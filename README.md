@@ -40,6 +40,13 @@ npm run dev     # open http://localhost:5199
 - **Visual effects** (screen-space, per object): blur, glow, pixelate, rim,
   shadow, colorize, flip, swirl, wave.
 - **IO**: JSON scene save/load, PNG snapshot, snapshot undo/redo.
+- **Navigation & QoL**: Blender-style *Emulate Numpad* (digit-row view keys)
+  and *Emulate 3 Button Mouse* (Alt+drag orbit / +Shift pan / +Ctrl zoom —
+  trackpad friendly), clickable axis gizmo with animated view transitions,
+  ortho/perspective toggle, flythrough mode (`` ` ``), **canvas planes**
+  (drawable quads placed at the 3D cursor — raycast targets for Surface
+  placement), and **Stroke placement** with All/End/First-point targets so
+  new strokes inherit depth from existing ones (grow forms in 3D).
 
 See [PLAN.md](PLAN.md) for the full feature checklist against the Blender
 manual and the post-parity roadmap (performance, Mental-Canvas-style gesture
@@ -58,3 +65,8 @@ navigation, live-performance bindings).
 | `I` / `Shift+I` | insert / remove keyframe |
 | `Space` `←→` `↑↓` | play, step frame, jump keyframe |
 | MMB / RMB | orbit / pan · `Shift+RMB` place 3D cursor |
+| `Alt+LMB` | orbit (trackpad) · `+Shift` pan · `+Ctrl` zoom |
+| `1/3/7` | front/right/top view (`Ctrl` = opposite) · `9` flip |
+| `5` | ortho ↔ perspective |
+| `2/4/6/8` | orbit view in 15° steps |
+| `` ` `` | flythrough mode (WASD + Q/E, wheel = speed, click/Esc exit) |

@@ -12,6 +12,7 @@ export function deserializeScene(json: string): GPScene {
   const data = JSON.parse(json);
   if (data?.format !== FORMAT) throw new Error('Not a threegrease scene file');
   const scene = data.scene as GPScene;
+  scene.canvases ??= []; // older saves predate canvas planes
   bumpIdCounter(scene);
   return scene;
 }

@@ -21,6 +21,8 @@ import { downloadScene, openSceneFile } from '../io/serialize';
 import { screenToWorld } from '../tools/projection';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
+import { Navigation } from './nav';
+import type { CanvasPlane } from '../core/types';
 
 const DEFAULT_TOOL: Record<EditorMode, string> = {
   DRAW: 'draw', EDIT: 'select', SCULPT: 'sculpt', VERTEX: 'vertexpaint', WEIGHT: 'weightpaint',
@@ -69,6 +71,10 @@ class App implements AppHandle {
   private hud: HTMLCanvasElement;
   private cursorMarker: THREE.Group;
   private interpTool = new InterpolateTool();
+  private nav!: Navigation;
+  private navDrag: { mode: 'orbit' | 'pan' | 'dolly'; x: number; y: number } | null = null;
+  private canvasGroup = new THREE.Group();
+  private lastTime = performance.now();
 
   constructor() {
     const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
@@ -88,6 +94,7 @@ class App implements AppHandle {
       MIDDLE: THREE.MOUSE.ROTATE,
       RIGHT: THREE.MOUSE.PAN,
     };
+    this.nav = new Navigation(this.camera, this.controls, glCanvas);
 
     const settings = defaultSettings();
     const history = new History();
@@ -104,7 +111,12 @@ class App implements AppHandle {
       copyBuffer: [],
       requestRender: () => this.gp.markDirty(),
       pushUndo: () => history.push(self.ctx.scene),
-      replaceScene: (s: GPScene) => { self.ctx.scene = s; this.gp.markDirty(); this.ui?.refresh(); },
+      replaceScene: (s: GPScene) => {
+        self.ctx.scene = s;
+        this.gp.markDirty();
+        this.syncCanvases();
+        this.ui?.refresh();
+      },
       refreshUI: () => this.ui?.refresh(),
     };
 
@@ -125,6 +137,7 @@ class App implements AppHandle {
     ground.position.y = -2;
     this.scene3.add(ground);
     this.ctx.surfaces.push(ground);
+    this.scene3.add(this.canvasGroup);
 
     this.fx = new EffectsPipeline(2, 2);
 
@@ -222,6 +235,77 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** Add a canvas plane at the 3D cursor, oriented to the current drawing plane. */
+  addCanvasPlane(): void {
+    const ctx = this.ctx;
+    ctx.pushUndo();
+    const s = ctx.settings;
+    let rotation: [number, number, number];
+    if (s.plane === 'FRONT') rotation = [0, 0, 0];
+    else if (s.plane === 'SIDE') rotation = [0, Math.PI / 2, 0];
+    else if (s.plane === 'TOP') rotation = [-Math.PI / 2, 0, 0];
+    else {
+      // VIEW: face the camera
+      const e = new THREE.Euler().setFromQuaternion(this.nav.active.quaternion, 'XYZ');
+      rotation = [e.x, e.y, e.z];
+    }
+    ctx.scene.canvases.push({
+      id: Date.now() % 1e9,
+      name: `Canvas ${ctx.scene.canvases.length + 1}`,
+      translation: [...ctx.scene.cursor] as [number, number, number],
+      rotation,
+      size: [3, 3],
+      visible: true,
+    });
+    this.syncCanvases();
+    this.ui.refresh();
+  }
+
+  removeCanvasPlane(id: number): void {
+    this.ctx.pushUndo();
+    this.ctx.scene.canvases = this.ctx.scene.canvases.filter((c) => c.id !== id);
+    this.syncCanvases();
+    this.ui.refresh();
+  }
+
+  /** Rebuild canvas plane meshes + SURFACE raycast targets from scene data. */
+  syncCanvases(): void {
+    for (const child of [...this.canvasGroup.children]) {
+      this.canvasGroup.remove(child);
+      (child as THREE.Mesh).geometry?.dispose?.();
+      ((child as THREE.Mesh).material as THREE.Material)?.dispose?.();
+    }
+    this.ctx.surfaces = this.ctx.surfaces.slice(0, 1); // keep the ground plane
+    for (const c of this.ctx.scene.canvases) {
+      if (!c.visible) continue;
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(c.size[0], c.size[1]),
+        new THREE.MeshBasicMaterial({
+          color: 0x8899bb, transparent: true, opacity: 0.07,
+          side: THREE.DoubleSide, depthWrite: false,
+        }),
+      );
+      mesh.position.set(...c.translation);
+      mesh.rotation.set(...c.rotation);
+      mesh.renderOrder = -1;
+      mesh.userData.canvasId = c.id;
+      const border = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(-c.size[0] / 2, -c.size[1] / 2, 0),
+          new THREE.Vector3(c.size[0] / 2, -c.size[1] / 2, 0),
+          new THREE.Vector3(c.size[0] / 2, c.size[1] / 2, 0),
+          new THREE.Vector3(-c.size[0] / 2, c.size[1] / 2, 0),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0x55688f, transparent: true, opacity: 0.6 }),
+      );
+      mesh.add(border);
+      this.canvasGroup.add(mesh);
+      this.ctx.surfaces.push(mesh);
+    }
+  }
+
+  snapView(view: 'FRONT' | 'BACK' | 'RIGHT' | 'LEFT' | 'TOP' | 'BOTTOM'): void { this.nav.snapView(view); }
+
   jumpKey(dir: 1 | -1): void {
     const ob = activeObject(this.ctx.scene);
     const frames = new Set<number>();
@@ -253,6 +337,21 @@ class App implements AppHandle {
 
     canvas.addEventListener('pointerdown', (e) => {
       (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer = this.toolEvent(e);
+      if (this.nav.flying) {
+        if (e.button === 0) this.nav.stopFly(); // click confirms fly position
+        return;
+      }
+      const te0 = this.toolEvent(e);
+      if (e.button === 0 && this.nav.hitGizmo(te0.x, te0.y)) return;
+      if (e.button === 0 && e.altKey && this.ctx.settings.emulate3Button) {
+        // Blender "Emulate 3 Button Mouse": Alt = orbit, +Shift pan, +Ctrl zoom
+        this.navDrag = {
+          mode: e.shiftKey ? 'pan' : (e.ctrlKey || e.metaKey) ? 'dolly' : 'orbit',
+          x: te0.x, y: te0.y,
+        };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
       if (e.button === 2 && e.shiftKey) {
         // place 3D cursor
         const world = screenToWorld(this.ctx, e.clientX, e.clientY);
@@ -272,6 +371,14 @@ class App implements AppHandle {
     canvas.addEventListener('pointermove', (e) => {
       const te = this.toolEvent(e);
       (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer = te;
+      if (this.navDrag) {
+        const dx = te.x - this.navDrag.x, dy = te.y - this.navDrag.y;
+        if (this.navDrag.mode === 'orbit') this.nav.orbitBy(dx * 0.006, dy * 0.006);
+        else if (this.navDrag.mode === 'pan') this.nav.panBy(dx, dy);
+        else this.nav.dollyBy(Math.exp(dy * 0.005));
+        this.navDrag.x = te.x; this.navDrag.y = te.y;
+        return;
+      }
       if (this.modal.active) { this.modal.update(this.ctx, te); return; }
       // coalesced events give smoother strokes
       const coalesced = e.getCoalescedEvents?.();
@@ -281,8 +388,11 @@ class App implements AppHandle {
 
     canvas.addEventListener('pointerup', (e) => {
       if (e.button !== 0) return;
+      if (this.navDrag) { this.navDrag = null; return; }
       this.tools.handleUp(this.ctx, this.toolEvent(e));
     });
+
+    window.addEventListener('keyup', (e) => { this.nav.handleFlyKey(e, false); });
 
     canvas.addEventListener('wheel', (e) => {
       if (this.modal.active && this.ctx.settings.propEdit.enabled) {
@@ -301,6 +411,34 @@ class App implements AppHandle {
     const ctx = this.ctx;
     const key = e.key;
     const mod = e.ctrlKey || e.metaKey;
+
+    // fly mode swallows its keys
+    if (this.nav.handleFlyKey(e, true)) { e.preventDefault(); return; }
+    if (key === '`') {
+      this.nav.flying ? this.nav.stopFly() : this.nav.startFly();
+      e.preventDefault();
+      return;
+    }
+
+    // numpad view keys — real numpad always, digit row when Emulate Numpad is on
+    const isNumpad = e.code.startsWith('Numpad');
+    if (isNumpad || ctx.settings.emulateNumpad) {
+      const digit = isNumpad ? e.code.slice(6) : key;
+      let handled = true;
+      switch (digit) {
+        case '1': this.nav.snapView(mod ? 'BACK' : 'FRONT'); break;
+        case '3': this.nav.snapView(mod ? 'LEFT' : 'RIGHT'); break;
+        case '7': this.nav.snapView(mod ? 'BOTTOM' : 'TOP'); break;
+        case '9': this.nav.flipView(); break;
+        case '5': this.nav.toggleOrtho(); break;
+        case '4': this.nav.orbitBy(-Math.PI / 12, 0); break;
+        case '6': this.nav.orbitBy(Math.PI / 12, 0); break;
+        case '8': this.nav.orbitBy(0, Math.PI / 12); break;
+        case '2': this.nav.orbitBy(0, -Math.PI / 12); break;
+        default: handled = false;
+      }
+      if (handled) { e.preventDefault(); return; }
+    }
 
     // modal transform takes precedence
     if (this.modal.active) {
@@ -418,8 +556,7 @@ class App implements AppHandle {
     const w = vp.clientWidth, h = vp.clientHeight;
     if (w === 0 || h === 0) return;
     this.glRenderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
+    this.nav.setAspect(w, h);
     this.gp.setSize(w * devicePixelRatio, h * devicePixelRatio);
     this.fx.setSize(w * devicePixelRatio, h * devicePixelRatio);
     this.hud.width = w * devicePixelRatio;
@@ -431,7 +568,12 @@ class App implements AppHandle {
   private loop(): void {
     requestAnimationFrame(() => this.loop());
     const ctx = this.ctx;
-    this.controls.update();
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - this.lastTime) / 1000);
+    this.lastTime = now;
+    this.nav.update(dt);
+    ctx.camera = this.nav.active;
+    if (!this.nav.flying) this.controls.update();
 
     if (this.player.tick(ctx.scene)) {
       this.gp.markDirty();
@@ -464,7 +606,7 @@ class App implements AppHandle {
       }
     });
 
-    this.glRenderer.render(this.scene3, this.camera);
+    this.glRenderer.render(this.scene3, this.nav.active);
 
     for (const job of fxJobs) {
       const ob = ctx.scene.objects[job.obIndex];
@@ -478,7 +620,7 @@ class App implements AppHandle {
         this.glRenderer.setRenderTarget(rt);
         this.glRenderer.setClearColor(0x000000, 0);
         this.glRenderer.clear();
-        this.glRenderer.render(this.scene3, this.camera);
+        this.glRenderer.render(this.scene3, this.nav.active);
         this.scene3.background = savedBg;
         this.scene3.children.forEach((c, i) => { c.visible = savedRoot[i]; });
         this.gp.objectGroups.forEach((g, i) => { g.visible = savedGroups[i]; });
@@ -496,6 +638,12 @@ class App implements AppHandle {
     g.save();
     g.scale(devicePixelRatio, devicePixelRatio);
     this.tools.active?.drawHud?.(this.ctx, g);
+    this.nav.drawGizmo(g, this.hud.width / devicePixelRatio);
+    if (this.nav.flying) {
+      g.fillStyle = '#fff';
+      g.font = '13px sans-serif';
+      g.fillText('FLY — WASD move · Q/E down/up · wheel speed · Shift boost · click/Esc exit', 16, 24);
+    }
     if (this.modal.active && this.ctx.settings.propEdit.enabled) {
       const { x, y } = this.tools.lastPointer;
       g.beginPath();

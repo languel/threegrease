@@ -1,4 +1,4 @@
-import type { AppCtx, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush } from '../tools/context';
+import type { AppCtx, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush, StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
 import { activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, genId } from '../core/gpdata';
@@ -12,6 +12,10 @@ export interface AppHandle {
   ctx: AppCtx;
   setMode(mode: EditorMode): void;
   setTool(id: string): void;
+  addCanvasPlane(): void;
+  removeCanvasPlane(id: number): void;
+  syncCanvases(): void;
+  snapView(view: 'FRONT' | 'BACK' | 'RIGHT' | 'LEFT' | 'TOP' | 'BOTTOM'): void;
   playToggle(): void;
   isPlaying(): boolean;
   undo(): void;
@@ -159,8 +163,11 @@ export class UI {
       bar.append(
         slider('Radius', s.brush.size, 1, 60, 1, (v) => { s.brush.size = v; }),
         slider('Strength', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }),
-        selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface']] as [PlacementMode, string][], (v) => { s.placement = v; }),
-        selectField('Plane', s.plane, [['VIEW', 'View'], ['FRONT', 'Front (X-Z)'], ['SIDE', 'Side (Y-Z)'], ['TOP', 'Top (X-Y)']] as [PlaneMode, string][], (v) => { s.plane = v; }),
+        selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['STROKE', 'Stroke']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
+        selectField('Plane', s.plane, [['VIEW', 'View'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)']] as [PlaneMode, string][], (v) => { s.plane = v; }),
+        ...(s.placement === 'STROKE' ? [
+          selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][], (v) => { s.strokeTarget = v; }),
+        ] : []),
         selectField('Guide', s.guide.type, [['NONE', 'No Guide'], ['CIRCULAR', 'Circular'], ['RADIAL', 'Radial'], ['PARALLEL', 'Parallel'], ['GRID', 'Grid'], ['ISO', 'Isometric']] as [GuideType, string][], (v) => { s.guide.type = v; }),
       );
       if (s.activeTool === 'erase') {
@@ -202,6 +209,11 @@ export class UI {
 
     bar.append(el('div', { class: 'sep' }));
     bar.append(
+      checkbox('Numpad', s.emulateNumpad, (v) => { s.emulateNumpad = v; }),
+      checkbox('Alt-nav', s.emulate3Button, (v) => { s.emulate3Button = v; }),
+    );
+    bar.append(el('div', { class: 'sep' }));
+    bar.append(
       btn('↶', () => this.app.undo(), { title: 'Undo (Ctrl+Z)' }),
       btn('↷', () => this.app.redo(), { title: 'Redo (Ctrl+Shift+Z)' }),
       btn('Save', () => this.app.saveScene()),
@@ -233,6 +245,7 @@ export class UI {
 
     side.append(this.layersPanel());
     side.append(this.materialsPanel());
+    side.append(this.canvasesPanel());
     if (ctx.settings.mode === 'EDIT') side.append(this.editOpsPanel());
     side.append(this.modifiersPanel());
     side.append(this.effectsPanel());
@@ -412,6 +425,38 @@ export class UI {
         }),
       ),
       ...items, ...props,
+    );
+  }
+
+  private canvasesPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const items: Node[] = [];
+    for (const c of ctx.scene.canvases) {
+      const body = el('div', { class: 'body' });
+      body.append(
+        el('div', { class: 'row' },
+          checkbox('Visible', c.visible, (v) => { c.visible = v; this.app.syncCanvases(); }),
+          btn('✕', () => this.app.removeCanvasPlane(c.id), { cls: 'icon-btn', title: 'Delete canvas' }),
+        ),
+        el('div', { class: 'row' }, 'Pos',
+          ...[0, 1, 2].map((i) => numField('', c.translation[i], (v) => { c.translation[i] = v; this.app.syncCanvases(); })),
+        ),
+        el('div', { class: 'row' }, 'Rot',
+          ...[0, 1, 2].map((i) => numField('', c.rotation[i], (v) => { c.rotation[i] = v; this.app.syncCanvases(); })),
+        ),
+        el('div', { class: 'row' }, 'Size',
+          ...[0, 1].map((i) => numField('', c.size[i], (v) => { c.size[i] = Math.max(0.1, v); this.app.syncCanvases(); })),
+        ),
+      );
+      items.push(el('div', { class: 'panel' }, el('h3', { text: c.name }), body));
+    }
+    return panel('Canvases',
+      el('div', { class: 'row' },
+        btn('＋ Plane at cursor', () => this.app.addCanvasPlane(),
+          { title: 'Add a drawable plane at the 3D cursor, oriented to the current drawing plane' }),
+      ),
+      el('div', { class: 'row', text: 'Use Placement: Surface to draw on canvases' }),
+      ...items,
     );
   }
 

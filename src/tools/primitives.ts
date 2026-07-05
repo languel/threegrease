@@ -4,7 +4,7 @@ import {
   activeLayer, activeObject, createPoint, createStroke, ensureFrame,
 } from '../core/gpdata';
 import type { AppCtx } from './context';
-import { screenToWorld, worldToObject } from './projection';
+import { screenToWorld, setStrokeExclusion, worldToObject } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 
 type PrimKind = 'line' | 'polyline' | 'arc' | 'curve' | 'box' | 'circle';
@@ -41,6 +41,7 @@ export class PrimitiveTool implements Tool {
       this.stroke = createStroke(ob.activeMaterial, ctx.settings.brush.size);
       this.stroke.hardness = ctx.settings.brush.hardness;
       frame.strokes.push(this.stroke);
+      setStrokeExclusion(this.stroke.id);
       this.anchors = [new THREE.Vector2(e.x, e.y)];
       this.phase = this.kind === 'polyline' ? 'poly' : 'drag';
       this.rebuild(ctx);
@@ -99,6 +100,7 @@ export class PrimitiveTool implements Tool {
     this.stroke = null;
     this.anchors = [];
     this.phase = 'idle';
+    setStrokeExclusion(null);
     ctx.requestRender();
   }
 

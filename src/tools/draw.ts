@@ -6,7 +6,7 @@ import {
 } from '../core/gpdata';
 import { simplifyStroke, smoothAttr, smoothPoints, clamp } from '../core/mathutil';
 import type { AppCtx } from './context';
-import { applyGuide, eventToCanvas, objectToScreen, screenToWorld, worldToObject } from './projection';
+import { applyGuide, eventToCanvas, objectToScreen, screenToWorld, setStrokeExclusion, worldToObject } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 
 function drawTarget(ctx: AppCtx) {
@@ -36,6 +36,7 @@ export class DrawTool implements Tool {
     s.hardness = b.hardness;
     target.frame.strokes.push(s);
     this.stroke = s;
+    setStrokeExclusion(s.id);
     this.stabPos = new THREE.Vector2(e.x, e.y);
     this.startScreen = null;
     const c = objectToScreen(ctx, [ctx.scene.cursor[0], ctx.scene.cursor[1], ctx.scene.cursor[2]]);
@@ -60,11 +61,12 @@ export class DrawTool implements Tool {
       if (b.simplify > 0) simplifyStroke(this.stroke, b.simplify);
     }
     this.stroke = null;
+    setStrokeExclusion(null);
     ctx.requestRender();
     ctx.refreshUI();
   }
 
-  onCancel(ctx: AppCtx): void { this.stroke = null; }
+  onCancel(ctx: AppCtx): void { this.stroke = null; setStrokeExclusion(null); }
 
   private addPoint(ctx: AppCtx, e: ToolEvent): void {
     if (!this.stroke) return;

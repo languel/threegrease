@@ -1,9 +1,68 @@
 import * as THREE from 'three';
 import type { Vec3 } from '../core/types';
-import { activeObject } from '../core/gpdata';
+import { activeObject, frameAt } from '../core/gpdata';
 import type { AppCtx } from './context';
 
 const raycaster = new THREE.Raycaster();
+
+/**
+ * Stroke id excluded from STROKE-placement depth sampling — set by drawing
+ * tools so the in-progress stroke doesn't attract its own points.
+ */
+let excludedStrokeId: number | null = null;
+export function setStrokeExclusion(id: number | null): void { excludedStrokeId = id; }
+
+/**
+ * STROKE placement: sample view-space depth from existing stroke points near
+ * the cursor (inverse-square screen-distance weighting), so new strokes grow
+ * off the surface of what's already drawn. Returns null when nothing is near.
+ */
+function strokeDepthPoint(ctx: AppCtx, ray: THREE.Ray, screenX: number, screenY: number): THREE.Vector3 | null {
+  const ob = activeObject(ctx.scene);
+  const rect = ctx.canvas.getBoundingClientRect();
+  const matrix = new THREE.Matrix4().compose(
+    new THREE.Vector3(...ob.translation),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+    new THREE.Vector3(...ob.scale),
+  );
+  const camDir = ctx.camera.getWorldDirection(new THREE.Vector3());
+  const camPos = ctx.camera.position;
+  const target = ctx.settings.strokeTarget;
+  const RADIUS = 140; // px search radius
+  let wSum = 0, depthSum = 0;
+  const world = new THREE.Vector3();
+  const projected = new THREE.Vector3();
+
+  for (const layer of ob.layers) {
+    if (layer.hide) continue;
+    const frame = frameAt(layer, ctx.scene.frame);
+    if (!frame) continue;
+    for (const s of frame.strokes) {
+      if (s.id === excludedStrokeId || s.points.length === 0) continue;
+      const picks =
+        target === 'FIRST' ? [s.points[0]] :
+        target === 'ENDS' ? (s.points.length > 1 ? [s.points[0], s.points[s.points.length - 1]] : [s.points[0]]) :
+        s.points;
+      for (const p of picks) {
+        world.set(p.co[0], p.co[1], p.co[2]).applyMatrix4(matrix);
+        projected.copy(world).project(ctx.camera);
+        if (projected.z > 1) continue; // behind camera
+        const sx = (projected.x * 0.5 + 0.5) * rect.width;
+        const sy = (-projected.y * 0.5 + 0.5) * rect.height;
+        const d = Math.hypot(sx - screenX, sy - screenY);
+        if (d > RADIUS) continue;
+        const w = 1 / (d * d + 25);
+        wSum += w;
+        depthSum += w * camDir.dot(world.clone().sub(camPos));
+      }
+    }
+  }
+  if (wSum <= 0) return null;
+  const depth = depthSum / wSum;
+  const cos = camDir.dot(ray.direction);
+  if (Math.abs(cos) < 1e-6) return null;
+  return ray.origin.clone().addScaledVector(ray.direction, depth / cos);
+}
 
 /** The plane strokes are placed on, per placement + orientation settings. */
 export function drawingPlane(ctx: AppCtx): THREE.Plane {
@@ -13,9 +72,10 @@ export function drawingPlane(ctx: AppCtx): THREE.Plane {
     : new THREE.Vector3(...activeObject(ctx.scene).translation);
   let normal: THREE.Vector3;
   switch (s.plane) {
-    case 'FRONT': normal = new THREE.Vector3(0, 1, 0); break; // X-Z plane
-    case 'SIDE': normal = new THREE.Vector3(1, 0, 0); break;  // Y-Z plane
-    case 'TOP': normal = new THREE.Vector3(0, 0, 1); break;   // X-Y plane
+    // three.js is Y-up: Front = X·Y plane, Side = Z·Y plane, Top = X·Z plane
+    case 'FRONT': normal = new THREE.Vector3(0, 0, 1); break;
+    case 'SIDE': normal = new THREE.Vector3(1, 0, 0); break;
+    case 'TOP': normal = new THREE.Vector3(0, 1, 0); break;
     default: normal = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
   }
   return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor);
@@ -32,6 +92,10 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
   if (ctx.settings.placement === 'SURFACE' && ctx.surfaces.length) {
     const hits = raycaster.intersectObjects(ctx.surfaces, true);
     if (hits.length) return hits[0].point.clone();
+  }
+  if (ctx.settings.placement === 'STROKE') {
+    const hit = strokeDepthPoint(ctx, raycaster.ray, x - rect.left, y - rect.top);
+    if (hit) return hit;
   }
   const plane = drawingPlane(ctx);
   const out = new THREE.Vector3();

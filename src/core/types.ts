@@ -124,6 +124,16 @@ export interface GPObject {
   };
 }
 
+/** A drawable quad in the scene: raycast target for SURFACE stroke placement. */
+export interface CanvasPlane {
+  id: number;
+  name: string;
+  translation: Vec3;
+  rotation: Vec3;          // euler radians
+  size: [number, number];
+  visible: boolean;
+}
+
 export interface GPScene {
   objects: GPObject[];
   activeObject: number;
@@ -132,4 +142,5 @@ export interface GPScene {
   frameEnd: number;
   fps: number;
   cursor: Vec3;            // 3D cursor
+  canvases: CanvasPlane[];
 }

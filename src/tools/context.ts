@@ -3,7 +3,8 @@ import type { GPScene, GPStroke, Vec3 } from '../core/types';
 import type { History } from '../core/history';
 import type { EditorMode, GPSceneRenderer } from '../render/GPSceneRenderer';
 
-export type PlacementMode = 'ORIGIN' | 'CURSOR' | 'SURFACE';
+export type PlacementMode = 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'STROKE';
+export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
 export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
 export type EraserMode = 'POINT' | 'STROKE' | 'SOFT';
@@ -33,6 +34,7 @@ export interface Settings {
   eraser: { mode: EraserMode; radius: number };
   fill: { simplify: number; scale: number };
   placement: PlacementMode;
+  strokeTarget: StrokeTarget;  // which points of existing strokes anchor depth
   plane: PlaneMode;
   guide: { type: GuideType; angle: number; spacing: number };
   selectMode: 'POINT' | 'STROKE';
@@ -44,13 +46,15 @@ export interface Settings {
   paint: { brush: PaintBrush; radius: number; strength: number };
   weight: { radius: number; strength: number; target: number };
   background: Vec3;
+  emulateNumpad: boolean;   // 1..9 become view keys instead of mode switching
+  emulate3Button: boolean;  // Alt+LMB orbits (Shift pan, Ctrl zoom) for trackpads
 }
 
 export interface AppCtx {
   scene: GPScene;
   history: History;
   settings: Settings;
-  camera: THREE.PerspectiveCamera;
+  camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
   gp: GPSceneRenderer;
   gl: THREE.WebGLRenderer;
   scene3: THREE.Scene;
@@ -78,6 +82,7 @@ export function defaultSettings(): Settings {
     eraser: { mode: 'POINT', radius: 24 },
     fill: { simplify: 1.5, scale: 1 },
     placement: 'ORIGIN',
+    strokeTarget: 'ALL',
     plane: 'VIEW',
     guide: { type: 'NONE', angle: 0, spacing: 40 },
     selectMode: 'POINT',
@@ -89,5 +94,7 @@ export function defaultSettings(): Settings {
     paint: { brush: 'DRAW', radius: 40, strength: 0.6 },
     weight: { radius: 40, strength: 0.5, target: 1 },
     background: [0.11, 0.11, 0.12],
+    emulateNumpad: true,
+    emulate3Button: true,
   };
 }

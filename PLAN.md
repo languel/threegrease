@@ -61,8 +61,10 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Eyedropper (pick material color from canvas)
 - [x] Primitives: Line, Polyline, Arc, Curve (quadratic), Box, Circle
 - [x] Interpolate tool (breakdown between neighboring keyframes)
-- [x] Drawing planes (placement): View, Front (X-Z), Side (Y-Z), Top (X-Y),
-      at Origin / 3D-cursor; Surface placement (raycast scene); Stroke offset
+- [x] Drawing planes (placement): View, Front, Side, Top (Y-up conventions),
+      at Origin / 3D-cursor; Surface placement (raycast canvas planes/scene)
+- [x] Stroke placement with target All Points / End Points / First Point
+      (new strokes take depth from nearby existing strokes)
 - [x] Guides: Circular, Radial, Parallel, Grid, Isometric
 
 ### Edit mode
@@ -111,6 +113,15 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [ ] Import SVG / export SVG-PDF (post-parity)
 - [ ] Curve edit mode on strokes (post-parity; Blender 4.3+ GPv3 dropped it too)
 - [ ] Armature/lattice/hook full parenting (post-parity — needs rig system)
+
+### Navigation & QoL (post-parity, done)
+- [x] Emulate Numpad (digit-row 1/3/7/9/5/2/4/6/8 view keys) — toggle in topbar
+- [x] Emulate 3 Button Mouse: Alt+LMB orbit, +Shift pan, +Ctrl zoom — toggle
+- [x] Axis gizmo (click balls to snap views, animated transitions)
+- [x] Ortho/perspective toggle
+- [x] Flythrough mode (`, WASD+QE, pointer lock)
+- [x] Canvas planes: drawable quads (add at cursor, per-plane orientation,
+      pos/rot/size editable, saved in scene JSON) as Surface raycast targets
 
 ## Post-parity roadmap (the action-painting lab)
 1. Performance: instanced segment rendering, dirty-region geometry updates,
