@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { createScene, activeObject, activeLayer, createFrame, cloneFrame, frameAt, keyframeIndexAt } from '../core/gpdata';
+import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createFrame, cloneFrame, frameAt, keyframeIndexAt } from '../core/gpdata';
 import { History } from '../core/history';
 import type { GPScene } from '../core/types';
 import { GPSceneRenderer, type EditorMode } from '../render/GPSceneRenderer';
@@ -20,6 +20,7 @@ import { interpolateFrame } from '../anim/interpolate';
 import { downloadScene, openSceneFile } from '../io/serialize';
 import { nearestStrokePoint, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
+import { Keymap, comboFromEvent } from './keymap';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
@@ -80,7 +81,8 @@ class App implements AppHandle {
   presentation = false;
   cameraView = false;
   lockCamToView = true;
-  private camHelper!: THREE.Group;
+  private camHelper!: THREE.Group; // root: one frustum child per scene camera
+  readonly keymap = new Keymap();
 
   constructor() {
     const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
@@ -131,7 +133,7 @@ class App implements AppHandle {
     this.grid = new THREE.GridHelper(20, 40, 0x3a3a44, 0x2a2a30);
     this.grid.position.y = -2;
     this.scene3.add(this.grid);
-    this.camHelper = this.makeCameraHelper();
+    this.camHelper = new THREE.Group();
     this.scene3.add(this.camHelper);
     this.scene3.add(this.gp.root);
     this.cursorMarker = this.makeCursorMarker();
@@ -469,9 +471,11 @@ class App implements AppHandle {
     const key = e.key;
     const mod = e.ctrlKey || e.metaKey;
 
-    // fly mode swallows its keys
+    if (this.ui.settingsOpen) return; // dialog handles its own keys
+
+    // fly mode swallows its keys (the fly toggle itself is a keymap action)
     if (this.nav.handleFlyKey(e, true)) { e.preventDefault(); return; }
-    if (key === '`') {
+    if (this.keymap.actionFor(comboFromEvent(e)) === 'fly') {
       this.nav.flying ? this.nav.stopFly() : this.nav.startFly();
       e.preventDefault();
       return;
@@ -483,7 +487,6 @@ class App implements AppHandle {
       const digit = isNumpad ? e.code.slice(6) : key;
       let handled = true;
       switch (digit) {
-        case '0': this.toggleCameraView(); break;
         case '1': this.nav.snapView(mod ? 'BACK' : 'FRONT'); break;
         case '3': this.nav.snapView(mod ? 'LEFT' : 'RIGHT'); break;
         case '7': this.nav.snapView(mod ? 'BOTTOM' : 'TOP'); break;
@@ -511,78 +514,67 @@ class App implements AppHandle {
 
     if (this.tools.handleKey(ctx, key, e)) { e.preventDefault(); return; }
 
-    if (mod && (key === 'z' || key === 'Z')) {
-      e.shiftKey ? this.redo() : this.undo();
-      e.preventDefault();
+    // fixed conveniences alongside the rebindable map
+    if (key === 'Delete' || key === 'Backspace') {
+      if (this.editLike()) { ops.deleteSelected(ctx, e.shiftKey); this.ui.refresh(); }
       return;
     }
     if (mod && key === 'y') { this.redo(); e.preventDefault(); return; }
-    if (mod && key === 'c') { ops.copySelected(ctx); return; }
-    if (mod && key === 'v') { ops.pasteBuffer(ctx); this.ui.refresh(); return; }
-    if (mod && key === 'i') { selectAll(ctx, 'invert'); this.gp.markDirty(); return; }
 
-    switch (key) {
-      case ' ': this.playToggle(); this.ui.refreshTimelineControls(); e.preventDefault(); break;
-      case 'Tab':
-        this.setMode(ctx.settings.mode === 'DRAW' ? 'EDIT' : 'DRAW');
-        e.preventDefault();
-        break;
-      case '1': this.setMode('DRAW'); break;
-      case '2': this.setMode('EDIT'); break;
-      case '3': this.setMode('SCULPT'); break;
-      case '4': this.setMode('VERTEX'); break;
-      case '5': this.setMode('WEIGHT'); break;
-      case 'p': this.togglePresentation(); break;
-      case 'd': if (ctx.settings.mode === 'DRAW') this.setTool('draw'); break;
-      case 'e': if (ctx.settings.mode === 'DRAW') this.setTool('erase'); break;
-      case 'f': if (ctx.settings.mode === 'DRAW') this.setTool('fill'); break;
-      case 'g': case 'G':
-        if (this.editLike() && this.modal.begin(ctx, 'move', this.tools.lastPointer)) e.preventDefault();
-        break;
-      case 'r': case 'R':
-        if (this.editLike() && this.modal.begin(ctx, 'rotate', this.tools.lastPointer)) e.preventDefault();
-        break;
-      case 's': case 'S':
-        if (this.editLike() && this.modal.begin(ctx, 'scale', this.tools.lastPointer)) e.preventDefault();
-        break;
-      case 'a':
-        if (this.editLike()) { selectAll(ctx, 'all'); this.gp.markDirty(); }
-        break;
-      case 'A':
-        if (this.editLike()) { selectAll(ctx, 'none'); this.gp.markDirty(); }
-        break;
-      case 'l':
-        if (this.editLike()) { selectLinked(ctx); this.gp.markDirty(); }
-        break;
-      case '+': case '=':
-        if (this.editLike()) { selectMoreLess(ctx, true); this.gp.markDirty(); }
-        break;
-      case '-': case '_':
-        if (this.editLike()) { selectMoreLess(ctx, false); this.gp.markDirty(); }
-        break;
-      case 'x': case 'Delete': case 'Backspace':
-        if (this.editLike()) { ops.deleteSelected(ctx, e.shiftKey); this.ui.refresh(); }
-        break;
-      case 'D':
-        if (this.editLike() && e.shiftKey) {
+    const action = this.keymap.actionFor(comboFromEvent(e));
+    if (!action) return;
+    e.preventDefault();
+    this.runAction(action);
+  }
+
+  private runAction(action: string): void {
+    const ctx = this.ctx;
+    const stepFrame = (d: number) => {
+      ctx.scene.frame = Math.min(ctx.scene.frameEnd, Math.max(ctx.scene.frameStart, ctx.scene.frame + d));
+      this.gp.markDirty(); this.ui.refreshTimelineControls(); this.ui.drawTimeline();
+    };
+    switch (action) {
+      case 'undo': this.undo(); break;
+      case 'redo': this.redo(); break;
+      case 'settings': this.ui.openSettings(); break;
+      case 'presentation': this.togglePresentation(); break;
+      case 'toggleEdit': this.setMode(ctx.settings.mode === 'DRAW' ? 'EDIT' : 'DRAW'); break;
+      case 'modeDraw': this.setMode('DRAW'); break;
+      case 'modeEdit': this.setMode('EDIT'); break;
+      case 'modeSculpt': this.setMode('SCULPT'); break;
+      case 'modeVertex': this.setMode('VERTEX'); break;
+      case 'modeWeight': this.setMode('WEIGHT'); break;
+      case 'toolDraw': if (ctx.settings.mode === 'DRAW') this.setTool('draw'); break;
+      case 'toolErase': if (ctx.settings.mode === 'DRAW') this.setTool('erase'); break;
+      case 'toolFill': if (ctx.settings.mode === 'DRAW') this.setTool('fill'); break;
+      case 'move': if (this.editLike()) this.modal.begin(ctx, 'move', this.tools.lastPointer); break;
+      case 'rotate': if (this.editLike()) this.modal.begin(ctx, 'rotate', this.tools.lastPointer); break;
+      case 'scale': if (this.editLike()) this.modal.begin(ctx, 'scale', this.tools.lastPointer); break;
+      case 'selectAll': if (this.editLike()) { selectAll(ctx, 'all'); this.gp.markDirty(); } break;
+      case 'selectNone': if (this.editLike()) { selectAll(ctx, 'none'); this.gp.markDirty(); } break;
+      case 'selectInvert': if (this.editLike()) { selectAll(ctx, 'invert'); this.gp.markDirty(); } break;
+      case 'selectLinked': if (this.editLike()) { selectLinked(ctx); this.gp.markDirty(); } break;
+      case 'selectMore': if (this.editLike()) { selectMoreLess(ctx, true); this.gp.markDirty(); } break;
+      case 'selectLess': if (this.editLike()) { selectMoreLess(ctx, false); this.gp.markDirty(); } break;
+      case 'delete': if (this.editLike()) { ops.deleteSelected(ctx, false); this.ui.refresh(); } break;
+      case 'duplicate':
+        if (this.editLike()) {
           ops.duplicateSelected(ctx);
           this.modal.begin(ctx, 'move', this.tools.lastPointer);
         }
         break;
-      case 'i': this.addKeyframe(false); break;
-      case 'I': this.removeKeyframe(); break;
-      case 'ArrowUp': this.jumpKey(1); e.preventDefault(); break;
-      case 'ArrowDown': this.jumpKey(-1); e.preventDefault(); break;
-      case 'ArrowRight':
-        ctx.scene.frame = Math.min(ctx.scene.frameEnd, ctx.scene.frame + 1);
-        this.gp.markDirty(); this.ui.refreshTimelineControls(); this.ui.drawTimeline();
-        e.preventDefault();
-        break;
-      case 'ArrowLeft':
-        ctx.scene.frame = Math.max(ctx.scene.frameStart, ctx.scene.frame - 1);
-        this.gp.markDirty(); this.ui.refreshTimelineControls(); this.ui.drawTimeline();
-        e.preventDefault();
-        break;
+      case 'copy': ops.copySelected(ctx); break;
+      case 'paste': ops.pasteBuffer(ctx); this.ui.refresh(); break;
+      case 'play': this.playToggle(); this.ui.refreshTimelineControls(); break;
+      case 'insertKey': this.addKeyframe(false); break;
+      case 'removeKey': this.removeKeyframe(); break;
+      case 'nextKey': this.jumpKey(1); break;
+      case 'prevKey': this.jumpKey(-1); break;
+      case 'nextFrame': stepFrame(1); break;
+      case 'prevFrame': stepFrame(-1); break;
+      case 'fly': this.nav.flying ? this.nav.stopFly() : this.nav.startFly(); break;
+      case 'cameraView': this.toggleCameraView(); break;
+      case 'cycleCamera': this.cycleCamera(); break;
     }
   }
 
@@ -594,9 +586,12 @@ class App implements AppHandle {
 
   // -------------------------------------------------- camera & presentation
 
-  private makeCameraHelper(): THREE.Group {
+  private makeCameraHelper(active: boolean): THREE.Group {
     const g = new THREE.Group();
-    const mat = new THREE.LineBasicMaterial({ color: 0xd8a03c });
+    const mat = new THREE.LineBasicMaterial({
+      color: active ? 0xd8a03c : 0x8a7346,
+      transparent: !active, opacity: active ? 1 : 0.6,
+    });
     const w = 0.32, h = 0.22, d = 0.5;
     const apex = new THREE.Vector3(0, 0, 0);
     const corners = [
@@ -616,37 +611,100 @@ class App implements AppHandle {
     return g;
   }
 
+  /** Keep one frustum helper per scene camera, posed at the evaluated frame. */
+  private syncCameraHelpers(): void {
+    const cams = this.ctx.scene.cameras;
+    if (this.camHelper.children.length !== cams.length ||
+        this.camHelper.userData.activeIndex !== this.ctx.scene.activeCamera) {
+      for (const c of [...this.camHelper.children]) this.camHelper.remove(c);
+      cams.forEach((_, i) => this.camHelper.add(this.makeCameraHelper(i === this.ctx.scene.activeCamera)));
+      this.camHelper.userData.activeIndex = this.ctx.scene.activeCamera;
+    }
+    cams.forEach((cam, i) => {
+      const helper = this.camHelper.children[i];
+      const pose = evalCamera(cam, this.ctx.scene.frame);
+      helper.position.copy(pose.position);
+      helper.quaternion.copy(pose.quaternion);
+      // the camera being looked through hides its own helper
+      helper.visible = !(this.cameraView && i === this.ctx.scene.activeCamera);
+    });
+  }
+
   toggleCameraView(): void {
     this.cameraView = !this.cameraView;
     if (this.cameraView) {
       if (this.nav.isOrtho) this.nav.toggleOrtho();
-      const pose = evalCamera(this.ctx.scene.camera, this.ctx.scene.frame);
-      this.camera.position.copy(pose.position);
-      this.camera.quaternion.copy(pose.quaternion);
-      this.camera.fov = pose.fov;
-      this.camera.updateProjectionMatrix();
-      const fwd = this.camera.getWorldDirection(new THREE.Vector3());
-      this.controls.target.copy(this.camera.position).addScaledVector(fwd, 4);
-      this.controls.update();
+      this.applyCameraPose();
     } else {
       this.camera.fov = 50;
       this.camera.updateProjectionMatrix();
       this.controls.enabled = true;
     }
-    this.camHelper.visible = !this.cameraView && !this.presentation;
     this.ui.refreshTimelineControls();
+  }
+
+  private applyCameraPose(): void {
+    const pose = evalCamera(activeCam(this.ctx.scene), this.ctx.scene.frame);
+    this.camera.position.copy(pose.position);
+    this.camera.quaternion.copy(pose.quaternion);
+    this.camera.fov = pose.fov;
+    this.camera.updateProjectionMatrix();
+    const fwd = this.camera.getWorldDirection(new THREE.Vector3());
+    this.controls.target.copy(this.camera.position).addScaledVector(fwd, 4);
+    this.controls.update();
+  }
+
+  cycleCamera(): void {
+    const s = this.ctx.scene;
+    if (s.cameras.length < 2 && !this.cameraView) { this.toggleCameraView(); return; }
+    s.activeCamera = (s.activeCamera + 1) % s.cameras.length;
+    if (this.cameraView) this.applyCameraPose();
+    this.ui.refreshTimelineControls();
+    this.ui.drawTimeline();
+  }
+
+  setActiveCamera(index: number): void {
+    this.ctx.scene.activeCamera = Math.max(0, Math.min(this.ctx.scene.cameras.length - 1, index));
+    if (this.cameraView) this.applyCameraPose();
+    this.ui.refreshTimelineControls();
+    this.ui.drawTimeline();
+  }
+
+  /** New camera captures the current viewport pose. */
+  addCamera(): void {
+    const s = this.ctx.scene;
+    this.ctx.pushUndo();
+    const cam = createDefaultCamera(`Camera ${s.cameras.length + 1}`);
+    cam.translation = this.camera.position.toArray() as [number, number, number];
+    const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion);
+    cam.rotation = [e.x, e.y, e.z];
+    cam.fov = this.cameraView ? this.camera.fov : 50;
+    s.cameras.push(cam);
+    s.activeCamera = s.cameras.length - 1;
+    this.ui.refreshTimelineControls();
+  }
+
+  removeCamera(): void {
+    const s = this.ctx.scene;
+    if (s.cameras.length <= 1) return;
+    this.ctx.pushUndo();
+    s.cameras.splice(s.activeCamera, 1);
+    s.activeCamera = Math.max(0, s.activeCamera - 1);
+    if (this.cameraView) this.applyCameraPose();
+    this.ui.refreshTimelineControls();
+    this.ui.drawTimeline();
   }
 
   addCameraKey(): void {
     this.ctx.pushUndo();
-    insertCameraKey(this.ctx.scene.camera, this.ctx.scene.frame);
+    insertCameraKey(activeCam(this.ctx.scene), this.ctx.scene.frame);
     this.ui.drawTimeline();
     this.ui.refreshTimelineControls();
   }
 
   removeCameraKeyAtFrame(): void {
     this.ctx.pushUndo();
-    removeCameraKey(this.ctx.scene.camera, this.ctx.scene.frame);
+    removeCameraKey(activeCam(this.ctx.scene), this.ctx.scene.frame);
     this.ui.drawTimeline();
   }
 
@@ -656,7 +714,7 @@ class App implements AppHandle {
     this.grid.visible = !this.presentation;
     this.canvasGroup.visible = !this.presentation;
     this.cursorMarker.visible = !this.presentation;
-    this.camHelper.visible = !this.presentation && !this.cameraView;
+    this.camHelper.visible = !this.presentation;
     this.gp.markDirty();
     this.resize();
   }
@@ -709,7 +767,7 @@ class App implements AppHandle {
     ctx.camera = this.nav.active;
 
     if (this.cameraView) {
-      const camData = ctx.scene.camera;
+      const camData = activeCam(ctx.scene);
       if (this.player.playing || !this.lockCamToView) {
         // keyframes drive the view
         const pose = evalCamera(camData, ctx.scene.frame);
@@ -719,20 +777,16 @@ class App implements AppHandle {
           this.camera.fov = pose.fov;
           this.camera.updateProjectionMatrix();
         }
-      } else if (!this.nav.flying) {
-        // locked: viewport navigation edits the camera live
+      } else {
+        // locked: viewport navigation (orbit, pan, fly) edits the camera live
         camData.translation = this.camera.position.toArray() as [number, number, number];
         const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion);
         camData.rotation = [e.x, e.y, e.z];
         camData.fov = this.camera.fov;
       }
       this.controls.enabled = this.lockCamToView && !this.player.playing && !this.nav.flying;
-    } else {
-      // show the camera object where its animation currently puts it
-      const pose = evalCamera(ctx.scene.camera, ctx.scene.frame);
-      this.camHelper.position.copy(pose.position);
-      this.camHelper.quaternion.copy(pose.quaternion);
     }
+    this.syncCameraHelpers();
     if (!this.nav.flying) this.controls.update();
 
     if (this.player.tick(ctx.scene)) {

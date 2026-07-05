@@ -54,17 +54,24 @@ npm run dev     # open http://localhost:5199
 - **Presentation / performance mode** (`P`): all UI panels, grid, gizmo and
   overlays disappear — just rendered strokes on a solid background while
   every shortcut keeps working. Made for live drawing.
-- **Scene camera**: a transformable, keyframable camera (`0` to look through
-  it, 🎥 in the timeline). With *Lock* on, normal viewport navigation moves
-  the camera; `＋CamKey` keyframes it at the current frame and playback
-  interpolates position/rotation/FOV between keys (slerped rotation). Shown
-  as a frustum gizmo in the viewport, keys marked on the timeline.
+- **Scene cameras**: multiple transformable, keyframable cameras (`0` to
+  look through the active one, `Shift+C` to cycle, dropdown + `＋Cam`/`－Cam`
+  in the timeline; `＋Cam` captures the current view). With *Lock* on, normal
+  viewport navigation — including flythrough — moves the camera; `＋CamKey`
+  keyframes it and playback interpolates position/rotation/FOV between keys
+  (slerped rotation). Every camera shows as a frustum gizmo (active one
+  highlighted), keys marked on the timeline.
+- **Settings dialog** (`,` or ⚙): preferences plus a full shortcut list —
+  click any binding and press a new key to rebind it. Custom bindings
+  persist in localStorage; one-click reset to defaults.
 
 See [PLAN.md](PLAN.md) for the full feature checklist against the Blender
 manual and the post-parity roadmap (performance, Mental-Canvas-style gesture
 navigation, live-performance bindings).
 
 ## Shortcuts
+
+All bindings below are defaults — open Settings (`,`) to rebind any of them.
 
 | Key | Action |
 | --- | ------ |
@@ -83,4 +90,5 @@ navigation, live-performance bindings).
 | `2/4/6/8` | orbit view in 15° steps |
 | `` ` `` | flythrough mode (WASD + Q/E, wheel = speed, click/Esc exit) |
 | `P` | presentation/performance mode (UI off, shortcuts live) |
-| `0` | look through the scene camera |
+| `0` / `Shift+C` | look through the active camera / cycle cameras |
+| `,` | settings & shortcut editor |

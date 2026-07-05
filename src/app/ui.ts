@@ -1,7 +1,8 @@
 import type { AppCtx, CursorSnap, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush, StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
-import { activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, genId } from '../core/gpdata';
+import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, genId } from '../core/gpdata';
+import { ACTIONS, comboFromEvent, type Keymap } from './keymap';
 import { MODIFIERS, createModifier } from '../modifiers/index';
 import { EFFECT_DEFAULTS, createEffect } from '../fx/effects';
 import { interpolateFrame, interpolateSequence } from '../anim/interpolate';
@@ -33,6 +34,11 @@ export interface AppHandle {
   removeCameraKeyAtFrame(): void;
   togglePresentation(): void;
   setBackground(rgb: [number, number, number]): void;
+  keymap: Keymap;
+  cycleCamera(): void;
+  setActiveCamera(index: number): void;
+  addCamera(): void;
+  removeCamera(): void;
 }
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -634,6 +640,117 @@ export class UI {
     );
   }
 
+  private cameraSelect(): HTMLElement {
+    const { ctx } = this.app;
+    const sel = el('select', { title: 'Active camera (Shift+C cycles)' }) as HTMLSelectElement;
+    ctx.scene.cameras.forEach((cam, i) => sel.append(el('option', { value: String(i), text: cam.name })));
+    sel.value = String(ctx.scene.activeCamera);
+    sel.onchange = () => this.app.setActiveCamera(Number(sel.value));
+    sel.ondblclick = () => {
+      const cam = activeCam(ctx.scene);
+      const n = prompt('Camera name', cam.name);
+      if (n) { cam.name = n; this.refreshTimelineControls(); }
+    };
+    return sel;
+  }
+
+  // ------------------------------------------------------------ settings
+
+  settingsOpen = false;
+
+  openSettings(): void {
+    if (this.settingsOpen) return;
+    this.settingsOpen = true;
+    const { ctx } = this.app;
+    const s = ctx.settings;
+
+    const overlay = el('div', { id: 'settings-overlay' });
+    const close = () => {
+      this.settingsOpen = false;
+      overlay.remove();
+      window.removeEventListener('keydown', escClose, true);
+      this.refresh();
+    };
+    const escClose = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !capturing) { e.stopPropagation(); close(); }
+    };
+    window.addEventListener('keydown', escClose, true);
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+    let capturing = false;
+
+    const prefs = el('div', { class: 'body' },
+      el('div', { class: 'row' },
+        checkbox('Emulate Numpad (digit-row view keys)', s.emulateNumpad, (v) => { s.emulateNumpad = v; }),
+      ),
+      el('div', { class: 'row' },
+        checkbox('Emulate 3-Button Mouse (Alt+LMB navigates)', s.emulate3Button, (v) => { s.emulate3Button = v; }),
+      ),
+      el('div', { class: 'row' },
+        selectField('Cursor snap', s.cursorSnap, [
+          ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SELECTION', 'Selection'],
+        ], (v) => { s.cursorSnap = v as typeof s.cursorSnap; }),
+        numField('Grid step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); }),
+      ),
+      el('div', { class: 'row' },
+        colorField('Background', [...s.background, 1], (rgb) => this.app.setBackground(rgb)),
+        checkbox('Auto-key', s.autoKey, (v) => { s.autoKey = v; }),
+      ),
+      el('div', { class: 'row', text: 'While Emulate Numpad is on, digit keys are view keys and mode shortcuts are shadowed (use the topbar or Tab).' }),
+    );
+
+    const shortcutRows = el('div', { class: 'body' });
+    const rebuildShortcuts = () => {
+      shortcutRows.replaceChildren();
+      let lastCat = '';
+      for (const a of ACTIONS) {
+        if (a.category !== lastCat) {
+          lastCat = a.category;
+          shortcutRows.append(el('h3', { text: a.category }));
+        }
+        const combo = this.app.keymap.comboFor(a.id);
+        const comboBtn = btn(combo || '(unbound)', () => {
+          capturing = true;
+          comboBtn.textContent = 'press a key…';
+          comboBtn.classList.add('active');
+          const capture = (e: KeyboardEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.key === 'Escape') { cleanup(); rebuildShortcuts(); return; }
+            const c = comboFromEvent(e);
+            if (!c) return; // modifier alone — keep waiting
+            this.app.keymap.rebind(a.id, c);
+            cleanup();
+            rebuildShortcuts();
+          };
+          const cleanup = () => {
+            capturing = false;
+            window.removeEventListener('keydown', capture, true);
+          };
+          window.addEventListener('keydown', capture, true);
+        }, { title: 'Click, then press the new shortcut (Esc cancels)' });
+        shortcutRows.append(el('div', { class: 'row spread shortcut-row' },
+          el('span', { text: a.label }), comboBtn,
+        ));
+      }
+      shortcutRows.append(el('div', { class: 'row' },
+        btn('Reset all to defaults', () => { this.app.keymap.reset(); rebuildShortcuts(); }),
+      ));
+    };
+    rebuildShortcuts();
+
+    const dialog = el('div', { id: 'settings-dialog' },
+      el('div', { class: 'row spread' },
+        el('h2', { text: 'Settings' }),
+        btn('✕', close, { cls: 'icon-btn' }),
+      ),
+      el('div', { class: 'panel' }, el('h3', { text: 'Preferences' }), prefs),
+      el('div', { class: 'panel' }, el('h3', { text: 'Shortcuts (click a binding to change it)' }), shortcutRows),
+    );
+    overlay.append(dialog);
+    document.body.append(overlay);
+  }
+
   // ------------------------------------------------------------ timeline
 
   private buildTimelineShell(): void {
@@ -694,11 +811,15 @@ export class UI {
       btn('Interpolate', () => { interpolateFrame(ctx, ctx.scene.frame, this.interpFactor(ctx)); this.drawTimeline(); }, { title: 'Insert breakdown at current frame' }),
       btn('Sequence', () => { interpolateSequence(ctx); this.drawTimeline(); }, { title: 'Interpolate all frames between keys' }),
       el('div', { class: 'sep' }),
-      btn('🎥', () => this.app.toggleCameraView(), { active: this.app.cameraView, title: 'Look through the scene camera (0)' }),
+      btn('🎥', () => this.app.toggleCameraView(), { active: this.app.cameraView, title: 'Look through the active camera (0)' }),
+      this.cameraSelect(),
+      btn('＋Cam', () => this.app.addCamera(), { title: 'Add a camera at the current view' }),
+      btn('－Cam', () => this.app.removeCamera(), { title: 'Delete the active camera' }),
       checkbox('Lock', this.app.lockCamToView, (v) => { this.app.lockCamToView = v; }),
       btn('＋CamKey', () => this.app.addCameraKey(), { title: 'Keyframe the camera at the current frame' }),
       btn('－CamKey', () => this.app.removeCameraKeyAtFrame(), { title: 'Remove camera key at current frame' }),
-      numField('FOV', ctx.scene.camera.fov, (v) => { ctx.scene.camera.fov = Math.min(140, Math.max(5, v)); }, 1),
+      numField('FOV', activeCam(ctx.scene).fov, (v) => { activeCam(ctx.scene).fov = Math.min(140, Math.max(5, v)); }, 1),
+      btn('⚙', () => this.openSettings(), { title: 'Settings & shortcuts (,)' }),
     );
   }
 
@@ -757,7 +878,7 @@ export class UI {
 
     // camera keys along the top edge
     g.fillStyle = '#d8a03c';
-    for (const k of s.camera.keys) {
+    for (const k of activeCam(s).keys) {
       const x = fx(k.frame);
       const r = 3 * devicePixelRatio;
       g.fillRect(x - r / 2, 2, r, r);

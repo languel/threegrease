@@ -125,8 +125,10 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] 3D-cursor snap modes: Plane / Grid / nearest Stroke point / Selection
 - [x] Stroke placement snaps to stroke segments with HUD anchor indicator
 - [x] Presentation/performance mode (P): UI-less viewport, shortcuts live
-- [x] Scene camera: keyframable transform+FOV, camera view (0), lock-to-view
-      navigation, frustum gizmo, keys on timeline
+- [x] Scene cameras: multiple, keyframable transform+FOV, camera view (0),
+      cycle (Shift+C), lock-to-view navigation incl. flythrough writeback,
+      frustum gizmos, keys on timeline
+- [x] Settings dialog with preferences + rebindable shortcuts (localStorage)
 
 ## Post-parity roadmap (the action-painting lab)
 1. Performance: instanced segment rendering, dirty-region geometry updates,

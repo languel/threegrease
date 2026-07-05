@@ -141,8 +141,9 @@ export interface GPCameraKey {
   fov: number;
 }
 
-/** The scene camera: transformable, keyframable, viewable (numpad 0). */
+/** A scene camera: transformable, keyframable, viewable (numpad 0). */
 export interface GPCamera {
+  name: string;
   translation: Vec3;
   rotation: Vec3;
   fov: number;
@@ -158,5 +159,6 @@ export interface GPScene {
   fps: number;
   cursor: Vec3;            // 3D cursor
   canvases: CanvasPlane[];
-  camera: GPCamera;
+  cameras: GPCamera[];
+  activeCamera: number;
 }

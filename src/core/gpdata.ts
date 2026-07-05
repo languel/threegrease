@@ -68,8 +68,12 @@ export function createObject(name: string): GPObject {
   };
 }
 
-export function createDefaultCamera(): GPCamera {
-  return { translation: [0, 0.6, 6], rotation: [0, 0, 0], fov: 50, keys: [] };
+export function createDefaultCamera(name = 'Camera 1'): GPCamera {
+  return { name, translation: [0, 0.6, 6], rotation: [0, 0, 0], fov: 50, keys: [] };
+}
+
+export function activeCam(scene: GPScene): GPCamera {
+  return scene.cameras[scene.activeCamera] ?? scene.cameras[0];
 }
 
 export function createScene(): GPScene {
@@ -77,7 +81,8 @@ export function createScene(): GPScene {
     objects: [createObject('GreasePencil')], activeObject: 0,
     frame: 1, frameStart: 1, frameEnd: 250, fps: 24, cursor: [0, 0, 0],
     canvases: [],
-    camera: createDefaultCamera(),
+    cameras: [createDefaultCamera()],
+    activeCamera: 0,
   };
 }
 

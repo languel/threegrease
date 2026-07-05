@@ -83,6 +83,19 @@ label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); 
 .tl-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
 
+#settings-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+}
+#settings-dialog {
+  width: 520px; max-height: 82vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+#settings-dialog h2 { font-size: 14px; }
+#settings-dialog .shortcut-row { padding: 2px 0; }
+#settings-dialog .shortcut-row button { min-width: 130px; font-family: ui-monospace, monospace; }
+
 /* presentation / performance mode: viewport only, shortcuts still live */
 #app.presentation #topbar,
 #app.presentation #toolbar,
