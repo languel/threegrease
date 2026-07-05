@@ -1,0 +1,699 @@
+import type { AppCtx, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush } from '../tools/context';
+import type { EditorMode } from '../render/GPSceneRenderer';
+import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
+import { activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, genId } from '../core/gpdata';
+import { MODIFIERS, createModifier } from '../modifiers/index';
+import { EFFECT_DEFAULTS, createEffect } from '../fx/effects';
+import { interpolateFrame, interpolateSequence } from '../anim/interpolate';
+import * as ops from '../tools/editops';
+import { selectAll, selectLinked, selectMoreLess } from '../tools/select';
+
+export interface AppHandle {
+  ctx: AppCtx;
+  setMode(mode: EditorMode): void;
+  setTool(id: string): void;
+  playToggle(): void;
+  isPlaying(): boolean;
+  undo(): void;
+  redo(): void;
+  saveScene(): void;
+  loadScene(): void;
+  exportPng(): void;
+  addKeyframe(duplicate: boolean): void;
+  removeKeyframe(): void;
+  jumpKey(dir: 1 | -1): void;
+}
+
+const $ = (id: string) => document.getElementById(id)!;
+
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K, attrs: Record<string, unknown> = {}, ...children: (Node | string)[]
+): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = String(v);
+    else if (k === 'text') e.textContent = String(v);
+    else if (k.startsWith('on')) (e as unknown as Record<string, unknown>)[k] = v;
+    else if (k === 'title') e.title = String(v);
+    else e.setAttribute(k, String(v));
+  }
+  for (const c of children) e.append(c);
+  return e;
+}
+
+function btn(label: string, onclick: () => void, opts: { active?: boolean; title?: string; cls?: string } = {}): HTMLButtonElement {
+  return el('button', {
+    text: label, onclick, title: opts.title ?? label,
+    class: `${opts.cls ?? ''} ${opts.active ? 'active' : ''}`,
+  });
+}
+
+function slider(
+  label: string, value: number, min: number, max: number, step: number, onInput: (v: number) => void,
+): HTMLElement {
+  const input = el('input', { type: 'range', min, max, step, value }) as HTMLInputElement;
+  input.oninput = () => onInput(parseFloat(input.value));
+  return el('label', { class: 'inline' }, label, input);
+}
+
+function numField(label: string, value: number, onChange: (v: number) => void, step = 0.1): HTMLElement {
+  const input = el('input', { type: 'number', value: Math.round(value * 1000) / 1000, step }) as HTMLInputElement;
+  input.onchange = () => onChange(parseFloat(input.value) || 0);
+  return el('label', { class: 'inline' }, label, input);
+}
+
+function checkbox(label: string, value: boolean, onChange: (v: boolean) => void): HTMLElement {
+  const input = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  input.checked = value;
+  input.onchange = () => onChange(input.checked);
+  return el('label', { class: 'inline' }, input, label);
+}
+
+function colorField(label: string, rgba: number[], onChange: (rgb: [number, number, number]) => void): HTMLElement {
+  const input = el('input', { type: 'color', value: rgbToHex(rgba) }) as HTMLInputElement;
+  input.oninput = () => onChange(hexToRgb(input.value));
+  return el('label', { class: 'inline' }, label, input);
+}
+
+function selectField<T extends string>(
+  label: string, value: T, options: [T, string][], onChange: (v: T) => void,
+): HTMLElement {
+  const sel = el('select') as HTMLSelectElement;
+  for (const [v, text] of options) sel.append(el('option', { value: v, text }));
+  sel.value = value;
+  sel.onchange = () => onChange(sel.value as T);
+  return el('label', { class: 'inline' }, label, sel);
+}
+
+function rgbToHex(c: number[]): string {
+  const h = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
+  return `#${h(c[0])}${h(c[1])}${h(c[2])}`;
+}
+function hexToRgb(hex: string): [number, number, number] {
+  return [
+    parseInt(hex.slice(1, 3), 16) / 255,
+    parseInt(hex.slice(3, 5), 16) / 255,
+    parseInt(hex.slice(5, 7), 16) / 255,
+  ];
+}
+
+function panel(title: string, ...children: (Node | string)[]): HTMLElement {
+  const body = el('div', { class: 'body' }, ...children);
+  const h = el('h3', { text: title });
+  h.onclick = () => { body.style.display = body.style.display === 'none' ? '' : 'none'; };
+  return el('div', { class: 'panel' }, h, body);
+}
+
+// ---------------------------------------------------------------------------
+
+const TOOLS_BY_MODE: Record<EditorMode, [string, string, string][]> = {
+  DRAW: [
+    ['draw', '✏️', 'Draw (D)'], ['erase', '◌', 'Erase (E)'], ['fill', '🪣', 'Fill (F)'],
+    ['tint', '🖌', 'Tint'], ['cutter', '✂️', 'Cutter'], ['eyedropper', '💧', 'Eyedropper'],
+    ['line', '╱', 'Line'], ['polyline', '⌇', 'Polyline'], ['arc', '◜', 'Arc'],
+    ['curve', '∿', 'Curve'], ['box', '▭', 'Box'], ['circle', '◯', 'Circle'],
+    ['interpolate', '⇄', 'Interpolate (drag)'],
+  ],
+  EDIT: [['select', '⬚', 'Select (drag box, Ctrl lasso, C circle)']],
+  SCULPT: [['sculpt', '🫳', 'Sculpt brush']],
+  VERTEX: [['vertexpaint', '🎨', 'Vertex paint']],
+  WEIGHT: [['weightpaint', '⚖️', 'Weight paint']],
+};
+
+export class UI {
+  private app: AppHandle;
+  private tlCanvas: HTMLCanvasElement;
+
+  constructor(app: AppHandle) {
+    this.app = app;
+    this.tlCanvas = el('canvas');
+    this.buildTimelineShell();
+    this.refresh();
+  }
+
+  refresh(): void {
+    this.buildTopbar();
+    this.buildToolbar();
+    this.buildSidebar();
+    this.refreshTimelineControls();
+    this.drawTimeline();
+  }
+
+  // ------------------------------------------------------------- topbar
+
+  private buildTopbar(): void {
+    const { ctx } = this.app;
+    const s = ctx.settings;
+    const bar = $('topbar');
+    bar.replaceChildren();
+
+    const modes: [EditorMode, string][] = [
+      ['DRAW', 'Draw'], ['EDIT', 'Edit'], ['SCULPT', 'Sculpt'], ['VERTEX', 'Vertex Paint'], ['WEIGHT', 'Weight Paint'],
+    ];
+    for (const [m, label] of modes) {
+      bar.append(btn(label, () => this.app.setMode(m), { active: s.mode === m }));
+    }
+    bar.append(el('div', { class: 'sep' }));
+
+    if (s.mode === 'DRAW') {
+      bar.append(
+        slider('Radius', s.brush.size, 1, 60, 1, (v) => { s.brush.size = v; }),
+        slider('Strength', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }),
+        selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface']] as [PlacementMode, string][], (v) => { s.placement = v; }),
+        selectField('Plane', s.plane, [['VIEW', 'View'], ['FRONT', 'Front (X-Z)'], ['SIDE', 'Side (Y-Z)'], ['TOP', 'Top (X-Y)']] as [PlaneMode, string][], (v) => { s.plane = v; }),
+        selectField('Guide', s.guide.type, [['NONE', 'No Guide'], ['CIRCULAR', 'Circular'], ['RADIAL', 'Radial'], ['PARALLEL', 'Parallel'], ['GRID', 'Grid'], ['ISO', 'Isometric']] as [GuideType, string][], (v) => { s.guide.type = v; }),
+      );
+      if (s.activeTool === 'erase') {
+        bar.append(
+          selectField('Eraser', s.eraser.mode, [['POINT', 'Point'], ['STROKE', 'Stroke'], ['SOFT', 'Soft']] as [EraserMode, string][], (v) => { s.eraser.mode = v; }),
+          slider('Size', s.eraser.radius, 4, 120, 1, (v) => { s.eraser.radius = v; }),
+        );
+      }
+    } else if (s.mode === 'EDIT') {
+      bar.append(
+        selectField('Select', s.selectMode, [['POINT', 'Point'], ['STROKE', 'Stroke']], (v) => { s.selectMode = v; ctx.requestRender(); }),
+        checkbox('Proportional', s.propEdit.enabled, (v) => { s.propEdit.enabled = v; }),
+        checkbox('Multiframe', s.multiframe, (v) => { s.multiframe = v; }),
+      );
+    } else if (s.mode === 'SCULPT') {
+      const brushes: [SculptBrush, string][] = [
+        ['SMOOTH', 'Smooth'], ['THICKNESS', 'Thickness'], ['STRENGTH', 'Strength'], ['RANDOMIZE', 'Randomize'],
+        ['GRAB', 'Grab'], ['PUSH', 'Push'], ['TWIST', 'Twist'], ['PINCH', 'Pinch'], ['CLONE', 'Clone'],
+      ];
+      bar.append(
+        selectField('Brush', s.sculpt.brush, brushes, (v) => { s.sculpt.brush = v; }),
+        slider('Radius', s.sculpt.radius, 10, 200, 1, (v) => { s.sculpt.radius = v; }),
+        slider('Strength', s.sculpt.strength, 0.05, 1, 0.05, (v) => { s.sculpt.strength = v; }),
+      );
+    } else if (s.mode === 'VERTEX') {
+      bar.append(
+        selectField('Brush', s.paint.brush, [['DRAW', 'Draw'], ['BLUR', 'Blur'], ['AVERAGE', 'Average'], ['SMEAR', 'Smear']] as [PaintBrush, string][], (v) => { s.paint.brush = v; }),
+        colorField('Color', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }),
+        slider('Radius', s.paint.radius, 5, 150, 1, (v) => { s.paint.radius = v; }),
+        slider('Strength', s.paint.strength, 0.05, 1, 0.05, (v) => { s.paint.strength = v; }),
+      );
+    } else if (s.mode === 'WEIGHT') {
+      bar.append(
+        slider('Weight', s.weight.target, 0, 1, 0.05, (v) => { s.weight.target = v; }),
+        slider('Radius', s.weight.radius, 5, 150, 1, (v) => { s.weight.radius = v; }),
+        slider('Strength', s.weight.strength, 0.05, 1, 0.05, (v) => { s.weight.strength = v; }),
+      );
+    }
+
+    bar.append(el('div', { class: 'sep' }));
+    bar.append(
+      btn('↶', () => this.app.undo(), { title: 'Undo (Ctrl+Z)' }),
+      btn('↷', () => this.app.redo(), { title: 'Redo (Ctrl+Shift+Z)' }),
+      btn('Save', () => this.app.saveScene()),
+      btn('Load', () => this.app.loadScene()),
+      btn('PNG', () => this.app.exportPng(), { title: 'Export viewport snapshot' }),
+    );
+  }
+
+  // ------------------------------------------------------------ toolbar
+
+  private buildToolbar(): void {
+    const { ctx } = this.app;
+    const bar = $('toolbar');
+    bar.replaceChildren();
+    for (const [id, icon, title] of TOOLS_BY_MODE[ctx.settings.mode]) {
+      bar.append(btn(icon, () => this.app.setTool(id), {
+        active: ctx.settings.activeTool === id, title, cls: 'tool',
+      }));
+    }
+  }
+
+  // ------------------------------------------------------------ sidebar
+
+  private buildSidebar(): void {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const side = $('sidebar');
+    side.replaceChildren();
+
+    side.append(this.layersPanel());
+    side.append(this.materialsPanel());
+    if (ctx.settings.mode === 'EDIT') side.append(this.editOpsPanel());
+    side.append(this.modifiersPanel());
+    side.append(this.effectsPanel());
+    side.append(this.onionPanel());
+    void ob;
+  }
+
+  private layersPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const items: Node[] = [];
+
+    // top layer first (Blender lists top-down)
+    for (let i = ob.layers.length - 1; i >= 0; i--) {
+      const layer = ob.layers[i];
+      const item = el('div', { class: `list-item ${layer.id === ob.activeLayerId ? 'active' : ''}` });
+      item.onclick = () => { ob.activeLayerId = layer.id; ctx.requestRender(); this.refresh(); };
+      const name = el('span', { class: 'grow', text: layer.name });
+      name.ondblclick = () => {
+        const n = prompt('Layer name', layer.name);
+        if (n) { layer.name = n; this.refresh(); }
+      };
+      item.append(
+        name,
+        btn(layer.hide ? '🙈' : '👁', () => { layer.hide = !layer.hide; ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn', title: 'Hide' }),
+        btn(layer.lock ? '🔒' : '🔓', () => { layer.lock = !layer.lock; this.refresh(); }, { cls: 'icon-btn', title: 'Lock' }),
+        btn(layer.useOnion ? '🧅' : '·', () => { layer.useOnion = !layer.useOnion; ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn', title: 'Onion skin' }),
+      );
+      items.push(item);
+    }
+
+    const layer = activeLayer(ob);
+    const props: Node[] = [];
+    if (layer) {
+      props.push(
+        slider('Opacity', layer.opacity, 0, 1, 0.01, (v) => { layer.opacity = v; ctx.requestRender(); }),
+        el('div', { class: 'row' },
+          selectField('Blend', layer.blendMode, [['REGULAR', 'Regular'], ['ADD', 'Add'], ['MULTIPLY', 'Multiply']] as [BlendMode, string][], (v) => { layer.blendMode = v; ctx.requestRender(); }),
+          numField('Thickness +', layer.thicknessOffset, (v) => { layer.thicknessOffset = v; ctx.requestRender(); }, 1),
+        ),
+        el('div', { class: 'row' },
+          colorField('Tint', layer.tint, (rgb) => { layer.tint = [rgb[0], rgb[1], rgb[2], layer.tint[3]]; ctx.requestRender(); }),
+          slider('Factor', layer.tint[3], 0, 1, 0.01, (v) => { layer.tint[3] = v; ctx.requestRender(); }),
+        ),
+        this.maskRow(layer),
+      );
+    }
+
+    return panel('Layers',
+      el('div', { class: 'row' },
+        btn('＋', () => {
+          ctx.pushUndo();
+          const l = createLayer(`Layer ${ob.layers.length + 1}`);
+          ob.layers.push(l);
+          ob.activeLayerId = l.id;
+          ctx.requestRender(); this.refresh();
+        }, { title: 'Add layer' }),
+        btn('－', () => {
+          if (ob.layers.length <= 1 || !layer) return;
+          ctx.pushUndo();
+          ob.layers.splice(ob.layers.indexOf(layer), 1);
+          ob.activeLayerId = ob.layers[ob.layers.length - 1].id;
+          ctx.requestRender(); this.refresh();
+        }, { title: 'Remove layer' }),
+        btn('⧉', () => {
+          if (!layer) return;
+          ctx.pushUndo();
+          const copy = createLayer(`${layer.name} copy`);
+          Object.assign(copy, JSON.parse(JSON.stringify({ ...layer, id: copy.id, name: copy.name })));
+          copy.frames = layer.frames.map(cloneFrame);
+          ob.layers.push(copy);
+          ob.activeLayerId = copy.id;
+          ctx.requestRender(); this.refresh();
+        }, { title: 'Duplicate layer' }),
+        btn('▲', () => this.moveLayer(1), { title: 'Move up' }),
+        btn('▼', () => this.moveLayer(-1), { title: 'Move down' }),
+      ),
+      ...items, ...props,
+    );
+  }
+
+  private maskRow(layer: GPLayer): HTMLElement {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const row = el('div', { class: 'row' });
+    row.append(checkbox('Mask', layer.useMask, (v) => { layer.useMask = v; ctx.requestRender(); }));
+    const sel = el('select') as HTMLSelectElement;
+    sel.append(el('option', { value: '', text: 'add mask layer…' }));
+    for (const l of ob.layers) {
+      if (l.id !== layer.id && !layer.maskLayerIds.includes(l.id)) {
+        sel.append(el('option', { value: String(l.id), text: l.name }));
+      }
+    }
+    sel.onchange = () => {
+      if (sel.value) { layer.maskLayerIds.push(Number(sel.value)); ctx.requestRender(); this.refresh(); }
+    };
+    row.append(sel);
+    for (const id of layer.maskLayerIds) {
+      const l = ob.layers.find((x) => x.id === id);
+      row.append(btn(`${l?.name ?? id} ✕`, () => {
+        layer.maskLayerIds = layer.maskLayerIds.filter((x) => x !== id);
+        ctx.requestRender(); this.refresh();
+      }, { cls: 'icon-btn', title: 'Remove mask' }));
+    }
+    return row;
+  }
+
+  private moveLayer(dir: number): void {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const layer = activeLayer(ob);
+    if (!layer) return;
+    const i = ob.layers.indexOf(layer);
+    const j = i + dir;
+    if (j < 0 || j >= ob.layers.length) return;
+    ctx.pushUndo();
+    [ob.layers[i], ob.layers[j]] = [ob.layers[j], ob.layers[i]];
+    ctx.requestRender(); this.refresh();
+  }
+
+  private materialsPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const items: Node[] = [];
+    ob.materials.forEach((m, i) => {
+      const item = el('div', { class: `list-item ${i === ob.activeMaterial ? 'active' : ''}` });
+      item.onclick = () => { ob.activeMaterial = i; this.refresh(); };
+      const sw = el('div', { class: 'swatch' });
+      sw.style.background = rgbToHex(m.showFill ? m.fillColor : m.strokeColor);
+      item.append(sw, el('span', { class: 'grow', text: m.name }));
+      items.push(item);
+    });
+
+    const m = ob.materials[ob.activeMaterial];
+    const props: Node[] = [];
+    if (m) {
+      props.push(
+        el('div', { class: 'row' },
+          checkbox('Stroke', m.showStroke, (v) => { m.showStroke = v; ctx.requestRender(); }),
+          colorField('', m.strokeColor, (rgb) => { m.strokeColor = [rgb[0], rgb[1], rgb[2], m.strokeColor[3]]; ctx.requestRender(); }),
+          slider('A', m.strokeColor[3], 0, 1, 0.01, (v) => { m.strokeColor[3] = v; ctx.requestRender(); }),
+        ),
+        selectField('Line', m.lineMode, [['LINE', 'Line'], ['DOTS', 'Dots'], ['SQUARES', 'Squares']] as [LineMode, string][], (v) => { m.lineMode = v; ctx.requestRender(); }),
+        el('div', { class: 'row' },
+          checkbox('Fill', m.showFill, (v) => { m.showFill = v; ctx.requestRender(); }),
+          colorField('', m.fillColor, (rgb) => { m.fillColor = [rgb[0], rgb[1], rgb[2], m.fillColor[3]]; ctx.requestRender(); }),
+          slider('A', m.fillColor[3], 0, 1, 0.01, (v) => { m.fillColor[3] = v; ctx.requestRender(); }),
+        ),
+        selectField('Fill style', m.fillStyle, [['SOLID', 'Solid'], ['GRADIENT_LINEAR', 'Linear Gradient'], ['GRADIENT_RADIAL', 'Radial Gradient']] as [FillStyle, string][], (v) => { m.fillStyle = v; ctx.requestRender(); }),
+      );
+      if (m.fillStyle !== 'SOLID') {
+        props.push(el('div', { class: 'row' },
+          colorField('Color 2', m.fillColor2, (rgb) => { m.fillColor2 = [rgb[0], rgb[1], rgb[2], m.fillColor2[3]]; ctx.requestRender(); }),
+          slider('Angle', m.gradientAngle, 0, Math.PI * 2, 0.05, (v) => { m.gradientAngle = v; ctx.requestRender(); }),
+        ));
+      }
+      props.push(checkbox('Holdout', m.holdout, (v) => { m.holdout = v; ctx.requestRender(); }));
+      if (ctx.settings.mode === 'EDIT') {
+        props.push(btn('Assign to selected', () => ops.assignMaterial(ctx, ob.activeMaterial)));
+      }
+    }
+
+    return panel('Materials',
+      el('div', { class: 'row' },
+        btn('＋', () => {
+          ctx.pushUndo();
+          ob.materials.push(createMaterial(`Material ${ob.materials.length + 1}`, [0, 0, 0, 1]));
+          ob.activeMaterial = ob.materials.length - 1;
+          this.refresh();
+        }),
+        btn('－', () => {
+          if (ob.materials.length <= 1) return;
+          ctx.pushUndo();
+          ob.materials.splice(ob.activeMaterial, 1);
+          ob.activeMaterial = Math.max(0, ob.activeMaterial - 1);
+          ctx.requestRender(); this.refresh();
+        }),
+      ),
+      ...items, ...props,
+    );
+  }
+
+  private editOpsPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const layerSel = el('select') as HTMLSelectElement;
+    for (const l of ob.layers) layerSel.append(el('option', { value: String(l.id), text: l.name }));
+    return panel('Stroke Ops',
+      el('div', { class: 'row' },
+        btn('Subdivide', () => ops.subdivideSelected(ctx)),
+        btn('Simplify', () => ops.simplifySelected(ctx)),
+        btn('Smooth', () => ops.smoothSelected(ctx)),
+      ),
+      el('div', { class: 'row' },
+        btn('Join', () => ops.joinSelected(ctx)),
+        btn('Split', () => ops.splitSelected(ctx)),
+        btn('Merge dist', () => ops.mergeByDistance(ctx)),
+      ),
+      el('div', { class: 'row' },
+        btn('Cyclic', () => ops.toggleCyclic(ctx)),
+        btn('Reverse', () => ops.switchDirection(ctx)),
+        btn('Set start', () => ops.setStartPoint(ctx)),
+      ),
+      el('div', { class: 'row' },
+        btn('Norm. width', () => ops.normalizeThickness(ctx)),
+        btn('Norm. alpha', () => ops.normalizeOpacity(ctx)),
+      ),
+      el('div', { class: 'row' },
+        btn('⤒ Front', () => ops.arrangeSelected(ctx, 'TOP')),
+        btn('↑', () => ops.arrangeSelected(ctx, 'UP')),
+        btn('↓', () => ops.arrangeSelected(ctx, 'DOWN')),
+        btn('⤓ Back', () => ops.arrangeSelected(ctx, 'BOTTOM')),
+      ),
+      el('div', { class: 'row' },
+        btn('Snap→Cursor', () => ops.snapToCursor(ctx)),
+        btn('Snap→Grid', () => ops.snapToGrid(ctx)),
+      ),
+      el('div', { class: 'row' },
+        btn('Sel linked (L)', () => { selectLinked(ctx); ctx.requestRender(); }),
+        btn('More', () => { selectMoreLess(ctx, true); ctx.requestRender(); }),
+        btn('Less', () => { selectMoreLess(ctx, false); ctx.requestRender(); }),
+        btn('Invert', () => { selectAll(ctx, 'invert'); ctx.requestRender(); }),
+      ),
+      el('div', { class: 'row' }, 'Move to layer:', layerSel,
+        btn('Go', () => ops.moveToLayer(ctx, Number(layerSel.value)))),
+    );
+  }
+
+  private paramEditors(
+    params: Record<string, number | boolean | number[]>, onChange: () => void,
+  ): Node[] {
+    const out: Node[] = [];
+    for (const [key, val] of Object.entries(params)) {
+      if (typeof val === 'boolean') {
+        out.push(checkbox(key, val, (v) => { params[key] = v; onChange(); }));
+      } else if (typeof val === 'number') {
+        out.push(numField(key, val, (v) => { params[key] = v; onChange(); }));
+      } else if (Array.isArray(val) && val.length === 3 && key.toLowerCase().includes('color')) {
+        out.push(colorField(key, [...val, 1], (rgb) => { params[key] = rgb; onChange(); }));
+      } else if (Array.isArray(val)) {
+        const row = el('div', { class: 'row' }, key);
+        val.forEach((component, i) => {
+          row.append(numField('', component, (v) => { (params[key] as number[])[i] = v; onChange(); }));
+        });
+        out.push(row);
+      }
+    }
+    return out;
+  }
+
+  private modifiersPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const addSel = el('select') as HTMLSelectElement;
+    addSel.append(el('option', { value: '', text: 'Add modifier…' }));
+    for (const [type, def] of Object.entries(MODIFIERS)) {
+      addSel.append(el('option', { value: type, text: def.label }));
+    }
+    addSel.onchange = () => {
+      if (!addSel.value) return;
+      ctx.pushUndo();
+      ob.modifiers.push(createModifier(addSel.value as ModifierType, genId()));
+      ctx.requestRender(); this.refresh();
+    };
+
+    const items: Node[] = [];
+    ob.modifiers.forEach((mod, i) => {
+      const body = el('div', { class: 'body' });
+      body.append(
+        el('div', { class: 'row' },
+          checkbox('On', mod.enabled, (v) => { mod.enabled = v; ctx.requestRender(); }),
+          btn('▲', () => { if (i > 0) { [ob.modifiers[i - 1], ob.modifiers[i]] = [ob.modifiers[i], ob.modifiers[i - 1]]; ctx.requestRender(); this.refresh(); } }, { cls: 'icon-btn' }),
+          btn('▼', () => { if (i < ob.modifiers.length - 1) { [ob.modifiers[i + 1], ob.modifiers[i]] = [ob.modifiers[i], ob.modifiers[i + 1]]; ctx.requestRender(); this.refresh(); } }, { cls: 'icon-btn' }),
+          btn('✕', () => { ctx.pushUndo(); ob.modifiers.splice(i, 1); ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn' }),
+        ),
+        ...this.paramEditors(mod.params, () => ctx.requestRender()),
+      );
+      const layerFilterSel = el('select') as HTMLSelectElement;
+      layerFilterSel.append(el('option', { value: '', text: 'All layers' }));
+      for (const l of ob.layers) layerFilterSel.append(el('option', { value: String(l.id), text: l.name }));
+      layerFilterSel.value = mod.layerFilter === null ? '' : String(mod.layerFilter);
+      layerFilterSel.onchange = () => {
+        mod.layerFilter = layerFilterSel.value ? Number(layerFilterSel.value) : null;
+        ctx.requestRender();
+      };
+      body.append(el('div', { class: 'row' }, 'Layer:', layerFilterSel));
+      items.push(el('div', { class: 'panel' }, el('h3', { text: `${mod.name}` }), body));
+    });
+
+    return panel('Modifiers', addSel, ...items);
+  }
+
+  private effectsPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const addSel = el('select') as HTMLSelectElement;
+    addSel.append(el('option', { value: '', text: 'Add effect…' }));
+    for (const [type, def] of Object.entries(EFFECT_DEFAULTS)) {
+      addSel.append(el('option', { value: type, text: def.label }));
+    }
+    addSel.onchange = () => {
+      if (!addSel.value) return;
+      ctx.pushUndo();
+      ob.effects.push(createEffect(addSel.value as EffectType, genId()));
+      ctx.requestRender(); this.refresh();
+    };
+
+    const items: Node[] = [];
+    ob.effects.forEach((fx, i) => {
+      const body = el('div', { class: 'body' });
+      body.append(
+        el('div', { class: 'row' },
+          checkbox('On', fx.enabled, (v) => { fx.enabled = v; ctx.requestRender(); }),
+          btn('✕', () => { ctx.pushUndo(); ob.effects.splice(i, 1); ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn' }),
+        ),
+        ...this.paramEditors(fx.params, () => ctx.requestRender()),
+      );
+      items.push(el('div', { class: 'panel' }, el('h3', { text: fx.name }), body));
+    });
+
+    return panel('Visual Effects', addSel, ...items);
+  }
+
+  private onionPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const o = ob.onion;
+    return panel('Onion Skinning',
+      el('div', { class: 'row' },
+        checkbox('Enabled', o.enabled, (v) => { o.enabled = v; ctx.requestRender(); }),
+        selectField('Mode', o.mode, [['KEYFRAMES', 'Keyframes'], ['FRAMES', 'Frames']], (v) => { o.mode = v; ctx.requestRender(); }),
+      ),
+      el('div', { class: 'row' },
+        numField('Before', o.before, (v) => { o.before = Math.max(0, Math.round(v)); ctx.requestRender(); }, 1),
+        numField('After', o.after, (v) => { o.after = Math.max(0, Math.round(v)); ctx.requestRender(); }, 1),
+      ),
+      el('div', { class: 'row' },
+        colorField('Before', [...o.colorBefore, 1], (rgb) => { o.colorBefore = rgb; ctx.requestRender(); }),
+        colorField('After', [...o.colorAfter, 1], (rgb) => { o.colorAfter = rgb; ctx.requestRender(); }),
+      ),
+      slider('Opacity', o.opacity, 0, 1, 0.01, (v) => { o.opacity = v; ctx.requestRender(); }),
+    );
+  }
+
+  // ------------------------------------------------------------ timeline
+
+  private buildTimelineShell(): void {
+    const tl = $('timeline');
+    tl.replaceChildren();
+    const controls = el('div', { class: 'tl-controls', id: 'tl-controls' });
+    const strip = el('div', { id: 'timeline-strip' });
+    strip.append(this.tlCanvas);
+    strip.onpointerdown = (e) => this.timelinePointer(e, strip);
+    strip.onpointermove = (e) => { if (e.buttons & 1) this.timelinePointer(e, strip); };
+    tl.append(controls, strip);
+  }
+
+  private timelinePointer(e: PointerEvent, strip: HTMLElement): void {
+    const { ctx } = this.app;
+    const rect = strip.getBoundingClientRect();
+    const t = (e.clientX - rect.left) / rect.width;
+    const frame = Math.round(ctx.scene.frameStart + t * (ctx.scene.frameEnd - ctx.scene.frameStart));
+    if (e.shiftKey && e.type === 'pointerdown') {
+      // toggle keyframe selection (multiframe editing)
+      const layer = activeLayer(activeObject(ctx.scene));
+      if (layer) {
+        let best: { d: number; f: typeof layer.frames[number] } | null = null;
+        for (const f of layer.frames) {
+          const d = Math.abs(f.frameNumber - frame);
+          if (!best || d < best.d) best = { d, f };
+        }
+        if (best && best.d < 5) best.f.select = !best.f.select;
+      }
+    } else {
+      ctx.scene.frame = Math.max(ctx.scene.frameStart, Math.min(ctx.scene.frameEnd, frame));
+    }
+    ctx.requestRender();
+    this.drawTimeline();
+    this.refreshTimelineControls();
+  }
+
+  refreshTimelineControls(): void {
+    const { ctx } = this.app;
+    const s = ctx.scene;
+    const controls = $('tl-controls');
+    controls.replaceChildren(
+      btn('⏮', () => { s.frame = s.frameStart; ctx.requestRender(); this.drawTimeline(); }, { title: 'Jump to start' }),
+      btn('◀◀', () => this.app.jumpKey(-1), { title: 'Previous keyframe (Down)' }),
+      btn(this.app.isPlaying() ? '⏸' : '▶', () => { this.app.playToggle(); this.refreshTimelineControls(); }, { title: 'Play (Space)' }),
+      btn('▶▶', () => this.app.jumpKey(1), { title: 'Next keyframe (Up)' }),
+      el('span', { text: `Frame ${s.frame}` }),
+      el('div', { class: 'sep' }),
+      numField('Start', s.frameStart, (v) => { s.frameStart = Math.round(v); this.drawTimeline(); }, 1),
+      numField('End', s.frameEnd, (v) => { s.frameEnd = Math.round(v); this.drawTimeline(); }, 1),
+      numField('FPS', s.fps, (v) => { s.fps = Math.max(1, Math.round(v)); }, 1),
+      el('div', { class: 'sep' }),
+      btn('＋Key', () => this.app.addKeyframe(false), { title: 'Insert blank keyframe (I)' }),
+      btn('＋Dup', () => this.app.addKeyframe(true), { title: 'Duplicate current keyframe' }),
+      btn('－Key', () => this.app.removeKeyframe(), { title: 'Delete keyframe' }),
+      el('div', { class: 'sep' }),
+      checkbox('Auto-key', ctx.settings.autoKey, (v) => { ctx.settings.autoKey = v; }),
+      btn('Interpolate', () => { interpolateFrame(ctx, ctx.scene.frame, this.interpFactor(ctx)); this.drawTimeline(); }, { title: 'Insert breakdown at current frame' }),
+      btn('Sequence', () => { interpolateSequence(ctx); this.drawTimeline(); }, { title: 'Interpolate all frames between keys' }),
+    );
+  }
+
+  private interpFactor(ctx: AppCtx): number {
+    const layer = activeLayer(activeObject(ctx.scene));
+    if (!layer) return 0.5;
+    let prev = -Infinity, next = Infinity;
+    for (const f of layer.frames) {
+      if (f.frameNumber < ctx.scene.frame) prev = Math.max(prev, f.frameNumber);
+      if (f.frameNumber > ctx.scene.frame) next = Math.min(next, f.frameNumber);
+    }
+    if (!isFinite(prev) || !isFinite(next)) return 0.5;
+    return (ctx.scene.frame - prev) / (next - prev);
+  }
+
+  drawTimeline(): void {
+    const { ctx } = this.app;
+    const s = ctx.scene;
+    const canvas = this.tlCanvas;
+    const strip = canvas.parentElement!;
+    const W = strip.clientWidth * devicePixelRatio;
+    const H = strip.clientHeight * devicePixelRatio;
+    if (canvas.width !== W) canvas.width = W;
+    if (canvas.height !== H) canvas.height = H;
+    const g = canvas.getContext('2d')!;
+    g.clearRect(0, 0, W, H);
+    const span = Math.max(1, s.frameEnd - s.frameStart);
+    const fx = (f: number) => ((f - s.frameStart) / span) * W;
+
+    // frame ticks
+    g.fillStyle = '#55555c';
+    const step = span > 200 ? 50 : span > 80 ? 20 : span > 30 ? 10 : 5;
+    g.font = `${10 * devicePixelRatio}px sans-serif`;
+    for (let f = Math.ceil(s.frameStart / step) * step; f <= s.frameEnd; f += step) {
+      g.fillRect(fx(f), 0, 1, H);
+      g.fillText(String(f), fx(f) + 3, 10 * devicePixelRatio);
+    }
+
+    // keyframes of all layers (active layer bright)
+    const ob = activeObject(s);
+    const rowH = Math.min(8 * devicePixelRatio, H / Math.max(1, ob.layers.length));
+    ob.layers.forEach((layer, li) => {
+      const y = H - (li + 0.5) * rowH;
+      const isActive = layer.id === ob.activeLayerId;
+      for (const f of layer.frames) {
+        const x = fx(f.frameNumber);
+        const r = (isActive ? 4 : 2.5) * devicePixelRatio;
+        g.beginPath();
+        g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y);
+        g.closePath();
+        const typeColor = f.keyframeType === 'BREAKDOWN' ? '#41c8e0' : '#e0e0e0';
+        g.fillStyle = f.select ? '#ff9a3b' : isActive ? typeColor : '#77777e';
+        g.fill();
+      }
+    });
+
+    // playhead
+    g.fillStyle = '#4f8cff';
+    g.fillRect(fx(s.frame) - 1, 0, 2 * devicePixelRatio, H);
+  }
+}

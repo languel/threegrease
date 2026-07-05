@@ -1,0 +1,60 @@
+# threegrease
+
+A feature-complete implementation of **Blender Grease Pencil** in **three.js** —
+the foundation for an interactive action-painting lab.
+
+```bash
+npm install
+npm run dev     # open http://localhost:5199
+```
+
+## What's inside
+
+- **Data model** mirroring Blender: object → layers → keyframes → strokes →
+  points (position, pressure→radius, strength→opacity, vertex color, weight).
+- **Renderer**: custom screen-space ribbon shader (per-point radius/color,
+  round caps & joins, hardness, Line/Dots/Squares modes), earcut-triangulated
+  fills with solid/linear/radial gradient styles, layer blend modes
+  (Regular/Add/Multiply), tint, thickness offset, stencil-based layer masks,
+  holdout, onion skinning.
+- **Draw mode**: pressure-sensitive draw with stabilizer + active smoothing +
+  post smooth/simplify, point/stroke/soft erasers, raster bucket fill with
+  leak detection, tint brush, cutter, eyedropper, primitives (line, polyline,
+  arc, curve, box, circle), drawing guides (circular/radial/parallel/grid/iso),
+  placement planes (view/front/side/top × origin/cursor/surface).
+- **Edit mode**: point/stroke select (click/box/lasso/circle), G/R/S modal
+  transforms with axis locks and proportional editing, full stroke-op suite
+  (subdivide, simplify, smooth, join, split, merge, dissolve, duplicate,
+  arrange, cyclic, direction, normalize, move-to-layer, snap), multiframe
+  editing, copy/paste.
+- **Sculpt mode**: smooth, thickness, strength, randomize, grab, push, twist,
+  pinch, clone brushes.
+- **Vertex/Weight paint**: draw/blur/average/smear color brushes; weight
+  group used by noise/opacity modifiers.
+- **Animation**: per-layer keyframes with types, timeline scrub/playback,
+  auto-key, onion skinning (frames/keyframes), interpolation (single
+  breakdown + full sequence).
+- **Modifiers** (non-destructive, reorderable, layer/material filtered):
+  noise, smooth, subdivide, simplify, thickness, offset, array, mirror,
+  build, tint, opacity, length, time offset, wave.
+- **Visual effects** (screen-space, per object): blur, glow, pixelate, rim,
+  shadow, colorize, flip, swirl, wave.
+- **IO**: JSON scene save/load, PNG snapshot, snapshot undo/redo.
+
+See [PLAN.md](PLAN.md) for the full feature checklist against the Blender
+manual and the post-parity roadmap (performance, Mental-Canvas-style gesture
+navigation, live-performance bindings).
+
+## Shortcuts
+
+| Key | Action |
+| --- | ------ |
+| `1–5` / `Tab` | modes (Draw/Edit/Sculpt/Vertex/Weight; Tab toggles Draw↔Edit) |
+| `D/E/F` | draw / erase / fill tools |
+| `G/R/S` + `X/Y/Z` | move/rotate/scale with axis lock (Edit) |
+| `A` / `Shift+A` / `Ctrl+I` / `L` | select all / none / invert / linked |
+| `X` | delete selected · `Shift+D` duplicate |
+| `Ctrl+C/V` `Ctrl+Z` | copy/paste, undo |
+| `I` / `Shift+I` | insert / remove keyframe |
+| `Space` `←→` `↑↓` | play, step frame, jump keyframe |
+| MMB / RMB | orbit / pan · `Shift+RMB` place 3D cursor |
