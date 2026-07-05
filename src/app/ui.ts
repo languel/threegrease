@@ -26,6 +26,13 @@ export interface AppHandle {
   addKeyframe(duplicate: boolean): void;
   removeKeyframe(): void;
   jumpKey(dir: 1 | -1): void;
+  toggleCameraView(): void;
+  cameraView: boolean;
+  lockCamToView: boolean;
+  addCameraKey(): void;
+  removeCameraKeyAtFrame(): void;
+  togglePresentation(): void;
+  setBackground(rgb: [number, number, number]): void;
 }
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -214,6 +221,8 @@ export class UI {
       ] as [CursorSnap, string][], (v) => { s.cursorSnap = v; }),
       checkbox('Numpad', s.emulateNumpad, (v) => { s.emulateNumpad = v; }),
       checkbox('Alt-nav', s.emulate3Button, (v) => { s.emulate3Button = v; }),
+      colorField('BG', [...s.background, 1], (rgb) => this.app.setBackground(rgb)),
+      btn('Present', () => this.app.togglePresentation(), { title: 'Presentation/performance mode (P): viewport only, shortcuts stay live' }),
     );
     bar.append(el('div', { class: 'sep' }));
     bar.append(
@@ -684,6 +693,12 @@ export class UI {
       checkbox('Auto-key', ctx.settings.autoKey, (v) => { ctx.settings.autoKey = v; }),
       btn('Interpolate', () => { interpolateFrame(ctx, ctx.scene.frame, this.interpFactor(ctx)); this.drawTimeline(); }, { title: 'Insert breakdown at current frame' }),
       btn('Sequence', () => { interpolateSequence(ctx); this.drawTimeline(); }, { title: 'Interpolate all frames between keys' }),
+      el('div', { class: 'sep' }),
+      btn('🎥', () => this.app.toggleCameraView(), { active: this.app.cameraView, title: 'Look through the scene camera (0)' }),
+      checkbox('Lock', this.app.lockCamToView, (v) => { this.app.lockCamToView = v; }),
+      btn('＋CamKey', () => this.app.addCameraKey(), { title: 'Keyframe the camera at the current frame' }),
+      btn('－CamKey', () => this.app.removeCameraKeyAtFrame(), { title: 'Remove camera key at current frame' }),
+      numField('FOV', ctx.scene.camera.fov, (v) => { ctx.scene.camera.fov = Math.min(140, Math.max(5, v)); }, 1),
     );
   }
 
@@ -739,6 +754,14 @@ export class UI {
         g.fill();
       }
     });
+
+    // camera keys along the top edge
+    g.fillStyle = '#d8a03c';
+    for (const k of s.camera.keys) {
+      const x = fx(k.frame);
+      const r = 3 * devicePixelRatio;
+      g.fillRect(x - r / 2, 2, r, r);
+    }
 
     // playhead
     g.fillStyle = '#4f8cff';

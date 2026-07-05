@@ -1,5 +1,5 @@
 import type {
-  GPFrame, GPLayer, GPMaterial, GPObject, GPPoint, GPScene, GPStroke, Vec3, Vec4,
+  GPCamera, GPFrame, GPLayer, GPMaterial, GPObject, GPPoint, GPScene, GPStroke, Vec3, Vec4,
 } from './types';
 
 let nextId = 1;
@@ -68,11 +68,16 @@ export function createObject(name: string): GPObject {
   };
 }
 
+export function createDefaultCamera(): GPCamera {
+  return { translation: [0, 0.6, 6], rotation: [0, 0, 0], fov: 50, keys: [] };
+}
+
 export function createScene(): GPScene {
   return {
     objects: [createObject('GreasePencil')], activeObject: 0,
     frame: 1, frameStart: 1, frameEnd: 250, fps: 24, cursor: [0, 0, 0],
     canvases: [],
+    camera: createDefaultCamera(),
   };
 }
 

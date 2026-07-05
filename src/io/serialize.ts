@@ -1,5 +1,5 @@
 import type { GPScene } from '../core/types';
-import { bumpIdCounter } from '../core/gpdata';
+import { bumpIdCounter, createDefaultCamera } from '../core/gpdata';
 
 const FORMAT = 'threegrease-scene';
 const VERSION = 1;
@@ -13,6 +13,7 @@ export function deserializeScene(json: string): GPScene {
   if (data?.format !== FORMAT) throw new Error('Not a threegrease scene file');
   const scene = data.scene as GPScene;
   scene.canvases ??= []; // older saves predate canvas planes
+  scene.camera ??= createDefaultCamera();
   bumpIdCounter(scene);
   return scene;
 }

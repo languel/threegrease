@@ -16,9 +16,17 @@ export function setStrokeExclusion(id: number | null): void {
   stickyDepth = null; // each new stroke re-acquires its depth anchor
 }
 
-interface DepthCandidate { d: number; depth: number; strokeId: number; world: THREE.Vector3 }
+interface DepthCandidate {
+  d: number; depth: number; strokeId: number; world: THREE.Vector3;
+  sx: number; sy: number; // screen position of the snap anchor
+}
 
-/** Project stroke points near a screen position; shared by STROKE placement and cursor snapping. */
+/**
+ * Project stroke geometry near a screen position; shared by STROKE placement
+ * and cursor snapping. With target ALL, snapping is against stroke *segments*
+ * (closest point on each projected segment), so sparse simplified strokes
+ * snap smoothly; ENDS/FIRST snap against those specific points.
+ */
 function gatherDepthCandidates(
   ctx: AppCtx, screenX: number, screenY: number, radius: number,
   target: 'ALL' | 'ENDS' | 'FIRST',
@@ -35,29 +43,74 @@ function gatherDepthCandidates(
   const out: DepthCandidate[] = [];
   const projected = new THREE.Vector3();
 
+  const projectPoint = (co: Vec3) => {
+    const world = new THREE.Vector3(co[0], co[1], co[2]).applyMatrix4(matrix);
+    projected.copy(world).project(ctx.camera);
+    if (projected.z > 1) return null; // behind camera
+    return {
+      world,
+      sx: (projected.x * 0.5 + 0.5) * rect.width,
+      sy: (-projected.y * 0.5 + 0.5) * rect.height,
+      depth: camDir.dot(world.clone().sub(camPos)),
+    };
+  };
+
   for (const layer of ob.layers) {
     if (layer.hide) continue;
     const frame = frameAt(layer, ctx.scene.frame);
     if (!frame) continue;
     for (const s of frame.strokes) {
       if (s.id === excludedStrokeId || s.points.length === 0) continue;
-      const picks =
-        target === 'FIRST' ? [s.points[0]] :
-        target === 'ENDS' ? (s.points.length > 1 ? [s.points[0], s.points[s.points.length - 1]] : [s.points[0]]) :
-        s.points;
-      for (const p of picks) {
-        const world = new THREE.Vector3(p.co[0], p.co[1], p.co[2]).applyMatrix4(matrix);
-        projected.copy(world).project(ctx.camera);
-        if (projected.z > 1) continue; // behind camera
-        const sx = (projected.x * 0.5 + 0.5) * rect.width;
-        const sy = (-projected.y * 0.5 + 0.5) * rect.height;
+
+      if (target !== 'ALL' || s.points.length === 1) {
+        const picks =
+          target === 'FIRST' || s.points.length === 1 ? [s.points[0]] :
+          target === 'ENDS' ? [s.points[0], s.points[s.points.length - 1]] :
+          s.points;
+        for (const p of picks) {
+          const pr = projectPoint(p.co);
+          if (!pr) continue;
+          const d = Math.hypot(pr.sx - screenX, pr.sy - screenY);
+          if (d <= radius) out.push({ d, depth: pr.depth, strokeId: s.id, world: pr.world, sx: pr.sx, sy: pr.sy });
+        }
+        continue;
+      }
+
+      // segment snapping: closest point on each projected segment
+      const prs = s.points.map((p) => projectPoint(p.co));
+      const segCount = s.cyclic ? s.points.length : s.points.length - 1;
+      for (let i = 0; i < segCount; i++) {
+        const a = prs[i], b = prs[(i + 1) % s.points.length];
+        if (!a || !b) continue;
+        const abx = b.sx - a.sx, aby = b.sy - a.sy;
+        const len2 = abx * abx + aby * aby;
+        const t = len2 < 1e-9 ? 0 :
+          Math.max(0, Math.min(1, ((screenX - a.sx) * abx + (screenY - a.sy) * aby) / len2));
+        const sx = a.sx + abx * t, sy = a.sy + aby * t;
         const d = Math.hypot(sx - screenX, sy - screenY);
         if (d > radius) continue;
-        out.push({ d, depth: camDir.dot(world.clone().sub(camPos)), strokeId: s.id, world });
+        out.push({
+          d,
+          depth: a.depth + (b.depth - a.depth) * t,
+          strokeId: s.id,
+          world: a.world.clone().lerp(b.world, t),
+          sx, sy,
+        });
       }
     }
   }
   return out;
+}
+
+/**
+ * HUD preview: where STROKE placement would anchor right now. Returns the
+ * screen position of the snap anchor on the target stroke, or null.
+ */
+export function strokeSnapPreview(ctx: AppCtx, screenX: number, screenY: number): { x: number; y: number } | null {
+  const candidates = gatherDepthCandidates(ctx, screenX, screenY, 80, ctx.settings.strokeTarget);
+  if (!candidates.length) return null;
+  const nearest = candidates.reduce((a, b) => (b.d < a.d ? b : a));
+  return { x: nearest.sx, y: nearest.sy };
 }
 
 /** Nearest existing stroke point (world space) within `radius` px, or null. */

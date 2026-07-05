@@ -134,6 +134,21 @@ export interface CanvasPlane {
   visible: boolean;
 }
 
+export interface GPCameraKey {
+  frame: number;
+  translation: Vec3;
+  rotation: Vec3;          // euler radians (interpolated via quaternion slerp)
+  fov: number;
+}
+
+/** The scene camera: transformable, keyframable, viewable (numpad 0). */
+export interface GPCamera {
+  translation: Vec3;
+  rotation: Vec3;
+  fov: number;
+  keys: GPCameraKey[];     // sorted by frame
+}
+
 export interface GPScene {
   objects: GPObject[];
   activeObject: number;
@@ -143,4 +158,5 @@ export interface GPScene {
   fps: number;
   cursor: Vec3;            // 3D cursor
   canvases: CanvasPlane[];
+  camera: GPCamera;
 }

@@ -47,9 +47,18 @@ npm run dev     # open http://localhost:5199
   (drawable quads placed at the 3D cursor — raycast targets for Surface
   placement), and **Stroke placement** with All/End/First-point targets so
   new strokes inherit depth from existing ones (grow forms in 3D) — depth
-  snaps to the nearest stroke only and holds while drawing past its edges.
-  The 3D cursor (`Shift+RMB`) has snap modes: Plane, Grid, nearest Stroke
-  point, Selection center.
+  snaps to the nearest stroke only (against stroke *segments*, with a live
+  HUD indicator showing the anchor point) and holds while drawing past its
+  edges. The 3D cursor (`Shift+RMB`) has snap modes: Plane, Grid, nearest
+  Stroke point, Selection center.
+- **Presentation / performance mode** (`P`): all UI panels, grid, gizmo and
+  overlays disappear — just rendered strokes on a solid background while
+  every shortcut keeps working. Made for live drawing.
+- **Scene camera**: a transformable, keyframable camera (`0` to look through
+  it, 🎥 in the timeline). With *Lock* on, normal viewport navigation moves
+  the camera; `＋CamKey` keyframes it at the current frame and playback
+  interpolates position/rotation/FOV between keys (slerped rotation). Shown
+  as a frustum gizmo in the viewport, keys marked on the timeline.
 
 See [PLAN.md](PLAN.md) for the full feature checklist against the Blender
 manual and the post-parity roadmap (performance, Mental-Canvas-style gesture
@@ -73,3 +82,5 @@ navigation, live-performance bindings).
 | `5` | ortho ↔ perspective |
 | `2/4/6/8` | orbit view in 15° steps |
 | `` ` `` | flythrough mode (WASD + Q/E, wheel = speed, click/Esc exit) |
+| `P` | presentation/performance mode (UI off, shortcuts live) |
+| `0` | look through the scene camera |

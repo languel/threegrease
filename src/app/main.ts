@@ -18,7 +18,8 @@ import * as ops from '../tools/editops';
 import { Player } from '../anim/player';
 import { interpolateFrame } from '../anim/interpolate';
 import { downloadScene, openSceneFile } from '../io/serialize';
-import { nearestStrokePoint, screenToWorld } from '../tools/projection';
+import { nearestStrokePoint, screenToWorld, strokeSnapPreview } from '../tools/projection';
+import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
@@ -75,6 +76,11 @@ class App implements AppHandle {
   private navDrag: { mode: 'orbit' | 'pan' | 'dolly'; x: number; y: number } | null = null;
   private canvasGroup = new THREE.Group();
   private lastTime = performance.now();
+  private grid!: THREE.GridHelper;
+  presentation = false;
+  cameraView = false;
+  lockCamToView = true;
+  private camHelper!: THREE.Group;
 
   constructor() {
     const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
@@ -122,9 +128,11 @@ class App implements AppHandle {
 
     // scene dressing
     this.scene3.background = new THREE.Color(...settings.background);
-    const grid = new THREE.GridHelper(20, 40, 0x3a3a44, 0x2a2a30);
-    grid.position.y = -2;
-    this.scene3.add(grid);
+    this.grid = new THREE.GridHelper(20, 40, 0x3a3a44, 0x2a2a30);
+    this.grid.position.y = -2;
+    this.scene3.add(this.grid);
+    this.camHelper = this.makeCameraHelper();
+    this.scene3.add(this.camHelper);
     this.scene3.add(this.gp.root);
     this.cursorMarker = this.makeCursorMarker();
     this.scene3.add(this.cursorMarker);
@@ -396,7 +404,7 @@ class App implements AppHandle {
         return;
       }
       const te0 = this.toolEvent(e);
-      if (e.button === 0 && this.nav.hitGizmo(te0.x, te0.y)) return;
+      if (e.button === 0 && !this.presentation && this.nav.hitGizmo(te0.x, te0.y)) return;
       if (e.button === 0 && e.altKey && this.ctx.settings.emulate3Button) {
         // Blender "Emulate 3 Button Mouse": Alt = orbit, +Shift pan, +Ctrl zoom
         this.navDrag = {
@@ -475,6 +483,7 @@ class App implements AppHandle {
       const digit = isNumpad ? e.code.slice(6) : key;
       let handled = true;
       switch (digit) {
+        case '0': this.toggleCameraView(); break;
         case '1': this.nav.snapView(mod ? 'BACK' : 'FRONT'); break;
         case '3': this.nav.snapView(mod ? 'LEFT' : 'RIGHT'); break;
         case '7': this.nav.snapView(mod ? 'BOTTOM' : 'TOP'); break;
@@ -523,6 +532,7 @@ class App implements AppHandle {
       case '3': this.setMode('SCULPT'); break;
       case '4': this.setMode('VERTEX'); break;
       case '5': this.setMode('WEIGHT'); break;
+      case 'p': this.togglePresentation(); break;
       case 'd': if (ctx.settings.mode === 'DRAW') this.setTool('draw'); break;
       case 'e': if (ctx.settings.mode === 'DRAW') this.setTool('erase'); break;
       case 'f': if (ctx.settings.mode === 'DRAW') this.setTool('fill'); break;
@@ -582,6 +592,81 @@ class App implements AppHandle {
 
   // ------------------------------------------------------------- render
 
+  // -------------------------------------------------- camera & presentation
+
+  private makeCameraHelper(): THREE.Group {
+    const g = new THREE.Group();
+    const mat = new THREE.LineBasicMaterial({ color: 0xd8a03c });
+    const w = 0.32, h = 0.22, d = 0.5;
+    const apex = new THREE.Vector3(0, 0, 0);
+    const corners = [
+      new THREE.Vector3(-w, -h, -d), new THREE.Vector3(w, -h, -d),
+      new THREE.Vector3(w, h, -d), new THREE.Vector3(-w, h, -d),
+    ];
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i < 4; i++) {
+      pts.push(apex.clone(), corners[i].clone());                 // sides
+      pts.push(corners[i].clone(), corners[(i + 1) % 4].clone()); // base
+    }
+    // up-direction triangle
+    pts.push(new THREE.Vector3(-w * 0.5, h, -d), new THREE.Vector3(w * 0.5, h, -d));
+    pts.push(new THREE.Vector3(w * 0.5, h, -d), new THREE.Vector3(0, h + 0.14, -d));
+    pts.push(new THREE.Vector3(0, h + 0.14, -d), new THREE.Vector3(-w * 0.5, h, -d));
+    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    return g;
+  }
+
+  toggleCameraView(): void {
+    this.cameraView = !this.cameraView;
+    if (this.cameraView) {
+      if (this.nav.isOrtho) this.nav.toggleOrtho();
+      const pose = evalCamera(this.ctx.scene.camera, this.ctx.scene.frame);
+      this.camera.position.copy(pose.position);
+      this.camera.quaternion.copy(pose.quaternion);
+      this.camera.fov = pose.fov;
+      this.camera.updateProjectionMatrix();
+      const fwd = this.camera.getWorldDirection(new THREE.Vector3());
+      this.controls.target.copy(this.camera.position).addScaledVector(fwd, 4);
+      this.controls.update();
+    } else {
+      this.camera.fov = 50;
+      this.camera.updateProjectionMatrix();
+      this.controls.enabled = true;
+    }
+    this.camHelper.visible = !this.cameraView && !this.presentation;
+    this.ui.refreshTimelineControls();
+  }
+
+  addCameraKey(): void {
+    this.ctx.pushUndo();
+    insertCameraKey(this.ctx.scene.camera, this.ctx.scene.frame);
+    this.ui.drawTimeline();
+    this.ui.refreshTimelineControls();
+  }
+
+  removeCameraKeyAtFrame(): void {
+    this.ctx.pushUndo();
+    removeCameraKey(this.ctx.scene.camera, this.ctx.scene.frame);
+    this.ui.drawTimeline();
+  }
+
+  togglePresentation(): void {
+    this.presentation = !this.presentation;
+    document.getElementById('app')!.classList.toggle('presentation', this.presentation);
+    this.grid.visible = !this.presentation;
+    this.canvasGroup.visible = !this.presentation;
+    this.cursorMarker.visible = !this.presentation;
+    this.camHelper.visible = !this.presentation && !this.cameraView;
+    this.gp.markDirty();
+    this.resize();
+  }
+
+  setBackground(rgb: [number, number, number]): void {
+    this.ctx.settings.background = rgb;
+    (this.scene3.background as THREE.Color).setRGB(rgb[0], rgb[1], rgb[2]);
+    this.gp.markDirty();
+  }
+
   private makeCursorMarker(): THREE.Group {
     const g = new THREE.Group();
     const mat = new THREE.LineBasicMaterial({ color: 0xd05555, depthTest: false });
@@ -622,6 +707,32 @@ class App implements AppHandle {
     this.lastTime = now;
     this.nav.update(dt);
     ctx.camera = this.nav.active;
+
+    if (this.cameraView) {
+      const camData = ctx.scene.camera;
+      if (this.player.playing || !this.lockCamToView) {
+        // keyframes drive the view
+        const pose = evalCamera(camData, ctx.scene.frame);
+        this.camera.position.copy(pose.position);
+        this.camera.quaternion.copy(pose.quaternion);
+        if (this.camera.fov !== pose.fov) {
+          this.camera.fov = pose.fov;
+          this.camera.updateProjectionMatrix();
+        }
+      } else if (!this.nav.flying) {
+        // locked: viewport navigation edits the camera live
+        camData.translation = this.camera.position.toArray() as [number, number, number];
+        const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion);
+        camData.rotation = [e.x, e.y, e.z];
+        camData.fov = this.camera.fov;
+      }
+      this.controls.enabled = this.lockCamToView && !this.player.playing && !this.nav.flying;
+    } else {
+      // show the camera object where its animation currently puts it
+      const pose = evalCamera(ctx.scene.camera, ctx.scene.frame);
+      this.camHelper.position.copy(pose.position);
+      this.camHelper.quaternion.copy(pose.quaternion);
+    }
     if (!this.nav.flying) this.controls.update();
 
     if (this.player.tick(ctx.scene)) {
@@ -633,9 +744,9 @@ class App implements AppHandle {
     if (this.gp.needsRebuild) {
       try {
         this.gp.update(ctx.scene, {
-        mode: ctx.settings.mode,
+        mode: this.presentation ? 'DRAW' : ctx.settings.mode,
         background: ctx.settings.background,
-        playing: this.player.playing,
+        playing: this.player.playing || this.presentation, // also hides onion in presentation
         selectMode: ctx.settings.selectMode,
         });
       } catch (err) {
@@ -687,7 +798,25 @@ class App implements AppHandle {
     g.save();
     g.scale(devicePixelRatio, devicePixelRatio);
     this.tools.active?.drawHud?.(this.ctx, g);
-    this.nav.drawGizmo(g, this.hud.width / devicePixelRatio);
+    // STROKE placement: show which stroke the depth will lock to
+    if (this.ctx.settings.mode === 'DRAW' && this.ctx.settings.placement === 'STROKE' && !this.nav.flying) {
+      const { x, y } = this.tools.lastPointer;
+      const anchor = strokeSnapPreview(this.ctx, x, y);
+      if (anchor) {
+        g.beginPath();
+        g.moveTo(x, y);
+        g.lineTo(anchor.x, anchor.y);
+        g.strokeStyle = 'rgba(255,190,80,0.5)';
+        g.lineWidth = 1;
+        g.stroke();
+        g.beginPath();
+        g.arc(anchor.x, anchor.y, 5, 0, Math.PI * 2);
+        g.strokeStyle = 'rgba(255,190,80,0.95)';
+        g.lineWidth = 1.6;
+        g.stroke();
+      }
+    }
+    if (!this.presentation) this.nav.drawGizmo(g, this.hud.width / devicePixelRatio);
     if (this.nav.flying) {
       g.fillStyle = '#fff';
       g.font = '13px sans-serif';

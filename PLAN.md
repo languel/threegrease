@@ -123,6 +123,10 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Canvas planes: drawable quads (add at cursor, per-plane orientation,
       pos/rot/size editable, saved in scene JSON) as Surface raycast targets
 - [x] 3D-cursor snap modes: Plane / Grid / nearest Stroke point / Selection
+- [x] Stroke placement snaps to stroke segments with HUD anchor indicator
+- [x] Presentation/performance mode (P): UI-less viewport, shortcuts live
+- [x] Scene camera: keyframable transform+FOV, camera view (0), lock-to-view
+      navigation, frustum gizmo, keys on timeline
 
 ## Post-parity roadmap (the action-painting lab)
 1. Performance: instanced segment rendering, dirty-region geometry updates,

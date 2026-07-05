@@ -82,3 +82,10 @@ label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); 
 #timeline-strip canvas { width: 100%; height: 100%; display: block; }
 .tl-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+
+/* presentation / performance mode: viewport only, shortcuts still live */
+#app.presentation #topbar,
+#app.presentation #toolbar,
+#app.presentation #sidebar,
+#app.presentation #timeline,
+#app.presentation #status { display: none; }
