@@ -46,7 +46,10 @@ npm run dev     # open http://localhost:5199
   ortho/perspective toggle, flythrough mode (`` ` ``), **canvas planes**
   (drawable quads placed at the 3D cursor — raycast targets for Surface
   placement), and **Stroke placement** with All/End/First-point targets so
-  new strokes inherit depth from existing ones (grow forms in 3D).
+  new strokes inherit depth from existing ones (grow forms in 3D) — depth
+  snaps to the nearest stroke only and holds while drawing past its edges.
+  The 3D cursor (`Shift+RMB`) has snap modes: Plane, Grid, nearest Stroke
+  point, Selection center.
 
 See [PLAN.md](PLAN.md) for the full feature checklist against the Blender
 manual and the post-parity roadmap (performance, Mental-Canvas-style gesture

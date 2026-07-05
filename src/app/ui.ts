@@ -1,4 +1,4 @@
-import type { AppCtx, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush, StrokeTarget } from '../tools/context';
+import type { AppCtx, CursorSnap, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush, StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
 import { activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, genId } from '../core/gpdata';
@@ -209,6 +209,9 @@ export class UI {
 
     bar.append(el('div', { class: 'sep' }));
     bar.append(
+      selectField('Cursor snap', s.cursorSnap, [
+        ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SELECTION', 'Selection'],
+      ] as [CursorSnap, string][], (v) => { s.cursorSnap = v; }),
       checkbox('Numpad', s.emulateNumpad, (v) => { s.emulateNumpad = v; }),
       checkbox('Alt-nav', s.emulate3Button, (v) => { s.emulate3Button = v; }),
     );

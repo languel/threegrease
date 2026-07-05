@@ -18,7 +18,7 @@ import * as ops from '../tools/editops';
 import { Player } from '../anim/player';
 import { interpolateFrame } from '../anim/interpolate';
 import { downloadScene, openSceneFile } from '../io/serialize';
-import { screenToWorld } from '../tools/projection';
+import { nearestStrokePoint, screenToWorld } from '../tools/projection';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
@@ -235,6 +235,60 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** Place the 3D cursor with the active snap mode (plane/grid/stroke/selection). */
+  private placeCursor(clientX: number, clientY: number): void {
+    const ctx = this.ctx;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const snap = ctx.settings.cursorSnap;
+
+    if (snap === 'STROKE') {
+      const hit = nearestStrokePoint(ctx, clientX - rect.left, clientY - rect.top, 60);
+      if (hit) {
+        ctx.scene.cursor = [hit.x, hit.y, hit.z];
+        this.gp.markDirty();
+        return;
+      }
+      // no stroke nearby: fall through to plane placement
+    }
+    if (snap === 'SELECTION') {
+      const med = new THREE.Vector3();
+      let n = 0;
+      const ob = activeObject(ctx.scene);
+      for (const layer of ob.layers) {
+        if (layer.hide) continue;
+        const f = frameAt(layer, ctx.scene.frame);
+        if (!f) continue;
+        for (const s of f.strokes) for (const p of s.points) {
+          if (p.select) { med.add(new THREE.Vector3(...p.co)); n++; }
+        }
+      }
+      if (n > 0) {
+        med.divideScalar(n);
+        const m = new THREE.Matrix4().compose(
+          new THREE.Vector3(...ob.translation),
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+          new THREE.Vector3(...ob.scale),
+        );
+        med.applyMatrix4(m);
+        ctx.scene.cursor = [med.x, med.y, med.z];
+        this.gp.markDirty();
+        return;
+      }
+    }
+    const world = screenToWorld(ctx, clientX, clientY);
+    if (!world) return;
+    if (snap === 'GRID') {
+      const g = ctx.settings.gridStep;
+      world.set(
+        Math.round(world.x / g) * g,
+        Math.round(world.y / g) * g,
+        Math.round(world.z / g) * g,
+      );
+    }
+    ctx.scene.cursor = [world.x, world.y, world.z];
+    this.gp.markDirty();
+  }
+
   /** Add a canvas plane at the 3D cursor, oriented to the current drawing plane. */
   addCanvasPlane(): void {
     const ctx = this.ctx;
@@ -353,12 +407,7 @@ class App implements AppHandle {
         return;
       }
       if (e.button === 2 && e.shiftKey) {
-        // place 3D cursor
-        const world = screenToWorld(this.ctx, e.clientX, e.clientY);
-        if (world) {
-          this.ctx.scene.cursor = [world.x, world.y, world.z];
-          this.gp.markDirty();
-        }
+        this.placeCursor(e.clientX, e.clientY);
         e.preventDefault();
         return;
       }

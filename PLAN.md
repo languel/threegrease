@@ -122,6 +122,7 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Flythrough mode (`, WASD+QE, pointer lock)
 - [x] Canvas planes: drawable quads (add at cursor, per-plane orientation,
       pos/rot/size editable, saved in scene JSON) as Surface raycast targets
+- [x] 3D-cursor snap modes: Plane / Grid / nearest Stroke point / Selection
 
 ## Post-parity roadmap (the action-painting lab)
 1. Performance: instanced segment rendering, dirty-region geometry updates,

@@ -10,14 +10,19 @@ const raycaster = new THREE.Raycaster();
  * tools so the in-progress stroke doesn't attract its own points.
  */
 let excludedStrokeId: number | null = null;
-export function setStrokeExclusion(id: number | null): void { excludedStrokeId = id; }
+let stickyDepth: number | null = null;
+export function setStrokeExclusion(id: number | null): void {
+  excludedStrokeId = id;
+  stickyDepth = null; // each new stroke re-acquires its depth anchor
+}
 
-/**
- * STROKE placement: sample view-space depth from existing stroke points near
- * the cursor (inverse-square screen-distance weighting), so new strokes grow
- * off the surface of what's already drawn. Returns null when nothing is near.
- */
-function strokeDepthPoint(ctx: AppCtx, ray: THREE.Ray, screenX: number, screenY: number): THREE.Vector3 | null {
+interface DepthCandidate { d: number; depth: number; strokeId: number; world: THREE.Vector3 }
+
+/** Project stroke points near a screen position; shared by STROKE placement and cursor snapping. */
+function gatherDepthCandidates(
+  ctx: AppCtx, screenX: number, screenY: number, radius: number,
+  target: 'ALL' | 'ENDS' | 'FIRST',
+): DepthCandidate[] {
   const ob = activeObject(ctx.scene);
   const rect = ctx.canvas.getBoundingClientRect();
   const matrix = new THREE.Matrix4().compose(
@@ -27,10 +32,7 @@ function strokeDepthPoint(ctx: AppCtx, ray: THREE.Ray, screenX: number, screenY:
   );
   const camDir = ctx.camera.getWorldDirection(new THREE.Vector3());
   const camPos = ctx.camera.position;
-  const target = ctx.settings.strokeTarget;
-  const RADIUS = 140; // px search radius
-  let wSum = 0, depthSum = 0;
-  const world = new THREE.Vector3();
+  const out: DepthCandidate[] = [];
   const projected = new THREE.Vector3();
 
   for (const layer of ob.layers) {
@@ -44,24 +46,60 @@ function strokeDepthPoint(ctx: AppCtx, ray: THREE.Ray, screenX: number, screenY:
         target === 'ENDS' ? (s.points.length > 1 ? [s.points[0], s.points[s.points.length - 1]] : [s.points[0]]) :
         s.points;
       for (const p of picks) {
-        world.set(p.co[0], p.co[1], p.co[2]).applyMatrix4(matrix);
+        const world = new THREE.Vector3(p.co[0], p.co[1], p.co[2]).applyMatrix4(matrix);
         projected.copy(world).project(ctx.camera);
         if (projected.z > 1) continue; // behind camera
         const sx = (projected.x * 0.5 + 0.5) * rect.width;
         const sy = (-projected.y * 0.5 + 0.5) * rect.height;
         const d = Math.hypot(sx - screenX, sy - screenY);
-        if (d > RADIUS) continue;
-        const w = 1 / (d * d + 25);
-        wSum += w;
-        depthSum += w * camDir.dot(world.clone().sub(camPos));
+        if (d > radius) continue;
+        out.push({ d, depth: camDir.dot(world.clone().sub(camPos)), strokeId: s.id, world });
       }
     }
   }
-  if (wSum <= 0) return null;
-  const depth = depthSum / wSum;
+  return out;
+}
+
+/** Nearest existing stroke point (world space) within `radius` px, or null. */
+export function nearestStrokePoint(ctx: AppCtx, screenX: number, screenY: number, radius = 40): THREE.Vector3 | null {
+  const candidates = gatherDepthCandidates(ctx, screenX, screenY, radius, 'ALL');
+  if (!candidates.length) return null;
+  return candidates.reduce((a, b) => (b.d < a.d ? b : a)).world;
+}
+
+/**
+ * STROKE placement: snap depth to the nearest existing stroke. Depth is
+ * blended only along the stroke that owns the nearest point (no cross-stroke
+ * averaging), and while a stroke is being drawn the last good depth is kept
+ * when the cursor leaves the snap radius — no fallback jumps to the origin
+ * plane mid-stroke.
+ */
+function strokeDepthPoint(ctx: AppCtx, ray: THREE.Ray, screenX: number, screenY: number): THREE.Vector3 | null {
+  const SNAP = 80; // px
+  const camDir = ctx.camera.getWorldDirection(new THREE.Vector3());
   const cos = camDir.dot(ray.direction);
   if (Math.abs(cos) < 1e-6) return null;
-  return ray.origin.clone().addScaledVector(ray.direction, depth / cos);
+  const pointAtDepth = (depth: number) =>
+    ray.origin.clone().addScaledVector(ray.direction, depth / cos);
+
+  const candidates = gatherDepthCandidates(ctx, screenX, screenY, SNAP, ctx.settings.strokeTarget);
+  if (!candidates.length) {
+    // sticky depth only while actively drawing a stroke
+    if (excludedStrokeId !== null && stickyDepth !== null) return pointAtDepth(stickyDepth);
+    return null;
+  }
+  const nearest = candidates.reduce((a, b) => (b.d < a.d ? b : a));
+  // smooth depth along the owning stroke only
+  let wSum = 0, depthSum = 0;
+  for (const c of candidates) {
+    if (c.strokeId !== nearest.strokeId) continue;
+    const w = 1 / (c.d * c.d + 4);
+    wSum += w;
+    depthSum += w * c.depth;
+  }
+  const depth = depthSum / wSum;
+  if (excludedStrokeId !== null) stickyDepth = depth;
+  return pointAtDepth(depth);
 }
 
 /** The plane strokes are placed on, per placement + orientation settings. */
