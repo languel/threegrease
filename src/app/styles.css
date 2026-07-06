@@ -83,6 +83,19 @@ label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); 
 .tl-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
 
+#inspector {
+  position: absolute; top: 8px; right: 8px; width: 235px;
+  background: rgba(36, 36, 40, 0.92); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 4px;
+  max-height: calc(100% - 120px); overflow-y: auto;
+}
+#inspector h3 {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--dim); margin-top: 4px;
+}
+#inspector input[type="number"] { width: 52px; }
+#app.presentation #inspector { display: none; }
+
 #settings-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
   display: flex; align-items: center; justify-content: center;

@@ -70,7 +70,11 @@ npm run dev     # open http://localhost:5199
   as a trackball when you drag its disc.
 - **World up convention**: Z-up right-handed (Blender, the default) or
   Y-up (three.js) — switch in Settings. Affects views, orbit, fly, grid,
-  drawing planes, and canvas orientation. Optional world axes overlay.
+  drawing planes, and canvas orientation. Optional world axes overlay; the
+  floor grid passes through the origin.
+- **Inspector panel** (`N`): Blender-style N-panel with live editable values
+  — selection median, object transform, active camera transform + FOV,
+  viewport position, 3D cursor.
 
 See [PLAN.md](PLAN.md) for the full feature checklist against the Blender
 manual and the post-parity roadmap (performance, Mental-Canvas-style gesture
@@ -100,3 +104,4 @@ All bindings below are defaults — open Settings (`,`) to rebind any of them.
 | `P` | presentation/performance mode (UI off, shortcuts live) |
 | `0` / `Shift+C` | look through the active camera / cycle cameras |
 | `,` | settings & shortcut editor |
+| `N` | inspector panel (selection median, object/camera transforms, 3D cursor) |

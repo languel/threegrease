@@ -12,6 +12,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'undo', label: 'Undo', combo: 'ctrl+z', category: 'General' },
   { id: 'redo', label: 'Redo', combo: 'ctrl+shift+z', category: 'General' },
   { id: 'settings', label: 'Open settings', combo: ',', category: 'General' },
+  { id: 'inspector', label: 'Toggle inspector panel', combo: 'n', category: 'General' },
   { id: 'presentation', label: 'Presentation mode', combo: 'p', category: 'General' },
   // Modes
   { id: 'toggleEdit', label: 'Toggle Draw ↔ Edit', combo: 'tab', category: 'Modes' },

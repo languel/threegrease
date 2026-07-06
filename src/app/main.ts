@@ -493,7 +493,7 @@ class App implements AppHandle {
       // Blender trackpad: two-finger orbit, Shift pan, Ctrl (or pinch) zoom
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) this.nav.dollyBy(Math.exp(e.deltaY * 0.01));
-      else if (e.shiftKey) this.nav.panBy(e.deltaX, e.deltaY);
+      else if (e.shiftKey) this.nav.panBy(-e.deltaX, -e.deltaY); // match Alt+Shift-drag direction
       else this.nav.orbitBy(e.deltaX * 0.005, e.deltaY * 0.005);
     }, { passive: false });
 
@@ -574,6 +574,7 @@ class App implements AppHandle {
       case 'undo': this.undo(); break;
       case 'redo': this.redo(); break;
       case 'settings': this.ui.openSettings(); break;
+      case 'inspector': this.ui.toggleInspector(); break;
       case 'presentation': this.togglePresentation(); break;
       case 'toggleEdit': this.setMode(ctx.settings.mode === 'DRAW' ? 'EDIT' : 'DRAW'); break;
       case 'modeDraw': this.setMode('DRAW'); break;
@@ -673,17 +674,16 @@ class App implements AppHandle {
     this.nav.controls = this.controls;
     this.nav.setUpAxis(axis);
 
+    // floor grid passes through the origin, Blender-style
     if (axis === 'Z') {
       this.grid.rotation.set(Math.PI / 2, 0, 0);
-      this.grid.position.set(0, 0, -2);
       this.ground.rotation.set(0, 0, 0);
-      this.ground.position.set(0, 0, -2);
     } else {
       this.grid.rotation.set(0, 0, 0);
-      this.grid.position.set(0, -2, 0);
       this.ground.rotation.set(-Math.PI / 2, 0, 0);
-      this.ground.position.set(0, -2, 0);
     }
+    this.grid.position.set(0, 0, 0);
+    this.ground.position.set(0, 0, 0);
     if (resetView) {
       if (axis === 'Z') this.camera.position.set(0, -6, 2);
       else this.camera.position.set(0, 0.6, 6);
@@ -983,7 +983,10 @@ class App implements AppHandle {
         g.stroke();
       }
     }
-    if (!this.presentation) this.nav.drawGizmo(g, this.hud.width / devicePixelRatio);
+    if (!this.presentation) {
+      const inset = this.ui.inspectorOpen ? 250 : 0;
+      this.nav.drawGizmo(g, this.hud.width / devicePixelRatio - inset);
+    }
     if (this.nav.flying) {
       g.fillStyle = '#fff';
       g.font = '13px sans-serif';

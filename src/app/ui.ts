@@ -1,7 +1,7 @@
 import type { AppCtx, CursorSnap, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush, StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
-import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, genId } from '../core/gpdata';
+import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import { ACTIONS, comboFromEvent, type Keymap } from './keymap';
 import { MODIFIERS, createModifier } from '../modifiers/index';
 import { EFFECT_DEFAULTS, createEffect } from '../fx/effects';
@@ -150,6 +150,12 @@ export class UI {
     this.tlCanvas = el('canvas');
     this.buildTimelineShell();
     this.refresh();
+    // live values (camera position etc.) — skip while the user types in it
+    setInterval(() => {
+      if (this.inspectorOpen && !this.inspectorEl?.contains(document.activeElement)) {
+        this.rebuildInspector();
+      }
+    }, 300);
   }
 
   refresh(): void {
@@ -656,6 +662,88 @@ export class UI {
       if (n) { cam.name = n; this.refreshTimelineControls(); }
     };
     return sel;
+  }
+
+  // ----------------------------------------------------------- inspector
+
+  inspectorOpen = false;
+  private inspectorEl: HTMLElement | null = null;
+
+  toggleInspector(): void {
+    this.inspectorOpen = !this.inspectorOpen;
+    if (this.inspectorOpen) this.rebuildInspector();
+    else { this.inspectorEl?.remove(); this.inspectorEl = null; }
+  }
+
+  private vecRow(
+    label: string, get: () => number[], set: (i: number, v: number) => void, step = 0.1,
+  ): HTMLElement {
+    const row = el('div', { class: 'row' }, label);
+    get().forEach((component, i) => {
+      row.append(numField('', component, (v) => set(i, v), step));
+    });
+    return row;
+  }
+
+  /** Blender-style N-panel: item / view / cursor values, live + editable. */
+  rebuildInspector(): void {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const cam = activeCam(ctx.scene);
+    if (!this.inspectorEl) {
+      this.inspectorEl = el('div', { id: 'inspector' });
+      document.getElementById('viewport')!.append(this.inspectorEl);
+    }
+    const body: Node[] = [];
+
+    // --- Item: selection median (edit-family modes) + object transform ---
+    const selected: { co: [number, number, number] }[] = [];
+    if (ctx.settings.mode !== 'DRAW') {
+      for (const layer of ob.layers) {
+        if (layer.hide || layer.lock) continue;
+        const f = frameAt(layer, ctx.scene.frame);
+        if (!f) continue;
+        for (const s of f.strokes) for (const p of s.points) if (p.select) selected.push(p);
+      }
+    }
+    if (selected.length) {
+      const median = [0, 1, 2].map((i) => selected.reduce((a, p) => a + p.co[i], 0) / selected.length);
+      body.push(el('h3', { text: `Median (${selected.length} pts)` }));
+      body.push(this.vecRow('', () => median.map((v) => +v.toFixed(3)), (i, v) => {
+        ctx.pushUndo();
+        const d = v - median[i];
+        for (const p of selected) p.co[i] += d;
+        ctx.requestRender();
+      }));
+    }
+    body.push(el('h3', { text: `Object: ${ob.name}` }));
+    body.push(
+      this.vecRow('Loc', () => ob.translation.map((v) => +v.toFixed(3)), (i, v) => { ob.translation[i] = v; ctx.requestRender(); }),
+      this.vecRow('Rot', () => ob.rotation.map((v) => +v.toFixed(3)), (i, v) => { ob.rotation[i] = v; ctx.requestRender(); }),
+      this.vecRow('Scale', () => ob.scale.map((v) => +v.toFixed(3)), (i, v) => { ob.scale[i] = v; ctx.requestRender(); }, 0.05),
+    );
+
+    // --- View ---
+    body.push(el('h3', { text: 'View' }));
+    const vp = ctx.camera.position;
+    body.push(el('div', { class: 'row', text: `Viewport: ${vp.x.toFixed(2)}, ${vp.y.toFixed(2)}, ${vp.z.toFixed(2)}` }));
+    body.push(el('h3', { text: `Camera: ${cam.name}` }));
+    body.push(
+      this.vecRow('Loc', () => cam.translation.map((v) => +v.toFixed(3)), (i, v) => { cam.translation[i] = v; ctx.requestRender(); }),
+      this.vecRow('Rot', () => cam.rotation.map((v) => +v.toFixed(3)), (i, v) => { cam.rotation[i] = v; ctx.requestRender(); }),
+      el('div', { class: 'row' },
+        numField('FOV', +cam.fov.toFixed(1), (v) => { cam.fov = Math.min(140, Math.max(5, v)); ctx.requestRender(); }, 1),
+      ),
+    );
+
+    // --- Cursor ---
+    body.push(el('h3', { text: '3D Cursor' }));
+    body.push(this.vecRow('', () => ctx.scene.cursor.map((v) => +v.toFixed(3)), (i, v) => {
+      ctx.scene.cursor[i] = v;
+      ctx.requestRender();
+    }));
+
+    this.inspectorEl.replaceChildren(...body);
   }
 
   // ------------------------------------------------------------ settings
