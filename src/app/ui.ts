@@ -39,6 +39,10 @@ export interface AppHandle {
   setActiveCamera(index: number): void;
   addCamera(): void;
   removeCamera(): void;
+  applyUpAxis(resetView?: boolean): void;
+  setShowAxes(v: boolean): void;
+  setTrackpadNav(v: boolean): void;
+  savePrefs(): void;
 }
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -224,10 +228,10 @@ export class UI {
     bar.append(
       selectField('Cursor snap', s.cursorSnap, [
         ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SELECTION', 'Selection'],
-      ] as [CursorSnap, string][], (v) => { s.cursorSnap = v; }),
-      checkbox('Numpad', s.emulateNumpad, (v) => { s.emulateNumpad = v; }),
-      checkbox('Alt-nav', s.emulate3Button, (v) => { s.emulate3Button = v; }),
-      colorField('BG', [...s.background, 1], (rgb) => this.app.setBackground(rgb)),
+      ] as [CursorSnap, string][], (v) => { s.cursorSnap = v; this.app.savePrefs(); }),
+      checkbox('Numpad', s.emulateNumpad, (v) => { s.emulateNumpad = v; this.app.savePrefs(); }),
+      checkbox('Alt-nav', s.emulate3Button, (v) => { s.emulate3Button = v; this.app.savePrefs(); }),
+      colorField('BG', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); this.app.savePrefs(); }),
       btn('Present', () => this.app.togglePresentation(), { title: 'Presentation/performance mode (P): viewport only, shortcuts stay live' }),
     );
     bar.append(el('div', { class: 'sep' }));
@@ -679,21 +683,31 @@ export class UI {
 
     let capturing = false;
 
+    const save = () => this.app.savePrefs();
     const prefs = el('div', { class: 'body' },
       el('div', { class: 'row' },
-        checkbox('Emulate Numpad (digit-row view keys)', s.emulateNumpad, (v) => { s.emulateNumpad = v; }),
+        selectField('World up', s.upAxis, [
+          ['Z', 'Z-up, right-handed (Blender)'], ['Y', 'Y-up (three.js)'],
+        ], (v) => { s.upAxis = v as 'Z' | 'Y'; this.app.applyUpAxis(true); }),
+        checkbox('Show axes', s.showAxes, (v) => this.app.setShowAxes(v)),
       ),
       el('div', { class: 'row' },
-        checkbox('Emulate 3-Button Mouse (Alt+LMB navigates)', s.emulate3Button, (v) => { s.emulate3Button = v; }),
+        checkbox('Trackpad navigation (two-finger orbit, Shift pan, Ctrl zoom)', s.trackpadNav, (v) => this.app.setTrackpadNav(v)),
+      ),
+      el('div', { class: 'row' },
+        checkbox('Emulate Numpad (digit-row view keys)', s.emulateNumpad, (v) => { s.emulateNumpad = v; save(); }),
+      ),
+      el('div', { class: 'row' },
+        checkbox('Emulate 3-Button Mouse (Alt+LMB navigates)', s.emulate3Button, (v) => { s.emulate3Button = v; save(); }),
       ),
       el('div', { class: 'row' },
         selectField('Cursor snap', s.cursorSnap, [
           ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SELECTION', 'Selection'],
-        ], (v) => { s.cursorSnap = v as typeof s.cursorSnap; }),
-        numField('Grid step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); }),
+        ], (v) => { s.cursorSnap = v as typeof s.cursorSnap; save(); }),
+        numField('Grid step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); save(); }),
       ),
       el('div', { class: 'row' },
-        colorField('Background', [...s.background, 1], (rgb) => this.app.setBackground(rgb)),
+        colorField('Background', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); }),
         checkbox('Auto-key', s.autoKey, (v) => { s.autoKey = v; }),
       ),
       el('div', { class: 'row', text: 'While Emulate Numpad is on, digit keys are view keys and mode shortcuts are shadowed (use the topbar or Tab).' }),

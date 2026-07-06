@@ -69,7 +69,9 @@ export function createObject(name: string): GPObject {
 }
 
 export function createDefaultCamera(name = 'Camera 1'): GPCamera {
-  return { name, translation: [0, 0.6, 6], rotation: [0, 0, 0], fov: 50, keys: [] };
+  // Z-up (Blender-style) home: behind -Y looking at the origin, up +Z.
+  // rotation.x = PI/2 - atan2(height, distance)
+  return { name, translation: [0, -6, 2], rotation: [1.249, 0, 0], fov: 50, keys: [] };
 }
 
 export function activeCam(scene: GPScene): GPCamera {

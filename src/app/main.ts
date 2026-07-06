@@ -5,7 +5,7 @@ import { History } from '../core/history';
 import type { GPScene } from '../core/types';
 import { GPSceneRenderer, type EditorMode } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
-import { defaultSettings, type AppCtx } from '../tools/context';
+import { defaultSettings, loadPrefs, savePrefs, type AppCtx } from '../tools/context';
 import { ToolManager, type ToolEvent } from '../tools/toolsys';
 import { DrawTool, EraseTool, TintTool, CutterTool, EyedropperTool } from '../tools/draw';
 import { FillTool } from '../tools/fill';
@@ -78,6 +78,9 @@ class App implements AppHandle {
   private canvasGroup = new THREE.Group();
   private lastTime = performance.now();
   private grid!: THREE.GridHelper;
+  private ground!: THREE.Mesh;
+  private axes!: THREE.Group;
+  private gizmoDrag: { x: number; y: number; startX: number; startY: number; dragged: boolean } | null = null;
   presentation = false;
   cameraView = false;
   lockCamToView = true;
@@ -105,6 +108,7 @@ class App implements AppHandle {
     this.nav = new Navigation(this.camera, this.controls, glCanvas);
 
     const settings = defaultSettings();
+    loadPrefs(settings);
     const history = new History();
     const scene = createScene();
     const self = this;
@@ -139,15 +143,17 @@ class App implements AppHandle {
     this.cursorMarker = this.makeCursorMarker();
     this.scene3.add(this.cursorMarker);
     // a ground plane for SURFACE placement demos
-    const ground = new THREE.Mesh(
+    this.ground = new THREE.Mesh(
       new THREE.PlaneGeometry(20, 20),
       new THREE.MeshBasicMaterial({ visible: false }),
     );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -2;
-    this.scene3.add(ground);
-    this.ctx.surfaces.push(ground);
+    this.scene3.add(this.ground);
+    this.ctx.surfaces.push(this.ground);
     this.scene3.add(this.canvasGroup);
+    this.axes = this.makeAxes();
+    this.scene3.add(this.axes);
+    this.applyUpAxis(true);
+    this.axes.visible = settings.showAxes;
 
     this.fx = new EffectsPipeline(2, 2);
 
@@ -304,10 +310,11 @@ class App implements AppHandle {
     const ctx = this.ctx;
     ctx.pushUndo();
     const s = ctx.settings;
+    const zUp = s.upAxis === 'Z';
     let rotation: [number, number, number];
-    if (s.plane === 'FRONT') rotation = [0, 0, 0];
+    if (s.plane === 'FRONT') rotation = zUp ? [-Math.PI / 2, 0, 0] : [0, 0, 0];
     else if (s.plane === 'SIDE') rotation = [0, Math.PI / 2, 0];
-    else if (s.plane === 'TOP') rotation = [-Math.PI / 2, 0, 0];
+    else if (s.plane === 'TOP') rotation = zUp ? [0, 0, 0] : [-Math.PI / 2, 0, 0];
     else {
       // VIEW: face the camera
       const e = new THREE.Euler().setFromQuaternion(this.nav.active.quaternion, 'XYZ');
@@ -406,7 +413,12 @@ class App implements AppHandle {
         return;
       }
       const te0 = this.toolEvent(e);
-      if (e.button === 0 && !this.presentation && this.nav.hitGizmo(te0.x, te0.y)) return;
+      if (e.button === 0 && !this.presentation && this.nav.inGizmo(te0.x, te0.y)) {
+        // click a ball snaps; dragging the disc orbits like a trackball
+        this.gizmoDrag = { x: te0.x, y: te0.y, startX: te0.x, startY: te0.y, dragged: false };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
       if (e.button === 0 && e.altKey && this.ctx.settings.emulate3Button) {
         // Blender "Emulate 3 Button Mouse": Alt = orbit, +Shift pan, +Ctrl zoom
         this.navDrag = {
@@ -430,6 +442,15 @@ class App implements AppHandle {
     canvas.addEventListener('pointermove', (e) => {
       const te = this.toolEvent(e);
       (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer = te;
+      if (this.gizmoDrag) {
+        const dx = te.x - this.gizmoDrag.x, dy = te.y - this.gizmoDrag.y;
+        if (Math.hypot(te.x - this.gizmoDrag.startX, te.y - this.gizmoDrag.startY) > 3) {
+          this.gizmoDrag.dragged = true;
+        }
+        if (this.gizmoDrag.dragged) this.nav.orbitBy(dx * 0.012, dy * 0.012);
+        this.gizmoDrag.x = te.x; this.gizmoDrag.y = te.y;
+        return;
+      }
       if (this.navDrag) {
         const dx = te.x - this.navDrag.x, dy = te.y - this.navDrag.y;
         if (this.navDrag.mode === 'orbit') this.nav.orbitBy(dx * 0.006, dy * 0.006);
@@ -447,6 +468,14 @@ class App implements AppHandle {
 
     canvas.addEventListener('pointerup', (e) => {
       if (e.button !== 0) return;
+      if (this.gizmoDrag) {
+        if (!this.gizmoDrag.dragged) {
+          const ball = this.nav.gizmoBallAt(this.gizmoDrag.startX, this.gizmoDrag.startY);
+          if (ball) this.nav.snapView(ball);
+        }
+        this.gizmoDrag = null;
+        return;
+      }
       if (this.navDrag) { this.navDrag = null; return; }
       this.tools.handleUp(this.ctx, this.toolEvent(e));
     });
@@ -457,7 +486,15 @@ class App implements AppHandle {
       if (this.modal.active && this.ctx.settings.propEdit.enabled) {
         this.modal.adjustRadius(this.ctx, -e.deltaY, this.tools.lastPointer);
         e.preventDefault();
+        return;
       }
+      if (this.nav.flying) return; // nav's own listener adjusts fly speed
+      if (!this.ctx.settings.trackpadNav) return; // classic wheel zoom (OrbitControls)
+      // Blender trackpad: two-finger orbit, Shift pan, Ctrl (or pinch) zoom
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) this.nav.dollyBy(Math.exp(e.deltaY * 0.01));
+      else if (e.shiftKey) this.nav.panBy(e.deltaX, e.deltaY);
+      else this.nav.orbitBy(e.deltaX * 0.005, e.deltaY * 0.005);
     }, { passive: false });
 
     window.addEventListener('keydown', (e) => this.onKey(e));
@@ -583,6 +620,81 @@ class App implements AppHandle {
   }
 
   // ------------------------------------------------------------- render
+
+  // ------------------------------------------------------- world convention
+
+  private makeAxes(): THREE.Group {
+    const g = new THREE.Group();
+    const mk = (dir: THREE.Vector3, color: number) => {
+      const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.4 });
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        dir.clone().multiplyScalar(-50), dir.clone().multiplyScalar(50),
+      ]);
+      g.add(new THREE.Line(geo, mat));
+    };
+    mk(new THREE.Vector3(1, 0, 0), 0xe5605e);
+    mk(new THREE.Vector3(0, 1, 0), 0x7db32b);
+    mk(new THREE.Vector3(0, 0, 1), 0x4f8cff);
+    return g;
+  }
+
+  setShowAxes(v: boolean): void {
+    this.ctx.settings.showAxes = v;
+    this.axes.visible = v && !this.presentation;
+    this.savePrefs();
+  }
+
+  setTrackpadNav(v: boolean): void {
+    this.ctx.settings.trackpadNav = v;
+    this.controls.enableZoom = !v; // classic wheel-zoom only when trackpad nav is off
+    this.savePrefs();
+  }
+
+  savePrefs(): void { savePrefs(this.ctx.settings); }
+
+  /**
+   * Apply the world-up convention. OrbitControls caches its up-frame at
+   * construction, so it is recreated here. With resetView, the viewport
+   * jumps to that convention's home view.
+   */
+  applyUpAxis(resetView = false): void {
+    const axis = this.ctx.settings.upAxis;
+    const target = this.controls.target.clone();
+    this.controls.dispose();
+    this.controls = new OrbitControls(this.nav.active, this.ctx.canvas);
+    this.controls.enableDamping = false;
+    this.controls.mouseButtons = {
+      LEFT: undefined as unknown as THREE.MOUSE,
+      MIDDLE: THREE.MOUSE.ROTATE,
+      RIGHT: THREE.MOUSE.PAN,
+    };
+    this.controls.enableZoom = !this.ctx.settings.trackpadNav;
+    this.controls.target.copy(target);
+    this.nav.controls = this.controls;
+    this.nav.setUpAxis(axis);
+
+    if (axis === 'Z') {
+      this.grid.rotation.set(Math.PI / 2, 0, 0);
+      this.grid.position.set(0, 0, -2);
+      this.ground.rotation.set(0, 0, 0);
+      this.ground.position.set(0, 0, -2);
+    } else {
+      this.grid.rotation.set(0, 0, 0);
+      this.grid.position.set(0, -2, 0);
+      this.ground.rotation.set(-Math.PI / 2, 0, 0);
+      this.ground.position.set(0, -2, 0);
+    }
+    if (resetView) {
+      if (axis === 'Z') this.camera.position.set(0, -6, 2);
+      else this.camera.position.set(0, 0.6, 6);
+      this.controls.target.set(0, 0, 0);
+      this.camera.up.copy(this.nav.up);
+      this.camera.lookAt(this.controls.target);
+    }
+    this.controls.update();
+    this.gp.markDirty();
+    this.savePrefs();
+  }
 
   // -------------------------------------------------- camera & presentation
 
@@ -715,6 +827,7 @@ class App implements AppHandle {
     this.canvasGroup.visible = !this.presentation;
     this.cursorMarker.visible = !this.presentation;
     this.camHelper.visible = !this.presentation;
+    this.axes.visible = this.ctx.settings.showAxes && !this.presentation;
     this.gp.markDirty();
     this.resize();
   }

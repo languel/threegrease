@@ -162,11 +162,13 @@ export function drawingPlane(ctx: AppCtx): THREE.Plane {
     ? new THREE.Vector3(...ctx.scene.cursor)
     : new THREE.Vector3(...activeObject(ctx.scene).translation);
   let normal: THREE.Vector3;
+  const zUp = s.upAxis === 'Z';
   switch (s.plane) {
-    // three.js is Y-up: Front = X·Y plane, Side = Z·Y plane, Top = X·Z plane
-    case 'FRONT': normal = new THREE.Vector3(0, 0, 1); break;
+    // Z-up (Blender): Front = X·Z, Side = Y·Z, Top = X·Y
+    // Y-up (three.js): Front = X·Y, Side = Z·Y, Top = X·Z
+    case 'FRONT': normal = zUp ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1); break;
     case 'SIDE': normal = new THREE.Vector3(1, 0, 0); break;
-    case 'TOP': normal = new THREE.Vector3(0, 1, 0); break;
+    case 'TOP': normal = zUp ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0); break;
     default: normal = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
   }
   return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor);

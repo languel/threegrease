@@ -62,8 +62,15 @@ npm run dev     # open http://localhost:5199
   (slerped rotation). Every camera shows as a frustum gizmo (active one
   highlighted), keys marked on the timeline.
 - **Settings dialog** (`,` or ⚙): preferences plus a full shortcut list —
-  click any binding and press a new key to rebind it. Custom bindings
-  persist in localStorage; one-click reset to defaults.
+  click any binding and press a new key to rebind it. Custom bindings and
+  preferences persist in localStorage; one-click reset to defaults.
+- **Trackpad navigation** (on by default): two-finger drag orbits,
+  `Shift`+two-finger pans, `Ctrl`+two-finger (or pinch) zooms — alongside
+  Alt-drag combos and MMB/RMB. The axis gizmo snaps on ball clicks and acts
+  as a trackball when you drag its disc.
+- **World up convention**: Z-up right-handed (Blender, the default) or
+  Y-up (three.js) — switch in Settings. Affects views, orbit, fly, grid,
+  drawing planes, and canvas orientation. Optional world axes overlay.
 
 See [PLAN.md](PLAN.md) for the full feature checklist against the Blender
 manual and the post-parity roadmap (performance, Mental-Canvas-style gesture
@@ -84,7 +91,8 @@ All bindings below are defaults — open Settings (`,`) to rebind any of them.
 | `I` / `Shift+I` | insert / remove keyframe |
 | `Space` `←→` `↑↓` | play, step frame, jump keyframe |
 | MMB / RMB | orbit / pan · `Shift+RMB` place 3D cursor |
-| `Alt+LMB` | orbit (trackpad) · `+Shift` pan · `+Ctrl` zoom |
+| `Alt+LMB` | orbit (trackpad) · `+Shift` pan · `+Ctrl/Cmd` zoom |
+| two-finger drag | orbit · `+Shift` pan · `+Ctrl`/pinch zoom |
 | `1/3/7` | front/right/top view (`Ctrl` = opposite) · `9` flip |
 | `5` | ortho ↔ perspective |
 | `2/4/6/8` | orbit view in 15° steps |

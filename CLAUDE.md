@@ -91,8 +91,14 @@ the browser console or automated evals:
   (`setStrokeExclusion` in `projection.ts`) and snaps to ONE stroke at a
   time with sticky depth mid-draw — don't reintroduce cross-stroke
   averaging (causes depth drift).
-- The world is **Y-up** (three.js), not Blender's Z-up: Front = X·Y plane,
-  Side = Z·Y, Top = X·Z (see `drawingPlane()` in `projection.ts`).
+- The world-up convention is a **setting** (`settings.upAxis`, default 'Z'
+  = Blender-style Z-up RH; 'Y' = three.js). All navigation math works in a
+  Y-up reference frame transformed by `Navigation.frameQuat()`; drawing
+  planes/views/grid/canvas orientation switch on it. OrbitControls caches
+  its up-frame at construction, so `App.applyUpAxis()` RECREATES the
+  controls — route any up-axis change through it.
+- Preferences persist via `loadPrefs`/`savePrefs` in `tools/context.ts`
+  (localStorage `threegrease.prefs`); add new pref fields to `PREF_FIELDS`.
 - Digit keys are view keys while `settings.emulateNumpad` is on (mode
   shortcuts shadowed — that's intentional, like Blender).
 - `ctx.camera` is reassigned every frame (`nav.active`, persp OR ortho) —

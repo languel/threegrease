@@ -51,6 +51,32 @@ export interface Settings {
   emulate3Button: boolean;  // Alt+LMB orbits (Shift pan, Ctrl zoom) for trackpads
   cursorSnap: CursorSnap;   // how Shift+RMB places the 3D cursor
   gridStep: number;
+  trackpadNav: boolean;     // two-finger orbit, shift pan, ctrl/pinch zoom
+  upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
+  showAxes: boolean;
+}
+
+// ---- preference persistence (localStorage) --------------------------------
+
+const PREFS_KEY = 'threegrease.prefs';
+const PREF_FIELDS = [
+  'emulateNumpad', 'emulate3Button', 'cursorSnap', 'gridStep',
+  'trackpadNav', 'upAxis', 'showAxes', 'background',
+] as const;
+
+export function loadPrefs(s: Settings): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}');
+    for (const key of PREF_FIELDS) {
+      if (key in saved) (s as unknown as Record<string, unknown>)[key] = saved[key];
+    }
+  } catch { /* corrupted storage: keep defaults */ }
+}
+
+export function savePrefs(s: Settings): void {
+  const out: Record<string, unknown> = {};
+  for (const key of PREF_FIELDS) out[key] = s[key];
+  localStorage.setItem(PREFS_KEY, JSON.stringify(out));
 }
 
 export interface AppCtx {
@@ -101,5 +127,8 @@ export function defaultSettings(): Settings {
     emulate3Button: true,
     cursorSnap: 'PLANE',
     gridStep: 0.5,
+    trackpadNav: true,
+    upAxis: 'Z',
+    showAxes: false,
   };
 }

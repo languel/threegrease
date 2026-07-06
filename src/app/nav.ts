@@ -2,16 +2,30 @@ import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 export type ViewName = 'FRONT' | 'BACK' | 'RIGHT' | 'LEFT' | 'TOP' | 'BOTTOM';
+export type UpAxis = 'Y' | 'Z';
 
-const VIEW_DIRS: Record<ViewName, [THREE.Vector3, THREE.Vector3]> = {
-  // [camera offset direction from target, up]
-  FRONT: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)],
-  BACK: [new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0)],
-  RIGHT: [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)],
-  LEFT: [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0)],
-  TOP: [new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1)],
-  BOTTOM: [new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1)],
-};
+/** [camera offset direction from target, view up] per world-up convention. */
+function viewDirs(up: UpAxis): Record<ViewName, [THREE.Vector3, THREE.Vector3]> {
+  if (up === 'Z') {
+    // Blender: front looks along +Y, top looks down -Z
+    return {
+      FRONT: [new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1)],
+      BACK: [new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)],
+      RIGHT: [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1)],
+      LEFT: [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, 1)],
+      TOP: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)],
+      BOTTOM: [new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, -1, 0)],
+    };
+  }
+  return {
+    FRONT: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)],
+    BACK: [new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0)],
+    RIGHT: [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)],
+    LEFT: [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0)],
+    TOP: [new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1)],
+    BOTTOM: [new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1)],
+  };
+}
 
 interface GizmoBall { x: number; y: number; z: number; view: ViewName; label: string; color: string }
 
@@ -24,9 +38,11 @@ export class Navigation {
   readonly persp: THREE.PerspectiveCamera;
   readonly ortho: THREE.OrthographicCamera;
   active: THREE.PerspectiveCamera | THREE.OrthographicCamera;
-  private controls: OrbitControls;
+  controls: OrbitControls; // reassigned by the app when the up axis changes
   private canvas: HTMLCanvasElement;
   private aspect = 1;
+  upAxis: UpAxis = 'Y';
+  readonly up = new THREE.Vector3(0, 1, 0);
 
   // view transition animation
   private anim: {
@@ -99,6 +115,20 @@ export class Navigation {
 
   get isOrtho(): boolean { return this.active === this.ortho; }
 
+  setUpAxis(axis: UpAxis): void {
+    this.upAxis = axis;
+    this.up.set(0, axis === 'Y' ? 1 : 0, axis === 'Z' ? 1 : 0);
+    this.persp.up.copy(this.up);
+    this.ortho.up.copy(this.up);
+    this.active.lookAt(this.target); // fix roll for the new convention
+    this.controls.update();
+  }
+
+  /** Rotation taking the Y-up reference frame into the current up frame. */
+  private frameQuat(): THREE.Quaternion {
+    return new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), this.up);
+  }
+
   toggleOrtho(): void {
     if (this.flying) return;
     if (this.isOrtho) {
@@ -122,7 +152,7 @@ export class Navigation {
 
   snapView(view: ViewName): void {
     if (this.flying) return;
-    const [dir, up] = VIEW_DIRS[view];
+    const [dir, up] = viewDirs(this.upAxis)[view];
     const dist = this.distance;
     const toPos = this.target.clone().addScaledVector(dir, dist);
     const m = new THREE.Matrix4().lookAt(toPos, this.target, up);
@@ -149,11 +179,16 @@ export class Navigation {
   }
 
   orbitBy(dAzimuth: number, dPolar: number): void {
-    const offset = this.active.position.clone().sub(this.target);
+    // spherical math in the Y-up reference frame, transformed to/from world up
+    const qFrame = this.frameQuat();
+    const qInv = qFrame.clone().invert();
+    const offset = this.active.position.clone().sub(this.target).applyQuaternion(qInv);
     const sph = new THREE.Spherical().setFromVector3(offset);
     sph.theta -= dAzimuth;
     sph.phi = Math.max(0.001, Math.min(Math.PI - 0.001, sph.phi - dPolar));
-    this.active.position.copy(this.target).add(new THREE.Vector3().setFromSpherical(sph));
+    offset.setFromSpherical(sph).applyQuaternion(qFrame);
+    this.active.position.copy(this.target).add(offset);
+    this.active.up.copy(this.up);
     this.active.lookAt(this.target);
     this.controls.update();
   }
@@ -192,7 +227,9 @@ export class Navigation {
     this.flyStopping = false;
     this.flyStart.pos.copy(this.persp.position);
     this.flyStart.quat.copy(this.persp.quaternion);
-    const euler = new THREE.Euler().setFromQuaternion(this.persp.quaternion, 'YXZ');
+    // yaw/pitch extracted in the up-frame so mouse-look works for any up axis
+    const local = this.frameQuat().invert().multiply(this.persp.quaternion);
+    const euler = new THREE.Euler().setFromQuaternion(local, 'YXZ');
     this.yaw = euler.y;
     this.pitch = euler.x;
     this.flyKeys.clear();
@@ -253,7 +290,8 @@ export class Navigation {
     }
     if (this.flying) {
       const cam = this.persp;
-      cam.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+      cam.quaternion.copy(this.frameQuat())
+        .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ')));
       const speed = this.flySpeed * (this.flyKeys.has('shift') ? 3 : 1) * dt;
       const fwd = cam.getWorldDirection(new THREE.Vector3());
       const right = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 0);
@@ -261,8 +299,8 @@ export class Navigation {
       if (this.flyKeys.has('s')) cam.position.addScaledVector(fwd, -speed);
       if (this.flyKeys.has('a')) cam.position.addScaledVector(right, -speed);
       if (this.flyKeys.has('d')) cam.position.addScaledVector(right, speed);
-      if (this.flyKeys.has('e')) cam.position.y += speed;
-      if (this.flyKeys.has('q')) cam.position.y -= speed;
+      if (this.flyKeys.has('e')) cam.position.addScaledVector(this.up, speed);
+      if (this.flyKeys.has('q')) cam.position.addScaledVector(this.up, -speed);
     }
   }
 
@@ -327,18 +365,20 @@ export class Navigation {
     g.restore();
   }
 
-  /** Returns true if the click was consumed by the gizmo. */
-  hitGizmo(x: number, y: number): boolean {
+  /** Is the point inside the gizmo disc? (drag there = trackball orbit) */
+  inGizmo(x: number, y: number): boolean {
     const { x: cx, y: cy, r } = this.gizmoCenter;
-    if (Math.hypot(x - cx, y - cy) > r) return false;
+    return Math.hypot(x - cx, y - cy) <= r;
+  }
+
+  /** Axis ball under the point, or null (empty disc area). */
+  gizmoBallAt(x: number, y: number): ViewName | null {
     let best: GizmoBall | null = null;
     let bestD = 12;
     for (const b of this.gizmoBalls) {
       const d = Math.hypot(x - b.x, y - b.y);
       if (d < bestD) { bestD = d; best = b; }
     }
-    if (best) this.snapView(best.view);
-    else this.flipView(); // click on empty gizmo area flips
-    return true;
+    return best ? best.view : null;
   }
 }
