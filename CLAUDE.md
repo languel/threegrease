@@ -1,5 +1,10 @@
 # threegrease — agent/contributor guide
 
+> **Start here, then read `docs/HANDOFF.md` (full technical handoff),
+> `docs/PRD.md` (product vision & requirements), and
+> `docs/IMPLEMENTATION_PLAN.md` (phased build plan with acceptance tests).
+> Those three documents are the authoritative brief for all future work.**
+
 Blender Grease Pencil reimplemented in three.js + TypeScript (Vite, no
 framework), evolving into an interactive action-painting lab for live
 performance. **PLAN.md** is the feature checklist + roadmap; **README.md**

@@ -1,0 +1,336 @@
+# threegrease — Implementation Plan
+
+*Phased plan written for capable-but-less-advanced implementing models.
+Each phase: goal, data model, files, steps, acceptance tests, guardrails.
+Read docs/HANDOFF.md §3 (architecture rules) and §6 (gotchas) before ANY
+phase. Never skip: `npm run typecheck` → browser-verify via `window.__tg`
+→ update README/PLAN/HANDOFF → commit → push.*
+
+**General guardrails (apply to every phase)**
+- New persistent state goes in `GPScene` (types.ts) with `??=` migration in
+  serialize.ts. New preferences go in `Settings` + `PREF_FIELDS`.
+- New shortcuts = keymap ACTIONS entry + `App.runAction` case. Never inline.
+- Tools mutate data only; `ctx.pushUndo()` before mutation;
+  `ctx.requestRender()` (strokes) / `ctx.syncCanvases()` (canvases) after.
+- Long computations (solvers) run in Web Workers; never block the rAF loop.
+- Don't add dependencies without noting them in HANDOFF; prefer zero-dep.
+- If a phase says "adapter", keep the external lib behind one file.
+
+---
+
+## P0 — NPR brush engine  *(started; spec below is binding)*
+
+**Goal**: expressive natural-media brushes; per-stroke baked style.
+
+**Data** (types.ts):
+```ts
+export interface StrokeStyle {
+  unit: 'VIEW' | 'SCENE';   // px vs world-space width
+  stamp: boolean;           // false = solid ribbon (current pipeline)
+  spacing: number;          // stamp interval as fraction of width (0.05–2)
+  angle: number;            // stamp rotation offset (rad); follows direction
+  aspect: number;           // stamp x/y squash (0.1–1)
+  jitter: number;           // 0–1 positional/rotational randomness
+  grain: number;            // 0–1 procedural noise masking
+  grainScale: number;       // noise frequency
+}
+// GPStroke gains: style: StrokeStyle  (migrate with a DEFAULT_STYLE ??=)
+```
+`Settings.brush` gains the same fields + `preset: string`. Presets in new
+`src/core/brushes.ts`: Pen (solid VIEW), Ink Rough (stamp SCENE, spacing
+0.12, grain 0.55, jitter 0.15), Marker (solid SCENE, hardness 0.85),
+Charcoal (stamp, grain 0.9, aspect 0.6, angle follows), Airbrush (stamp,
+hardness 0.15, strength 0.25, spacing 0.3).
+
+**Renderer**:
+1. `materials.ts`: vertex attrs `aRot` (float), `aAspect` (float), extend
+   `aKind`: 3 = stamp. Rotate/scale `aCorner` in the vertex shader for
+   dots/stamps. SCENE units: replace px offset with
+   `aRadius * projectionMatrix[1][1] / clip.w` when new attr `aUnit`=1
+   (both segment and dot paths).
+2. `geometry.ts`: if `style.stamp`, skip segments/joins; walk arc length
+   emitting stamps every `spacing * width`, interpolating position/radius/
+   color; rotation = path direction + `angle` + jitter (seeded by
+   stroke.id + index — NEVER Math.random in geometry); aspect per stamp.
+3. Fragment: kind 3 = radial hardness falloff × grain mask
+   `mix(1., valueNoise(vUv*grainScale + seed), grain)`; hash-based value
+   noise, no textures yet.
+4. DrawTool/primitives bake `settings.brush` → `stroke.style` on create.
+   `cloneStroke` must deep-copy `style`.
+
+**UI**: preset dropdown in DRAW topbar; "Brush" sidebar panel with the
+advanced sliders (mirror Blender's Advanced panel: Size Unit, Spacing,
+Active Smooth, Angle, Aspect, Hardness…).
+
+**Also fold in (small parity items)**: drawing plane option `CURSOR`
+(view-aligned plane through 3D cursor) in projection.ts + UI; Surface
+`offset` setting applied along hit normal (flip toward camera).
+
+**Accept**: draw with each preset — Ink Rough shows rotated grainy stamps
+following the path; zoom in/out: SCENE strokes change apparent size, VIEW
+strokes don't; save/load round-trips style; old scenes load (default
+style); 5k-point stamp stroke stays >30 fps.
+
+---
+
+## P1 — Blender interop
+
+**Goal**: round-trip scenes with Blender 4.3+/5.x GPv3.
+
+1. Schema: bump serialize.ts `VERSION = 2`; write `docs/schema.md`
+   documenting every field of GPScene (generate by hand, keep updated).
+2. New top-level `blender/threegrease_io/` Python addon:
+   - `__init__.py` (bl_info, register import/export operators + menu).
+   - Import: JSON → `bpy.data.grease_pencils_v3.new()`; layers by name
+     (opacity/blend/hide/lock), frames by number, drawings: build
+     CurvesGeometry — `curve_offsets`, positions (Z-up: ours matches),
+     `radius` (our lineWidth*pressure/2, converted px→world via a scale
+     option on the importer, default 0.01), `opacity`=strength,
+     `vertex_color`, `cyclic`, materials (stroke/fill colors, fill_id
+     attribute per GPv3), stroke order preserved.
+   - Export: reverse mapping to our JSON; unsupported Blender features
+     (textures, curves fills, groups) flatten with a report listing drops.
+   - Version guards: try `grease_pencils_v3` (4.3+) names first; document
+     any 5.x renames encountered in comments.
+3. Fidelity table appended to docs/schema.md (attribute → roundtrip: full/
+   lossy/dropped). Cameras/canvases/scores export as empties + custom
+   properties (`threegrease_*`) so nothing silently disappears.
+
+**Accept**: scripted test scene (3 layers, keyframes, fills, vertex color,
+cyclic strokes) → Blender import (run `blender --background --python
+blender/tests/roundtrip.py`) → export → diff against original JSON:
+positions within 1e-4, counts identical.
+
+---
+
+## P2 — Event bus + IO (foundation for C/D)
+
+**Goal**: typed pub/sub + MIDI/OSC/WS in and out + monitor.
+
+**Data/files**:
+```ts
+// src/events/bus.ts
+export interface TGEvent {
+  time: number;                 // performance.now()
+  source: string;               // 'cursor:12' | 'midi:in' | 'ws' | 'ui' ...
+  address: string;              // '/cursor/12/pos' | 'note/1/64' style
+  args: (number | string)[];
+}
+export class EventBus {  on(pattern, cb): unsub; emit(ev): void;
+  history(n): TGEvent[];  // ring buffer for the monitor
+}
+```
+- `src/events/midi.ts`: Web MIDI in/out (requestMIDIAccess; note/cc both
+  directions; device pickers). Feature-detect; degrade gracefully.
+- `src/events/ws.ts`: WebSocket client (configurable URL, auto-reconnect)
+  speaking JSON `{address, args}`; OSC framing left to the bridge.
+- `bridge/` (Node, plain js, no deps beyond `ws` + `osc`): WS ⇄ UDP-OSC
+  and WS ⇄ node-midi relay; README with 3-line run instructions. Keep
+  under ~150 lines.
+- Monitor panel in ui.ts (scrolling recent events, pause, filter).
+- `scene.io: { wsUrl, midiInId, midiOutId, oscPrefix }` persisted.
+
+**Guardrails**: bus emit must be allocation-light (no JSON.stringify per
+event in the hot path); UI monitor samples, not subscribes-render.
+
+**Accept**: browser sends `/hello` via WS to the bridge, arrives as UDP
+OSC (verify with `oscdump`); MIDI note from a virtual device shows in the
+monitor; 1000 events/sec doesn't drop the frame rate below 55.
+
+---
+
+## P3 — Scores: cursors, triggers, path-attached objects
+
+**Goal**: the IanniX layer. Strokes become playable scores.
+
+**Data** (all in GPScene, all JSON-safe):
+```ts
+export interface PathRef { objectIndex: number; layerId: number;
+  strokeId: number; }            // resolve defensively: stroke may be gone
+export interface TGCursor { id; name; path: PathRef;
+  speed: number;                 // path lengths per second (can be <0)
+  phase: number; loop: 'LOOP'|'PINGPONG'|'ONCE'; ease: 'LINEAR'|'SMOOTH';
+  running: boolean; messages: MsgTemplate[]; color: Vec3; }
+export interface TGTrigger { id; name; position: Vec3; radius: number;
+  retrigger: boolean; messages: MsgTemplate[]; }
+export interface TGAttachment { id; target: {kind:'CANVAS'|'CAMERA'|'SPLAT'
+  |'OBJECT'; id:number}; path: PathRef; cursorLike: {speed;phase;loop};
+  orient: 'NONE'|'TANGENT'; offset: Vec3; }
+export interface MsgTemplate { address: string;  // supports {id} {t} {x}...
+  argExprs: string[]; }          // tiny substitution, NOT eval
+scene.score = { cursors: [], triggers: [], attachments: [] }
+```
+- `src/score/engine.ts`: advance cursors each frame by dt (own clock —
+  independent of GP frame playback); arc-length parametrize stroke once
+  and cache keyed by stroke id + point-count (invalidate on markDirty);
+  emit position messages at a configurable rate (default 30 Hz, not every
+  frame); test triggers against cursor world positions (sphere), fire
+  through the bus.
+- Rendering: cursor glyphs + trigger spheres as an overlay group in
+  GPSceneRenderer (respect presentation-mode styling toggle).
+- UI: Score panel (list cursors/triggers/attachments; add-cursor from
+  selected stroke; per-item transport, speed, message editor); trigger
+  placement = place at 3D cursor.
+- Attachments drive canvas planes / cameras (sets translation/rotation
+  each frame BEFORE render; when target is the viewed camera it becomes a
+  dolly rig).
+
+**Accept**: cursor on a drawn stroke emits `/cursor/1/pos x y z t` at
+30 Hz over WS (observed in monitor + oscdump); trigger fires exactly once
+per pass with retrigger off; a canvas plane rides a circle stroke with
+TANGENT orient; ALL of it survives save/load; deleting the stroke leaves
+a paused cursor, not a crash.
+
+---
+
+## P4 — Property routing in (routional)
+
+**Goal**: incoming events drive properties, learn mode included.
+
+```ts
+export interface TGRoute { id; enabled: boolean;
+  match: { source: 'MIDI'|'OSC'|'WS'; address: string };  // glob ok
+  target: string;               // dot-path: 'settings.brush.size',
+                                // 'scene.objects.0.layers.<id>.opacity',
+                                // 'score.cursors.<id>.speed'
+  mapping: { inMin; inMax; outMin; outMax;
+             mode: 'RAW'|'SCALE'|'CLAMP'|'WRAP' }; }
+scene.routes: TGRoute[]
+```
+- `src/events/routes.ts`: subscribe to bus; resolve target path through a
+  **whitelisted resolver** (explicit table of settable roots — never
+  arbitrary object walking into functions); apply mapping; mark dirty /
+  syncCanvases as appropriate per root.
+- Learn mode: "learn" button on route → next bus event fills `match`.
+- Routes panel with monitor-linked highlighting.
+
+**Accept**: CC1 mapped to brush size changes live drawing width; OSC
+`/layer/opacity` fades a layer during playback; broken target path logs
+once and disables the route (no crash, no spam).
+
+---
+
+## P5 — String art & attractors
+
+**Goal**: Bridges-2022 greedy solver + dynamic string simulation.
+
+- `src/solvers/stringart.worker.ts` (Web Worker):
+  input {pins: Vec2[] (from a selected cyclic stroke or canvas rect,
+  N configurable), target: ImageData (imported image or a rendered layer
+  snapshot via existing PNG path), opacity, maxChords, minGain};
+  greedy loop: for current pin, evaluate candidate chords by residual
+  darkness integral (sample along line), pick best, subtract, repeat;
+  stop on maxChords or gain < minGain. Post progress every 100 chords.
+- Output = one GPStroke per chord (or one polyline stroke chaining pins)
+  into a new layer "StringArt" — ordinary data afterwards.
+- Dynamic variant `src/solvers/strings.ts`: strings as verlet springs
+  between their two pins; attractor/repulsor points (new scene list
+  `scene.attractors`) pull midpoints; step in rAF at fixed dt with substep
+  cap; writes point positions each frame to a dedicated layer (this layer
+  flagged `simulated: true` so undo snapshots skip churn).
+- UI: Solver panel (pick target image, pin count, run/cancel, progress).
+
+**Accept**: 300-pin, 2000-chord portrait recognizable in <20 s on a mid
+laptop, UI responsive throughout (worker); attractor dragged in edit mode
+visibly bends the string field live; export of result via P8 works.
+
+---
+
+## P6 — Multi-view wire art (anamorphic)
+
+**Goal**: one 3D stroke network matching 2–3 view drawings.
+
+Stage 1 (assist, ship first): "view lock" workflow — store target drawing
+per scene camera (imported image or GP layer); when drawing from camera A,
+render residual overlay of camera B's target (what's still unmatched)
+projected into the current view; artist connects manually.
+Stage 2 (solver, worker): voxelize the intersection of the 2–3 view
+silhouette extrusions (visual hull of the line drawings, dilated);
+greedy-select voxels covering the drawings; connect components with A*
+through the hull; fit Catmull-Rom through the path; project-and-compare
+refinement (gradient-free jitter accept/reject). Output: strokes.
+
+**Accept** (stage 2): the classic test — "3" from front, "S" from side —
+produces a connected curve whose renders from the two stored cameras match
+the inputs by >80% pixel overlap at 512².
+
+---
+
+## P7 — Gaussian splats (Spark adapter)
+
+**Goal**: import/transform/occlude splats; paint later.
+
+- Add dependency `@sparkjsdev/spark` (pin exact version).
+- `src/splats/index.ts` adapter ONLY file importing spark: load url/file →
+  `SplatMesh`, add under a `splatsGroup`; scene data:
+  `scene.splats: {id, name, src (url or 'embedded'), translation, rotation,
+  scale, visible}[]` (embedded = object URL from a File; warn not saved).
+- SplatMesh is an Object3D → attachments (P3) and G/R/S selection follow
+  the canvas-plane pattern (world-space branch in ModalTransform).
+- Depth interplay: render order + depthWrite per Spark docs; verify
+  strokes behind/in front of splats resolve correctly; document limits.
+- Stroke-on-splat drawing (P2 of this phase): sample depth under cursor
+  from a depth render of the splat pass, reuse STROKE-placement sticky
+  machinery with splat depth as anchor.
+
+**Accept**: a .spz scan loads, transforms with G/R/S, rides a path via an
+attachment, occludes strokes plausibly, and the scene (with src URL)
+reloads after save.
+
+---
+
+## P8 — Exporters
+
+- `src/io/export3d.ts` using three's GLTFExporter/OBJExporter/STLExporter
+  (import from examples/jsm — already vendored via three).
+- Strokes → geometry: ribbons as-is for GLB (flat shading), plus a "tube"
+  option (TubeGeometry along points, radius from width) for OBJ/STL
+  fabrication; fills as meshes; option: selected-only / per-layer.
+- Splats: re-export source file as-is (no re-encoding v1); note in UI.
+- UI: File section in topbar → Export dialog (format, tube radius scale,
+  selection scope).
+
+**Accept**: STL of a string-art result opens manifold in a slicer;
+GLB opens in Blender with colors; export of a 50k-point scene <5 s.
+
+---
+
+## P9 — mediamime bridge
+
+- Define `docs/protocol.md`: shared WS vocabulary
+  (`/mm/shape/<id>/enter|leave|move`, args normalized 0–1 coords).
+- mediamime side (separate repo, coordinate with owner): add WS output of
+  its shape events. threegrease side: nothing new — P2 WS + P4 routes
+  already consume them; add an example scene mapping shape events to
+  cursor speed/layer opacity.
+
+**Accept**: mediamime demo drives a threegrease scene through the bridge
+using only routes UI (no code).
+
+---
+
+## P10 — Performance pass (schedule before heavy generative scenes)
+
+1. Incremental rebuild: per-layer dirty flags (draw touches one layer —
+   rebuild only it; keep meshes per layer keyed by layer id + frame).
+2. In-progress stroke fast path: append-only geometry buffer for the
+   stroke being drawn (no full-layer rebuild per pointermove).
+3. Bucket fill in a worker (transfer ImageData).
+4. Stamp instancing: InstancedBufferGeometry for kind-3 stamps.
+5. Budget: 60 fps with 100k stamp quads + 4 cursors + simulation layer.
+Measure with a scripted scene (`window.__tg` eval) before/after; record
+numbers in this file.
+
+---
+
+## Cross-cutting tasks (do alongside phases)
+
+- **Outliner** panel (objects/layers/canvases/cameras/splats/cursors/
+  triggers; select/rename/visibility) — do with or right after P3.
+- **Docs upkeep**: every phase updates README (user-facing), PLAN.md
+  (checklist), HANDOFF.md (§2 inventory, §6 new gotchas), and this file
+  (mark phase done, note deviations).
+- **Examples**: one saved scene per shipped phase in `examples/`.
+- **Testing habit**: every phase lands with a browser-eval verification
+  snippet committed into `docs/verify/<phase>.md` so weaker models can
+  re-run regression checks verbatim.

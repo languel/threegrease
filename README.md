@@ -86,9 +86,11 @@ npm run dev     # open http://localhost:5199
   point on a canvas plane. Cursor grid-snap works within the drawing plane
   (no more off-plane jumps to the invisible 3D lattice).
 
-See [PLAN.md](PLAN.md) for the full feature checklist against the Blender
-manual and the post-parity roadmap (performance, Mental-Canvas-style gesture
-navigation, live-performance bindings).
+See [PLAN.md](PLAN.md) for the feature checklist against the Blender manual.
+The project brief lives in [docs/PRD.md](docs/PRD.md) (platform vision:
+event scores, MIDI/OSC/WS, string/wire art solvers, Gaussian splats),
+[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) (phased plan),
+and [docs/HANDOFF.md](docs/HANDOFF.md) (technical handoff for contributors).
 
 ## Shortcuts
 
