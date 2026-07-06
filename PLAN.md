@@ -130,6 +130,24 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
       frustum gizmos, keys on timeline
 - [x] Settings dialog with preferences + rebindable shortcuts (localStorage)
 
+### Blender parity gaps spotted in use (reference screenshots 2026-07-06)
+- [ ] Drawing Plane: "Cursor" option (plane through the 3D cursor)
+- [ ] Surface placement: Offset distance + "Project Onto Selected"
+- [ ] Brush Advanced: Size Unit (View px vs Scene world units), Spacing,
+      Angle/Factor, Aspect X/Y (see Blender's Ink Pen Rough panel)
+- [ ] Draw on real mesh surfaces (cube etc.), not just canvas planes
+
+## NPR brush engine (the current focus)
+Goal: expressive natural-media brushes (ink, charcoal, marker, airbrush)
+rendered in real time. Approach: per-stroke baked style, stamp-based
+rendering along the stroke with procedural grain in the fragment shader.
+- [ ] Scene-unit stroke width (world-space radius in the ribbon shader)
+- [ ] Stroke style data (stamp mode, spacing, angle, aspect, jitter, grain)
+- [ ] Stamp geometry emission + rotated/aspect quads + grain fragment
+- [ ] Brush presets (Pen, Ink Rough, Marker, Charcoal, Airbrush) + UI
+- [ ] Later: texture-sampled stamps (image brushes), smudge/blend brushes,
+      paper grain overlay, buildup blending
+
 ## Post-parity roadmap (the action-painting lab)
 1. Performance: instanced segment rendering, dirty-region geometry updates,
    pointer-event coalescing + prediction, worker-side fill.

@@ -121,9 +121,15 @@ the browser console or automated evals:
 
 ## Where to pick up (roadmap, rough priority)
 
+0. **NPR brush engine** (current focus — see PLAN.md "NPR brush engine"):
+   scene-unit widths, per-stroke style (stamp/spacing/angle/aspect/grain),
+   stamp rendering with procedural grain, brush presets. Stroke appearance
+   params must be BAKED onto the stroke (`GPStroke`), not read from live
+   brush settings, so finished strokes keep their look.
 1. **Perf pass** (before heavy scenes): incremental/dirty-region geometry
    rebuilds in `GPSceneRenderer` (currently full rebuild), instanced
-   segments, worker-side bucket fill.
+   segments, worker-side bucket fill. Stamp brushes multiply vertex count —
+   this becomes urgent once NPR brushes land.
 2. **Camera bookmark transitions**: eased "jump to camera N over t seconds"
    action for live performance (nav has `startAnim` easing to build on).
 3. **Mental-Canvas gestures**: grabbable canvas planes (drag/rotate in
