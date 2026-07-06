@@ -101,6 +101,10 @@ the browser console or automated evals:
   is wrapped in try/catch — keep it that way.
 - Vite hot-reload wipes app state; browser-eval tests should
   `location.reload()` first if files changed mid-session.
+- Fly mode (Blender semantics): `~` starts, Enter/click accepts, Esc
+  teleports back to the start pose. Pointer lock swallows the Esc keydown,
+  so cancel is detected via `pointerlockchange` + the `flyStopping` flag in
+  `nav.ts` — don't remove that flag.
 
 ## Where to pick up (roadmap, rough priority)
 

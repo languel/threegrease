@@ -41,6 +41,8 @@ export class Navigation {
   private flySpeed = 3;
   private yaw = 0;
   private pitch = 0;
+  private flyStart = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
+  private flyStopping = false; // deliberate exit in progress (Enter/click)
   onFlyChange: ((flying: boolean) => void) | null = null;
 
   // gizmo hit areas, rebuilt every draw
@@ -55,7 +57,11 @@ export class Navigation {
     this.ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -500, 500);
 
     document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement !== this.canvas && this.flying) this.stopFly();
+      // Esc is swallowed by pointer lock: losing the lock without a
+      // deliberate stopFly() means the user cancelled -> teleport back
+      if (document.pointerLockElement !== this.canvas && this.flying && !this.flyStopping) {
+        this.stopFly(false);
+      }
     });
     document.addEventListener('mousemove', (e) => {
       if (!this.flying) return;
@@ -183,6 +189,9 @@ export class Navigation {
     if (this.flying) return;
     if (this.isOrtho) this.toggleOrtho();
     this.flying = true;
+    this.flyStopping = false;
+    this.flyStart.pos.copy(this.persp.position);
+    this.flyStart.quat.copy(this.persp.quaternion);
     const euler = new THREE.Euler().setFromQuaternion(this.persp.quaternion, 'YXZ');
     this.yaw = euler.y;
     this.pitch = euler.x;
@@ -192,15 +201,25 @@ export class Navigation {
     this.onFlyChange?.(true);
   }
 
-  stopFly(): void {
+  /**
+   * Blender semantics: Enter/click accepts the new position; Esc cancels
+   * and teleports back to where the flyover started (inspect, don't move).
+   */
+  stopFly(accept = true): void {
     if (!this.flying) return;
     this.flying = false;
+    this.flyStopping = true;
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+    if (!accept) {
+      this.persp.position.copy(this.flyStart.pos);
+      this.persp.quaternion.copy(this.flyStart.quat);
+    }
     // rebuild an orbit target ahead of the camera
     const fwd = this.persp.getWorldDirection(new THREE.Vector3());
     this.target.copy(this.persp.position).addScaledVector(fwd, 4);
     this.controls.enabled = true;
     this.controls.update();
+    this.flyStopping = false;
     this.onFlyChange?.(false);
   }
 
@@ -208,7 +227,8 @@ export class Navigation {
   handleFlyKey(e: KeyboardEvent, down: boolean): boolean {
     if (!this.flying) return false;
     const k = e.key.toLowerCase();
-    if (down && e.key === 'Escape') { this.stopFly(); return true; }
+    if (down && e.key === 'Escape') { this.stopFly(false); return true; }
+    if (down && e.key === 'Enter') { this.stopFly(true); return true; }
     if (['w', 'a', 's', 'd', 'q', 'e', 'shift'].includes(k)) {
       down ? this.flyKeys.add(k) : this.flyKeys.delete(k);
       return true;

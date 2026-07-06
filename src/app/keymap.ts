@@ -47,7 +47,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'nextFrame', label: 'Next frame', combo: 'arrowright', category: 'Animation' },
   { id: 'prevFrame', label: 'Previous frame', combo: 'arrowleft', category: 'Animation' },
   // View / camera
-  { id: 'fly', label: 'Flythrough mode', combo: '`', category: 'View' },
+  { id: 'fly', label: 'Flythrough (Enter accepts, Esc teleports back)', combo: '~', category: 'View' },
   { id: 'cameraView', label: 'Look through camera', combo: '0', category: 'View' },
   { id: 'cycleCamera', label: 'Next camera', combo: 'shift+c', category: 'View' },
 ];
@@ -63,6 +63,11 @@ export function comboFromEvent(e: KeyboardEvent): string {
   let key = e.key.toLowerCase();
   if (key === ' ') key = 'space';
   if (['control', 'meta', 'alt', 'shift'].includes(key)) return ''; // modifier alone
+  // shifted symbols ('~', '+', '?') already encode shift in the character
+  if (key.length === 1 && !/[a-z0-9]/.test(key)) {
+    const i = parts.indexOf('shift');
+    if (i >= 0) parts.splice(i, 1);
+  }
   parts.push(key);
   return parts.join('+');
 }

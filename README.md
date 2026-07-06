@@ -43,7 +43,7 @@ npm run dev     # open http://localhost:5199
 - **Navigation & QoL**: Blender-style *Emulate Numpad* (digit-row view keys)
   and *Emulate 3 Button Mouse* (Alt+drag orbit / +Shift pan / +Ctrl zoom —
   trackpad friendly), clickable axis gizmo with animated view transitions,
-  ortho/perspective toggle, flythrough mode (`` ` ``), **canvas planes**
+  ortho/perspective toggle, flythrough mode (`~`), **canvas planes**
   (drawable quads placed at the 3D cursor — raycast targets for Surface
   placement), and **Stroke placement** with All/End/First-point targets so
   new strokes inherit depth from existing ones (grow forms in 3D) — depth
@@ -88,7 +88,7 @@ All bindings below are defaults — open Settings (`,`) to rebind any of them.
 | `1/3/7` | front/right/top view (`Ctrl` = opposite) · `9` flip |
 | `5` | ortho ↔ perspective |
 | `2/4/6/8` | orbit view in 15° steps |
-| `` ` `` | flythrough mode (WASD + Q/E, wheel = speed, click/Esc exit) |
+| `~` | flythrough (WASD + Q/E, wheel = speed; `Enter`/click accepts, `Esc` teleports back) |
 | `P` | presentation/performance mode (UI off, shortcuts live) |
 | `0` / `Shift+C` | look through the active camera / cycle cameras |
 | `,` | settings & shortcut editor |

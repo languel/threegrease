@@ -874,7 +874,7 @@ class App implements AppHandle {
     if (this.nav.flying) {
       g.fillStyle = '#fff';
       g.font = '13px sans-serif';
-      g.fillText('FLY — WASD move · Q/E down/up · wheel speed · Shift boost · click/Esc exit', 16, 24);
+      g.fillText('FLY — WASD move · Q/E down/up · wheel speed · Shift boost · Enter/click accept · Esc cancel', 16, 24);
     }
     if (this.modal.active && this.ctx.settings.propEdit.enabled) {
       const { x, y } = this.tools.lastPointer;
