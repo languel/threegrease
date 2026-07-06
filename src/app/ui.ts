@@ -187,7 +187,10 @@ export class UI {
         slider('Radius', s.brush.size, 1, 60, 1, (v) => { s.brush.size = v; }),
         slider('Strength', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }),
         selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['STROKE', 'Stroke']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
-        selectField('Plane', s.plane, [['VIEW', 'View'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)']] as [PlaneMode, string][], (v) => { s.plane = v; }),
+        selectField('Plane', s.plane, (s.upAxis === 'Z'
+          ? [['VIEW', 'View'], ['FRONT', 'Front (X·Z)'], ['SIDE', 'Side (Y·Z)'], ['TOP', 'Top (X·Y)']]
+          : [['VIEW', 'View'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)']]) as [PlaneMode, string][],
+        (v) => { s.plane = v; }),
         ...(s.placement === 'STROKE' ? [
           selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][], (v) => { s.strokeTarget = v; }),
         ] : []),

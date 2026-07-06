@@ -11,9 +11,30 @@ const raycaster = new THREE.Raycaster();
  */
 let excludedStrokeId: number | null = null;
 let stickyDepth: number | null = null;
+let drawingSurface: THREE.Object3D | null = null;
 export function setStrokeExclusion(id: number | null): void {
   excludedStrokeId = id;
-  stickyDepth = null; // each new stroke re-acquires its depth anchor
+  stickyDepth = null;     // each new stroke re-acquires its depth anchor
+  drawingSurface = null;  // ...and its surface
+}
+
+function ownedBy(object: THREE.Object3D, root: THREE.Object3D): boolean {
+  let cur: THREE.Object3D | null = object;
+  while (cur) {
+    if (cur === root) return true;
+    cur = cur.parent;
+  }
+  return false;
+}
+
+/** Infinite plane through a surface object (canvas planes face local +Z). */
+function surfacePlane(surface: THREE.Object3D): THREE.Plane {
+  const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+    surface.getWorldQuaternion(new THREE.Quaternion()),
+  );
+  return new THREE.Plane().setFromNormalAndCoplanarPoint(
+    normal, surface.getWorldPosition(new THREE.Vector3()),
+  );
 }
 
 interface DepthCandidate {
@@ -184,7 +205,20 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
   raycaster.setFromCamera(ndc, ctx.camera);
   if (ctx.settings.placement === 'SURFACE' && ctx.surfaces.length) {
     const hits = raycaster.intersectObjects(ctx.surfaces, true);
-    if (hits.length) return hits[0].point.clone();
+    if (excludedStrokeId !== null && drawingSurface) {
+      // sticky: the stroke stays on the surface it started on; when the
+      // pointer leaves its bounds, extend along that surface's plane
+      const hit = hits.find((h) => ownedBy(h.object, drawingSurface!));
+      if (hit) return hit.point.clone();
+      const out = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(surfacePlane(drawingSurface), out)) return out;
+    } else if (hits.length) {
+      if (excludedStrokeId !== null) {
+        // remember the top-level surface this stroke started on
+        drawingSurface = ctx.surfaces.find((s) => ownedBy(hits[0].object, s)) ?? hits[0].object;
+      }
+      return hits[0].point.clone();
+    }
   }
   if (ctx.settings.placement === 'STROKE') {
     const hit = strokeDepthPoint(ctx, raycaster.ray, x - rect.left, y - rect.top);

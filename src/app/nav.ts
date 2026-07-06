@@ -313,11 +313,19 @@ export class Navigation {
     this.gizmoBalls = [];
 
     const q = this.active.quaternion.clone().invert();
-    const axes: [THREE.Vector3, ViewName, ViewName, string, string][] = [
-      [new THREE.Vector3(1, 0, 0), 'RIGHT', 'LEFT', 'X', '#e5605e'],
-      [new THREE.Vector3(0, 1, 0), 'TOP', 'BOTTOM', 'Y', '#7db32b'],
-      [new THREE.Vector3(0, 0, 1), 'FRONT', 'BACK', 'Z', '#4f8cff'],
-    ];
+    // clicking a ball places the camera along that axis — view names depend
+    // on the world-up convention
+    const axes: [THREE.Vector3, ViewName, ViewName, string, string][] = this.upAxis === 'Z'
+      ? [
+        [new THREE.Vector3(1, 0, 0), 'RIGHT', 'LEFT', 'X', '#e5605e'],
+        [new THREE.Vector3(0, 1, 0), 'BACK', 'FRONT', 'Y', '#7db32b'],
+        [new THREE.Vector3(0, 0, 1), 'TOP', 'BOTTOM', 'Z', '#4f8cff'],
+      ]
+      : [
+        [new THREE.Vector3(1, 0, 0), 'RIGHT', 'LEFT', 'X', '#e5605e'],
+        [new THREE.Vector3(0, 1, 0), 'TOP', 'BOTTOM', 'Y', '#7db32b'],
+        [new THREE.Vector3(0, 0, 1), 'FRONT', 'BACK', 'Z', '#4f8cff'],
+      ];
     for (const [axis, posView, negView, label, color] of axes) {
       const v = axis.clone().applyQuaternion(q);
       this.gizmoBalls.push({ x: cx + v.x * R, y: cy - v.y * R, z: v.z, view: posView, label, color });

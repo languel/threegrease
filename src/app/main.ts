@@ -78,7 +78,6 @@ class App implements AppHandle {
   private canvasGroup = new THREE.Group();
   private lastTime = performance.now();
   private grid!: THREE.GridHelper;
-  private ground!: THREE.Mesh;
   private axes!: THREE.Group;
   private gizmoDrag: { x: number; y: number; startX: number; startY: number; dragged: boolean } | null = null;
   presentation = false;
@@ -143,12 +142,6 @@ class App implements AppHandle {
     this.cursorMarker = this.makeCursorMarker();
     this.scene3.add(this.cursorMarker);
     // a ground plane for SURFACE placement demos
-    this.ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(20, 20),
-      new THREE.MeshBasicMaterial({ visible: false }),
-    );
-    this.scene3.add(this.ground);
-    this.ctx.surfaces.push(this.ground);
     this.scene3.add(this.canvasGroup);
     this.axes = this.makeAxes();
     this.scene3.add(this.axes);
@@ -346,7 +339,7 @@ class App implements AppHandle {
       (child as THREE.Mesh).geometry?.dispose?.();
       ((child as THREE.Mesh).material as THREE.Material)?.dispose?.();
     }
-    this.ctx.surfaces = this.ctx.surfaces.slice(0, 1); // keep the ground plane
+    this.ctx.surfaces = [];
     for (const c of this.ctx.scene.canvases) {
       if (!c.visible) continue;
       const mesh = new THREE.Mesh(
@@ -369,6 +362,7 @@ class App implements AppHandle {
         ]),
         new THREE.LineBasicMaterial({ color: 0x55688f, transparent: true, opacity: 0.6 }),
       );
+      border.raycast = () => {}; // border must never catch surface-placement rays
       mesh.add(border);
       this.canvasGroup.add(mesh);
       this.ctx.surfaces.push(mesh);
@@ -675,15 +669,8 @@ class App implements AppHandle {
     this.nav.setUpAxis(axis);
 
     // floor grid passes through the origin, Blender-style
-    if (axis === 'Z') {
-      this.grid.rotation.set(Math.PI / 2, 0, 0);
-      this.ground.rotation.set(0, 0, 0);
-    } else {
-      this.grid.rotation.set(0, 0, 0);
-      this.ground.rotation.set(-Math.PI / 2, 0, 0);
-    }
+    this.grid.rotation.set(axis === 'Z' ? Math.PI / 2 : 0, 0, 0);
     this.grid.position.set(0, 0, 0);
-    this.ground.position.set(0, 0, 0);
     if (resetView) {
       if (axis === 'Z') this.camera.position.set(0, -6, 2);
       else this.camera.position.set(0, 0.6, 6);
