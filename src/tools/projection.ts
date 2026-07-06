@@ -134,6 +134,23 @@ export function strokeSnapPreview(ctx: AppCtx, screenX: number, screenY: number)
   return { x: nearest.sx, y: nearest.sy };
 }
 
+/** Canvas plane under a canvas-local screen point, or null. */
+export function pickCanvas(ctx: AppCtx, x: number, y: number): { id: number; point: THREE.Vector3 } | null {
+  if (!ctx.canvasMeshes.length) return null;
+  const rect = ctx.canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, ctx.camera);
+  const hits = raycaster.intersectObjects(ctx.canvasMeshes, true);
+  for (const h of hits) {
+    let cur: THREE.Object3D | null = h.object;
+    while (cur) {
+      if (cur.userData.canvasId !== undefined) return { id: cur.userData.canvasId, point: h.point.clone() };
+      cur = cur.parent;
+    }
+  }
+  return null;
+}
+
 /** Nearest existing stroke point (world space) within `radius` px, or null. */
 export function nearestStrokePoint(ctx: AppCtx, screenX: number, screenY: number, radius = 40): THREE.Vector3 | null {
   const candidates = gatherDepthCandidates(ctx, screenX, screenY, radius, 'ALL');

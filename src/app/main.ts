@@ -10,7 +10,11 @@ import { ToolManager, type ToolEvent } from '../tools/toolsys';
 import { DrawTool, EraseTool, TintTool, CutterTool, EyedropperTool } from '../tools/draw';
 import { FillTool } from '../tools/fill';
 import { PrimitiveTool } from '../tools/primitives';
-import { SelectTool, selectAll, selectLinked, selectMoreLess } from '../tools/select';
+import { SelectTool, selectAll, selectLinked, selectMoreLess, selectedPoints } from '../tools/select';
+
+function hasSelectedPoints(ctx: AppCtx): boolean {
+  return selectedPoints(ctx).length > 0;
+}
 import { ModalTransform } from '../tools/transform';
 import { SculptTool } from '../tools/sculpt';
 import { VertexPaintTool, WeightPaintTool } from '../tools/paint';
@@ -18,7 +22,7 @@ import * as ops from '../tools/editops';
 import { Player } from '../anim/player';
 import { interpolateFrame } from '../anim/interpolate';
 import { downloadScene, openSceneFile } from '../io/serialize';
-import { nearestStrokePoint, screenToWorld, strokeSnapPreview } from '../tools/projection';
+import { drawingPlane, nearestStrokePoint, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { Keymap, comboFromEvent } from './keymap';
 import { UI, type AppHandle } from './ui';
@@ -119,6 +123,8 @@ class App implements AppHandle {
       scene3: this.scene3,
       canvas: glCanvas,
       surfaces: [],
+      canvasMeshes: [],
+      syncCanvases: () => this.syncCanvases(),
       copyBuffer: [],
       requestRender: () => this.gp.markDirty(),
       pushUndo: () => history.push(self.ctx.scene),
@@ -155,7 +161,9 @@ class App implements AppHandle {
       new DrawTool(), new EraseTool(), new FillTool(), new TintTool(), new CutterTool(),
       new EyedropperTool(), new PrimitiveTool('line'), new PrimitiveTool('polyline'),
       new PrimitiveTool('arc'), new PrimitiveTool('curve'), new PrimitiveTool('box'),
-      new PrimitiveTool('circle'), this.interpTool, new SelectTool(), new SculptTool(),
+      new PrimitiveTool('circle'), this.interpTool,
+      new SelectTool('select', 'BOX'), new SelectTool('select-lasso', 'LASSO'),
+      new SelectTool('select-circle', 'CIRCLE'), new SculptTool(),
       new VertexPaintTool(), new WeightPaintTool(),
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
@@ -287,12 +295,18 @@ class App implements AppHandle {
     const world = screenToWorld(ctx, clientX, clientY);
     if (!world) return;
     if (snap === 'GRID') {
+      // snap within the placement plane (not the invisible 3D lattice —
+      // rounding all axes would pull the cursor off the plane)
       const g = ctx.settings.gridStep;
-      world.set(
-        Math.round(world.x / g) * g,
-        Math.round(world.y / g) * g,
-        Math.round(world.z / g) * g,
-      );
+      const plane = drawingPlane(ctx);
+      const anchor = plane.normal.clone().multiplyScalar(-plane.constant);
+      const tmp = Math.abs(plane.normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+      const u = new THREE.Vector3().crossVectors(tmp, plane.normal).normalize();
+      const v = new THREE.Vector3().crossVectors(plane.normal, u);
+      const d = world.clone().sub(anchor);
+      world.copy(anchor)
+        .addScaledVector(u, Math.round(d.dot(u) / g) * g)
+        .addScaledVector(v, Math.round(d.dot(v) / g) * g);
     }
     ctx.scene.cursor = [world.x, world.y, world.z];
     this.gp.markDirty();
@@ -320,6 +334,8 @@ class App implements AppHandle {
       rotation,
       size: [3, 3],
       visible: true,
+      select: false,
+      drawTarget: true,
     });
     this.syncCanvases();
     this.ui.refresh();
@@ -340,12 +356,13 @@ class App implements AppHandle {
       ((child as THREE.Mesh).material as THREE.Material)?.dispose?.();
     }
     this.ctx.surfaces = [];
+    this.ctx.canvasMeshes = [];
     for (const c of this.ctx.scene.canvases) {
       if (!c.visible) continue;
       const mesh = new THREE.Mesh(
         new THREE.PlaneGeometry(c.size[0], c.size[1]),
         new THREE.MeshBasicMaterial({
-          color: 0x8899bb, transparent: true, opacity: 0.07,
+          color: c.select ? 0xd8a03c : 0x8899bb, transparent: true, opacity: c.select ? 0.1 : 0.07,
           side: THREE.DoubleSide, depthWrite: false,
         }),
       );
@@ -360,12 +377,16 @@ class App implements AppHandle {
           new THREE.Vector3(c.size[0] / 2, c.size[1] / 2, 0),
           new THREE.Vector3(-c.size[0] / 2, c.size[1] / 2, 0),
         ]),
-        new THREE.LineBasicMaterial({ color: 0x55688f, transparent: true, opacity: 0.6 }),
+        new THREE.LineBasicMaterial({
+          color: c.select ? 0xff9a3b : c.drawTarget ? 0x55688f : 0x6a5a3a,
+          transparent: true, opacity: c.select ? 1 : 0.6,
+        }),
       );
       border.raycast = () => {}; // border must never catch surface-placement rays
       mesh.add(border);
       this.canvasGroup.add(mesh);
-      this.ctx.surfaces.push(mesh);
+      this.ctx.canvasMeshes.push(mesh);
+      if (c.drawTarget) this.ctx.surfaces.push(mesh); // reference planes are not draw targets
     }
   }
 
@@ -386,6 +407,11 @@ class App implements AppHandle {
   }
 
   // ------------------------------------------------------------- events
+
+  /** setPointerCapture throws for unknown pointer ids (synthetic events) — never fatal. */
+  private capture(e: PointerEvent): void {
+    try { this.ctx.canvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+  }
 
   private toolEvent(e: PointerEvent): ToolEvent {
     const rect = this.ctx.canvas.getBoundingClientRect();
@@ -410,7 +436,7 @@ class App implements AppHandle {
       if (e.button === 0 && !this.presentation && this.nav.inGizmo(te0.x, te0.y)) {
         // click a ball snaps; dragging the disc orbits like a trackball
         this.gizmoDrag = { x: te0.x, y: te0.y, startX: te0.x, startY: te0.y, dragged: false };
-        canvas.setPointerCapture(e.pointerId);
+        this.capture(e);
         return;
       }
       if (e.button === 0 && e.altKey && this.ctx.settings.emulate3Button) {
@@ -419,7 +445,7 @@ class App implements AppHandle {
           mode: e.shiftKey ? 'pan' : (e.ctrlKey || e.metaKey) ? 'dolly' : 'orbit',
           x: te0.x, y: te0.y,
         };
-        canvas.setPointerCapture(e.pointerId);
+        this.capture(e);
         return;
       }
       if (e.button === 2 && e.shiftKey) {
@@ -429,7 +455,7 @@ class App implements AppHandle {
       }
       if (e.button !== 0) return;
       if (this.modal.active) { this.modal.confirm(this.ctx); this.ui.refresh(); return; }
-      canvas.setPointerCapture(e.pointerId);
+      this.capture(e);
       this.tools.handleDown(this.ctx, this.toolEvent(e));
     });
 
@@ -588,7 +614,24 @@ class App implements AppHandle {
       case 'selectLinked': if (this.editLike()) { selectLinked(ctx); this.gp.markDirty(); } break;
       case 'selectMore': if (this.editLike()) { selectMoreLess(ctx, true); this.gp.markDirty(); } break;
       case 'selectLess': if (this.editLike()) { selectMoreLess(ctx, false); this.gp.markDirty(); } break;
-      case 'delete': if (this.editLike()) { ops.deleteSelected(ctx, false); this.ui.refresh(); } break;
+      case 'delete':
+        if (this.editLike()) {
+          const selCanvases = ctx.scene.canvases.filter((c) => c.select);
+          if (selCanvases.length && !hasSelectedPoints(ctx)) {
+            ctx.pushUndo();
+            ctx.scene.canvases = ctx.scene.canvases.filter((c) => !c.select);
+            this.syncCanvases();
+          } else {
+            ops.deleteSelected(ctx, false);
+          }
+          this.ui.refresh();
+        }
+        break;
+      case 'toggleSnap':
+        ctx.settings.snap.enabled = !ctx.settings.snap.enabled;
+        this.savePrefs();
+        this.ui.refresh();
+        break;
       case 'duplicate':
         if (this.editLike()) {
           ops.duplicateSelected(ctx);

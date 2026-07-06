@@ -13,6 +13,10 @@ export function deserializeScene(json: string): GPScene {
   if (data?.format !== FORMAT) throw new Error('Not a threegrease scene file');
   const scene = data.scene as GPScene;
   scene.canvases ??= []; // older saves predate canvas planes
+  for (const c of scene.canvases) {
+    c.select ??= false;
+    c.drawTarget ??= true;
+  }
   // migrate single-camera saves to the camera list
   const legacy = (scene as unknown as { camera?: import('../core/types').GPCamera }).camera;
   scene.cameras ??= legacy ? [{ ...createDefaultCamera(), ...legacy, name: 'Camera 1' }] : [createDefaultCamera()];

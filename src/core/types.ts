@@ -124,7 +124,7 @@ export interface GPObject {
   };
 }
 
-/** A drawable quad in the scene: raycast target for SURFACE stroke placement. */
+/** A quad object in the scene: drawing surface and/or reference plane. */
 export interface CanvasPlane {
   id: number;
   name: string;
@@ -132,6 +132,8 @@ export interface CanvasPlane {
   rotation: Vec3;          // euler radians
   size: [number, number];
   visible: boolean;
+  select: boolean;
+  drawTarget: boolean;     // false = reference plane only (not a Surface target)
 }
 
 export interface GPCameraKey {

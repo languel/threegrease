@@ -112,6 +112,13 @@ the browser console or automated evals:
   so cancel is detected via `pointerlockchange` + the `flyStopping` flag in
   `nav.ts` — don't remove that flag.
 
+- Canvas planes are scene-level objects (`scene.canvases`, world space, NOT
+  object space like stroke points). Selection lives on `CanvasPlane.select`;
+  `ModalTransform` handles them in a separate world-space branch. Rebuild
+  meshes with `ctx.syncCanvases()` after mutating canvas data.
+- `setPointerCapture` is wrapped in `App.capture()` (throws on synthetic
+  pointer ids) — use it, never call setPointerCapture directly.
+
 ## Where to pick up (roadmap, rough priority)
 
 1. **Perf pass** (before heavy scenes): incremental/dirty-region geometry

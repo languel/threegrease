@@ -135,7 +135,11 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, string, string][]> = {
     ['curve', '∿', 'Curve'], ['box', '▭', 'Box'], ['circle', '◯', 'Circle'],
     ['interpolate', '⇄', 'Interpolate (drag)'],
   ],
-  EDIT: [['select', '⬚', 'Select (drag box, Ctrl lasso, C circle)']],
+  EDIT: [
+    ['select', '⬚', 'Box select (Ctrl lasso, C circle)'],
+    ['select-lasso', '⟁', 'Lasso select'],
+    ['select-circle', '◯', 'Circle select ([ ] size)'],
+  ],
   SCULPT: [['sculpt', '🫳', 'Sculpt brush']],
   VERTEX: [['vertexpaint', '🎨', 'Vertex paint']],
   WEIGHT: [['weightpaint', '⚖️', 'Weight paint']],
@@ -207,6 +211,10 @@ export class UI {
         selectField('Select', s.selectMode, [['POINT', 'Point'], ['STROKE', 'Stroke']], (v) => { s.selectMode = v; ctx.requestRender(); }),
         checkbox('Proportional', s.propEdit.enabled, (v) => { s.propEdit.enabled = v; }),
         checkbox('Multiframe', s.multiframe, (v) => { s.multiframe = v; }),
+        checkbox('🧲 Snap', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
+        selectField('', s.snap.mode, [
+          ['INCREMENT', 'Increment'], ['POINT', 'Stroke point'], ['CANVAS', 'Canvas'],
+        ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); }),
       );
     } else if (s.mode === 'SCULPT') {
       const brushes: [SculptBrush, string][] = [
@@ -467,6 +475,7 @@ export class UI {
       body.append(
         el('div', { class: 'row' },
           checkbox('Visible', c.visible, (v) => { c.visible = v; this.app.syncCanvases(); }),
+          checkbox('Draw target', c.drawTarget, (v) => { c.drawTarget = v; this.app.syncCanvases(); }),
           btn('✕', () => this.app.removeCanvasPlane(c.id), { cls: 'icon-btn', title: 'Delete canvas' }),
         ),
         el('div', { class: 'row' }, 'Pos',

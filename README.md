@@ -75,6 +75,16 @@ npm run dev     # open http://localhost:5199
 - **Inspector panel** (`N`): Blender-style N-panel with live editable values
   — selection median, object transform, active camera transform + FOV,
   viewport position, 3D cursor.
+- **Select tool family** (edit mode toolbar): box, lasso, and circle brush
+  (`[`/`]` resize) as explicit tools; box keeps Ctrl-drag lasso and `C`.
+- **Canvas planes are objects**: click to select them in edit mode (amber
+  highlight), transform with `G`/`R`/`S`, delete with `X`. A per-canvas
+  *Draw target* flag turns a canvas into a pure reference plane that
+  Surface placement ignores.
+- **Magnet snapping** (`Shift+Tab` or 🧲 in the edit topbar): during moves,
+  snap the selection to grid increments, the nearest stroke point, or a
+  point on a canvas plane. Cursor grid-snap works within the drawing plane
+  (no more off-plane jumps to the invisible 3D lattice).
 
 See [PLAN.md](PLAN.md) for the full feature checklist against the Blender
 manual and the post-parity roadmap (performance, Mental-Canvas-style gesture

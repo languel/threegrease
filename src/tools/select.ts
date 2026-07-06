@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { GPFrame, GPLayer, GPStroke } from '../core/types';
 import { activeObject, frameAt, visibleEditableLayers } from '../core/gpdata';
 import type { AppCtx } from './context';
-import { objectToScreen } from './projection';
+import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso, pointInPolygon } from './draw';
 
@@ -40,6 +40,12 @@ export function deselectAll(ctx: AppCtx): void {
     s.select = false;
     for (const p of s.points) p.select = false;
   });
+  let hadCanvas = false;
+  for (const c of ctx.scene.canvases) {
+    if (c.select) hadCanvas = true;
+    c.select = false;
+  }
+  if (hadCanvas) ctx.syncCanvases();
 }
 
 export function selectAll(ctx: AppCtx, action: 'all' | 'none' | 'invert'): void {
@@ -76,13 +82,18 @@ export function selectMoreLess(ctx: AppCtx, more: boolean): void {
   });
 }
 
+export type SelectKind = 'BOX' | 'LASSO' | 'CIRCLE';
+
 /**
- * Select tool: click picks nearest point/stroke (shift extends), drag = box
- * select, Ctrl-drag = lasso, C = circle-brush select mode.
+ * Select tool family (Blender-style): click picks the nearest point/stroke
+ * or canvas plane (Shift extends). Drag behavior depends on the variant:
+ * box, lasso, or circle brush. The box variant keeps Ctrl-drag = lasso and
+ * C = toggle circle mode as shortcuts.
  */
 export class SelectTool implements Tool {
-  id = 'select';
+  id: string;
   cursor = 'default';
+  private kind: SelectKind;
   private mode: 'none' | 'box' | 'lasso' | 'circle' = 'none';
   private start = new THREE.Vector2();
   private lasso: THREE.Vector2[] = [];
@@ -91,8 +102,21 @@ export class SelectTool implements Tool {
   private extend = false;
   private dragged = false;
 
+  constructor(id = 'select', kind: SelectKind = 'BOX') {
+    this.id = id;
+    this.kind = kind;
+    this.circleMode = kind === 'CIRCLE';
+  }
+
   onKey(ctx: AppCtx, key: string): boolean {
-    if (key === 'c' || key === 'C') { this.circleMode = !this.circleMode; return true; }
+    if (this.kind === 'BOX' && (key === 'c' || key === 'C')) {
+      this.circleMode = !this.circleMode;
+      return true;
+    }
+    if (this.circleMode && (key === '[' || key === ']')) {
+      this.circleRadius = Math.max(8, this.circleRadius + (key === ']' ? 8 : -8));
+      return true;
+    }
     return false;
   }
 
@@ -104,7 +128,7 @@ export class SelectTool implements Tool {
       this.mode = 'circle';
       ctx.pushUndo();
       this.circleSelect(ctx, e);
-    } else if (e.ctrl) {
+    } else if (this.kind === 'LASSO' || e.ctrl) {
       this.mode = 'lasso';
       this.lasso = [new THREE.Vector2(e.x, e.y)];
     } else {
@@ -206,6 +230,17 @@ export class SelectTool implements Tool {
       } else {
         b.s.points[b.index].select = true;
         b.s.select = true;
+      }
+      return;
+    }
+    // no stroke under the cursor: try canvas planes (objects)
+    const hit = pickCanvas(ctx, e.x, e.y);
+    if (hit) {
+      const canvas = ctx.scene.canvases.find((c) => c.id === hit.id);
+      if (canvas) {
+        canvas.select = this.extend ? !canvas.select : true;
+        ctx.syncCanvases();
+        ctx.refreshUI();
       }
     }
   }

@@ -54,6 +54,8 @@ export interface Settings {
   trackpadNav: boolean;     // two-finger orbit, shift pan, ctrl/pinch zoom
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
+  /** Blender-style magnet snapping during transforms. */
+  snap: { enabled: boolean; mode: 'INCREMENT' | 'POINT' | 'CANVAS' };
 }
 
 // ---- preference persistence (localStorage) --------------------------------
@@ -61,7 +63,7 @@ export interface Settings {
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'cursorSnap', 'gridStep',
-  'trackpadNav', 'upAxis', 'showAxes', 'background',
+  'trackpadNav', 'upAxis', 'showAxes', 'background', 'snap',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -90,6 +92,9 @@ export interface AppCtx {
   canvas: HTMLCanvasElement;
   /** meshes eligible for SURFACE placement raycasts */
   surfaces: THREE.Object3D[];
+  /** all visible canvas-plane meshes (selection picking, snapping) */
+  canvasMeshes: THREE.Object3D[];
+  syncCanvases(): void;
   copyBuffer: GPStroke[];
   requestRender(): void;
   pushUndo(): void;
@@ -130,5 +135,6 @@ export function defaultSettings(): Settings {
     trackpadNav: true,
     upAxis: 'Z',
     showAxes: false,
+    snap: { enabled: false, mode: 'INCREMENT' },
   };
 }

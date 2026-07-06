@@ -1,14 +1,20 @@
 import * as THREE from 'three';
-import type { GPPoint, Vec3 } from '../core/types';
+import type { CanvasPlane, GPPoint, Vec3 } from '../core/types';
 import { falloff } from '../core/mathutil';
 import type { AppCtx } from './context';
 import { forEachEditableStroke, selectedPoints } from './select';
-import { objectToScreen, objectToWorld, screenToWorld, worldToObject } from './projection';
+import { nearestStrokePoint, objectToScreen, objectToWorld, pickCanvas, screenToWorld, worldToObject } from './projection';
 
 type TransformKind = 'move' | 'rotate' | 'scale' | 'shear';
 type AxisLock = 'none' | 'x' | 'y' | 'z';
 
 interface Affected { p: GPPoint; orig: Vec3; weight: number }
+interface AffectedCanvas {
+  c: CanvasPlane;
+  origT: Vec3;
+  origQ: THREE.Quaternion;
+  origSize: [number, number];
+}
 
 /**
  * Blender-style modal transform (G/R/S). Started from a keypress; pointer
@@ -18,6 +24,8 @@ interface Affected { p: GPPoint; orig: Vec3; weight: number }
 export class ModalTransform {
   private kind: TransformKind = 'move';
   private affected: Affected[] = [];
+  private canvases: AffectedCanvas[] = [];
+  private canvasPivot = new THREE.Vector3(); // world-space pivot for canvas transforms
   private center = new THREE.Vector2();   // screen px pivot
   private centerLocal: Vec3 = [0, 0, 0];
   private startPointer = new THREE.Vector2();
@@ -26,8 +34,9 @@ export class ModalTransform {
 
   begin(ctx: AppCtx, kind: TransformKind, pointer: { x: number; y: number }): boolean {
     const sel = selectedPoints(ctx);
-    if (!sel.length) return false;
+    if (!sel.length) return this.beginCanvases(ctx, kind, pointer);
     ctx.pushUndo();
+    this.canvases = [];
     this.kind = kind;
     this.axis = 'none';
     this.startPointer.set(pointer.x, pointer.y);
@@ -71,9 +80,100 @@ export class ModalTransform {
     return true;
   }
 
+  /** Transform selected canvas planes (world space) when no points are selected. */
+  private beginCanvases(ctx: AppCtx, kind: TransformKind, pointer: { x: number; y: number }): boolean {
+    const sel = ctx.scene.canvases.filter((c) => c.select);
+    if (!sel.length || kind === 'shear') return false;
+    ctx.pushUndo();
+    this.kind = kind;
+    this.axis = 'none';
+    this.affected = [];
+    this.startPointer.set(pointer.x, pointer.y);
+    this.canvases = sel.map((c) => ({
+      c,
+      origT: [...c.translation] as Vec3,
+      origQ: new THREE.Quaternion().setFromEuler(new THREE.Euler(...c.rotation)),
+      origSize: [...c.size] as [number, number],
+    }));
+    this.canvasPivot.set(0, 0, 0);
+    for (const a of this.canvases) this.canvasPivot.add(new THREE.Vector3(...a.origT));
+    this.canvasPivot.divideScalar(this.canvases.length);
+    const rect = ctx.canvas.getBoundingClientRect();
+    const projected = this.canvasPivot.clone().project(ctx.camera);
+    this.center.set((projected.x * 0.5 + 0.5) * rect.width, (-projected.y * 0.5 + 0.5) * rect.height);
+    this.active = true;
+    return true;
+  }
+
+  private updateCanvases(ctx: AppCtx, cur: THREE.Vector2): void {
+    if (this.kind === 'move') {
+      const rect = ctx.canvas.getBoundingClientRect();
+      const w0 = screenToWorld(ctx, this.startPointer.x + rect.left, this.startPointer.y + rect.top);
+      const w1 = screenToWorld(ctx, cur.x + rect.left, cur.y + rect.top);
+      if (!w0 || !w1) return;
+      let delta = w1.clone().sub(w0);
+      if (this.axis !== 'none') {
+        const keep = this.axis === 'x' ? 'x' : this.axis === 'y' ? 'y' : 'z';
+        delta = new THREE.Vector3(
+          keep === 'x' ? delta.x : 0, keep === 'y' ? delta.y : 0, keep === 'z' ? delta.z : 0,
+        );
+      }
+      for (const a of this.canvases) {
+        a.c.translation = [a.origT[0] + delta.x, a.origT[1] + delta.y, a.origT[2] + delta.z];
+      }
+    } else if (this.kind === 'rotate') {
+      const a0 = Math.atan2(this.startPointer.y - this.center.y, this.startPointer.x - this.center.x);
+      const a1 = Math.atan2(cur.y - this.center.y, cur.x - this.center.x);
+      const viewDir = ctx.camera.getWorldDirection(new THREE.Vector3());
+      const qd = new THREE.Quaternion().setFromAxisAngle(viewDir, -(a1 - a0));
+      for (const a of this.canvases) {
+        const pos = new THREE.Vector3(...a.origT).sub(this.canvasPivot).applyQuaternion(qd).add(this.canvasPivot);
+        a.c.translation = [pos.x, pos.y, pos.z];
+        const e = new THREE.Euler().setFromQuaternion(qd.clone().multiply(a.origQ));
+        a.c.rotation = [e.x, e.y, e.z];
+      }
+    } else if (this.kind === 'scale') {
+      const d0 = Math.max(4, this.startPointer.distanceTo(this.center));
+      const f = cur.distanceTo(this.center) / d0;
+      for (const a of this.canvases) {
+        const pos = new THREE.Vector3(...a.origT).sub(this.canvasPivot).multiplyScalar(f).add(this.canvasPivot);
+        a.c.translation = [pos.x, pos.y, pos.z];
+        a.c.size = [Math.max(0.05, a.origSize[0] * f), Math.max(0.05, a.origSize[1] * f)];
+      }
+    }
+    ctx.syncCanvases();
+  }
+
+  /** Magnet snapping for point moves: adjusts the delta so the selection median lands on the target. */
+  private snapDelta(ctx: AppCtx, delta: Vec3, pointer: THREE.Vector2): Vec3 {
+    const snap = ctx.settings.snap;
+    if (!snap.enabled) return delta;
+    const moved: Vec3 = [
+      this.centerLocal[0] + delta[0], this.centerLocal[1] + delta[1], this.centerLocal[2] + delta[2],
+    ];
+    let target: Vec3 | null = null;
+    if (snap.mode === 'INCREMENT') {
+      const g = ctx.settings.gridStep;
+      target = moved.map((v) => Math.round(v / g) * g) as Vec3;
+    } else if (snap.mode === 'POINT') {
+      const world = nearestStrokePoint(ctx, pointer.x, pointer.y, 40);
+      if (world) target = worldToObject(ctx, world);
+    } else if (snap.mode === 'CANVAS') {
+      const hit = pickCanvas(ctx, pointer.x, pointer.y);
+      if (hit) target = worldToObject(ctx, hit.point);
+    }
+    if (!target) return delta;
+    return [
+      delta[0] + target[0] - moved[0],
+      delta[1] + target[1] - moved[1],
+      delta[2] + target[2] - moved[2],
+    ];
+  }
+
   update(ctx: AppCtx, pointer: { x: number; y: number }): void {
     if (!this.active) return;
     const cur = new THREE.Vector2(pointer.x, pointer.y);
+    if (this.canvases.length) { this.updateCanvases(ctx, cur); return; }
     if (this.kind === 'move') {
       // move along the drawing plane via unprojection of both pointer positions
       const rect = ctx.canvas.getBoundingClientRect();
@@ -86,6 +186,7 @@ export class ModalTransform {
         const keep = this.axis === 'x' ? 0 : this.axis === 'y' ? 1 : 2;
         delta = delta.map((v, i) => (i === keep ? v : 0)) as Vec3;
       }
+      delta = this.snapDelta(ctx, delta, cur);
       for (const a of this.affected) {
         a.p.co = [a.orig[0] + delta[0] * a.weight, a.orig[1] + delta[1] * a.weight, a.orig[2] + delta[2] * a.weight];
       }
@@ -145,13 +246,22 @@ export class ModalTransform {
   confirm(ctx: AppCtx): void {
     this.active = false;
     this.affected = [];
+    this.canvases = [];
     ctx.requestRender();
   }
 
   cancel(ctx: AppCtx): void {
     for (const a of this.affected) a.p.co = a.orig;
+    for (const a of this.canvases) {
+      a.c.translation = [...a.origT] as Vec3;
+      const e = new THREE.Euler().setFromQuaternion(a.origQ);
+      a.c.rotation = [e.x, e.y, e.z];
+      a.c.size = [...a.origSize] as [number, number];
+    }
+    if (this.canvases.length) ctx.syncCanvases();
     this.active = false;
     this.affected = [];
+    this.canvases = [];
     ctx.requestRender();
   }
 }

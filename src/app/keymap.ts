@@ -37,6 +37,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'selectLess', label: 'Select less', combo: '-', category: 'Edit' },
   { id: 'delete', label: 'Delete selected', combo: 'x', category: 'Edit' },
   { id: 'duplicate', label: 'Duplicate', combo: 'shift+d', category: 'Edit' },
+  { id: 'toggleSnap', label: 'Toggle magnet snapping', combo: 'shift+tab', category: 'Edit' },
   { id: 'copy', label: 'Copy strokes', combo: 'ctrl+c', category: 'Edit' },
   { id: 'paste', label: 'Paste strokes', combo: 'ctrl+v', category: 'Edit' },
   // Animation
