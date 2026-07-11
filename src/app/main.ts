@@ -25,6 +25,8 @@ import { downloadScene, openSceneFile } from '../io/serialize';
 import { drawingPlane, nearestStrokePoint, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { Keymap, comboFromEvent } from './keymap';
+import { midi } from '../events/midi';
+import { wsLink } from '../events/ws';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
@@ -129,9 +131,13 @@ class App implements AppHandle {
       requestRender: () => this.gp.markDirty(),
       pushUndo: () => history.push(self.ctx.scene),
       replaceScene: (s: GPScene) => {
+        const prevWs = self.ctx.scene.io?.wsUrl;
         self.ctx.scene = s;
         this.gp.markDirty();
         this.syncCanvases();
+        if (s.io.wsUrl !== prevWs) {
+          s.io.wsUrl ? wsLink.connect(s.io.wsUrl) : wsLink.disconnect();
+        }
         this.ui?.refresh();
       },
       refreshUI: () => this.ui?.refresh(),
@@ -170,6 +176,17 @@ class App implements AppHandle {
 
     this.ui = new UI(this);
     (window as unknown as Record<string, unknown>).__tg = this; // debug/scripting handle
+
+    // event IO (P2): MIDI is async and optional; WS connects if configured
+    midi.init().then((ok) => {
+      if (ok) {
+        if (scene.io.midiInId) midi.setInput(scene.io.midiInId);
+        if (scene.io.midiOutId) midi.setOutput(scene.io.midiOutId);
+        this.ui.refresh();
+      }
+    });
+    wsLink.onStatus = () => this.ui?.refresh();
+    if (scene.io.wsUrl) wsLink.connect(scene.io.wsUrl);
     this.bindEvents(glCanvas);
     this.resize();
     requestAnimationFrame(() => this.loop());

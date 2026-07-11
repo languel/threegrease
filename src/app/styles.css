@@ -115,3 +115,8 @@ label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); 
 #app.presentation #sidebar,
 #app.presentation #timeline,
 #app.presentation #status { display: none; }
+#event-monitor {
+  font: 10px ui-monospace, monospace; color: var(--dim);
+  white-space: pre; overflow-x: auto; min-height: 40px;
+  background: var(--bg); border-radius: 4px; padding: 4px 6px;
+}

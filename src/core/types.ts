@@ -176,4 +176,6 @@ export interface GPScene {
   canvases: CanvasPlane[];
   cameras: GPCamera[];
   activeCamera: number;
+  /** event IO endpoints (P2) */
+  io: { wsUrl: string; midiInId: string | null; midiOutId: string | null };
 }

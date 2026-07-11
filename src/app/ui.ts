@@ -5,6 +5,9 @@ import { activeCam, activeLayer, activeObject, createLayer, createMaterial, clon
 import { ACTIONS, comboFromEvent, type Keymap } from './keymap';
 import { MODIFIERS, createModifier } from '../modifiers/index';
 import { BRUSH_PRESETS } from '../core/brushes';
+import { bus } from '../events/bus';
+import { midi } from '../events/midi';
+import { wsLink } from '../events/ws';
 import { EFFECT_DEFAULTS, createEffect } from '../fx/effects';
 import { interpolateFrame, interpolateSequence } from '../anim/interpolate';
 import * as ops from '../tools/editops';
@@ -160,6 +163,7 @@ export class UI {
       if (this.inspectorOpen && !this.inspectorEl?.contains(document.activeElement)) {
         this.rebuildInspector();
       }
+      this.refreshMonitor();
     }, 300);
   }
 
@@ -306,6 +310,7 @@ export class UI {
     side.append(this.modifiersPanel());
     side.append(this.effectsPanel());
     side.append(this.onionPanel());
+    side.append(this.ioPanel());
     void ob;
   }
 
@@ -912,6 +917,68 @@ export class UI {
     );
     overlay.append(dialog);
     document.body.append(overlay);
+  }
+
+  // ---------------------------------------------------------- events / IO
+
+  private monitorPaused = false;
+
+  private ioPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const io = ctx.scene.io;
+
+    const urlInput = el('input', { type: 'text', value: io.wsUrl, placeholder: 'ws://localhost:8765' }) as HTMLInputElement;
+    urlInput.style.width = '150px';
+    urlInput.onchange = () => { io.wsUrl = urlInput.value.trim(); };
+    const wsRow = el('div', { class: 'row' },
+      'WS', urlInput,
+      btn(wsLink.status === 'open' ? '● on' : wsLink.status === 'connecting' ? '… ' : 'Connect',
+        () => {
+          io.wsUrl = urlInput.value.trim();
+          if (wsLink.status === 'off' && io.wsUrl) wsLink.connect(io.wsUrl);
+          else wsLink.disconnect();
+          this.refresh();
+        },
+        { active: wsLink.status === 'open', title: 'Connect/disconnect the bridge (see bridge/README.md)' }),
+    );
+
+    const midiRows: Node[] = [];
+    if (midi.available) {
+      const mkSel = (ports: { id: string; name: string }[], cur: string | null, onPick: (id: string | null) => void) => {
+        const sel = el('select') as HTMLSelectElement;
+        sel.append(el('option', { value: '', text: '(all/default)' }));
+        for (const p of ports) sel.append(el('option', { value: p.id, text: p.name }));
+        sel.value = cur ?? '';
+        sel.onchange = () => onPick(sel.value || null);
+        return sel;
+      };
+      midiRows.push(
+        el('div', { class: 'row' }, 'MIDI in', mkSel(midi.inputs, midi.inputId, (id) => { midi.setInput(id); io.midiInId = id; })),
+        el('div', { class: 'row' }, 'MIDI out', mkSel(midi.outputs, midi.outputId, (id) => { midi.setOutput(id); io.midiOutId = id; })),
+      );
+    } else {
+      midiRows.push(el('div', { class: 'row', text: 'Web MIDI unavailable in this browser' }));
+    }
+
+    const monitor = el('div', { id: 'event-monitor' });
+    return panel('Events / IO',
+      wsRow, ...midiRows,
+      el('div', { class: 'row' },
+        btn(this.monitorPaused ? '▶ monitor' : '⏸ monitor', () => { this.monitorPaused = !this.monitorPaused; this.refresh(); }),
+        btn('test', () => bus.send('ui', '/ws/test', 1, 'hello'), { title: 'Emit a test event' }),
+      ),
+      monitor,
+    );
+  }
+
+  /** Called on the shared 300ms UI tick. */
+  refreshMonitor(): void {
+    if (this.monitorPaused) return;
+    const elMon = document.getElementById('event-monitor');
+    if (!elMon) return;
+    const rows = bus.history(10).map((e) =>
+      `${(e.time / 1000).toFixed(1)} ${e.source} ${e.address} ${e.args.map((a) => typeof a === 'number' ? +a.toFixed(3) : a).join(' ')}`);
+    elMon.textContent = rows.join('\n') || '(no events yet)';
   }
 
   // ------------------------------------------------------------ timeline

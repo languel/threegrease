@@ -87,6 +87,7 @@ export function createScene(): GPScene {
     canvases: [],
     cameras: [createDefaultCamera()],
     activeCamera: 0,
+    io: { wsUrl: '', midiInId: null, midiOutId: null },
   };
 }
 
