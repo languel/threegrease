@@ -165,6 +165,65 @@ export interface GPCamera {
   keys: GPCameraKey[];     // sorted by frame
 }
 
+// ---- Score system (P3): strokes as playable paths -------------------------
+
+export interface PathRef {
+  objectIndex: number;
+  layerId: number;
+  strokeId: number;
+}
+
+/** Message template: {x} {y} {z} {t} {id} {name} substitute at fire time. */
+export interface MsgTemplate {
+  address: string;
+  argExprs: string[];
+}
+
+export type LoopMode = 'LOOP' | 'PINGPONG' | 'ONCE';
+
+/** A playhead riding a stroke on its own clock (IanniX cursor). */
+export interface TGCursor {
+  id: number;
+  name: string;
+  path: PathRef;
+  speed: number;           // path lengths per second (negative = reverse)
+  phase: number;           // 0..1 position along the path
+  loop: LoopMode;
+  running: boolean;
+  rate: number;            // message emissions per second
+  messages: MsgTemplate[];
+  color: Vec3;
+}
+
+/** Fires when a cursor enters its radius (IanniX trigger). */
+export interface TGTrigger {
+  id: number;
+  name: string;
+  position: Vec3;          // world space
+  radius: number;
+  retrigger: boolean;      // false = fire once per cursor until scene reload
+  messages: MsgTemplate[];
+}
+
+/** A scene object riding a path on its own clock. */
+export interface TGAttachment {
+  id: number;
+  target: { kind: 'CANVAS' | 'CAMERA'; id: number }; // canvas id / camera index
+  path: PathRef;
+  speed: number;
+  phase: number;
+  loop: LoopMode;
+  running: boolean;
+  orient: 'NONE' | 'TANGENT';
+  offset: Vec3;
+}
+
+export interface TGScore {
+  cursors: TGCursor[];
+  triggers: TGTrigger[];
+  attachments: TGAttachment[];
+}
+
 export interface GPScene {
   objects: GPObject[];
   activeObject: number;
@@ -178,4 +237,5 @@ export interface GPScene {
   activeCamera: number;
   /** event IO endpoints (P2) */
   io: { wsUrl: string; midiInId: string | null; midiOutId: string | null };
+  score: TGScore;
 }

@@ -23,6 +23,7 @@ export function deserializeScene(json: string): GPScene {
   scene.cameras ??= legacy ? [{ ...createDefaultCamera(), ...legacy, name: 'Camera 1' }] : [createDefaultCamera()];
   scene.activeCamera ??= 0;
   scene.io ??= { wsUrl: '', midiInId: null, midiOutId: null };
+  scene.score ??= { cursors: [], triggers: [], attachments: [] };
   // v1 -> v2: strokes gain baked style
   for (const ob of scene.objects) {
     for (const layer of ob.layers) {

@@ -6,6 +6,8 @@ import { ACTIONS, comboFromEvent, type Keymap } from './keymap';
 import { MODIFIERS, createModifier } from '../modifiers/index';
 import { BRUSH_PRESETS } from '../core/brushes';
 import { bus } from '../events/bus';
+import { defaultCursor, scoreId } from '../score/engine';
+import type { PathRef } from '../core/types';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { EFFECT_DEFAULTS, createEffect } from '../fx/effects';
@@ -310,6 +312,7 @@ export class UI {
     side.append(this.modifiersPanel());
     side.append(this.effectsPanel());
     side.append(this.onionPanel());
+    side.append(this.scorePanel());
     side.append(this.ioPanel());
     void ob;
   }
@@ -917,6 +920,139 @@ export class UI {
     );
     overlay.append(dialog);
     document.body.append(overlay);
+  }
+
+  // --------------------------------------------------------------- score
+
+  /** First selected stroke across visible editable layers, as a PathRef. */
+  private selectedPathRef(): PathRef | null {
+    const { ctx } = this.app;
+    const obIndex = ctx.scene.activeObject;
+    const ob = activeObject(ctx.scene);
+    for (const layer of ob.layers) {
+      if (layer.hide) continue;
+      const f = frameAt(layer, ctx.scene.frame);
+      if (!f) continue;
+      for (const s of f.strokes) {
+        if (s.select || s.points.some((p) => p.select)) {
+          return { objectIndex: obIndex, layerId: layer.id, strokeId: s.id };
+        }
+      }
+    }
+    // fallback: last stroke of the active layer
+    const layer = activeLayer(ob);
+    const f = layer ? frameAt(layer, ctx.scene.frame) : null;
+    const s = f?.strokes.at(-1);
+    return layer && s ? { objectIndex: obIndex, layerId: layer.id, strokeId: s.id } : null;
+  }
+
+  private msgEditor(messages: { address: string; argExprs: string[] }[]): HTMLElement {
+    const { ctx } = this.app;
+    const m = messages[0];
+    const addr = el('input', { type: 'text', value: m?.address ?? '' }) as HTMLInputElement;
+    addr.style.width = '120px';
+    addr.onchange = () => { if (m) m.address = addr.value; };
+    const args = el('input', {
+      type: 'text', value: m?.argExprs.join(' ') ?? '',
+      title: 'space-separated; {x} {y} {z} {t} {id} {name} substitute',
+    }) as HTMLInputElement;
+    args.style.width = '90px';
+    args.onchange = () => { if (m) m.argExprs = args.value.split(/\s+/).filter(Boolean); };
+    void ctx;
+    return el('div', { class: 'row' }, '→', addr, args);
+  }
+
+  private scorePanel(): HTMLElement {
+    const { ctx } = this.app;
+    const sc = ctx.scene.score;
+    const items: Node[] = [];
+
+    for (const cur of sc.cursors) {
+      const body = el('div', { class: 'body' },
+        el('div', { class: 'row' },
+          btn(cur.running ? '⏸' : '▶', () => { cur.running = !cur.running; this.refresh(); }, { cls: 'icon-btn', active: cur.running }),
+          el('span', { class: 'grow', text: cur.name }),
+          btn('✕', () => { ctx.pushUndo(); sc.cursors.splice(sc.cursors.indexOf(cur), 1); this.refresh(); }, { cls: 'icon-btn' }),
+        ),
+        el('div', { class: 'row' },
+          numField('Speed', cur.speed, (v) => { cur.speed = v; }, 0.05),
+          numField('Rate', cur.rate, (v) => { cur.rate = Math.max(1, Math.round(v)); }, 1),
+          selectField('', cur.loop, [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { cur.loop = v as typeof cur.loop; }),
+        ),
+        this.msgEditor(cur.messages),
+      );
+      items.push(el('div', { class: 'panel' }, el('h3', { text: `🏃 ${cur.name}` }), body));
+    }
+
+    for (const trig of sc.triggers) {
+      const body = el('div', { class: 'body' },
+        el('div', { class: 'row' },
+          numField('Radius', trig.radius, (v) => { trig.radius = Math.max(0.01, v); }, 0.05),
+          checkbox('Retrigger', trig.retrigger, (v) => { trig.retrigger = v; }),
+          btn('✕', () => { ctx.pushUndo(); sc.triggers.splice(sc.triggers.indexOf(trig), 1); this.refresh(); }, { cls: 'icon-btn' }),
+        ),
+        this.msgEditor(trig.messages),
+      );
+      items.push(el('div', { class: 'panel' }, el('h3', { text: `◎ ${trig.name}` }), body));
+    }
+
+    for (const at of sc.attachments) {
+      const body = el('div', { class: 'body' },
+        el('div', { class: 'row' },
+          btn(at.running ? '⏸' : '▶', () => { at.running = !at.running; this.refresh(); }, { cls: 'icon-btn', active: at.running }),
+          numField('Speed', at.speed, (v) => { at.speed = v; }, 0.05),
+          selectField('', at.loop, [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { at.loop = v as typeof at.loop; }),
+          checkbox('Tangent', at.orient === 'TANGENT', (v) => { at.orient = v ? 'TANGENT' : 'NONE'; }),
+          btn('✕', () => { ctx.pushUndo(); sc.attachments.splice(sc.attachments.indexOf(at), 1); this.refresh(); }, { cls: 'icon-btn' }),
+        ),
+      );
+      items.push(el('div', { class: 'panel' },
+        el('h3', { text: `🔗 ${at.target.kind === 'CANVAS' ? 'Canvas' : 'Camera'} → path` }), body));
+    }
+
+    const attachTarget = el('select') as HTMLSelectElement;
+    for (const c of ctx.scene.canvases) attachTarget.append(el('option', { value: `CANVAS:${c.id}`, text: `Canvas: ${c.name}` }));
+    ctx.scene.cameras.forEach((cam, i) => attachTarget.append(el('option', { value: `CAMERA:${i}`, text: `Camera: ${cam.name}` })));
+
+    return panel('Score (cursors · triggers · paths)',
+      el('div', { class: 'row' },
+        btn('＋Cursor on stroke', () => {
+          const path = this.selectedPathRef();
+          if (!path) return;
+          ctx.pushUndo();
+          sc.cursors.push(defaultCursor(ctx.scene, path));
+          this.refresh();
+        }, { title: 'Attach a playhead to the selected (or last) stroke' }),
+        btn('＋Trigger at cursor', () => {
+          ctx.pushUndo();
+          const id = scoreId(ctx.scene);
+          sc.triggers.push({
+            id, name: `Trigger ${id}`, position: [...ctx.scene.cursor] as [number, number, number],
+            radius: 0.25, retrigger: true,
+            messages: [{ address: '/trigger/{id}', argExprs: ['1'] }],
+          });
+          this.refresh();
+        }, { title: 'Place a trigger sphere at the 3D cursor' }),
+      ),
+      el('div', { class: 'row' },
+        attachTarget,
+        btn('＋Attach to stroke', () => {
+          const path = this.selectedPathRef();
+          const val = attachTarget.value;
+          if (!path || !val) return;
+          const [kind, idStr] = val.split(':');
+          ctx.pushUndo();
+          sc.attachments.push({
+            id: scoreId(ctx.scene),
+            target: { kind: kind as 'CANVAS' | 'CAMERA', id: Number(idStr) },
+            path, speed: 0.1, phase: 0, loop: 'LOOP', running: true,
+            orient: 'TANGENT', offset: [0, 0, 0],
+          });
+          this.refresh();
+        }, { title: 'Ride the selected object along the selected stroke' }),
+      ),
+      ...items,
+    );
   }
 
   // ---------------------------------------------------------- events / IO

@@ -27,6 +27,7 @@ import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { Keymap, comboFromEvent } from './keymap';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
+import { ScoreEngine } from '../score/engine';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
@@ -91,6 +92,9 @@ class App implements AppHandle {
   lockCamToView = true;
   private camHelper!: THREE.Group; // root: one frustum child per scene camera
   readonly keymap = new Keymap();
+  readonly score = new ScoreEngine();
+  private scoreGroup = new THREE.Group(); // cursor + trigger glyphs
+  private scoreGlyphKey = '';
 
   constructor() {
     const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
@@ -128,7 +132,7 @@ class App implements AppHandle {
       canvasMeshes: [],
       syncCanvases: () => this.syncCanvases(),
       copyBuffer: [],
-      requestRender: () => this.gp.markDirty(),
+      requestRender: () => { this.gp.markDirty(); this.score.invalidate(); },
       pushUndo: () => history.push(self.ctx.scene),
       replaceScene: (s: GPScene) => {
         const prevWs = self.ctx.scene.io?.wsUrl;
@@ -155,6 +159,7 @@ class App implements AppHandle {
     this.scene3.add(this.cursorMarker);
     // a ground plane for SURFACE placement demos
     this.scene3.add(this.canvasGroup);
+    this.scene3.add(this.scoreGroup);
     this.axes = this.makeAxes();
     this.scene3.add(this.axes);
     this.applyUpAxis(true);
@@ -885,6 +890,51 @@ class App implements AppHandle {
     this.gp.markDirty();
   }
 
+  /** Cursor/trigger glyphs: rebuilt when the score roster changes, posed every frame. */
+  private syncScoreGlyphs(): void {
+    const sc = this.ctx.scene.score;
+    const key = `${sc.cursors.map((c) => c.id).join(',')}|${sc.triggers.map((t) => t.id).join(',')}`;
+    if (key !== this.scoreGlyphKey) {
+      this.scoreGlyphKey = key;
+      for (const child of [...this.scoreGroup.children]) {
+        this.scoreGroup.remove(child);
+        (child as THREE.Mesh).geometry?.dispose?.();
+        ((child as THREE.Mesh).material as THREE.Material)?.dispose?.();
+      }
+      for (const cur of sc.cursors) {
+        const mesh = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.06),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(...cur.color), depthTest: false }),
+        );
+        mesh.renderOrder = 15000;
+        mesh.userData.cursorId = cur.id;
+        this.scoreGroup.add(mesh);
+      }
+      for (const trig of sc.triggers) {
+        const mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(1, 12, 8),
+          new THREE.MeshBasicMaterial({ color: 0x58c0d0, wireframe: true, transparent: true, opacity: 0.35 }),
+        );
+        mesh.userData.triggerId = trig.id;
+        this.scoreGroup.add(mesh);
+      }
+    }
+    for (const child of this.scoreGroup.children) {
+      if (child.userData.cursorId !== undefined) {
+        const state = this.score.states.get(child.userData.cursorId);
+        child.visible = !!state?.valid;
+        if (state?.valid) child.position.copy(state.position);
+      } else if (child.userData.triggerId !== undefined) {
+        const trig = sc.triggers.find((t) => t.id === child.userData.triggerId);
+        child.visible = !!trig && !this.presentation; // triggers hidden on stage
+        if (trig) {
+          child.position.set(...trig.position);
+          child.scale.setScalar(trig.radius);
+        }
+      }
+    }
+  }
+
   private makeCursorMarker(): THREE.Group {
     const g = new THREE.Group();
     const mat = new THREE.LineBasicMaterial({ color: 0xd05555, depthTest: false });
@@ -928,7 +978,14 @@ class App implements AppHandle {
 
     if (this.cameraView) {
       const camData = activeCam(ctx.scene);
-      if (this.player.playing || !this.lockCamToView) {
+      const cameraDriven = ctx.scene.score.attachments.some((a) =>
+        a.running && a.target.kind === 'CAMERA'
+        && (ctx.scene.cameras[a.target.id] ?? activeCam(ctx.scene)) === camData);
+      if (cameraDriven) {
+        // an attachment owns the camera: apply its transform to the view
+        this.camera.position.set(...camData.translation);
+        this.camera.quaternion.setFromEuler(new THREE.Euler(...camData.rotation));
+      } else if (this.player.playing || !this.lockCamToView) {
         // keyframes drive the view
         const pose = evalCamera(camData, ctx.scene.frame);
         this.camera.position.copy(pose.position);
@@ -948,6 +1005,13 @@ class App implements AppHandle {
     }
     this.syncCameraHelpers();
     if (!this.nav.flying) this.controls.update();
+
+    // score engine: cursors/triggers/attachments run on their own clocks
+    this.score.update(ctx.scene, dt, now);
+    this.syncScoreGlyphs();
+    if (ctx.scene.score.attachments.some((a) => a.running && a.target.kind === 'CANVAS')) {
+      this.syncCanvases();
+    }
 
     if (this.player.tick(ctx.scene)) {
       this.gp.markDirty();
