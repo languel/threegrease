@@ -28,6 +28,7 @@ export class DrawTool implements Tool {
   id = 'draw';
   cursor = 'crosshair';
   private stroke: GPStroke | null = null;
+  private layerId: number | null = null;
   private stabPos: THREE.Vector2 | null = null;
   private startScreen: THREE.Vector2 | null = null;
   private guideCenter = new THREE.Vector2();
@@ -42,6 +43,7 @@ export class DrawTool implements Tool {
     s.style = { ...b.style };
     target.frame.strokes.push(s);
     this.stroke = s;
+    this.layerId = target.layer.id;
     setStrokeExclusion(s.id);
     this.stabPos = new THREE.Vector2(e.x, e.y);
     this.startScreen = null;
@@ -53,7 +55,7 @@ export class DrawTool implements Tool {
   onMove(ctx: AppCtx, e: ToolEvent): void {
     if (!this.stroke) return;
     this.addPoint(ctx, e);
-    ctx.requestRender();
+    ctx.requestRender(this.layerId ?? undefined); // hot path: this layer only
   }
 
   onUp(ctx: AppCtx): void {

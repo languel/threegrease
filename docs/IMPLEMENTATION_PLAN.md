@@ -321,6 +321,12 @@ using only routes UI (no code).
 Measure with a scripted scene (`window.__tg` eval) before/after; record
 numbers in this file.
 
+**Status (2026-07): items 1 shipped** — per-layer cached groups in
+GPSceneRenderer with `markDirty(layerId?)`; drawing + string sim use the
+scoped path. Measured on a 19,200-point scene: full rebuild 27.6 ms,
+single-layer 2.7 ms (10.2x). Items 2-4 (append-only in-progress buffer,
+worker fill, stamp instancing) remain open for a future pass.
+
 ---
 
 ## Cross-cutting tasks (do alongside phases)

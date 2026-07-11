@@ -17,6 +17,8 @@ export class StringSim {
   iterations = 2;
   stiffness = 0.02;      // pull back toward home shape
   enabled = false;
+  /** layer touched by the last step — pass to requestRender for the fast path */
+  lastLayerId: number | null = null;
   private states = new Map<number, ChainState>();
 
   reset(): void { this.states.clear(); }
@@ -48,6 +50,7 @@ export class StringSim {
     const ob = activeObject(scene);
     const layer = ob.layers.find((l) => l.name === this.layerName);
     if (!layer) return false;
+    this.lastLayerId = layer.id;
     const frame = frameAt(layer, scene.frame);
     if (!frame) return false;
     const attractors = scene.attractors;

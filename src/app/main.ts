@@ -137,7 +137,10 @@ class App implements AppHandle {
       canvasMeshes: [],
       syncCanvases: () => this.syncCanvases(),
       copyBuffer: [],
-      requestRender: () => { this.gp.markDirty(); this.score.invalidate(); },
+      requestRender: (layerId?: number) => {
+        this.gp.markDirty(layerId);
+        this.score.invalidate();
+      },
       pushUndo: () => history.push(self.ctx.scene),
       replaceScene: (s: GPScene) => {
         const prevWs = self.ctx.scene.io?.wsUrl;
@@ -1040,7 +1043,7 @@ class App implements AppHandle {
     // score engine: cursors/triggers/attachments run on their own clocks
     this.score.update(ctx.scene, dt, now);
     this.syncScoreGlyphs();
-    if (this.sim.step(ctx.scene, dt)) ctx.requestRender();
+    if (this.sim.step(ctx.scene, dt)) ctx.requestRender(this.sim.lastLayerId ?? undefined);
     this.splats.sync(ctx.scene);
     if (ctx.scene.score.attachments.some((a) => a.running && a.target.kind === 'CANVAS')) {
       this.syncCanvases();

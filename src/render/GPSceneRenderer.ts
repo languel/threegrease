@@ -3,7 +3,7 @@ import type { GPLayer, GPObject, GPScene, GPStroke, Vec3 } from '../core/types';
 import { frameAt, keyframeIndexAt } from '../core/gpdata';
 import { evaluateModifiers, remapTime } from '../modifiers/index';
 import { buildFillGeometry, buildStrokeGeometry, type BuildOptions } from './geometry';
-import { applyBlendMode, makeFillMaterial, makeStrokeMaterial } from './materials';
+import { makeFillMaterial, makeStrokeMaterial } from './materials';
 
 export type EditorMode = 'DRAW' | 'EDIT' | 'SCULPT' | 'VERTEX' | 'WEIGHT';
 
@@ -14,97 +14,152 @@ export interface RenderState {
   selectMode: 'POINT' | 'STROKE';
 }
 
+interface LayerCacheEntry {
+  group: THREE.Group;
+  disposables: { dispose(): void }[];
+}
+
 /**
- * Syncs GPScene data -> three.js meshes. Full rebuild on demand (call
- * markDirty() after mutations); geometry is cheap to rebuild at sketch scale.
+ * Syncs GPScene data -> three.js meshes with per-layer granularity (P10):
+ * markDirty() rebuilds everything, markDirty(layerId) rebuilds only that
+ * layer's cached group — the hot path while drawing/simulating.
  */
 export class GPSceneRenderer {
   readonly root = new THREE.Group();
   readonly resolution = new THREE.Vector2(1, 1);
-  private dirty = true;
+  private dirtyAll = true;
+  private dirtyLayers = new Set<number>();
   /** Groups per GP object, exposed for the effects pipeline. */
   readonly objectGroups: THREE.Group[] = [];
-  private disposables: { dispose(): void }[] = [];
-  private stencilCounter = 1;
+  private layerCache = new Map<number, LayerCacheEntry>();
 
-  markDirty(): void { this.dirty = true; }
-  get needsRebuild(): boolean { return this.dirty; }
+  markDirty(layerId?: number): void {
+    if (layerId === undefined) this.dirtyAll = true;
+    else this.dirtyLayers.add(layerId);
+  }
+
+  get needsRebuild(): boolean { return this.dirtyAll || this.dirtyLayers.size > 0; }
 
   setSize(w: number, h: number): void { this.resolution.set(w, h); }
 
-  update(scene: GPScene, state: RenderState): void {
-    if (!this.dirty) return;
-    this.dirty = false;
-    this.stencilCounter = 1;
-    for (const d of this.disposables) d.dispose();
-    this.disposables.length = 0;
-    this.root.clear();
-    this.objectGroups.length = 0;
-
-    scene.objects.forEach((ob, obIndex) => {
-      const group = new THREE.Group();
-      group.position.set(...ob.translation);
-      group.rotation.set(...ob.rotation);
-      group.scale.set(...ob.scale);
-      group.userData.gpObject = obIndex;
-      this.buildObject(ob, scene, state, group, obIndex);
-      this.root.add(group);
-      this.objectGroups.push(group);
-    });
+  private disposeEntry(entry: LayerCacheEntry): void {
+    for (const d of entry.disposables) d.dispose();
+    entry.group.removeFromParent();
+    entry.group.clear();
   }
 
-  private buildObject(
-    ob: GPObject, scene: GPScene, state: RenderState, group: THREE.Group, obIndex: number,
-  ): void {
-    const isActive = obIndex === scene.activeObject;
-    const baseOrder = obIndex * 1000;
+  update(scene: GPScene, state: RenderState): void {
+    if (!this.needsRebuild) return;
 
-    ob.layers.forEach((layer, li) => {
-      if (layer.hide) return;
-      const order = baseOrder + li * 8;
-
-      // --- onion skins (under the real frame) ---
-      if (ob.onion.enabled && layer.useOnion && isActive && !state.playing) {
-        this.buildOnion(ob, layer, scene.frame, group, order);
-      }
-
-      // --- current frame, modifier-evaluated ---
-      const sampleFrame = remapTime(ob, layer, scene.frame);
-      const kf = frameAt(layer, sampleFrame);
-      if (!kf) return;
-      const strokes = evaluateModifiers(kf.strokes, ob, layer, scene.frame, kf.frameNumber);
-      const opts: BuildOptions = {
-        layerOpacity: layer.opacity,
-        tint: layer.tint,
-        thicknessOffset: layer.thicknessOffset,
-        background: state.background,
-      };
-      const meshes = this.buildLayerMeshes(strokes, ob, layer, opts, order + 4);
-      let stencilRef = 0;
-      if (layer.useMask && layer.maskLayerIds.length) {
-        stencilRef = this.buildMaskWriters(ob, layer, scene, state, group, order + 2);
-        if (stencilRef > 0) {
-          for (const m of meshes) {
-            const mat = m.material as THREE.Material;
-            mat.stencilWrite = true;
-            mat.stencilRef = stencilRef;
-            mat.stencilFunc = THREE.EqualStencilFunc;
-            mat.stencilZPass = THREE.KeepStencilOp;
+    // masked layers depend on their mask sources
+    if (!this.dirtyAll && this.dirtyLayers.size) {
+      for (const ob of scene.objects) {
+        for (const layer of ob.layers) {
+          if (layer.useMask && layer.maskLayerIds.some((id) => this.dirtyLayers.has(id))) {
+            this.dirtyLayers.add(layer.id);
           }
         }
       }
-      for (const m of meshes) group.add(m);
+    }
 
-      // --- edit overlays for the active layer set ---
-      if (isActive && state.mode !== 'DRAW' && !layer.lock) {
-        const overlay = this.buildOverlay(kf.strokes, layer, state, order + 7);
-        if (overlay) group.add(overlay);
+    if (this.dirtyAll) {
+      for (const entry of this.layerCache.values()) this.disposeEntry(entry);
+      this.layerCache.clear();
+      this.root.clear();
+      this.objectGroups.length = 0;
+    }
+
+    scene.objects.forEach((ob, obIndex) => {
+      let group = this.objectGroups[obIndex];
+      if (!group) {
+        group = new THREE.Group();
+        group.userData.gpObject = obIndex;
+        this.root.add(group);
+        this.objectGroups[obIndex] = group;
       }
+      group.position.set(...ob.translation);
+      group.rotation.set(...ob.rotation);
+      group.scale.set(...ob.scale);
+
+      ob.layers.forEach((layer, li) => {
+        const cached = this.layerCache.get(layer.id);
+        const needsBuild = this.dirtyAll || !cached || this.dirtyLayers.has(layer.id);
+        if (!needsBuild) return;
+        if (cached) {
+          this.disposeEntry(cached);
+          this.layerCache.delete(layer.id);
+        }
+        const entry: LayerCacheEntry = { group: new THREE.Group(), disposables: [] };
+        entry.group.userData.layerId = layer.id;
+        if (!layer.hide) {
+          this.buildLayer(ob, scene, state, obIndex, layer, li, entry);
+        }
+        group.add(entry.group);
+        this.layerCache.set(layer.id, entry);
+      });
     });
+
+    // drop cache for layers that no longer exist
+    const liveIds = new Set(scene.objects.flatMap((o) => o.layers.map((l) => l.id)));
+    for (const [id, entry] of this.layerCache) {
+      if (!liveIds.has(id)) {
+        this.disposeEntry(entry);
+        this.layerCache.delete(id);
+      }
+    }
+
+    this.dirtyAll = false;
+    this.dirtyLayers.clear();
+  }
+
+  /** Everything one layer contributes: onion ghosts, meshes, masks, overlay. */
+  private buildLayer(
+    ob: GPObject, scene: GPScene, state: RenderState,
+    obIndex: number, layer: GPLayer, li: number, entry: LayerCacheEntry,
+  ): void {
+    const isActive = obIndex === scene.activeObject;
+    const order = obIndex * 1000 + li * 8;
+
+    if (ob.onion.enabled && layer.useOnion && isActive && !state.playing) {
+      this.buildOnion(ob, layer, scene.frame, entry, order);
+    }
+
+    const sampleFrame = remapTime(ob, layer, scene.frame);
+    const kf = frameAt(layer, sampleFrame);
+    if (!kf) return;
+    const strokes = evaluateModifiers(kf.strokes, ob, layer, scene.frame, kf.frameNumber);
+    const opts: BuildOptions = {
+      layerOpacity: layer.opacity,
+      tint: layer.tint,
+      thicknessOffset: layer.thicknessOffset,
+      background: state.background,
+    };
+    const meshes = this.buildLayerMeshes(strokes, ob, layer, opts, order + 4, entry);
+    if (layer.useMask && layer.maskLayerIds.length) {
+      // stable stencil ref per layer (cached rebuilds must not collide)
+      const ref = (layer.id % 250) + 1;
+      const wrote = this.buildMaskWriters(ob, layer, scene, state, entry, order + 2, ref);
+      if (wrote) {
+        for (const m of meshes) {
+          const mat = m.material as THREE.Material;
+          mat.stencilWrite = true;
+          mat.stencilRef = ref;
+          mat.stencilFunc = THREE.EqualStencilFunc;
+          mat.stencilZPass = THREE.KeepStencilOp;
+        }
+      }
+    }
+    for (const m of meshes) entry.group.add(m);
+
+    if (isActive && state.mode !== 'DRAW' && !layer.lock) {
+      const overlay = this.buildOverlay(kf.strokes, layer, state, order + 7, entry);
+      if (overlay) entry.group.add(overlay);
+    }
   }
 
   private buildLayerMeshes(
-    strokes: GPStroke[], ob: GPObject, layer: GPLayer, opts: BuildOptions, order: number,
+    strokes: GPStroke[], ob: GPObject, layer: GPLayer, opts: BuildOptions,
+    order: number, entry: LayerCacheEntry,
   ): THREE.Mesh[] {
     const meshes: THREE.Mesh[] = [];
     const layerMatrix = new THREE.Matrix4().compose(
@@ -120,7 +175,7 @@ export class GPSceneRenderer {
       mesh.renderOrder = order;
       mesh.applyMatrix4(layerMatrix);
       mesh.frustumCulled = false;
-      this.disposables.push(fillGeom, mat);
+      entry.disposables.push(fillGeom, mat);
       meshes.push(mesh);
     }
     const strokeGeom = buildStrokeGeometry(strokes, ob.materials, opts);
@@ -130,7 +185,7 @@ export class GPSceneRenderer {
       mesh.renderOrder = order + 1;
       mesh.applyMatrix4(layerMatrix);
       mesh.frustumCulled = false;
-      this.disposables.push(strokeGeom, mat);
+      entry.disposables.push(strokeGeom, mat);
       meshes.push(mesh);
     }
     return meshes;
@@ -139,10 +194,8 @@ export class GPSceneRenderer {
   /** Renders mask layers' geometry into the stencil buffer (color off). */
   private buildMaskWriters(
     ob: GPObject, layer: GPLayer, scene: GPScene, state: RenderState,
-    group: THREE.Group, order: number,
-  ): number {
-    const ref = this.stencilCounter++;
-    if (ref > 250) return 0;
+    entry: LayerCacheEntry, order: number, ref: number,
+  ): boolean {
     let wrote = false;
     for (const maskId of layer.maskLayerIds) {
       const maskLayer = ob.layers.find((l) => l.id === maskId);
@@ -168,16 +221,16 @@ export class GPSceneRenderer {
         const mesh = new THREE.Mesh(geom, mat);
         mesh.renderOrder = order;
         mesh.frustumCulled = false;
-        this.disposables.push(geom, mat);
-        group.add(mesh);
+        entry.disposables.push(geom, mat);
+        entry.group.add(mesh);
         wrote = true;
       }
     }
-    return wrote ? ref : 0;
+    return wrote;
   }
 
   private buildOnion(
-    ob: GPObject, layer: GPLayer, frame: number, group: THREE.Group, order: number,
+    ob: GPObject, layer: GPLayer, frame: number, entry: LayerCacheEntry, order: number,
   ): void {
     const { mode, before, after, colorBefore, colorAfter, opacity } = ob.onion;
     const ghosts: { kfIndex: number; dist: number; isBefore: boolean }[] = [];
@@ -212,21 +265,21 @@ export class GPSceneRenderer {
         background: [0, 0, 0],
         colorOverride: { color: g.isBefore ? colorBefore : colorAfter, opacity: opacity * fade },
       };
-      const meshes = this.buildLayerMeshes(kf.strokes, ob, layer, opts, order);
-      for (const m of meshes) group.add(m);
+      const meshes = this.buildLayerMeshes(kf.strokes, ob, layer, opts, order, entry);
+      for (const m of meshes) entry.group.add(m);
     }
   }
 
   /** Point/selection overlay for edit-family modes. */
   private buildOverlay(
     strokes: GPStroke[], layer: GPLayer, state: RenderState, order: number,
+    entry: LayerCacheEntry,
   ): THREE.Points | null {
     const pos: number[] = [], col: number[] = [];
     for (const s of strokes) {
       for (const p of s.points) {
         pos.push(...p.co);
         if (state.mode === 'WEIGHT') {
-          // blue (0) -> green (0.5) -> red (1)
           const w = p.weight;
           col.push(Math.min(1, w * 2), 1 - Math.abs(w - 0.5) * 2 < 0 ? 0 : 1 - Math.abs(w - 0.5) * 2, Math.min(1, (1 - w) * 2));
         } else if (p.select || (state.selectMode === 'STROKE' && s.select)) {
@@ -252,7 +305,7 @@ export class GPSceneRenderer {
     points.applyMatrix4(layerMatrix);
     points.renderOrder = order;
     points.frustumCulled = false;
-    this.disposables.push(geom, mat);
+    entry.disposables.push(geom, mat);
     return points;
   }
 }

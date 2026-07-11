@@ -100,7 +100,8 @@ export interface AppCtx {
   canvasMeshes: THREE.Object3D[];
   syncCanvases(): void;
   copyBuffer: GPStroke[];
-  requestRender(): void;
+  /** mark for rebuild; pass a layerId for the cheap single-layer path (P10) */
+  requestRender(layerId?: number): void;
   pushUndo(): void;
   replaceScene(s: GPScene): void;
   refreshUI(): void;
