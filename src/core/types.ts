@@ -14,6 +14,18 @@ export interface GPPoint {
 }
 
 export type LineMode = 'LINE' | 'DOTS' | 'SQUARES';
+
+/** Baked per-stroke brush appearance (NPR engine). Never read live brush settings at render time. */
+export interface StrokeStyle {
+  unit: 'VIEW' | 'SCENE';   // px width vs world-space width
+  stamp: boolean;           // false = solid ribbon
+  spacing: number;          // stamp interval as fraction of width
+  angle: number;            // stamp rotation offset (rad), added to path direction
+  aspect: number;           // stamp squash (0.1..1)
+  jitter: number;           // 0..1 positional/rotational randomness
+  grain: number;            // 0..1 procedural noise masking
+  grainScale: number;       // noise frequency
+}
 export type FillStyle = 'SOLID' | 'GRADIENT_LINEAR' | 'GRADIENT_RADIAL';
 
 export interface GPStroke {
@@ -21,10 +33,11 @@ export interface GPStroke {
   points: GPPoint[];
   cyclic: boolean;
   materialIndex: number;
-  lineWidth: number;       // base thickness in screen px
+  lineWidth: number;       // thickness: px when style.unit=VIEW, world units when SCENE
   hardness: number;        // 0..1 edge softness
   fillVertexColor: Vec4;   // alpha 0 = use material fill
   select: boolean;
+  style: StrokeStyle;
 }
 
 export type KeyframeType = 'KEYFRAME' | 'BREAKDOWN' | 'EXTREME' | 'JITTER' | 'MOVING_HOLD';

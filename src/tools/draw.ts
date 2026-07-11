@@ -9,6 +9,11 @@ import type { AppCtx } from './context';
 import { applyGuide, eventToCanvas, objectToScreen, screenToWorld, setStrokeExclusion, worldToObject } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 
+/** Brush size → stroke lineWidth: px for VIEW, world units (size/100) for SCENE. */
+export function brushWidth(b: AppCtx['settings']['brush']): number {
+  return b.style.unit === 'SCENE' ? b.size / 100 : b.size;
+}
+
 function drawTarget(ctx: AppCtx) {
   const ob = activeObject(ctx.scene);
   const layer = activeLayer(ob);
@@ -32,8 +37,9 @@ export class DrawTool implements Tool {
     if (!target) return;
     ctx.pushUndo();
     const b = ctx.settings.brush;
-    const s = createStroke(target.ob.activeMaterial, b.size);
+    const s = createStroke(target.ob.activeMaterial, brushWidth(b));
     s.hardness = b.hardness;
+    s.style = { ...b.style };
     target.frame.strokes.push(s);
     this.stroke = s;
     setStrokeExclusion(s.id);

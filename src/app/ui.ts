@@ -4,6 +4,7 @@ import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, Li
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import { ACTIONS, comboFromEvent, type Keymap } from './keymap';
 import { MODIFIERS, createModifier } from '../modifiers/index';
+import { BRUSH_PRESETS } from '../core/brushes';
 import { EFFECT_DEFAULTS, createEffect } from '../fx/effects';
 import { interpolateFrame, interpolateSequence } from '../anim/interpolate';
 import * as ops from '../tools/editops';
@@ -188,12 +189,27 @@ export class UI {
 
     if (s.mode === 'DRAW') {
       bar.append(
-        slider('Radius', s.brush.size, 1, 60, 1, (v) => { s.brush.size = v; }),
+        selectField('Brush', s.brush.preset,
+          BRUSH_PRESETS.map((p) => [p.name, p.name]) as [string, string][],
+          (name) => {
+            const p = BRUSH_PRESETS.find((x) => x.name === name);
+            if (!p) return;
+            s.brush.preset = p.name;
+            s.brush.size = p.size;
+            s.brush.strength = p.strength;
+            s.brush.hardness = p.hardness;
+            s.brush.style = { ...p.style };
+            this.refresh();
+          }),
+        slider('Size', s.brush.size, 1, 80, 1, (v) => { s.brush.size = v; }),
         slider('Strength', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }),
         selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['STROKE', 'Stroke']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
+        ...(s.placement === 'SURFACE' ? [
+          numField('Offset', s.surfaceOffset, (v) => { s.surfaceOffset = v; }, 0.01),
+        ] : []),
         selectField('Plane', s.plane, (s.upAxis === 'Z'
-          ? [['VIEW', 'View'], ['FRONT', 'Front (X·Z)'], ['SIDE', 'Side (Y·Z)'], ['TOP', 'Top (X·Y)']]
-          : [['VIEW', 'View'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)']]) as [PlaneMode, string][],
+          ? [['VIEW', 'View'], ['FRONT', 'Front (X·Z)'], ['SIDE', 'Side (Y·Z)'], ['TOP', 'Top (X·Y)'], ['CURSOR', 'Cursor']]
+          : [['VIEW', 'View'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)'], ['CURSOR', 'Cursor']]) as [PlaneMode, string][],
         (v) => { s.plane = v; }),
         ...(s.placement === 'STROKE' ? [
           selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][], (v) => { s.strokeTarget = v; }),
@@ -282,6 +298,7 @@ export class UI {
     const side = $('sidebar');
     side.replaceChildren();
 
+    if (ctx.settings.mode === 'DRAW') side.append(this.brushPanel());
     side.append(this.layersPanel());
     side.append(this.materialsPanel());
     side.append(this.canvasesPanel());
@@ -290,6 +307,38 @@ export class UI {
     side.append(this.effectsPanel());
     side.append(this.onionPanel());
     void ob;
+  }
+
+  /** Blender-style brush Advanced panel; edits are baked into future strokes only. */
+  private brushPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const b = ctx.settings.brush;
+    const st = b.style;
+    return panel('Brush — Advanced',
+      el('div', { class: 'row' },
+        selectField('Size unit', st.unit, [['VIEW', 'View (px)'], ['SCENE', 'Scene (world)']],
+          (v) => { st.unit = v as 'VIEW' | 'SCENE'; }),
+        checkbox('Stamp', st.stamp, (v) => { st.stamp = v; }),
+      ),
+      slider('Hardness', b.hardness, 0.05, 1, 0.01, (v) => { b.hardness = v; }),
+      slider('Spacing', st.spacing, 0.03, 1, 0.01, (v) => { st.spacing = v; }),
+      slider('Angle', st.angle, -Math.PI, Math.PI, 0.05, (v) => { st.angle = v; }),
+      slider('Aspect', st.aspect, 0.1, 1, 0.01, (v) => { st.aspect = v; }),
+      slider('Jitter', st.jitter, 0, 1, 0.01, (v) => { st.jitter = v; }),
+      slider('Grain', st.grain, 0, 1, 0.01, (v) => { st.grain = v; }),
+      slider('Grain scale', st.grainScale, 1, 30, 0.5, (v) => { st.grainScale = v; }),
+      el('div', { class: 'row' },
+        slider('Active smooth', b.activeSmooth, 0, 0.8, 0.02, (v) => { b.activeSmooth = v; }),
+      ),
+      el('div', { class: 'row' },
+        slider('Post smooth', b.postSmooth, 0, 1, 0.02, (v) => { b.postSmooth = v; }),
+        numField('Simplify', b.simplify, (v) => { b.simplify = Math.max(0, v); }, 0.001),
+      ),
+      el('div', { class: 'row' },
+        checkbox('Stabilize', b.stabilize, (v) => { b.stabilize = v; }),
+        slider('Radius', b.stabilizeRadius, 5, 120, 1, (v) => { b.stabilizeRadius = v; }),
+      ),
+    );
   }
 
   private layersPanel(): HTMLElement {

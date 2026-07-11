@@ -196,7 +196,7 @@ function strokeDepthPoint(ctx: AppCtx, ray: THREE.Ray, screenX: number, screenY:
 /** The plane strokes are placed on, per placement + orientation settings. */
 export function drawingPlane(ctx: AppCtx): THREE.Plane {
   const s = ctx.settings;
-  const anchor = s.placement === 'CURSOR'
+  const anchor = s.placement === 'CURSOR' || s.plane === 'CURSOR'
     ? new THREE.Vector3(...ctx.scene.cursor)
     : new THREE.Vector3(...activeObject(ctx.scene).translation);
   let normal: THREE.Vector3;
@@ -207,7 +207,8 @@ export function drawingPlane(ctx: AppCtx): THREE.Plane {
     case 'FRONT': normal = zUp ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1); break;
     case 'SIDE': normal = new THREE.Vector3(1, 0, 0); break;
     case 'TOP': normal = zUp ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0); break;
-    default: normal = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
+    default: // VIEW and CURSOR: view-aligned (CURSOR differs only by anchor)
+      normal = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
   }
   return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor);
 }
@@ -221,20 +222,31 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
   );
   raycaster.setFromCamera(ndc, ctx.camera);
   if (ctx.settings.placement === 'SURFACE' && ctx.surfaces.length) {
+    const lift = (point: THREE.Vector3, normal: THREE.Vector3) => {
+      const off = ctx.settings.surfaceOffset;
+      if (!off) return point;
+      const n = normal.clone();
+      if (n.dot(raycaster.ray.direction) > 0) n.negate(); // toward the camera
+      return point.addScaledVector(n, off);
+    };
+    const hitNormal = (h: THREE.Intersection) =>
+      (h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
+        : raycaster.ray.direction.clone().negate());
     const hits = raycaster.intersectObjects(ctx.surfaces, true);
     if (excludedStrokeId !== null && drawingSurface) {
       // sticky: the stroke stays on the surface it started on; when the
       // pointer leaves its bounds, extend along that surface's plane
       const hit = hits.find((h) => ownedBy(h.object, drawingSurface!));
-      if (hit) return hit.point.clone();
+      if (hit) return lift(hit.point.clone(), hitNormal(hit));
+      const plane = surfacePlane(drawingSurface);
       const out = new THREE.Vector3();
-      if (raycaster.ray.intersectPlane(surfacePlane(drawingSurface), out)) return out;
+      if (raycaster.ray.intersectPlane(plane, out)) return lift(out, plane.normal);
     } else if (hits.length) {
       if (excludedStrokeId !== null) {
         // remember the top-level surface this stroke started on
         drawingSurface = ctx.surfaces.find((s) => ownedBy(hits[0].object, s)) ?? hits[0].object;
       }
-      return hits[0].point.clone();
+      return lift(hits[0].point.clone(), hitNormal(hits[0]));
     }
   }
   if (ctx.settings.placement === 'STROKE') {

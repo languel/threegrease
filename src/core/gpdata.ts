@@ -1,6 +1,7 @@
 import type {
   GPCamera, GPFrame, GPLayer, GPMaterial, GPObject, GPPoint, GPScene, GPStroke, Vec3, Vec4,
 } from './types';
+import { defaultStyle } from './brushes';
 
 let nextId = 1;
 export function genId(): number { return nextId++; }
@@ -26,6 +27,7 @@ export function createStroke(materialIndex: number, lineWidth: number): GPStroke
   return {
     id: genId(), points: [], cyclic: false, materialIndex, lineWidth,
     hardness: 1, fillVertexColor: [0, 0, 0, 0], select: false,
+    style: defaultStyle(),
   };
 }
 
@@ -134,7 +136,11 @@ export function clonePoint(p: GPPoint): GPPoint {
   return { co: [...p.co] as Vec3, pressure: p.pressure, strength: p.strength, vertexColor: [...p.vertexColor] as Vec4, select: p.select, weight: p.weight };
 }
 export function cloneStroke(s: GPStroke): GPStroke {
-  return { ...s, id: genId(), points: s.points.map(clonePoint), fillVertexColor: [...s.fillVertexColor] as Vec4 };
+  return {
+    ...s, id: genId(), points: s.points.map(clonePoint),
+    fillVertexColor: [...s.fillVertexColor] as Vec4,
+    style: { ...(s.style ?? defaultStyle()) },
+  };
 }
 export function cloneFrame(f: GPFrame): GPFrame {
   return { ...f, strokes: f.strokes.map(cloneStroke) };

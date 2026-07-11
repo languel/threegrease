@@ -1,8 +1,9 @@
 import type { GPScene } from '../core/types';
 import { bumpIdCounter, createDefaultCamera } from '../core/gpdata';
+import { defaultStyle } from '../core/brushes';
 
 const FORMAT = 'threegrease-scene';
-const VERSION = 1;
+const VERSION = 2; // v2: StrokeStyle on strokes, canvases select/drawTarget
 
 export function serializeScene(scene: GPScene): string {
   return JSON.stringify({ format: FORMAT, version: VERSION, scene }, null, 0);
@@ -21,6 +22,14 @@ export function deserializeScene(json: string): GPScene {
   const legacy = (scene as unknown as { camera?: import('../core/types').GPCamera }).camera;
   scene.cameras ??= legacy ? [{ ...createDefaultCamera(), ...legacy, name: 'Camera 1' }] : [createDefaultCamera()];
   scene.activeCamera ??= 0;
+  // v1 -> v2: strokes gain baked style
+  for (const ob of scene.objects) {
+    for (const layer of ob.layers) {
+      for (const f of layer.frames) {
+        for (const s of f.strokes) s.style ??= defaultStyle();
+      }
+    }
+  }
   bumpIdCounter(scene);
   return scene;
 }

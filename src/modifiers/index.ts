@@ -310,7 +310,13 @@ export function remapTime(ob: GPObject, layer: GPLayer, frame: number): number {
 export function evaluateModifiers(
   strokes: GPStroke[], ob: GPObject, layer: GPLayer, frame: number, keyFrameNumber: number,
 ): GPStroke[] {
-  let out = strokes.map(cloneStroke);
+  // keep original ids: stamp jitter and NOISE seeds derive from stroke.id,
+  // so evaluated geometry must be deterministic across rebuilds
+  let out = strokes.map((s) => {
+    const c = cloneStroke(s);
+    c.id = s.id;
+    return c;
+  });
   const ctx: EvalContext = { object: ob, layer, frame, keyFrameNumber };
   for (const mod of ob.modifiers) {
     if (!mod.enabled || mod.type === 'TIME') continue;

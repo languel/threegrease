@@ -1,12 +1,13 @@
 import type * as THREE from 'three';
-import type { GPScene, GPStroke, Vec3 } from '../core/types';
+import type { GPScene, GPStroke, StrokeStyle, Vec3 } from '../core/types';
+import { defaultStyle } from '../core/brushes';
 import type { History } from '../core/history';
 import type { EditorMode, GPSceneRenderer } from '../render/GPSceneRenderer';
 
 export type PlacementMode = 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'STROKE';
 export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
 export type CursorSnap = 'PLANE' | 'GRID' | 'STROKE' | 'SELECTION';
-export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP';
+export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
 export type EraserMode = 'POINT' | 'STROKE' | 'SOFT';
 export type SculptBrush =
@@ -17,9 +18,11 @@ export interface Settings {
   mode: EditorMode;
   activeTool: string;
   brush: {
-    size: number;            // stroke lineWidth px
+    preset: string;
+    size: number;            // px (VIEW) or world*100 (SCENE), see sizeToWidth()
     strength: number;
     hardness: number;
+    style: StrokeStyle;      // baked onto each new stroke
     pressureSize: boolean;
     pressureStrength: boolean;
     stabilize: boolean;
@@ -36,6 +39,7 @@ export interface Settings {
   fill: { simplify: number; scale: number };
   placement: PlacementMode;
   strokeTarget: StrokeTarget;  // which points of existing strokes anchor depth
+  surfaceOffset: number;       // world units above the surface hit (along normal)
   plane: PlaneMode;
   guide: { type: GuideType; angle: number; spacing: number };
   selectMode: 'POINT' | 'STROKE';
@@ -107,7 +111,9 @@ export function defaultSettings(): Settings {
     mode: 'DRAW',
     activeTool: 'draw',
     brush: {
+      preset: 'Pen',
       size: 8, strength: 1, hardness: 1,
+      style: defaultStyle(),
       pressureSize: true, pressureStrength: true,
       stabilize: false, stabilizeRadius: 30, stabilizeFactor: 0.6,
       activeSmooth: 0.2, postSmooth: 0.3, postSmoothSteps: 2, simplify: 0.002,
@@ -117,6 +123,7 @@ export function defaultSettings(): Settings {
     fill: { simplify: 1.5, scale: 1 },
     placement: 'ORIGIN',
     strokeTarget: 'ALL',
+    surfaceOffset: 0,
     plane: 'VIEW',
     guide: { type: 'NONE', angle: 0, spacing: 40 },
     selectMode: 'POINT',

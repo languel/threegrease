@@ -4,6 +4,7 @@ import {
   activeLayer, activeObject, createPoint, createStroke, ensureFrame,
 } from '../core/gpdata';
 import type { AppCtx } from './context';
+import { brushWidth } from './draw';
 import { screenToWorld, setStrokeExclusion, worldToObject } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 
@@ -38,8 +39,9 @@ export class PrimitiveTool implements Tool {
       if (!layer || layer.lock || layer.hide) return;
       ctx.pushUndo();
       const frame = ensureFrame(layer, ctx.scene.frame, ctx.settings.autoKey);
-      this.stroke = createStroke(ob.activeMaterial, ctx.settings.brush.size);
+      this.stroke = createStroke(ob.activeMaterial, brushWidth(ctx.settings.brush));
       this.stroke.hardness = ctx.settings.brush.hardness;
+      this.stroke.style = { ...ctx.settings.brush.style };
       frame.strokes.push(this.stroke);
       setStrokeExclusion(this.stroke.id);
       this.anchors = [new THREE.Vector2(e.x, e.y)];
