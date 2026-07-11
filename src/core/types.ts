@@ -211,7 +211,7 @@ export interface TGTrigger {
 /** A scene object riding a path on its own clock. */
 export interface TGAttachment {
   id: number;
-  target: { kind: 'CANVAS' | 'CAMERA'; id: number }; // canvas id / camera index
+  target: { kind: 'CANVAS' | 'CAMERA' | 'SPLAT'; id: number }; // canvas/splat id, camera index
   path: PathRef;
   speed: number;
   phase: number;
@@ -228,6 +228,17 @@ export interface TGScore {
 }
 
 // ---- Property routing (P4, the routional layer) ---------------------------
+
+/** A Gaussian splat scene object, rendered via the Spark adapter (P7). */
+export interface TGSplat {
+  id: number;
+  name: string;
+  src: string;             // URL (object URLs are session-only, warned in UI)
+  translation: Vec3;
+  rotation: Vec3;
+  scale: number;
+  visible: boolean;
+}
 
 /** Point force for the dynamic string simulation (P5). */
 export interface TGAttractor {
@@ -266,5 +277,6 @@ export interface GPScene {
   io: { wsUrl: string; midiInId: string | null; midiOutId: string | null };
   score: TGScore;
   routes: TGRoute[];
+  splats: TGSplat[];
   attractors: TGAttractor[];
 }

@@ -30,6 +30,7 @@ import { wsLink } from '../events/ws';
 import { ScoreEngine } from '../score/engine';
 import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
+import { SplatManager } from '../splats/index';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
@@ -96,6 +97,7 @@ class App implements AppHandle {
   readonly keymap = new Keymap();
   readonly score = new ScoreEngine();
   readonly sim = new StringSim();
+  readonly splats = new SplatManager();
   private scoreGroup = new THREE.Group(); // cursor + trigger + attractor glyphs
   private scoreGlyphKey = '';
 
@@ -163,6 +165,8 @@ class App implements AppHandle {
     // a ground plane for SURFACE placement demos
     this.scene3.add(this.canvasGroup);
     this.scene3.add(this.scoreGroup);
+    this.splats.init(this.glRenderer);
+    this.scene3.add(this.splats.group);
     this.axes = this.makeAxes();
     this.scene3.add(this.axes);
     this.applyUpAxis(true);
@@ -1037,6 +1041,7 @@ class App implements AppHandle {
     this.score.update(ctx.scene, dt, now);
     this.syncScoreGlyphs();
     if (this.sim.step(ctx.scene, dt)) ctx.requestRender();
+    this.splats.sync(ctx.scene);
     if (ctx.scene.score.attachments.some((a) => a.running && a.target.kind === 'CANVAS')) {
       this.syncCanvases();
     }

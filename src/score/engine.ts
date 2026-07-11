@@ -217,6 +217,12 @@ export class ScoreEngine {
           cam.translation = pos;
           if (rotation) cam.rotation = rotation;
         }
+      } else if (at.target.kind === 'SPLAT') {
+        const splat = scene.splats.find((s) => s.id === at.target.id);
+        if (splat) {
+          splat.translation = pos;
+          if (rotation) splat.rotation = rotation;
+        }
       }
     }
   }

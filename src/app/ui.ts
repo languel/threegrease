@@ -48,6 +48,7 @@ export interface AppHandle {
   setBackground(rgb: [number, number, number]): void;
   keymap: Keymap;
   sim: { enabled: boolean; damping: number; stiffness: number; reset(): void };
+  splats: { errors: Map<number, string> };
   cycleCamera(): void;
   setActiveCamera(index: number): void;
   addCamera(): void;
@@ -320,6 +321,7 @@ export class UI {
     side.append(this.effectsPanel());
     side.append(this.onionPanel());
     side.append(this.scorePanel());
+    side.append(this.splatsPanel());
     side.append(this.solverPanel());
     side.append(this.routesPanel());
     side.append(this.ioPanel());
@@ -1022,6 +1024,7 @@ export class UI {
     const attachTarget = el('select') as HTMLSelectElement;
     for (const c of ctx.scene.canvases) attachTarget.append(el('option', { value: `CANVAS:${c.id}`, text: `Canvas: ${c.name}` }));
     ctx.scene.cameras.forEach((cam, i) => attachTarget.append(el('option', { value: `CAMERA:${i}`, text: `Camera: ${cam.name}` })));
+    for (const s of ctx.scene.splats) attachTarget.append(el('option', { value: `SPLAT:${s.id}`, text: `Splat: ${s.name}` }));
 
     return panel('Score (cursors · triggers · paths)',
       el('div', { class: 'row' },
@@ -1053,12 +1056,71 @@ export class UI {
           ctx.pushUndo();
           sc.attachments.push({
             id: scoreId(ctx.scene),
-            target: { kind: kind as 'CANVAS' | 'CAMERA', id: Number(idStr) },
+            target: { kind: kind as 'CANVAS' | 'CAMERA' | 'SPLAT', id: Number(idStr) },
             path, speed: 0.1, phase: 0, loop: 'LOOP', running: true,
             orient: 'TANGENT', offset: [0, 0, 0],
           });
           this.refresh();
         }, { title: 'Ride the selected object along the selected stroke' }),
+      ),
+      ...items,
+    );
+  }
+
+  // --------------------------------------------------------------- splats
+
+  private splatsPanel(): HTMLElement {
+    const { ctx } = this.app;
+
+    const urlInput = el('input', { type: 'text', placeholder: 'https://…/scan.spz | .ply | .splat' }) as HTMLInputElement;
+    urlInput.style.width = '150px';
+    const addSplat = (src: string, name: string) => {
+      ctx.pushUndo();
+      ctx.scene.splats.push({
+        id: scoreId(ctx.scene), name, src,
+        translation: [0, 0, 0], rotation: [0, 0, 0], scale: 1, visible: true,
+      });
+      this.refresh();
+    };
+    const fileInput = el('input', { type: 'file', accept: '.spz,.ply,.splat,.ksplat,.sog' }) as HTMLInputElement;
+    fileInput.style.display = 'none';
+    fileInput.onchange = () => {
+      const f = fileInput.files?.[0];
+      if (f) addSplat(URL.createObjectURL(f), `${f.name} (session only)`);
+    };
+
+    const items: Node[] = ctx.scene.splats.map((s) => {
+      const err = this.app.splats.errors.get(s.id);
+      const body = el('div', { class: 'body' },
+        el('div', { class: 'row' },
+          checkbox('', s.visible, (v) => { s.visible = v; }),
+          el('span', { class: 'grow', text: s.name }),
+          btn('✕', () => {
+            ctx.pushUndo();
+            ctx.scene.splats.splice(ctx.scene.splats.indexOf(s), 1);
+            this.refresh();
+          }, { cls: 'icon-btn' }),
+        ),
+        el('div', { class: 'row' }, 'Pos',
+          ...[0, 1, 2].map((i) => numField('', s.translation[i], (v) => { s.translation[i] = v; })),
+        ),
+        el('div', { class: 'row' }, 'Rot',
+          ...[0, 1, 2].map((i) => numField('', s.rotation[i], (v) => { s.rotation[i] = v; })),
+        ),
+        el('div', { class: 'row' },
+          numField('Scale', s.scale, (v) => { s.scale = Math.max(0.001, v); }, 0.1),
+          ...(err ? [el('span', { text: `⚠ ${err.slice(0, 60)}` })] : []),
+        ),
+      );
+      return el('div', { class: 'panel' }, el('h3', { text: `✳ ${s.name}` }), body);
+    });
+
+    return panel('Gaussian Splats',
+      fileInput,
+      el('div', { class: 'row' },
+        urlInput,
+        btn('＋URL', () => { if (urlInput.value.trim()) addSplat(urlInput.value.trim(), urlInput.value.split('/').pop() ?? 'splat'); }),
+        btn('＋File', () => fileInput.click(), { title: 'Local file — not saved with the scene' }),
       ),
       ...items,
     );

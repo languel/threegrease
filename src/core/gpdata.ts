@@ -91,6 +91,7 @@ export function createScene(): GPScene {
     score: { cursors: [], triggers: [], attachments: [] },
     routes: [],
     attractors: [],
+    splats: [],
   };
 }
 

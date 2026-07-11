@@ -26,6 +26,9 @@ export function deserializeScene(json: string): GPScene {
   scene.score ??= { cursors: [], triggers: [], attachments: [] };
   scene.routes ??= [];
   scene.attractors ??= [];
+  scene.splats ??= [];
+  // object-URL splat sources don't survive reload
+  scene.splats = scene.splats.filter((s) => !s.src.startsWith('blob:'));
   // v1 -> v2: strokes gain baked style
   for (const ob of scene.objects) {
     for (const layer of ob.layers) {
