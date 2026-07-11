@@ -288,6 +288,9 @@ export class UI {
       btn('Save', () => this.app.saveScene()),
       btn('Load', () => this.app.loadScene()),
       btn('PNG', () => this.app.exportPng(), { title: 'Export viewport snapshot' }),
+      btn('GLB', async () => { const m = await import('../io/export3d'); m.exportGLB(ctx); }, { title: 'Export strokes as tubes + fills (colors preserved)' }),
+      btn('OBJ', async () => { const m = await import('../io/export3d'); m.exportOBJ(ctx); }, { title: 'Export geometry (fabrication)' }),
+      btn('STL', async () => { const m = await import('../io/export3d'); m.exportSTL(ctx); }, { title: 'Export for slicing/printing' }),
     );
   }
 
