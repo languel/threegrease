@@ -94,7 +94,10 @@ and [docs/HANDOFF.md](docs/HANDOFF.md) (technical handoff for contributors).
 
 ## Shortcuts
 
-All bindings below are defaults — open Settings (`,`) to rebind any of them.
+A Blender-style menubar (File / Edit / Add / View / Help) holds save/load,
+import/export (GP JSON, models, splats, GLB/OBJ/STL/PNG), add-object, and
+view commands — each item shows its shortcut. All bindings below are
+defaults — open Settings (`,`) to rebind any of them.
 
 | Key | Action |
 | --- | ------ |
@@ -104,6 +107,9 @@ All bindings below are defaults — open Settings (`,`) to rebind any of them.
 | `A` / `Shift+A` / `Ctrl+I` / `L` | select all / none / invert / linked |
 | `X` | delete selected · `Shift+D` duplicate |
 | `Ctrl+C/V` `Ctrl+Z` | copy/paste, undo |
+| `Ctrl+S` / `Ctrl+O` | save / open scene |
+| `Alt+A` | deselect all (Blender parity) |
+| `Home` / `Shift+C` | frame all / center cursor & frame all |
 | `I` / `Shift+I` | insert / remove keyframe |
 | `Space` `←→` `↑↓` | play, step frame, jump keyframe |
 | MMB / RMB | orbit / pan · `Shift+RMB` place 3D cursor |

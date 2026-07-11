@@ -16,6 +16,37 @@ body {
   user-select: none; -webkit-user-select: none;
 }
 #app { display: flex; flex-direction: column; }
+#menubar {
+  display: flex; align-items: center; gap: 2px; padding: 2px 6px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  min-height: 26px; position: relative; z-index: 60;
+}
+#menubar .app-title { color: var(--dim); font-size: 11px; margin-right: 8px; }
+.menu { position: relative; }
+.menu > button {
+  border: none; background: transparent; padding: 3px 9px; border-radius: 4px;
+}
+.menu > button:hover, .menu.open > button { background: var(--panel2); }
+.menu-pop {
+  position: absolute; top: 100%; left: 0; min-width: 210px; z-index: 100;
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px; display: flex; flex-direction: column;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+}
+.menu-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 4px 10px; border-radius: 4px; cursor: pointer; white-space: nowrap;
+}
+.menu-item:hover { background: var(--accent); color: #fff; }
+.menu-item:hover .menu-key { color: #dfe8ff; }
+.menu-key { color: var(--dim); font: 10px ui-monospace, monospace; }
+.menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+.menu-header {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--dim); padding: 4px 10px 2px;
+}
+#app.presentation #menubar { display: none; }
+
 #topbar {
   display: flex; align-items: center; gap: 6px; padding: 4px 8px;
   background: var(--panel); border-bottom: 1px solid var(--border);

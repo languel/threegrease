@@ -58,6 +58,10 @@ export interface AppHandle {
   exportActiveGP(): void;
   importGPFile(file: File): void;
   exportSplatPly(id: number): void;
+  run(action: string): void;
+  newScene(): void;
+  viewAll(): void;
+  addCamera(): void;
   cycleCamera(): void;
   setActiveCamera(index: number): void;
   addCamera(): void;
@@ -185,14 +189,174 @@ export class UI {
       }
       this.refreshMonitor();
     }, 300);
+    // menus close on outside click / Esc
+    document.addEventListener('pointerdown', (e) => {
+      if (this.openMenu && !(e.target as HTMLElement).closest?.('.menu')) {
+        this.openMenu = null;
+        this.buildMenubar();
+      }
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.openMenu) {
+        this.openMenu = null;
+        this.buildMenubar();
+      }
+    }, true);
   }
 
   refresh(): void {
+    this.buildMenubar();
     this.buildTopbar();
     this.buildToolbar();
     this.buildSidebar();
     this.refreshTimelineControls();
     this.drawTimeline();
+  }
+
+  // ------------------------------------------------------------ menubar
+
+  private openMenu: string | null = null;
+
+  private filePick(accept: string, onFile: (f: File) => void): void {
+    const input = el('input', { type: 'file', accept }) as HTMLInputElement;
+    input.style.display = 'none';
+    document.body.append(input);
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (f) onFile(f);
+      input.remove();
+    };
+    input.click();
+  }
+
+  private buildMenubar(): void {
+    const { ctx } = this.app;
+    const bar = $('menubar');
+    bar.replaceChildren();
+    bar.append(el('span', { class: 'app-title', text: 'threegrease' }));
+
+    type Item = { label: string; action?: string; do?: () => void; check?: boolean }
+      | { sep: true } | { header: string };
+
+    const menu = (name: string, items: Item[]) => {
+      const root = el('div', { class: `menu ${this.openMenu === name ? 'open' : ''}` });
+      const button = btn(name, () => {
+        this.openMenu = this.openMenu === name ? null : name;
+        this.buildMenubar();
+      });
+      button.onmouseenter = () => {
+        if (this.openMenu && this.openMenu !== name) {
+          this.openMenu = name;
+          this.buildMenubar();
+        }
+      };
+      root.append(button);
+      if (this.openMenu === name) {
+        const pop = el('div', { class: 'menu-pop' });
+        for (const item of items) {
+          if ('sep' in item) { pop.append(el('div', { class: 'menu-sep' })); continue; }
+          if ('header' in item) { pop.append(el('div', { class: 'menu-header', text: item.header })); continue; }
+          const key = item.action ? this.app.keymap.comboFor(item.action) : '';
+          const row = el('div', { class: 'menu-item' },
+            el('span', { text: `${item.check ? '✓ ' : ''}${item.label}` }),
+            el('span', { class: 'menu-key', text: key }),
+          );
+          row.onclick = () => {
+            this.openMenu = null;
+            this.buildMenubar();
+            if (item.do) item.do();
+            else if (item.action) this.app.run(item.action);
+          };
+          pop.append(row);
+        }
+        root.append(pop);
+      }
+      bar.append(root);
+    };
+
+    menu('File', [
+      { label: 'New', action: 'newScene' },
+      { label: 'Open…', action: 'open' },
+      { label: 'Save', action: 'save' },
+      { sep: true },
+      { header: 'Import' },
+      { label: 'GP object / scene (.json)…', do: () => this.filePick('.json', (f) => this.app.importGPFile(f)) },
+      { label: 'Model (.glb/.gltf/.obj)…', do: () => this.filePick('.glb,.gltf,.obj', (f) => this.app.importModelFile(f)) },
+      {
+        label: 'Splat (.ply/.spz/.splat)…',
+        do: () => this.filePick('.ply,.spz,.splat,.ksplat,.sog', (f) => {
+          ctx.pushUndo();
+          ctx.scene.splats.push({
+            id: scoreId(ctx.scene), name: `${f.name} (session only)`, src: URL.createObjectURL(f),
+            translation: [0, 0, 0], rotation: [0, 0, 0], scale: 1, visible: true, select: false,
+          });
+          this.refresh();
+        }),
+      },
+      { sep: true },
+      { header: 'Export' },
+      { label: 'GP object (.threegrease.json)', do: () => this.app.exportActiveGP() },
+      { label: 'GLB', do: async () => { const m = await import('../io/export3d'); m.exportGLB(ctx); } },
+      { label: 'OBJ', do: async () => { const m = await import('../io/export3d'); m.exportOBJ(ctx); } },
+      { label: 'STL', do: async () => { const m = await import('../io/export3d'); m.exportSTL(ctx); } },
+      { label: 'PNG snapshot', do: () => this.app.exportPng() },
+    ]);
+
+    menu('Edit', [
+      { label: 'Undo', action: 'undo' },
+      { label: 'Redo', action: 'redo' },
+      { sep: true },
+      { label: 'Preferences…', action: 'settings' },
+    ]);
+
+    menu('Add', [
+      { label: 'Canvas plane at cursor', do: () => this.app.addCanvasPlane() },
+      { sep: true },
+      { label: 'Plane', do: () => this.app.addMeshObject('PLANE') },
+      { label: 'Box', do: () => this.app.addMeshObject('BOX') },
+      { label: 'Sphere', do: () => this.app.addMeshObject('SPHERE') },
+      { label: 'Cylinder', do: () => this.app.addMeshObject('CYLINDER') },
+      { sep: true },
+      { label: 'Model…', do: () => this.filePick('.glb,.gltf,.obj', (f) => this.app.importModelFile(f)) },
+      { label: 'GP object…', do: () => this.filePick('.json', (f) => this.app.importGPFile(f)) },
+      {
+        label: 'Splat from URL…',
+        do: () => {
+          const url = prompt('Splat URL (.ply/.spz/.splat)');
+          if (!url) return;
+          ctx.pushUndo();
+          ctx.scene.splats.push({
+            id: scoreId(ctx.scene), name: url.split('/').pop() ?? 'splat', src: url.trim(),
+            translation: [0, 0, 0], rotation: [0, 0, 0], scale: 1, visible: true, select: false,
+          });
+          this.refresh();
+        },
+      },
+      { label: 'Camera (at current view)', do: () => this.app.addCamera() },
+    ]);
+
+    menu('View', [
+      { label: 'Frame all', action: 'viewAll' },
+      { label: 'Center cursor & frame all', action: 'centerCursorViewAll' },
+      { sep: true },
+      { label: 'Camera view', action: 'cameraView' },
+      { label: 'Next camera', action: 'cycleCamera' },
+      { label: 'Flythrough', action: 'fly' },
+      { sep: true },
+      { label: 'Presentation mode', action: 'presentation' },
+      { label: 'Inspector panel', action: 'inspector' },
+      { label: 'World axes', check: ctx.settings.showAxes, do: () => { this.app.setShowAxes(!ctx.settings.showAxes); this.refresh(); } },
+      { sep: true },
+      { header: 'Viewpoint' },
+      { label: 'Front', do: () => this.app.snapView('FRONT') },
+      { label: 'Right', do: () => this.app.snapView('RIGHT') },
+      { label: 'Top', do: () => this.app.snapView('TOP') },
+    ]);
+
+    menu('Help', [
+      { label: 'Keyboard shortcuts…', action: 'settings' },
+      { label: 'About (GitHub)', do: () => window.open('https://github.com/languel/threegrease', '_blank') },
+    ]);
   }
 
   // ------------------------------------------------------------- topbar
@@ -213,33 +377,10 @@ export class UI {
     bar.append(el('div', { class: 'sep' }));
 
     if (s.mode === 'OBJECT') {
-      const addSel = el('select') as HTMLSelectElement;
-      addSel.append(el('option', { value: '', text: '＋ Add…' }));
-      for (const [v, t] of [['PLANE', 'Plane'], ['BOX', 'Box'], ['SPHERE', 'Sphere'], ['CYLINDER', 'Cylinder'],
-        ['MODEL', 'Model (.glb/.obj)…'], ['GP', 'Import GP (.json)…']]) {
-        addSel.append(el('option', { value: v, text: t }));
-      }
-      const modelFile = el('input', { type: 'file', accept: '.glb,.gltf,.obj' }) as HTMLInputElement;
-      modelFile.style.display = 'none';
-      modelFile.onchange = () => { const f = modelFile.files?.[0]; if (f) this.app.importModelFile(f); };
-      const gpFile = el('input', { type: 'file', accept: '.json' }) as HTMLInputElement;
-      gpFile.style.display = 'none';
-      gpFile.onchange = () => { const f = gpFile.files?.[0]; if (f) this.app.importGPFile(f); };
-      addSel.onchange = () => {
-        const v = addSel.value;
-        addSel.value = '';
-        if (v === 'MODEL') modelFile.click();
-        else if (v === 'GP') gpFile.click();
-        else if (v) this.app.addMeshObject(v as 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER');
-      };
       bar.append(
-        addSel, modelFile, gpFile,
-        el('div', { class: 'sep' }),
         btn('Move', () => this.app.setWidgetMode('translate'), { active: this.app.widgetMode === 'translate', title: 'Widget: translate (G)' }),
         btn('Rotate', () => this.app.setWidgetMode('rotate'), { active: this.app.widgetMode === 'rotate', title: 'Widget: rotate (R)' }),
         btn('Scale', () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
-        el('div', { class: 'sep' }),
-        btn('Export GP', () => this.app.exportActiveGP(), { title: 'Export the active GP object as .threegrease.json' }),
       );
     } else if (s.mode === 'DRAW') {
       bar.append(
@@ -316,21 +457,6 @@ export class UI {
       selectField('Cursor snap', s.cursorSnap, [
         ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SELECTION', 'Selection'],
       ] as [CursorSnap, string][], (v) => { s.cursorSnap = v; this.app.savePrefs(); }),
-      checkbox('Numpad', s.emulateNumpad, (v) => { s.emulateNumpad = v; this.app.savePrefs(); }),
-      checkbox('Alt-nav', s.emulate3Button, (v) => { s.emulate3Button = v; this.app.savePrefs(); }),
-      colorField('BG', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); this.app.savePrefs(); }),
-      btn('Present', () => this.app.togglePresentation(), { title: 'Presentation/performance mode (P): viewport only, shortcuts stay live' }),
-    );
-    bar.append(el('div', { class: 'sep' }));
-    bar.append(
-      btn('↶', () => this.app.undo(), { title: 'Undo (Ctrl+Z)' }),
-      btn('↷', () => this.app.redo(), { title: 'Redo (Ctrl+Shift+Z)' }),
-      btn('Save', () => this.app.saveScene()),
-      btn('Load', () => this.app.loadScene()),
-      btn('PNG', () => this.app.exportPng(), { title: 'Export viewport snapshot' }),
-      btn('GLB', async () => { const m = await import('../io/export3d'); m.exportGLB(ctx); }, { title: 'Export strokes as tubes + fills (colors preserved)' }),
-      btn('OBJ', async () => { const m = await import('../io/export3d'); m.exportOBJ(ctx); }, { title: 'Export geometry (fabrication)' }),
-      btn('STL', async () => { const m = await import('../io/export3d'); m.exportSTL(ctx); }, { title: 'Export for slicing/printing' }),
     );
   }
 

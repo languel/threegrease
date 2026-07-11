@@ -11,6 +11,9 @@ export const ACTIONS: ActionDef[] = [
   // General
   { id: 'undo', label: 'Undo', combo: 'ctrl+z', category: 'General' },
   { id: 'redo', label: 'Redo', combo: 'ctrl+shift+z', category: 'General' },
+  { id: 'save', label: 'Save scene', combo: 'ctrl+s', category: 'General' },
+  { id: 'open', label: 'Open scene', combo: 'ctrl+o', category: 'General' },
+  { id: 'newScene', label: 'New scene', combo: 'ctrl+alt+n', category: 'General' },
   { id: 'settings', label: 'Open settings', combo: ',', category: 'General' },
   { id: 'inspector', label: 'Toggle inspector panel', combo: 'n', category: 'General' },
   { id: 'presentation', label: 'Presentation mode', combo: 'p', category: 'General' },
@@ -30,7 +33,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'rotate', label: 'Rotate', combo: 'r', category: 'Edit' },
   { id: 'scale', label: 'Scale', combo: 's', category: 'Edit' },
   { id: 'selectAll', label: 'Select all', combo: 'a', category: 'Edit' },
-  { id: 'selectNone', label: 'Select none', combo: 'shift+a', category: 'Edit' },
+  { id: 'selectNone', label: 'Select none', combo: 'alt+a', category: 'Edit' },
   { id: 'selectInvert', label: 'Invert selection', combo: 'ctrl+i', category: 'Edit' },
   { id: 'selectLinked', label: 'Select linked', combo: 'l', category: 'Edit' },
   { id: 'selectMore', label: 'Select more', combo: '=', category: 'Edit' },
@@ -51,7 +54,9 @@ export const ACTIONS: ActionDef[] = [
   // View / camera
   { id: 'fly', label: 'Flythrough (Enter accepts, Esc teleports back)', combo: '~', category: 'View' },
   { id: 'cameraView', label: 'Look through camera', combo: '0', category: 'View' },
-  { id: 'cycleCamera', label: 'Next camera', combo: 'shift+c', category: 'View' },
+  { id: 'cycleCamera', label: 'Next camera', combo: 'ctrl+shift+c', category: 'View' },
+  { id: 'viewAll', label: 'Frame all (view fit)', combo: 'home', category: 'View' },
+  { id: 'centerCursorViewAll', label: 'Center cursor & frame all', combo: 'shift+c', category: 'View' },
 ];
 
 const STORAGE_KEY = 'threegrease.keymap';

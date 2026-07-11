@@ -22,7 +22,8 @@ import * as ops from '../tools/editops';
 import { Player } from '../anim/player';
 import { interpolateFrame } from '../anim/interpolate';
 import {
-  downloadScene, downloadText, importGPObjects, openSceneFile, serializeGPObject,
+  downloadScene, downloadText, importGPObjects, openSceneFile,
+  remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
 import { drawingPlane, nearestStrokePoint, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
@@ -36,8 +37,9 @@ import { SplatManager } from '../splats/index';
 import { MeshManager, createMeshObject } from '../render/meshes';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
-  ObjectSelectTool, deleteObject, getObjectTransform, listSelected,
-  selectionPivot, setObjectTransform, type ObjRef, type ObjTransform,
+  ObjectSelectTool, deleteObject, deselectAllObjects, getObjectTransform,
+  listSelected, selectionPivot, setObjectSelected, setObjectTransform,
+  type ObjRef, type ObjTransform,
 } from '../tools/objects';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
@@ -728,7 +730,8 @@ class App implements AppHandle {
         this.ui.refresh();
         break;
       case 'duplicate':
-        if (this.editLike()) {
+        if (ctx.settings.mode === 'OBJECT') this.duplicateSelectedObjects();
+        else if (this.editLike()) {
           ops.duplicateSelected(ctx);
           this.modal.begin(ctx, 'move', this.tools.lastPointer);
         }
@@ -745,6 +748,15 @@ class App implements AppHandle {
       case 'fly': this.nav.flying ? this.nav.stopFly() : this.nav.startFly(); break;
       case 'cameraView': this.toggleCameraView(); break;
       case 'cycleCamera': this.cycleCamera(); break;
+      case 'save': this.saveScene(); break;
+      case 'open': void this.loadScene(); break;
+      case 'newScene': this.newScene(); break;
+      case 'viewAll': this.viewAll(); break;
+      case 'centerCursorViewAll':
+        ctx.scene.cursor = [0, 0, 0];
+        this.gp.markDirty();
+        this.viewAll();
+        break;
     }
   }
 
@@ -1032,6 +1044,71 @@ class App implements AppHandle {
     });
     this.syncCanvases();
     this.gp.markDirty(); // GP object transforms live on the object groups
+  }
+
+  run(action: string): void { this.runAction(action); }
+
+  newScene(): void {
+    this.ctx.pushUndo();
+    this.ctx.replaceScene(createScene());
+    this.refreshWidget();
+  }
+
+  viewAll(): void {
+    const box = new THREE.Box3();
+    for (const g of [this.gp.root, this.canvasGroup, this.splats.group, this.meshes.group]) {
+      const b = new THREE.Box3().setFromObject(g);
+      if (!b.isEmpty()) box.union(b);
+    }
+    if (box.isEmpty()) box.set(new THREE.Vector3(-3, -3, -1), new THREE.Vector3(3, 3, 3));
+    this.nav.frameAll(box);
+  }
+
+  /** Object-mode Shift+D: clone every selected object, select the clones. */
+  duplicateSelectedObjects(): void {
+    const scene = this.ctx.scene;
+    const refs = listSelected(scene);
+    if (!refs.length) return;
+    this.ctx.pushUndo();
+    let n = 1;
+    const newId = () => (Date.now() + n++) % 1e9;
+    const clones: ObjRef[] = [];
+    for (const ref of refs) {
+      if (ref.kind === 'GP') {
+        const copy = remapGPObjectIds(JSON.parse(JSON.stringify(scene.objects[ref.id])));
+        copy.name += ' copy';
+        copy.translation = [copy.translation[0] + 0.3, copy.translation[1], copy.translation[2]];
+        scene.objects.push(copy);
+        clones.push({ kind: 'GP', id: scene.objects.length - 1 });
+      } else if (ref.kind === 'CANVAS') {
+        const src = scene.canvases.find((c) => c.id === ref.id);
+        if (!src) continue;
+        const copy = { ...JSON.parse(JSON.stringify(src)), id: newId() };
+        copy.translation[0] += 0.3;
+        scene.canvases.push(copy);
+        clones.push({ kind: 'CANVAS', id: copy.id });
+      } else if (ref.kind === 'SPLAT') {
+        const src = scene.splats.find((s) => s.id === ref.id);
+        if (!src) continue;
+        const copy = { ...JSON.parse(JSON.stringify(src)), id: newId() };
+        copy.translation[0] += 0.3;
+        scene.splats.push(copy);
+        clones.push({ kind: 'SPLAT', id: copy.id });
+      } else {
+        const src = scene.meshes.find((m) => m.id === ref.id);
+        if (!src) continue;
+        const copy = { ...JSON.parse(JSON.stringify(src)), id: newId() };
+        copy.translation[0] += 0.3;
+        scene.meshes.push(copy);
+        clones.push({ kind: 'MESH', id: copy.id });
+      }
+    }
+    deselectAllObjects(scene);
+    for (const ref of clones) setObjectSelected(scene, ref, true);
+    this.syncCanvases();
+    this.gp.markDirty();
+    this.refreshWidget();
+    this.ui.refresh();
   }
 
   exportActiveGP(): void {

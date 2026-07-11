@@ -160,6 +160,21 @@ export class Navigation {
     this.startAnim(toPos, toQuat);
   }
 
+  /** Fit the view to a bounding box, keeping the current view direction. */
+  frameAll(box: THREE.Box3): void {
+    if (this.flying || box.isEmpty()) return;
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const radius = Math.max(0.5, sphere.radius);
+    const dist = (radius / Math.tan(THREE.MathUtils.degToRad(this.persp.fov / 2))) * 1.25;
+    let dir = this.active.position.clone().sub(this.target);
+    if (dir.lengthSq() < 1e-9) dir = new THREE.Vector3(0, -1, 0.35);
+    dir.normalize();
+    this.target.copy(sphere.center);
+    const toPos = sphere.center.clone().addScaledVector(dir, dist);
+    const m = new THREE.Matrix4().lookAt(toPos, sphere.center, this.up);
+    this.startAnim(toPos, new THREE.Quaternion().setFromRotationMatrix(m));
+  }
+
   /** Flip to the opposite side of the current view (numpad 9). */
   flipView(): void {
     if (this.flying) return;
