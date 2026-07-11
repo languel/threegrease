@@ -82,6 +82,15 @@ export function resolveTarget(ctx: AppCtx, path: string): ResolvedTarget | null 
       };
       return map[seg[2]]?.() ?? null;
     }
+    case 'attractor': {
+      const at = scene.attractors.find((a) => a.id === Number(seg[1]));
+      if (!at) return null;
+      const axes: Record<string, number> = { x: 0, y: 1, z: 2 };
+      if (seg[2] in axes) return { set: (v) => { at.position[axes[seg[2]]] = num(v); }, dirty: 'none' };
+      if (seg[2] === 'strength') return { set: (v) => { at.strength = num(v); }, dirty: 'none' };
+      if (seg[2] === 'radius') return { set: (v) => { at.radius = Math.max(0.01, num(v)); }, dirty: 'none' };
+      return null;
+    }
     case 'cursor3d': {
       const i = { x: 0, y: 1, z: 2 }[seg[1] as 'x' | 'y' | 'z'];
       if (i === undefined) return null;
@@ -103,6 +112,7 @@ export const TARGET_SUGGESTIONS = [
   'brush.style.jitter', 'layer.<id>.opacity', 'modifier.<id>.factor',
   'cursor.<id>.speed', 'cursor.<id>.phase', 'trigger.<id>.radius',
   'camera.0.fov', 'canvas.<id>.tx', 'cursor3d.x', 'frame',
+  'attractor.<id>.x', 'attractor.<id>.strength',
 ];
 
 function applyMapping(route: TGRoute, v: number): number {

@@ -8,6 +8,10 @@ import { BRUSH_PRESETS } from '../core/brushes';
 import { bus } from '../events/bus';
 import { defaultCursor, scoreId } from '../score/engine';
 import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
+import {
+  DEFAULT_STRINGART, loadTargetImage, pinSourceStroke, runStringArt,
+  type StringArtRun,
+} from '../solvers/stringart';
 import type { PathRef } from '../core/types';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
@@ -42,6 +46,7 @@ export interface AppHandle {
   togglePresentation(): void;
   setBackground(rgb: [number, number, number]): void;
   keymap: Keymap;
+  sim: { enabled: boolean; damping: number; stiffness: number; reset(): void };
   cycleCamera(): void;
   setActiveCamera(index: number): void;
   addCamera(): void;
@@ -314,6 +319,7 @@ export class UI {
     side.append(this.effectsPanel());
     side.append(this.onionPanel());
     side.append(this.scorePanel());
+    side.append(this.solverPanel());
     side.append(this.routesPanel());
     side.append(this.ioPanel());
     void ob;
@@ -1054,6 +1060,101 @@ export class UI {
         }, { title: 'Ride the selected object along the selected stroke' }),
       ),
       ...items,
+    );
+  }
+
+  // -------------------------------------------------------------- solvers
+
+  private saTarget: { gray: Float32Array; width: number; height: number } | null = null;
+  private saTargetName = '';
+  private saOpts = { ...DEFAULT_STRINGART };
+  private saRun: StringArtRun | null = null;
+  private saStatus = '';
+
+  private solverPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const sim = this.app.sim;
+
+    const fileInput = el('input', { type: 'file', accept: 'image/*' }) as HTMLInputElement;
+    fileInput.style.display = 'none';
+    fileInput.onchange = async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      this.saTarget = await loadTargetImage(file, this.saOpts.imageSize);
+      this.saTargetName = file.name;
+      this.refresh();
+    };
+
+    const source = pinSourceStroke(ctx);
+    const stringArt = el('div', { class: 'body' },
+      fileInput,
+      el('div', { class: 'row' },
+        btn(this.saTargetName ? `🖼 ${this.saTargetName}` : 'Load target image…',
+          () => fileInput.click()),
+      ),
+      el('div', { class: 'row' },
+        numField('Pins', this.saOpts.pinCount, (v) => { this.saOpts.pinCount = Math.max(8, Math.round(v)); }, 1),
+        numField('Chords', this.saOpts.maxChords, (v) => { this.saOpts.maxChords = Math.max(10, Math.round(v)); }, 10),
+        numField('Opacity', this.saOpts.opacity, (v) => { this.saOpts.opacity = Math.min(1, Math.max(0.02, v)); }, 0.01),
+      ),
+      el('div', { class: 'row' },
+        this.saRun
+          ? btn('Cancel', () => { this.saRun?.cancel(); this.saRun = null; this.refresh(); })
+          : btn('Run string art', () => {
+            if (!this.saTarget) { this.saStatus = 'load a target image first'; this.refresh(); return; }
+            if (!pinSourceStroke(ctx)) { this.saStatus = 'draw/select a frame stroke first'; this.refresh(); return; }
+            this.saStatus = 'solving…';
+            this.saRun = runStringArt(ctx, this.saTarget, this.saOpts,
+              (done) => {
+                this.saStatus = `solving… ${done} chords`;
+                const s = document.getElementById('sa-status');
+                if (s) s.textContent = this.saStatus;
+              },
+              (chords) => {
+                this.saRun = null;
+                this.saStatus = `done: ${chords} chords → layer "StringArt"`;
+                this.refresh();
+              });
+            this.refresh();
+          }, { title: 'Pins ride the selected (or last) stroke; result becomes strokes' }),
+        el('span', { id: 'sa-status', text: this.saStatus || (source ? `pins on stroke #${source.id}` : 'no source stroke') }),
+      ),
+    );
+
+    const attractorItems: Node[] = ctx.scene.attractors.map((at) => el('div', { class: 'row' },
+      el('span', { text: at.name }),
+      numField('str', at.strength, (v) => { at.strength = v; }, 0.1),
+      numField('rad', at.radius, (v) => { at.radius = Math.max(0.01, v); }, 0.1),
+      btn('⌖', () => { at.position = [...ctx.scene.cursor] as [number, number, number]; }, { cls: 'icon-btn', title: 'Move to 3D cursor' }),
+      btn('✕', () => {
+        ctx.pushUndo();
+        ctx.scene.attractors.splice(ctx.scene.attractors.indexOf(at), 1);
+        this.refresh();
+      }, { cls: 'icon-btn' }),
+    ));
+
+    return panel('Solvers (string art · attractors)',
+      el('div', { class: 'panel' }, el('h3', { text: 'String art' }), stringArt),
+      el('div', { class: 'body' },
+        el('div', { class: 'row' },
+          btn('＋Attractor at cursor', () => {
+            ctx.pushUndo();
+            const id = scoreId(ctx.scene);
+            ctx.scene.attractors.push({
+              id, name: `Attractor ${id}`,
+              position: [...ctx.scene.cursor] as [number, number, number],
+              strength: 1.5, radius: 1.5,
+            });
+            this.refresh();
+          }),
+          checkbox('Simulate strings', sim.enabled, (v) => { sim.enabled = v; if (v) sim.reset(); }),
+        ),
+        ...attractorItems,
+        el('div', { class: 'row' },
+          slider('Damping', sim.damping, 0.8, 0.999, 0.001, (v) => { sim.damping = v; }),
+          slider('Stiffness', sim.stiffness, 0, 0.2, 0.005, (v) => { sim.stiffness = v; }),
+        ),
+      ),
     );
   }
 

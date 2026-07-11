@@ -148,6 +148,13 @@ rendering along the stroke with procedural grain in the fragment shader.
 - [ ] Later: texture-sampled stamps (image brushes), smudge/blend brushes,
       paper grain overlay, buildup blending
 
+## Platform phases (docs/IMPLEMENTATION_PLAN.md) — status
+- [x] P0 NPR brushes · [x] P1 Blender interop · [x] P2 event bus/IO
+- [x] P3 scores (cursors/triggers/attachments) · [x] P4 routes
+- [x] P5 string art solver + attractor string sim
+- [ ] P6 multi-view wire art · [ ] P7 splats (Spark) · [ ] P8 exporters
+- [ ] P9 mediamime protocol · [ ] P10 perf pass
+
 ## Post-parity roadmap (the action-painting lab)
 1. Performance: instanced segment rendering, dirty-region geometry updates,
    pointer-event coalescing + prediction, worker-side fill.

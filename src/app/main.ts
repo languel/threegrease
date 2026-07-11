@@ -29,6 +29,7 @@ import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { ScoreEngine } from '../score/engine';
 import { routes } from '../events/routes';
+import { StringSim } from '../solvers/strings';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
@@ -94,7 +95,8 @@ class App implements AppHandle {
   private camHelper!: THREE.Group; // root: one frustum child per scene camera
   readonly keymap = new Keymap();
   readonly score = new ScoreEngine();
-  private scoreGroup = new THREE.Group(); // cursor + trigger glyphs
+  readonly sim = new StringSim();
+  private scoreGroup = new THREE.Group(); // cursor + trigger + attractor glyphs
   private scoreGlyphKey = '';
 
   constructor() {
@@ -896,7 +898,8 @@ class App implements AppHandle {
   /** Cursor/trigger glyphs: rebuilt when the score roster changes, posed every frame. */
   private syncScoreGlyphs(): void {
     const sc = this.ctx.scene.score;
-    const key = `${sc.cursors.map((c) => c.id).join(',')}|${sc.triggers.map((t) => t.id).join(',')}`;
+    const attractors = this.ctx.scene.attractors;
+    const key = `${sc.cursors.map((c) => c.id).join(',')}|${sc.triggers.map((t) => t.id).join(',')}|${attractors.map((a) => a.id).join(',')}`;
     if (key !== this.scoreGlyphKey) {
       this.scoreGlyphKey = key;
       for (const child of [...this.scoreGroup.children]) {
@@ -921,6 +924,20 @@ class App implements AppHandle {
         mesh.userData.triggerId = trig.id;
         this.scoreGroup.add(mesh);
       }
+      for (const at of attractors) {
+        const mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 10, 8),
+          new THREE.MeshBasicMaterial({ color: 0xe5605e, depthTest: false }),
+        );
+        mesh.renderOrder = 15000;
+        const halo = new THREE.Mesh(
+          new THREE.SphereGeometry(1, 12, 8),
+          new THREE.MeshBasicMaterial({ color: 0xe5605e, wireframe: true, transparent: true, opacity: 0.15 }),
+        );
+        mesh.add(halo);
+        mesh.userData.attractorId = at.id;
+        this.scoreGroup.add(mesh);
+      }
     }
     for (const child of this.scoreGroup.children) {
       if (child.userData.cursorId !== undefined) {
@@ -933,6 +950,13 @@ class App implements AppHandle {
         if (trig) {
           child.position.set(...trig.position);
           child.scale.setScalar(trig.radius);
+        }
+      } else if (child.userData.attractorId !== undefined) {
+        const at = attractors.find((a) => a.id === child.userData.attractorId);
+        child.visible = !!at && !this.presentation;
+        if (at) {
+          child.position.set(...at.position);
+          (child.children[0] as THREE.Mesh)?.scale.setScalar(at.radius / 0.05);
         }
       }
     }
@@ -1012,6 +1036,7 @@ class App implements AppHandle {
     // score engine: cursors/triggers/attachments run on their own clocks
     this.score.update(ctx.scene, dt, now);
     this.syncScoreGlyphs();
+    if (this.sim.step(ctx.scene, dt)) ctx.requestRender();
     if (ctx.scene.score.attachments.some((a) => a.running && a.target.kind === 'CANVAS')) {
       this.syncCanvases();
     }

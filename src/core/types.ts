@@ -226,6 +226,15 @@ export interface TGScore {
 
 // ---- Property routing (P4, the routional layer) ---------------------------
 
+/** Point force for the dynamic string simulation (P5). */
+export interface TGAttractor {
+  id: number;
+  name: string;
+  position: Vec3;      // world space
+  strength: number;    // negative repels
+  radius: number;
+}
+
 export type RouteMapMode = 'RAW' | 'SCALE' | 'CLAMP' | 'WRAP';
 
 /** Bind incoming events to a scene/settings property. */
@@ -254,4 +263,5 @@ export interface GPScene {
   io: { wsUrl: string; midiInId: string | null; midiOutId: string | null };
   score: TGScore;
   routes: TGRoute[];
+  attractors: TGAttractor[];
 }

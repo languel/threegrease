@@ -90,6 +90,7 @@ export function createScene(): GPScene {
     io: { wsUrl: '', midiInId: null, midiOutId: null },
     score: { cursors: [], triggers: [], attachments: [] },
     routes: [],
+    attractors: [],
   };
 }
 
