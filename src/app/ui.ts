@@ -12,6 +12,7 @@ import {
   DEFAULT_STRINGART, loadTargetImage, pinSourceStroke, runStringArt,
   type StringArtRun,
 } from '../solvers/stringart';
+import { DEFAULT_WIREART, runWireArt } from '../solvers/wireart';
 import type { PathRef } from '../core/types';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
@@ -1070,6 +1071,7 @@ export class UI {
   private saOpts = { ...DEFAULT_STRINGART };
   private saRun: StringArtRun | null = null;
   private saStatus = '';
+  private waStatus = '';
 
   private solverPanel(): HTMLElement {
     const { ctx } = this.app;
@@ -1133,8 +1135,54 @@ export class UI {
       }, { cls: 'icon-btn' }),
     ));
 
-    return panel('Solvers (string art · attractors)',
+    // --- multi-view wire art ---
+    const waStatus = el('span', { id: 'wa-status', text: this.waStatus });
+    const camTargets: Node[] = ctx.scene.cameras.map((cam, i) => {
+      const file = el('input', { type: 'file', accept: 'image/*' }) as HTMLInputElement;
+      file.style.display = 'none';
+      file.onchange = () => {
+        const f = file.files?.[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          cam.target = String(reader.result);
+          cam.targetOpacity ??= 0.35;
+          this.refresh();
+        };
+        reader.readAsDataURL(f);
+      };
+      return el('div', { class: 'row' },
+        file,
+        el('span', { class: 'grow', text: cam.name }),
+        btn(cam.target ? '🖼 set' : 'target…', () => file.click(),
+          { active: !!cam.target, title: 'Target drawing seen from this camera' }),
+        ...(cam.target ? [
+          slider('', cam.targetOpacity ?? 0.35, 0, 1, 0.05, (v) => { cam.targetOpacity = v; }),
+          btn('✕', () => { delete cam.target; this.refresh(); }, { cls: 'icon-btn' }),
+        ] : []),
+      );
+    });
+    const wireArt = el('div', { class: 'body' },
+      ...camTargets,
+      el('div', { class: 'row' },
+        btn('Solve wire (2+ cams)', async () => {
+          this.waStatus = 'solving…';
+          this.refresh();
+          const res = await runWireArt(ctx, DEFAULT_WIREART, (n) => {
+            const s = document.getElementById('wa-status');
+            if (s) s.textContent = `solving… ${n} voxels`;
+          });
+          this.waStatus = 'error' in res ? res.error : `wire: ${res.points} pts (hull ${res.hull})`;
+          this.refresh();
+        }, { title: 'One 3D wire matching the camera target drawings' }),
+        waStatus,
+      ),
+      el('div', { class: 'row', text: 'Assist: in camera view (0) the target shows as an overlay — trace it, switch cameras, connect in 3D.' }),
+    );
+
+    return panel('Solvers (string art · wire art · attractors)',
       el('div', { class: 'panel' }, el('h3', { text: 'String art' }), stringArt),
+      el('div', { class: 'panel' }, el('h3', { text: 'Multi-view wire art' }), wireArt),
       el('div', { class: 'body' },
         el('div', { class: 'row' },
           btn('＋Attractor at cursor', () => {

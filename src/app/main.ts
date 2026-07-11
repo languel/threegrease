@@ -1098,11 +1098,33 @@ class App implements AppHandle {
     this.updateStatus();
   }
 
+  private targetImageCache = new Map<string, HTMLImageElement>();
+
+  /** Wire-art assist: the active camera's target drawing, aspect-fit over the view. */
+  private drawTargetOverlay(g: CanvasRenderingContext2D, w: number, h: number): void {
+    if (!this.cameraView) return;
+    const cam = activeCam(this.ctx.scene);
+    if (!cam?.target) return;
+    let img = this.targetImageCache.get(cam.target);
+    if (!img) {
+      img = new Image();
+      img.src = cam.target;
+      this.targetImageCache.set(cam.target, img);
+    }
+    if (!img.complete || !img.naturalWidth) return;
+    const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+    g.globalAlpha = cam.targetOpacity ?? 0.35;
+    g.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    g.globalAlpha = 1;
+  }
+
   private drawHud(): void {
     const g = this.hud.getContext('2d')!;
     g.clearRect(0, 0, this.hud.width, this.hud.height);
     g.save();
     g.scale(devicePixelRatio, devicePixelRatio);
+    this.drawTargetOverlay(g, this.hud.width / devicePixelRatio, this.hud.height / devicePixelRatio);
     this.tools.active?.drawHud?.(this.ctx, g);
     // STROKE placement: show which stroke the depth will lock to
     if (this.ctx.settings.mode === 'DRAW' && this.ctx.settings.placement === 'STROKE' && !this.nav.flying) {

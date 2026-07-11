@@ -163,6 +163,9 @@ export interface GPCamera {
   rotation: Vec3;
   fov: number;
   keys: GPCameraKey[];     // sorted by frame
+  /** wire-art target drawing for this viewpoint (dataURL), P6 */
+  target?: string;
+  targetOpacity?: number;  // assist overlay opacity in camera view
 }
 
 // ---- Score system (P3): strokes as playable paths -------------------------
