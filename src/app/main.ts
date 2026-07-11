@@ -21,7 +21,9 @@ import { VertexPaintTool, WeightPaintTool } from '../tools/paint';
 import * as ops from '../tools/editops';
 import { Player } from '../anim/player';
 import { interpolateFrame } from '../anim/interpolate';
-import { downloadScene, openSceneFile } from '../io/serialize';
+import {
+  downloadScene, downloadText, importGPObjects, openSceneFile, serializeGPObject,
+} from '../io/serialize';
 import { drawingPlane, nearestStrokePoint, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { Keymap, comboFromEvent } from './keymap';
@@ -31,13 +33,20 @@ import { ScoreEngine } from '../score/engine';
 import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
+import { MeshManager, createMeshObject } from '../render/meshes';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import {
+  ObjectSelectTool, deleteObject, getObjectTransform, listSelected,
+  selectionPivot, setObjectTransform, type ObjRef, type ObjTransform,
+} from '../tools/objects';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
 import type { CanvasPlane } from '../core/types';
 
 const DEFAULT_TOOL: Record<EditorMode, string> = {
-  DRAW: 'draw', EDIT: 'select', SCULPT: 'sculpt', VERTEX: 'vertexpaint', WEIGHT: 'weightpaint',
+  OBJECT: 'object-select', DRAW: 'draw', EDIT: 'select',
+  SCULPT: 'sculpt', VERTEX: 'vertexpaint', WEIGHT: 'weightpaint',
 };
 
 /** Interpolate tool: horizontal drag picks the breakdown factor; release commits. */
@@ -98,6 +107,12 @@ class App implements AppHandle {
   readonly score = new ScoreEngine();
   readonly sim = new StringSim();
   readonly splats = new SplatManager();
+  readonly meshes = new MeshManager();
+  private widget!: TransformControls;
+  private widgetProxy = new THREE.Object3D();
+  private widgetBase: { refs: ObjRef[]; transforms: ObjTransform[]; proxy: ObjTransform } | null = null;
+  private canvasSurfaces: THREE.Object3D[] = [];
+  private objectPick = new ObjectSelectTool();
   private scoreGroup = new THREE.Group(); // cursor + trigger + attractor glyphs
   private scoreGlyphKey = '';
 
@@ -135,6 +150,7 @@ class App implements AppHandle {
       canvas: glCanvas,
       surfaces: [],
       canvasMeshes: [],
+      pickableMeshes: [],
       syncCanvases: () => this.syncCanvases(),
       copyBuffer: [],
       requestRender: (layerId?: number) => {
@@ -170,6 +186,26 @@ class App implements AppHandle {
     this.scene3.add(this.scoreGroup);
     this.splats.init(this.glRenderer);
     this.scene3.add(this.splats.group);
+    this.scene3.add(this.meshes.group);
+    // mesh objects use MeshStandardMaterial — GP shaders ignore lights
+    this.scene3.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+    sun.position.set(3, -4, 6);
+    this.scene3.add(sun);
+
+    // object-mode transform widget
+    this.scene3.add(this.widgetProxy);
+    this.widget = new TransformControls(this.camera, glCanvas);
+    this.widget.setSize(0.8);
+    this.scene3.add(this.widget.getHelper());
+    this.widget.addEventListener('dragging-changed', (e) => {
+      this.controls.enabled = !(e as unknown as { value: boolean }).value;
+      if ((e as unknown as { value: boolean }).value) this.beginWidgetDrag();
+      else this.widgetBase = null;
+    });
+    this.widget.addEventListener('objectChange', () => this.applyWidgetDrag());
+    this.widget.enabled = false;
+    this.objectPick.onSelectionChange = () => this.refreshWidget();
     this.axes = this.makeAxes();
     this.scene3.add(this.axes);
     this.applyUpAxis(true);
@@ -185,7 +221,7 @@ class App implements AppHandle {
       new PrimitiveTool('circle'), this.interpTool,
       new SelectTool('select', 'BOX'), new SelectTool('select-lasso', 'LASSO'),
       new SelectTool('select-circle', 'CIRCLE'), new SculptTool(),
-      new VertexPaintTool(), new WeightPaintTool(),
+      new VertexPaintTool(), new WeightPaintTool(), this.objectPick,
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
 
@@ -215,6 +251,7 @@ class App implements AppHandle {
     this.ctx.settings.mode = mode;
     this.setTool(DEFAULT_TOOL[mode]);
     this.gp.markDirty();
+    this.refreshWidget();
     this.ui.refresh();
   }
 
@@ -389,7 +426,7 @@ class App implements AppHandle {
       (child as THREE.Mesh).geometry?.dispose?.();
       ((child as THREE.Mesh).material as THREE.Material)?.dispose?.();
     }
-    this.ctx.surfaces = [];
+    this.canvasSurfaces = [];
     this.ctx.canvasMeshes = [];
     for (const c of this.ctx.scene.canvases) {
       if (!c.visible) continue;
@@ -420,8 +457,9 @@ class App implements AppHandle {
       mesh.add(border);
       this.canvasGroup.add(mesh);
       this.ctx.canvasMeshes.push(mesh);
-      if (c.drawTarget) this.ctx.surfaces.push(mesh); // reference planes are not draw targets
+      if (c.drawTarget) this.canvasSurfaces.push(mesh); // reference planes are not draw targets
     }
+    this.ctx.surfaces = [...this.canvasSurfaces, ...this.meshes.drawTargets(this.ctx.scene)];
   }
 
   snapView(view: 'FRONT' | 'BACK' | 'RIGHT' | 'LEFT' | 'TOP' | 'BOTTOM'): void { this.nav.snapView(view); }
@@ -489,6 +527,8 @@ class App implements AppHandle {
       }
       if (e.button !== 0) return;
       if (this.modal.active) { this.modal.confirm(this.ctx); this.ui.refresh(); return; }
+      // transform widget owns clicks that land on its gizmo
+      if (this.ctx.settings.mode === 'OBJECT' && this.widget.enabled && this.widget.axis) return;
       this.capture(e);
       this.tools.handleDown(this.ctx, this.toolEvent(e));
     });
@@ -639,9 +679,18 @@ class App implements AppHandle {
       case 'toolDraw': if (ctx.settings.mode === 'DRAW') this.setTool('draw'); break;
       case 'toolErase': if (ctx.settings.mode === 'DRAW') this.setTool('erase'); break;
       case 'toolFill': if (ctx.settings.mode === 'DRAW') this.setTool('fill'); break;
-      case 'move': if (this.editLike()) this.modal.begin(ctx, 'move', this.tools.lastPointer); break;
-      case 'rotate': if (this.editLike()) this.modal.begin(ctx, 'rotate', this.tools.lastPointer); break;
-      case 'scale': if (this.editLike()) this.modal.begin(ctx, 'scale', this.tools.lastPointer); break;
+      case 'move':
+        if (ctx.settings.mode === 'OBJECT') this.setWidgetMode('translate');
+        else if (this.editLike()) this.modal.begin(ctx, 'move', this.tools.lastPointer);
+        break;
+      case 'rotate':
+        if (ctx.settings.mode === 'OBJECT') this.setWidgetMode('rotate');
+        else if (this.editLike()) this.modal.begin(ctx, 'rotate', this.tools.lastPointer);
+        break;
+      case 'scale':
+        if (ctx.settings.mode === 'OBJECT') this.setWidgetMode('scale');
+        else if (this.editLike()) this.modal.begin(ctx, 'scale', this.tools.lastPointer);
+        break;
       case 'selectAll': if (this.editLike()) { selectAll(ctx, 'all'); this.gp.markDirty(); } break;
       case 'selectNone': if (this.editLike()) { selectAll(ctx, 'none'); this.gp.markDirty(); } break;
       case 'selectInvert': if (this.editLike()) { selectAll(ctx, 'invert'); this.gp.markDirty(); } break;
@@ -649,6 +698,18 @@ class App implements AppHandle {
       case 'selectMore': if (this.editLike()) { selectMoreLess(ctx, true); this.gp.markDirty(); } break;
       case 'selectLess': if (this.editLike()) { selectMoreLess(ctx, false); this.gp.markDirty(); } break;
       case 'delete':
+        if (ctx.settings.mode === 'OBJECT') {
+          const refs = listSelected(ctx.scene);
+          if (refs.length) {
+            ctx.pushUndo();
+            for (const ref of refs) deleteObject(ctx.scene, ref);
+            this.syncCanvases();
+            this.gp.markDirty();
+            this.refreshWidget();
+            this.ui.refresh();
+          }
+          break;
+        }
         if (this.editLike()) {
           const selCanvases = ctx.scene.canvases.filter((c) => c.select);
           if (selCanvases.length && !hasSelectedPoints(ctx)) {
@@ -902,6 +963,124 @@ class App implements AppHandle {
     this.gp.markDirty();
   }
 
+  // --------------------------------------------------------- object mode
+
+  /** Re-attach the transform widget to the current object selection pivot. */
+  refreshWidget(): void {
+    const inObjectMode = this.ctx.settings.mode === 'OBJECT';
+    const pivot = inObjectMode ? selectionPivot(this.ctx.scene) : null;
+    if (pivot) {
+      this.widgetProxy.position.copy(pivot);
+      this.widgetProxy.rotation.set(0, 0, 0);
+      this.widgetProxy.scale.set(1, 1, 1);
+      this.widget.attach(this.widgetProxy);
+      this.widget.enabled = true;
+      this.widget.getHelper().visible = true;
+    } else {
+      this.widget.detach();
+      this.widget.enabled = false;
+      this.widget.getHelper().visible = false;
+    }
+  }
+
+  setWidgetMode(mode: 'translate' | 'rotate' | 'scale'): void {
+    this.widget.setMode(mode);
+    this.ui.refresh();
+  }
+  get widgetMode(): string { return this.widget?.mode ?? 'translate'; }
+
+  private beginWidgetDrag(): void {
+    const refs = listSelected(this.ctx.scene);
+    if (!refs.length) return;
+    this.ctx.pushUndo();
+    this.widgetBase = {
+      refs,
+      transforms: refs.map((r) => getObjectTransform(this.ctx.scene, r)!),
+      proxy: {
+        translation: this.widgetProxy.position.toArray() as [number, number, number],
+        rotation: [this.widgetProxy.rotation.x, this.widgetProxy.rotation.y, this.widgetProxy.rotation.z],
+        scale: this.widgetProxy.scale.toArray() as [number, number, number],
+      },
+    };
+  }
+
+  /** Proxy deltas -> every selected object, around the pivot. */
+  private applyWidgetDrag(): void {
+    const base = this.widgetBase;
+    if (!base) return;
+    const pivot = new THREE.Vector3(...base.proxy.translation);
+    const dPos = this.widgetProxy.position.clone().sub(pivot);
+    const qDelta = new THREE.Quaternion().setFromEuler(this.widgetProxy.rotation);
+    const sDelta = new THREE.Vector3(
+      this.widgetProxy.scale.x / base.proxy.scale[0],
+      this.widgetProxy.scale.y / base.proxy.scale[1],
+      this.widgetProxy.scale.z / base.proxy.scale[2],
+    );
+    base.refs.forEach((ref, i) => {
+      const t0 = base.transforms[i];
+      const pos = new THREE.Vector3(...t0.translation);
+      // orbit position around pivot for rotation, scale offset for scaling
+      const offset = pos.clone().sub(pivot).applyQuaternion(qDelta).multiply(sDelta);
+      const newPos = pivot.clone().add(offset).add(dPos);
+      const q0 = new THREE.Quaternion().setFromEuler(new THREE.Euler(...t0.rotation));
+      const e = new THREE.Euler().setFromQuaternion(qDelta.clone().multiply(q0));
+      setObjectTransform(this.ctx.scene, ref, {
+        translation: [newPos.x, newPos.y, newPos.z],
+        rotation: [e.x, e.y, e.z],
+        scale: [t0.scale[0] * sDelta.x, t0.scale[1] * sDelta.y, t0.scale[2] * sDelta.z],
+      });
+    });
+    this.syncCanvases();
+    this.gp.markDirty(); // GP object transforms live on the object groups
+  }
+
+  exportActiveGP(): void {
+    const ob = activeObject(this.ctx.scene);
+    downloadText(serializeGPObject(ob), `${ob.name || 'gp'}.threegrease.json`);
+  }
+
+  async importGPFile(file: File): Promise<void> {
+    try {
+      this.ctx.pushUndo();
+      const added = importGPObjects(this.ctx.scene, await file.text());
+      this.ctx.scene.activeObject = this.ctx.scene.objects.length - 1;
+      this.gp.markDirty();
+      this.ui.refresh();
+      console.info(`imported ${added} GP object(s)`);
+    } catch (err) {
+      alert(`GP import failed: ${err}`);
+    }
+  }
+
+  exportSplatPly(id: number): void {
+    const buffer = this.splats.exportPly(id);
+    if (!buffer) { alert('Splat not loaded yet (or unsupported)'); return; }
+    const name = this.ctx.scene.splats.find((s) => s.id === id)?.name ?? 'splat';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([buffer], { type: 'application/octet-stream' }));
+    a.download = `${name.replace(/\.\w+.*$/, '')}.ply`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER', src?: string): void {
+    this.ctx.pushUndo();
+    const id = Date.now() % 1e9;
+    this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, [...this.ctx.scene.cursor], src));
+    this.meshes.sync(this.ctx.scene);
+    this.ui.refresh();
+  }
+
+  importModelFile(file: File): void {
+    this.ctx.pushUndo();
+    const id = Date.now() % 1e9;
+    const mesh = createMeshObject(id, 'MODEL', [...this.ctx.scene.cursor], URL.createObjectURL(file));
+    mesh.name = `${file.name} (session only)`;
+    this.ctx.scene.meshes.push(mesh);
+    this.meshes.sync(this.ctx.scene);
+    this.ui.refresh();
+  }
+
   /** Cursor/trigger glyphs: rebuilt when the score roster changes, posed every frame. */
   private syncScoreGlyphs(): void {
     const sc = this.ctx.scene.score;
@@ -1045,6 +1224,21 @@ class App implements AppHandle {
     this.syncScoreGlyphs();
     if (this.sim.step(ctx.scene, dt)) ctx.requestRender(this.sim.lastLayerId ?? undefined);
     this.splats.sync(ctx.scene);
+    this.meshes.sync(ctx.scene);
+    ctx.pickableMeshes = ctx.scene.meshes
+      .map((m) => this.meshes.rootFor(m.id))
+      .filter((r): r is THREE.Object3D => !!r && r.visible);
+    ctx.surfaces = [...this.canvasSurfaces, ...this.meshes.drawTargets(ctx.scene)];
+    this.widget.camera = this.nav.active; // ortho/persp swaps
+    // GP object transforms are data-driven; groups must track outside rebuilds
+    ctx.scene.objects.forEach((ob, i) => {
+      const g = this.gp.objectGroups[i];
+      if (g) {
+        g.position.set(...ob.translation);
+        g.rotation.set(...ob.rotation);
+        g.scale.set(...ob.scale);
+      }
+    });
     if (ctx.scene.score.attachments.some((a) => a.running && a.target.kind === 'CANVAS')) {
       this.syncCanvases();
     }
@@ -1175,6 +1369,7 @@ class App implements AppHandle {
     const s = this.ctx.settings;
     const status = document.getElementById('status')!;
     const hints: Record<string, string> = {
+      OBJECT: 'LMB select (Shift extends) · widget or G/R/S mode · X delete · Add… for primitives/models',
       DRAW: 'LMB draw · MMB orbit · RMB pan · Shift+RMB set cursor · Tab edit mode',
       EDIT: 'LMB select (drag box, Ctrl lasso) · G/R/S transform · X delete · Shift+D dup · A all',
       SCULPT: 'LMB sculpt · Ctrl inverts brush',

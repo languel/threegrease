@@ -123,6 +123,11 @@ the browser console or automated evals:
   meshes with `ctx.syncCanvases()` after mutating canvas data.
 - `setPointerCapture` is wrapped in `App.capture()` (throws on synthetic
   pointer ids) — use it, never call setPointerCapture directly.
+- Object mode: unified selection over GP/canvas/splat/mesh objects lives
+  in `src/tools/objects.ts`; the TransformControls widget applies DELTAS
+  from a proxy at the pivot (see App.applyWidgetDrag). GP object-group
+  transforms are re-applied every frame in the loop (the renderer only
+  sets them on rebuild). Mesh objects need the scene lights.
 
 ## Where to pick up (roadmap, rough priority)
 

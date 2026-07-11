@@ -49,6 +49,15 @@ export interface AppHandle {
   keymap: Keymap;
   sim: { enabled: boolean; damping: number; stiffness: number; reset(): void };
   splats: { errors: Map<number, string> };
+  meshes: { errors: Map<number, string> };
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER'): void;
+  importModelFile(file: File): void;
+  setWidgetMode(mode: 'translate' | 'rotate' | 'scale'): void;
+  widgetMode: string;
+  refreshWidget(): void;
+  exportActiveGP(): void;
+  importGPFile(file: File): void;
+  exportSplatPly(id: number): void;
   cycleCamera(): void;
   setActiveCamera(index: number): void;
   addCamera(): void;
@@ -142,6 +151,7 @@ function panel(title: string, ...children: (Node | string)[]): HTMLElement {
 // ---------------------------------------------------------------------------
 
 const TOOLS_BY_MODE: Record<EditorMode, [string, string, string][]> = {
+  OBJECT: [['object-select', '⬚', 'Select objects (Shift extends)']],
   DRAW: [
     ['draw', '✏️', 'Draw (D)'], ['erase', '◌', 'Erase (E)'], ['fill', '🪣', 'Fill (F)'],
     ['tint', '🖌', 'Tint'], ['cutter', '✂️', 'Cutter'], ['eyedropper', '💧', 'Eyedropper'],
@@ -194,14 +204,44 @@ export class UI {
     bar.replaceChildren();
 
     const modes: [EditorMode, string][] = [
-      ['DRAW', 'Draw'], ['EDIT', 'Edit'], ['SCULPT', 'Sculpt'], ['VERTEX', 'Vertex Paint'], ['WEIGHT', 'Weight Paint'],
+      ['OBJECT', 'Object'], ['DRAW', 'Draw'], ['EDIT', 'Edit'], ['SCULPT', 'Sculpt'],
+      ['VERTEX', 'Vertex Paint'], ['WEIGHT', 'Weight Paint'],
     ];
     for (const [m, label] of modes) {
       bar.append(btn(label, () => this.app.setMode(m), { active: s.mode === m }));
     }
     bar.append(el('div', { class: 'sep' }));
 
-    if (s.mode === 'DRAW') {
+    if (s.mode === 'OBJECT') {
+      const addSel = el('select') as HTMLSelectElement;
+      addSel.append(el('option', { value: '', text: '＋ Add…' }));
+      for (const [v, t] of [['PLANE', 'Plane'], ['BOX', 'Box'], ['SPHERE', 'Sphere'], ['CYLINDER', 'Cylinder'],
+        ['MODEL', 'Model (.glb/.obj)…'], ['GP', 'Import GP (.json)…']]) {
+        addSel.append(el('option', { value: v, text: t }));
+      }
+      const modelFile = el('input', { type: 'file', accept: '.glb,.gltf,.obj' }) as HTMLInputElement;
+      modelFile.style.display = 'none';
+      modelFile.onchange = () => { const f = modelFile.files?.[0]; if (f) this.app.importModelFile(f); };
+      const gpFile = el('input', { type: 'file', accept: '.json' }) as HTMLInputElement;
+      gpFile.style.display = 'none';
+      gpFile.onchange = () => { const f = gpFile.files?.[0]; if (f) this.app.importGPFile(f); };
+      addSel.onchange = () => {
+        const v = addSel.value;
+        addSel.value = '';
+        if (v === 'MODEL') modelFile.click();
+        else if (v === 'GP') gpFile.click();
+        else if (v) this.app.addMeshObject(v as 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER');
+      };
+      bar.append(
+        addSel, modelFile, gpFile,
+        el('div', { class: 'sep' }),
+        btn('Move', () => this.app.setWidgetMode('translate'), { active: this.app.widgetMode === 'translate', title: 'Widget: translate (G)' }),
+        btn('Rotate', () => this.app.setWidgetMode('rotate'), { active: this.app.widgetMode === 'rotate', title: 'Widget: rotate (R)' }),
+        btn('Scale', () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
+        el('div', { class: 'sep' }),
+        btn('Export GP', () => this.app.exportActiveGP(), { title: 'Export the active GP object as .threegrease.json' }),
+      );
+    } else if (s.mode === 'DRAW') {
       bar.append(
         selectField('Brush', s.brush.preset,
           BRUSH_PRESETS.map((p) => [p.name, p.name]) as [string, string][],
@@ -315,6 +355,7 @@ export class UI {
     const side = $('sidebar');
     side.replaceChildren();
 
+    if (ctx.settings.mode === 'OBJECT') side.append(this.objectsPanel());
     if (ctx.settings.mode === 'DRAW') side.append(this.brushPanel());
     side.append(this.layersPanel());
     side.append(this.materialsPanel());
@@ -329,6 +370,58 @@ export class UI {
     side.append(this.routesPanel());
     side.append(this.ioPanel());
     void ob;
+  }
+
+  /** Object-mode outliner: every scene object, selectable + togglable. */
+  private objectsPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const scene = ctx.scene;
+    const rows: Node[] = [];
+    const row = (
+      icon: string, name: string, selected: boolean,
+      onSelect: () => void, extras: Node[] = [],
+    ) => {
+      const item = el('div', { class: `list-item ${selected ? 'active' : ''}` });
+      item.onclick = onSelect;
+      item.append(el('span', { text: icon }), el('span', { class: 'grow', text: name }), ...extras);
+      rows.push(item);
+    };
+    const toggleSel = (apply: (v: boolean) => void, cur: boolean, shift: boolean) => {
+      ctx.pushUndo();
+      if (!shift) {
+        for (const o of scene.objects) o.select = false;
+        for (const c of scene.canvases) c.select = false;
+        for (const s of scene.splats) s.select = false;
+        for (const m of scene.meshes) m.select = false;
+      }
+      apply(shift ? !cur : true);
+      ctx.syncCanvases();
+      ctx.requestRender();
+      this.app.refreshWidget();
+      this.refresh();
+    };
+
+    scene.objects.forEach((ob, i) => row('✏️', ob.name, !!ob.select,
+      () => { scene.activeObject = i; toggleSel((v) => { ob.select = v; }, !!ob.select, false); },
+      [btn('⬇', () => this.app.exportActiveGP(), { cls: 'icon-btn', title: 'Export this GP object' })]));
+    for (const c of scene.canvases) row('▦', c.name, c.select,
+      (e?: unknown) => toggleSel((v) => { c.select = v; }, c.select, !!(e as MouseEvent)?.shiftKey),
+      [btn(c.drawTarget ? '🖊' : '·', () => { c.drawTarget = !c.drawTarget; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
+        btn(c.visible ? '👁' : '🙈', () => { c.visible = !c.visible; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn' })]);
+    for (const m of scene.meshes) row(m.kind === 'MODEL' ? '🗿' : '⬢', m.name, m.select,
+      () => toggleSel((v) => { m.select = v; }, m.select, false),
+      [btn(m.drawTarget ? '🖊' : '·', () => { m.drawTarget = !m.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
+        btn(m.wireframe ? '◻' : '◼', () => { m.wireframe = !m.wireframe; this.refresh(); }, { cls: 'icon-btn', title: 'Wireframe (reference look)' }),
+        btn(m.visible ? '👁' : '🙈', () => { m.visible = !m.visible; this.refresh(); }, { cls: 'icon-btn' })]);
+    for (const s of scene.splats) row('✳', s.name, s.select,
+      () => toggleSel((v) => { s.select = v; }, s.select, false),
+      [btn('⬇.ply', () => this.app.exportSplatPly(s.id), { cls: 'icon-btn', title: 'Export as 3DGS PLY' }),
+        btn(s.visible ? '👁' : '🙈', () => { s.visible = !s.visible; this.refresh(); }, { cls: 'icon-btn' })]);
+
+    return panel('Objects',
+      el('div', { class: 'row', text: 'Click selects · widget transforms · X deletes' }),
+      ...rows,
+    );
   }
 
   /** Blender-style brush Advanced panel; edits are baked into future strokes only. */
@@ -1081,7 +1174,7 @@ export class UI {
       ctx.pushUndo();
       ctx.scene.splats.push({
         id: scoreId(ctx.scene), name, src,
-        translation: [0, 0, 0], rotation: [0, 0, 0], scale: 1, visible: true,
+        translation: [0, 0, 0], rotation: [0, 0, 0], scale: 1, visible: true, select: false,
       });
       this.refresh();
     };

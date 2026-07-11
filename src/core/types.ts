@@ -116,6 +116,7 @@ export interface GPEffect {
 
 export interface GPObject {
   name: string;
+  select?: boolean;        // object-mode selection
   layers: GPLayer[];       // index 0 = bottom
   activeLayerId: number;
   materials: GPMaterial[];
@@ -211,7 +212,7 @@ export interface TGTrigger {
 /** A scene object riding a path on its own clock. */
 export interface TGAttachment {
   id: number;
-  target: { kind: 'CANVAS' | 'CAMERA' | 'SPLAT'; id: number }; // canvas/splat id, camera index
+  target: { kind: 'CANVAS' | 'CAMERA' | 'SPLAT' | 'MESH'; id: number };
   path: PathRef;
   speed: number;
   phase: number;
@@ -238,6 +239,25 @@ export interface TGSplat {
   rotation: Vec3;
   scale: number;
   visible: boolean;
+  select: boolean;
+}
+
+/** A mesh scene object: primitive solid, plane, or imported model —
+ *  usable as a reference or as a Surface-placement draw target. */
+export interface TGMesh {
+  id: number;
+  name: string;
+  kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'MODEL';
+  src?: string;            // MODEL only: .glb/.gltf/.obj URL (blob = session)
+  translation: Vec3;
+  rotation: Vec3;
+  scale: Vec3;
+  visible: boolean;
+  select: boolean;
+  drawTarget: boolean;     // raycast target for Surface placement
+  wireframe: boolean;      // reference look
+  color: Vec3;
+  opacity: number;
 }
 
 /** Point force for the dynamic string simulation (P5). */
@@ -278,5 +298,6 @@ export interface GPScene {
   score: TGScore;
   routes: TGRoute[];
   splats: TGSplat[];
+  meshes: TGMesh[];
   attractors: TGAttractor[];
 }

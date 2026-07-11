@@ -98,6 +98,8 @@ export interface AppCtx {
   surfaces: THREE.Object3D[];
   /** all visible canvas-plane meshes (selection picking, snapping) */
   canvasMeshes: THREE.Object3D[];
+  /** mesh-object roots for object-mode picking */
+  pickableMeshes: THREE.Object3D[];
   syncCanvases(): void;
   copyBuffer: GPStroke[];
   /** mark for rebuild; pass a layerId for the cheap single-layer path (P10) */

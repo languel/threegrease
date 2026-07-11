@@ -1,5 +1,5 @@
-import type { GPScene } from '../core/types';
-import { bumpIdCounter, createDefaultCamera } from '../core/gpdata';
+import type { GPObject, GPScene } from '../core/types';
+import { bumpIdCounter, createDefaultCamera, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
 
 const FORMAT = 'threegrease-scene';
@@ -27,8 +27,13 @@ export function deserializeScene(json: string): GPScene {
   scene.routes ??= [];
   scene.attractors ??= [];
   scene.splats ??= [];
-  // object-URL splat sources don't survive reload
+  // object-URL sources don't survive reload
   scene.splats = scene.splats.filter((s) => !s.src.startsWith('blob:'));
+  for (const s of scene.splats) s.select ??= false;
+  scene.meshes ??= [];
+  scene.meshes = scene.meshes.filter((m) => !(m.src ?? '').startsWith('blob:'));
+  for (const m of scene.meshes) m.select ??= false;
+  for (const ob of scene.objects) ob.select ??= false;
   // v1 -> v2: strokes gain baked style
   for (const ob of scene.objects) {
     for (const layer of ob.layers) {
@@ -39,6 +44,72 @@ export function deserializeScene(json: string): GPScene {
   }
   bumpIdCounter(scene);
   return scene;
+}
+
+// ---- GP-object-level interchange ------------------------------------------
+
+export function serializeGPObject(ob: GPObject): string {
+  return JSON.stringify({ format: 'threegrease-gpobject', version: VERSION, object: ob });
+}
+
+/** Fresh ids for an appended GP object (layers, strokes, mask refs, mods). */
+export function remapGPObjectIds(ob: GPObject): GPObject {
+  const layerIdMap = new Map<number, number>();
+  for (const layer of ob.layers) {
+    const newId = genId();
+    layerIdMap.set(layer.id, newId);
+    layer.id = newId;
+    for (const f of layer.frames) {
+      for (const s of f.strokes) {
+        s.id = genId();
+        s.style ??= defaultStyle();
+      }
+    }
+  }
+  for (const layer of ob.layers) {
+    layer.maskLayerIds = layer.maskLayerIds
+      .map((id) => layerIdMap.get(id))
+      .filter((id): id is number => id !== undefined);
+  }
+  ob.activeLayerId = layerIdMap.get(ob.activeLayerId) ?? ob.layers[0]?.id ?? 0;
+  for (const mod of ob.modifiers) {
+    mod.id = genId();
+    mod.layerFilter = mod.layerFilter === null
+      ? null : (layerIdMap.get(mod.layerFilter) ?? null);
+  }
+  for (const fx of ob.effects) fx.id = genId();
+  ob.select = false;
+  return ob;
+}
+
+/**
+ * Append GP object(s) from a gpobject or full scene file into `scene`.
+ * Returns the number of objects added.
+ */
+export function importGPObjects(scene: GPScene, json: string): number {
+  const data = JSON.parse(json);
+  let objects: GPObject[] = [];
+  if (data?.format === 'threegrease-gpobject' && data.object) objects = [data.object];
+  else if (data?.format === FORMAT && data.scene?.objects) objects = data.scene.objects;
+  else throw new Error('Not a threegrease GP or scene file');
+  bumpIdCounter(scene);
+  for (const ob of objects) {
+    for (const layer of ob.layers ?? []) {
+      for (const f of layer.frames ?? []) {
+        for (const s of f.strokes ?? []) s.style ??= defaultStyle();
+      }
+    }
+    scene.objects.push(remapGPObjectIds(ob));
+  }
+  return objects.length;
+}
+
+export function downloadText(text: string, filename: string, type = 'application/json'): void {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 export function downloadScene(scene: GPScene, filename = 'scene.threegrease.json'): void {

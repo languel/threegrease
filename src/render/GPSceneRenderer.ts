@@ -5,7 +5,7 @@ import { evaluateModifiers, remapTime } from '../modifiers/index';
 import { buildFillGeometry, buildStrokeGeometry, type BuildOptions } from './geometry';
 import { makeFillMaterial, makeStrokeMaterial } from './materials';
 
-export type EditorMode = 'DRAW' | 'EDIT' | 'SCULPT' | 'VERTEX' | 'WEIGHT';
+export type EditorMode = 'OBJECT' | 'DRAW' | 'EDIT' | 'SCULPT' | 'VERTEX' | 'WEIGHT';
 
 export interface RenderState {
   mode: EditorMode;
@@ -151,7 +151,7 @@ export class GPSceneRenderer {
     }
     for (const m of meshes) entry.group.add(m);
 
-    if (isActive && state.mode !== 'DRAW' && !layer.lock) {
+    if (isActive && state.mode !== 'DRAW' && state.mode !== 'OBJECT' && !layer.lock) {
       const overlay = this.buildOverlay(kf.strokes, layer, state, order + 7, entry);
       if (overlay) entry.group.add(overlay);
     }

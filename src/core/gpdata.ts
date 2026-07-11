@@ -92,6 +92,7 @@ export function createScene(): GPScene {
     routes: [],
     attractors: [],
     splats: [],
+    meshes: [],
   };
 }
 
