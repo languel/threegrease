@@ -89,6 +89,7 @@ export function createScene(): GPScene {
     activeCamera: 0,
     io: { wsUrl: '', midiInId: null, midiOutId: null },
     score: { cursors: [], triggers: [], attachments: [] },
+    routes: [],
   };
 }
 

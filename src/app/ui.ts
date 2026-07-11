@@ -7,6 +7,7 @@ import { MODIFIERS, createModifier } from '../modifiers/index';
 import { BRUSH_PRESETS } from '../core/brushes';
 import { bus } from '../events/bus';
 import { defaultCursor, scoreId } from '../score/engine';
+import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
 import type { PathRef } from '../core/types';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
@@ -313,6 +314,7 @@ export class UI {
     side.append(this.effectsPanel());
     side.append(this.onionPanel());
     side.append(this.scorePanel());
+    side.append(this.routesPanel());
     side.append(this.ioPanel());
     void ob;
   }
@@ -1050,6 +1052,65 @@ export class UI {
           });
           this.refresh();
         }, { title: 'Ride the selected object along the selected stroke' }),
+      ),
+      ...items,
+    );
+  }
+
+  // --------------------------------------------------------------- routes
+
+  private routesPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const items: Node[] = [];
+
+    for (const route of ctx.scene.routes) {
+      const addr = el('input', { type: 'text', value: route.match.address }) as HTMLInputElement;
+      addr.style.width = '110px';
+      addr.onchange = () => { route.match.address = addr.value.trim(); };
+
+      const target = el('input', { type: 'text', value: route.target, list: 'route-targets' }) as HTMLInputElement;
+      target.style.width = '120px';
+      target.onchange = () => { route.target = target.value.trim(); route.enabled = true; };
+
+      const learning = routes.learningRouteId === route.id;
+      const body = el('div', { class: 'body' },
+        el('div', { class: 'row' },
+          checkbox('', route.enabled, (v) => { route.enabled = v; }),
+          selectField('', route.match.source, [['ANY', 'Any'], ['MIDI', 'MIDI'], ['WS', 'WS/OSC']],
+            (v) => { route.match.source = v as typeof route.match.source; }),
+          addr,
+          btn(learning ? '…' : 'Learn', () => {
+            routes.learningRouteId = learning ? null : route.id;
+            this.refresh();
+          }, { active: learning, title: 'Click, then move a controller / send an event' }),
+          btn('✕', () => { ctx.pushUndo(); ctx.scene.routes.splice(ctx.scene.routes.indexOf(route), 1); this.refresh(); }, { cls: 'icon-btn' }),
+        ),
+        el('div', { class: 'row' }, '→', target),
+        el('div', { class: 'row' },
+          numField('in', route.mapping.inMin, (v) => { route.mapping.inMin = v; }, 1),
+          numField('', route.mapping.inMax, (v) => { route.mapping.inMax = v; }, 1),
+          numField('out', route.mapping.outMin, (v) => { route.mapping.outMin = v; }),
+          numField('', route.mapping.outMax, (v) => { route.mapping.outMax = v; }),
+          selectField('', route.mapping.mode, [['SCALE', 'Scale'], ['CLAMP', 'Clamp'], ['WRAP', 'Wrap'], ['RAW', 'Raw']],
+            (v) => { route.mapping.mode = v as typeof route.mapping.mode; }),
+        ),
+      );
+      items.push(el('div', { class: 'panel' },
+        el('h3', { text: `⇄ ${route.match.address} → ${route.target}` }), body));
+    }
+
+    const datalist = el('datalist', { id: 'route-targets' });
+    for (const t of TARGET_SUGGESTIONS) datalist.append(el('option', { value: t }));
+
+    return panel('Routes (events → properties)',
+      datalist,
+      el('div', { class: 'row' },
+        btn('＋Route', () => {
+          ctx.pushUndo();
+          ctx.scene.routes.push(createRoute(scoreId(ctx.scene)));
+          this.refresh();
+        }),
+        el('span', { text: 'Learn: click, then wiggle a controller' }),
       ),
       ...items,
     );

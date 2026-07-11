@@ -28,6 +28,7 @@ import { Keymap, comboFromEvent } from './keymap';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { ScoreEngine } from '../score/engine';
+import { routes } from '../events/routes';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
@@ -192,6 +193,8 @@ class App implements AppHandle {
     });
     wsLink.onStatus = () => this.ui?.refresh();
     if (scene.io.wsUrl) wsLink.connect(scene.io.wsUrl);
+    routes.init(this.ctx);
+    routes.onLearned = () => this.ui?.refresh();
     this.bindEvents(glCanvas);
     this.resize();
     requestAnimationFrame(() => this.loop());

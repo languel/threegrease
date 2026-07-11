@@ -224,6 +224,21 @@ export interface TGScore {
   attachments: TGAttachment[];
 }
 
+// ---- Property routing (P4, the routional layer) ---------------------------
+
+export type RouteMapMode = 'RAW' | 'SCALE' | 'CLAMP' | 'WRAP';
+
+/** Bind incoming events to a scene/settings property. */
+export interface TGRoute {
+  id: number;
+  enabled: boolean;
+  match: { source: 'MIDI' | 'WS' | 'ANY'; address: string }; // glob address
+  /** whitelisted dot-path, e.g. 'brush.size', 'layer.3.opacity',
+   *  'cursor.2.speed', 'camera.0.fov', 'modifier.9.factor' */
+  target: string;
+  mapping: { inMin: number; inMax: number; outMin: number; outMax: number; mode: RouteMapMode };
+}
+
 export interface GPScene {
   objects: GPObject[];
   activeObject: number;
@@ -238,4 +253,5 @@ export interface GPScene {
   /** event IO endpoints (P2) */
   io: { wsUrl: string; midiInId: string | null; midiOutId: string | null };
   score: TGScore;
+  routes: TGRoute[];
 }
