@@ -208,11 +208,27 @@ pauses while one of its inputs has focus.
 | [Spark](https://sparkjs.dev) ([github](https://github.com/sparkjsdev/spark)) | three.js 3DGS renderer: SplatMesh extends Object3D, renders alongside meshes, formats .ply/.spz/.splat/.ksplat/.sog/.rad, programmable "dyno" GPU graphs, LoD in 2.0. **Decision: use Spark, don't write our own splat renderer.** |
 | Browser constraints | Web MIDI API native (Chrome); raw UDP OSC impossible in browser → WebSocket bridge required (small Node relay, see plan P2). |
 
-## 9. Where the work goes next
+## 9. Platform phases — ALL SHIPPED (2026-07-11, commits 30743e8..b4d0002)
 
-Read [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Summary order:
-P0 NPR brushes → P1 Blender interop → P2 event bus + IO → P3 scores
-(cursors/triggers/path-attached objects) → P4 property routing in →
-P5 string art → P6 multi-view wire art → P7 splats (Spark) → P8 exporters
-→ P9 mediamime bridge → P10 performance. Cross-cutting: outliner, module
-registry, docs upkeep. Do not start a phase without reading its section.
+P0 NPR brushes (stamps/grain/scene-units/presets) · P1 Blender GPv3 addon
+(roundtrip passes vs Blender 5.1.1) · P2 event bus + MIDI/WS + OSC bridge
+· P3 scores (cursors/triggers/attachments) · P4 routes (learn mode) ·
+P5 string art + attractor sim · P6 multi-view wire art (99%/97% on 3/S) ·
+P7 splats via Spark (three→0.180) · P8 GLB/OBJ/STL export · P9 protocol
+doc · P10 per-layer rebuild (10.2x hot path). Per-phase regression
+scripts: docs/verify/*.md.
+
+New gotchas from the platform build:
+- SparkRenderer must be constructed explicitly with our WebGLRenderer
+  (SplatManager.init) — Spark's auto-detection never fires in our loop.
+- Modifier evaluation preserves stroke ids (cloneStroke normally regens)
+  so stamp jitter/NOISE seeds stay deterministic across rebuilds.
+- markDirty(layerId) is the drawing/sim hot path; anything cross-layer
+  (frame, mode, masks, undo, load) must stay global markDirty().
+- Background browser tabs throttle rAF — headless verification must step
+  engines manually (sim.step / gp.update), never await wall-clock frames.
+- Wire-art scripting: compute camera eulers via lookAt, never by hand.
+
+Where next: deferred perf items (worker fill, stamp instancing,
+in-progress stroke buffer), texture/image stamp brushes, splat painting,
+outliner, curve edit; see PRD §4 for the P1/P2-priority backlog.
