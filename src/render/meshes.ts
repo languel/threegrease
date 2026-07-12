@@ -19,11 +19,22 @@ function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
 
 export class MeshManager {
   readonly group = new THREE.Group();
-  private entries = new Map<number, { root: THREE.Object3D; src?: string; kind: string }>();
+  private entries = new Map<number, { root: THREE.Object3D; src?: string; kind: string; unlit?: boolean }>();
+  private textures = new Map<string, THREE.Texture>();
   readonly errors = new Map<number, string>();
 
-  /** Rebuild/update mesh objects to mirror scene.meshes. Returns pickables. */
-  sync(scene: GPScene): void {
+  private textureFor(src: string): THREE.Texture {
+    let tex = this.textures.get(src);
+    if (!tex) {
+      tex = new THREE.TextureLoader().load(src);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.textures.set(src, tex);
+    }
+    return tex;
+  }
+
+  /** Rebuild/update mesh objects to mirror scene.meshes (camera for view locks). */
+  sync(scene: GPScene, camera?: THREE.Camera): void {
     for (const [id, entry] of this.entries) {
       const data = scene.meshes.find((m) => m.id === id);
       if (!data || data.src !== entry.src || data.kind !== entry.kind) {
@@ -36,13 +47,24 @@ export class MeshManager {
     for (const data of scene.meshes) {
       let entry = this.entries.get(data.id);
       if (!entry) {
-        entry = { root: this.build(data), src: data.src, kind: data.kind };
+        // build() always makes a Standard material; unlit:false so the
+        // first sync swaps it when the data says unlit
+        entry = { root: this.build(data), src: data.src, kind: data.kind, unlit: false };
         entry.root.userData.meshId = data.id;
         entry.root.traverse((o) => { o.userData.meshId = data.id; });
         this.group.add(entry.root);
         this.entries.set(data.id, entry);
       }
-      this.apply(entry.root, data, scene);
+      // unlit toggles swap the material class on primitives
+      if (data.kind !== 'MODEL' && entry.unlit !== !!data.unlit) {
+        const mesh = entry.root as THREE.Mesh;
+        (mesh.material as THREE.Material)?.dispose?.();
+        mesh.material = data.unlit
+          ? new THREE.MeshBasicMaterial()
+          : new THREE.MeshStandardMaterial();
+        entry.unlit = !!data.unlit;
+      }
+      this.apply(entry.root, data, scene, camera);
     }
   }
 
@@ -68,9 +90,24 @@ export class MeshManager {
     return mesh;
   }
 
-  private apply(root: THREE.Object3D, data: TGMesh, scene: GPScene): void {
-    worldMatrixOf(scene, { kind: 'MESH', id: data.id })
-      .decompose(root.position, root.quaternion, root.scale);
+  private apply(root: THREE.Object3D, data: TGMesh, scene: GPScene, camera?: THREE.Camera): void {
+    if (data.billboard === 'CAMERA' && camera) {
+      // locked to the view: local transform is a camera-space offset
+      camera.updateMatrixWorld();
+      const local = new THREE.Matrix4().compose(
+        new THREE.Vector3(...data.translation),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(...data.rotation)),
+        new THREE.Vector3(...data.scale),
+      );
+      camera.matrixWorld.clone().multiply(local)
+        .decompose(root.position, root.quaternion, root.scale);
+    } else {
+      worldMatrixOf(scene, { kind: 'MESH', id: data.id })
+        .decompose(root.position, root.quaternion, root.scale);
+      if (data.billboard === 'FACE_VIEW' && camera) {
+        root.quaternion.copy((camera as THREE.PerspectiveCamera).quaternion);
+      }
+    }
     root.visible = data.visible;
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -79,11 +116,20 @@ export class MeshManager {
       if (!mat || Array.isArray(mat)) return;
       if (data.kind !== 'MODEL') {
         mat.color.setRGB(...data.color);
+        const tex = data.texture ? this.textureFor(data.texture) : null;
+        if (mat.map !== tex) {
+          mat.map = tex;
+          if (tex) mat.color.setRGB(1, 1, 1); // don't tint the image
+          mat.needsUpdate = true;
+        }
       }
       mat.wireframe = data.wireframe;
-      mat.transparent = data.opacity < 1;
+      mat.side = data.doubleSided !== false ? THREE.DoubleSide : THREE.FrontSide;
+      mat.transparent = data.opacity < 1 || !!(mat.map);
       mat.opacity = data.opacity;
-      mat.emissive?.setRGB(data.select ? 0.35 : 0, data.select ? 0.2 : 0, 0);
+      mat.depthWrite = data.opacity >= 0.99;
+      (mat as unknown as { emissive?: THREE.Color }).emissive
+        ?.setRGB(data.select ? 0.35 : 0, data.select ? 0.2 : 0, 0);
     });
   }
 
@@ -114,5 +160,6 @@ export function createMeshObject(id: number, kind: TGMesh['kind'], at: [number, 
     translation: [...at], rotation: [0, 0, 0], scale: [1, 1, 1],
     visible: true, select: false, drawTarget: true, wireframe: false,
     color: [0.62, 0.65, 0.72], opacity: 1,
+    parent: null, texture: null, unlit: false, doubleSided: true, billboard: 'NONE',
   };
 }

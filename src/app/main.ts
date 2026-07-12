@@ -1202,6 +1202,32 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** Reference/image plane: textured unlit PLANE sized to the image aspect. */
+  importImagePlane(file: File): void {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result);
+      const img = new Image();
+      img.onload = () => {
+        this.ctx.pushUndo();
+        const id = Date.now() % 1e9;
+        const mesh = createMeshObject(id, 'PLANE', [...this.ctx.scene.cursor]);
+        mesh.name = file.name;
+        mesh.texture = dataUrl;
+        mesh.unlit = true;
+        mesh.drawTarget = false;   // reference by default; toggle in properties
+        mesh.opacity = 1;
+        const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
+        mesh.scale = [aspect, 1, 1];
+        this.ctx.scene.meshes.push(mesh);
+        this.meshes.sync(this.ctx.scene, this.nav.active);
+        this.ui.refresh();
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
+
   importModelFile(file: File): void {
     this.ctx.pushUndo();
     const id = Date.now() % 1e9;
@@ -1355,7 +1381,7 @@ class App implements AppHandle {
     this.syncScoreGlyphs();
     if (this.sim.step(ctx.scene, dt)) ctx.requestRender(this.sim.lastLayerId ?? undefined);
     this.splats.sync(ctx.scene);
-    this.meshes.sync(ctx.scene);
+    this.meshes.sync(ctx.scene, this.nav.active);
     ctx.pickableMeshes = ctx.scene.meshes
       .map((m) => this.meshes.rootFor(m.id))
       .filter((r): r is THREE.Object3D => !!r && r.visible);

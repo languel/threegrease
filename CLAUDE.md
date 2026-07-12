@@ -119,10 +119,11 @@ the browser console or automated evals:
   so cancel is detected via `pointerlockchange` + the `flyStopping` flag in
   `nav.ts` — don't remove that flag.
 
-- Canvas planes are scene-level objects (`scene.canvases`, world space, NOT
-  object space like stroke points). Selection lives on `CanvasPlane.select`;
-  `ModalTransform` handles them in a separate world-space branch. Rebuild
-  meshes with `ctx.syncCanvases()` after mutating canvas data.
+- Canvas planes are RETIRED: serialize.ts migrates them to PLANE mesh
+  objects on load (ids preserved; attachments/routes rewritten). The
+  canvas code paths remain but always see an empty list — don't build new
+  features on `scene.canvases`; use TGMesh with material fields (texture/
+  unlit/doubleSided/billboard) instead.
 - `setPointerCapture` is wrapped in `App.capture()` (throws on synthetic
   pointer ids) — use it, never call setPointerCapture directly.
 - Object mode: unified selection over GP/canvas/splat/mesh objects lives

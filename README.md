@@ -77,10 +77,10 @@ npm run dev     # open http://localhost:5199
   viewport position, 3D cursor.
 - **Select tool family** (edit mode toolbar): box, lasso, and circle brush
   (`[`/`]` resize) as explicit tools; box keeps Ctrl-drag lasso and `C`.
-- **Canvas planes are objects**: click to select them in edit mode (amber
-  highlight), transform with `G`/`R`/`S`, delete with `X`. A per-canvas
-  *Draw target* flag turns a canvas into a pure reference plane that
-  Surface placement ignores.
+- **Reference / image planes**: textured planes (Add menu) with a
+  Blender-lite per-object Material panel — color, opacity, texture,
+  unlit, two-sided, wireframe, world/face-view/camera lock, draw-target
+  flag. Old canvas planes migrate automatically into these.
 - **Magnet snapping** (`Shift+Tab` or 🧲 in the edit topbar): during moves,
   snap the selection to grid increments, the nearest stroke point, or a
   point on a canvas plane. Cursor grid-snap works within the drawing plane

@@ -269,6 +269,15 @@ export interface TGMesh {
   color: Vec3;
   opacity: number;
   parent?: ParentRef | null;
+  // ---- material (Blender-lite, the parts we need) ----
+  /** image map (dataURL persists in the scene; URLs allowed) */
+  texture?: string | null;
+  /** ignore scene lights (flat/reference look) */
+  unlit?: boolean;
+  doubleSided?: boolean;
+  /** NONE = world; FACE_VIEW = always face the viewport (billboard);
+   *  CAMERA = locked to the view — transform becomes a camera-space offset */
+  billboard?: 'NONE' | 'FACE_VIEW' | 'CAMERA';
 }
 
 /** Point force for the dynamic string simulation (P5). */

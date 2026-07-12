@@ -32,7 +32,37 @@ export function deserializeScene(json: string): GPScene {
   for (const s of scene.splats) s.select ??= false;
   scene.meshes ??= [];
   scene.meshes = scene.meshes.filter((m) => !(m.src ?? '').startsWith('blob:'));
-  for (const m of scene.meshes) m.select ??= false;
+  for (const m of scene.meshes) {
+    m.select ??= false;
+    m.texture ??= null;
+    if (m.texture?.startsWith('blob:')) m.texture = null; // session-only
+    m.unlit ??= false;
+    m.doubleSided ??= true;
+    m.billboard ??= 'NONE';
+  }
+  // canvases are retired: migrate them to PLANE mesh objects (same ids, so
+  // parent refs survive; attachments/routes rewritten below)
+  for (const c of scene.canvases) {
+    scene.meshes.push({
+      id: c.id, name: c.name, kind: 'PLANE',
+      translation: [...c.translation], rotation: [...c.rotation],
+      scale: [c.size[0] / 2, c.size[1] / 2, 1],   // PLANE geometry is 2x2
+      visible: c.visible, select: false,
+      drawTarget: c.drawTarget, wireframe: false,
+      color: [0.62, 0.65, 0.72], opacity: 0.25,
+      parent: c.parent ?? null,
+      texture: null, unlit: true, doubleSided: true, billboard: 'NONE',
+    });
+  }
+  if (scene.canvases.length) {
+    for (const at of scene.score?.attachments ?? []) {
+      if (at.target.kind === 'CANVAS') at.target = { kind: 'MESH', id: at.target.id };
+    }
+    for (const r of scene.routes ?? []) {
+      r.target = r.target.replace(/^canvas\./, 'mesh.');
+    }
+  }
+  scene.canvases = [];
   for (const ob of scene.objects) {
     ob.select ??= false;
     ob.id ??= genId();

@@ -223,6 +223,12 @@ export class ScoreEngine {
           splat.translation = pos;
           if (rotation) splat.rotation = rotation;
         }
+      } else if (at.target.kind === 'MESH') {
+        const mesh = scene.meshes.find((m) => m.id === at.target.id);
+        if (mesh) {
+          mesh.translation = pos;
+          if (rotation) mesh.rotation = rotation;
+        }
       }
     }
   }

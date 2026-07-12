@@ -69,7 +69,22 @@ export function resolveTarget(ctx: AppCtx, path: string): ResolvedTarget | null 
       if (!cam || seg[2] !== 'fov') return null;
       return { set: (v) => { cam.fov = Math.min(140, Math.max(5, num(v))); }, dirty: 'none' };
     }
-    case 'canvas': {
+    case 'mesh': case 'canvas': { // 'canvas' = legacy alias since the migration
+      const mesh = scene.meshes.find((m) => m.id === Number(seg[1]));
+      if (mesh) {
+        const axes: Record<string, () => ResolvedTarget> = {
+          tx: () => ({ set: (v) => { mesh.translation[0] = num(v); }, dirty: 'none' }),
+          ty: () => ({ set: (v) => { mesh.translation[1] = num(v); }, dirty: 'none' }),
+          tz: () => ({ set: (v) => { mesh.translation[2] = num(v); }, dirty: 'none' }),
+          rx: () => ({ set: (v) => { mesh.rotation[0] = num(v); }, dirty: 'none' }),
+          ry: () => ({ set: (v) => { mesh.rotation[1] = num(v); }, dirty: 'none' }),
+          rz: () => ({ set: (v) => { mesh.rotation[2] = num(v); }, dirty: 'none' }),
+          opacity: () => ({ set: (v) => { mesh.opacity = Math.max(0, Math.min(1, num(v))); }, dirty: 'none' }),
+        };
+        const hit = axes[seg[2]]?.();
+        if (hit) return hit;
+      }
+      // fall through to canvas lookup for any not-yet-migrated scene
       const canvas = scene.canvases.find((c) => c.id === Number(seg[1]));
       if (!canvas) return null;
       const map: Record<string, () => ResolvedTarget> = {

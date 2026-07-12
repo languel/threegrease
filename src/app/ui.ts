@@ -9,6 +9,10 @@ import { bus } from '../events/bus';
 import { defaultCursor, scoreId } from '../score/engine';
 import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
 import {
+  getObjectTransform, listSelected as listSelectedObjects, objectName,
+  setObjectTransform,
+} from '../tools/objects';
+import {
   DEFAULT_STRINGART, loadTargetImage, pinSourceStroke, runStringArt,
   type StringArtRun,
 } from '../solvers/stringart';
@@ -52,6 +56,7 @@ export interface AppHandle {
   meshes: { errors: Map<number, string> };
   addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER'): void;
   importModelFile(file: File): void;
+  importImagePlane(file: File): void;
   setWidgetMode(mode: 'translate' | 'rotate' | 'scale'): void;
   widgetMode: string;
   refreshWidget(): void;
@@ -312,7 +317,10 @@ export class UI {
     ]);
 
     menu('Add', [
-      { label: 'Canvas plane at cursor', do: () => this.app.addCanvasPlane() },
+      {
+        label: 'Reference / image plane…',
+        do: () => this.filePick('image/*', (f) => this.app.importImagePlane(f)),
+      },
       { sep: true },
       { label: 'Plane', do: () => this.app.addMeshObject('PLANE') },
       { label: 'Box', do: () => this.app.addMeshObject('BOX') },
@@ -485,9 +493,9 @@ export class UI {
 
     if (ctx.settings.mode === 'OBJECT') side.append(this.objectsPanel());
     if (ctx.settings.mode === 'DRAW') side.append(this.brushPanel());
+    if (ctx.settings.mode === 'OBJECT') side.append(this.objectPropsPanel());
     side.append(this.layersPanel());
     side.append(this.materialsPanel());
-    side.append(this.canvasesPanel());
     if (ctx.settings.mode === 'EDIT') {
       side.append(this.strokePanel());
       side.append(this.editOpsPanel());
@@ -577,6 +585,95 @@ export class UI {
       el('div', { class: 'row', text: 'Click selects · drag box-selects · Ctrl+P parents to last-picked · Alt+P clears · X deletes' }),
       ...rows,
     );
+  }
+
+  /** Blender-lite per-object Properties + Material panel (single selection). */
+  private objectPropsPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const refs = listSelectedObjects(ctx.scene);
+    if (refs.length !== 1) {
+      return panel('Object Properties', el('div', {
+        class: 'row',
+        text: refs.length === 0 ? 'select one object' : `${refs.length} selected — properties need one`,
+      }));
+    }
+    const ref = refs[0];
+    const rows: Node[] = [];
+    const t = getObjectTransform(ctx.scene, ref);
+    if (t) {
+      const write = () => {
+        setObjectTransform(ctx.scene, ref, t);
+        ctx.syncCanvases();
+        ctx.requestRender();
+        this.app.refreshWidget();
+      };
+      rows.push(
+        el('div', { class: 'row' }, 'Loc',
+          ...[0, 1, 2].map((i) => numField('', +t.translation[i].toFixed(3), (v) => { t.translation[i] = v; write(); }))),
+        el('div', { class: 'row' }, 'Rot',
+          ...[0, 1, 2].map((i) => numField('', +t.rotation[i].toFixed(3), (v) => { t.rotation[i] = v; write(); }))),
+        el('div', { class: 'row' }, 'Scale',
+          ...[0, 1, 2].map((i) => numField('', +t.scale[i].toFixed(3), (v) => { t.scale[i] = v; write(); }))),
+      );
+    }
+
+    if (ref.kind === 'MESH') {
+      const m = ctx.scene.meshes.find((x) => x.id === ref.id)!;
+      const texFile = el('input', { type: 'file', accept: 'image/*' }) as HTMLInputElement;
+      texFile.style.display = 'none';
+      texFile.onchange = () => {
+        const f = texFile.files?.[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = () => { m.texture = String(reader.result); m.unlit = true; this.refresh(); };
+        reader.readAsDataURL(f);
+      };
+      rows.push(
+        el('div', { class: 'menu-sep' }),
+        el('div', { class: 'menu-header', text: 'Material' }),
+        el('div', { class: 'row' },
+          colorField('Color', [...m.color, 1], (rgb) => { m.color = rgb; }),
+          slider('Opacity', m.opacity, 0.02, 1, 0.01, (v) => { m.opacity = v; }),
+        ),
+        el('div', { class: 'row' },
+          texFile,
+          btn(m.texture ? '🖼 replace texture…' : 'Load texture…', () => texFile.click()),
+          ...(m.texture ? [btn('✕ tex', () => { m.texture = null; this.refresh(); }, { cls: 'icon-btn', title: 'Clear texture' })] : []),
+        ),
+        el('div', { class: 'row' },
+          checkbox('Unlit', !!m.unlit, (v) => { m.unlit = v; }),
+          checkbox('Two-sided', m.doubleSided !== false, (v) => { m.doubleSided = v; }),
+          checkbox('Wireframe', m.wireframe, (v) => { m.wireframe = v; }),
+        ),
+        el('div', { class: 'row' },
+          selectField('Lock', m.billboard ?? 'NONE', [
+            ['NONE', 'World'], ['FACE_VIEW', 'Face view'], ['CAMERA', 'Camera (HUD)'],
+          ], (v) => { m.billboard = v as typeof m.billboard; this.refresh(); }),
+          checkbox('Draw target', m.drawTarget, (v) => { m.drawTarget = v; }),
+        ),
+        ...(m.billboard === 'CAMERA' ? [el('div', {
+          class: 'row',
+          text: 'Camera lock: Loc/Rot/Scale become a view-space offset (keep z negative for depth)',
+        })] : []),
+      );
+    } else if (ref.kind === 'SPLAT') {
+      const s = ctx.scene.splats.find((x) => x.id === ref.id)!;
+      rows.push(
+        el('div', { class: 'menu-sep' }),
+        el('div', { class: 'row' },
+          checkbox('Visible', s.visible, (v) => { s.visible = v; }),
+          btn('⬇ .ply', () => this.app.exportSplatPly(s.id), { title: '3DGS PLY (PlayCanvas/SuperSplat)' }),
+        ),
+      );
+    } else if (ref.kind === 'GP') {
+      const ob = ctx.scene.objects.find((o) => o.id === ref.id);
+      if (ob) {
+        const name = el('input', { type: 'text', value: ob.name }) as HTMLInputElement;
+        name.onchange = () => { ob.name = name.value; this.refresh(); };
+        rows.push(el('div', { class: 'menu-sep' }), el('div', { class: 'row' }, 'Name', name));
+      }
+    }
+    return panel(`Properties — ${objectName(ctx.scene, ref)}`, ...rows);
   }
 
   /** Blender-style brush Advanced panel; edits are baked into future strokes only. */
@@ -1352,7 +1449,7 @@ export class UI {
     }
 
     const attachTarget = el('select') as HTMLSelectElement;
-    for (const c of ctx.scene.canvases) attachTarget.append(el('option', { value: `CANVAS:${c.id}`, text: `Canvas: ${c.name}` }));
+    for (const m of ctx.scene.meshes) attachTarget.append(el('option', { value: `MESH:${m.id}`, text: `Mesh: ${m.name}` }));
     ctx.scene.cameras.forEach((cam, i) => attachTarget.append(el('option', { value: `CAMERA:${i}`, text: `Camera: ${cam.name}` })));
     for (const s of ctx.scene.splats) attachTarget.append(el('option', { value: `SPLAT:${s.id}`, text: `Splat: ${s.name}` }));
 
@@ -1386,7 +1483,7 @@ export class UI {
           ctx.pushUndo();
           sc.attachments.push({
             id: scoreId(ctx.scene),
-            target: { kind: kind as 'CANVAS' | 'CAMERA' | 'SPLAT', id: Number(idStr) },
+            target: { kind: kind as 'CANVAS' | 'CAMERA' | 'SPLAT' | 'MESH', id: Number(idStr) },
             path, speed: 0.1, phase: 0, loop: 'LOOP', running: true,
             orient: 'TANGENT', offset: [0, 0, 0],
           });
