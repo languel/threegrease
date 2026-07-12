@@ -10,7 +10,7 @@ import { defaultCursor, scoreId } from '../score/engine';
 import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
 import {
   getObjectTransform, listSelected as listSelectedObjects, objectName,
-  setObjectTransform,
+  setObjectTransform, setParentKeepWorld, type ObjRef,
 } from '../tools/objects';
 import {
   DEFAULT_STRINGART, loadTargetImage, pinSourceStroke, runStringArt,
@@ -549,20 +549,13 @@ export class UI {
     side.append(...active.build());
   }
 
-  /** Object-mode outliner: every scene object, selectable + togglable. */
+  /** N6: hierarchy outliner — tree by parent, drag-to-parent, dbl-click rename. */
+  private outlinerCollapsed = new Set<string>();
+
   private objectsPanel(): HTMLElement {
     const { ctx } = this.app;
     const scene = ctx.scene;
-    const rows: Node[] = [];
-    const row = (
-      icon: string, name: string, selected: boolean,
-      onSelect: () => void, extras: Node[] = [],
-    ) => {
-      const item = el('div', { class: `list-item ${selected ? 'active' : ''}` });
-      item.onclick = onSelect;
-      item.append(el('span', { text: icon }), el('span', { class: 'grow', text: name }), ...extras);
-      rows.push(item);
-    };
+
     const toggleSel = (apply: (v: boolean) => void, cur: boolean, shift: boolean) => {
       ctx.pushUndo();
       if (!shift) {
@@ -578,52 +571,161 @@ export class UI {
       this.refresh();
     };
 
-    const parentTag = (p?: { kind: string; id: number } | null) =>
-      p ? ` ⌊ ${p.kind.toLowerCase()} ${p.id}` : '';
+    interface NodeDesc {
+      ref: ObjRef; icon: string; name: string; selected: boolean;
+      parent?: { kind: string; id: number } | null;
+      onSelect: (e?: MouseEvent) => void; extras: Node[];
+      rename: (v: string) => void; after?: Node[];
+    }
+    const nodes: NodeDesc[] = [];
 
-    scene.objects.forEach((ob, i) => row('✏️', ob.name + parentTag(ob.parent), !!ob.select,
-      () => {
+    scene.objects.forEach((ob, i) => nodes.push({
+      ref: { kind: 'GP', id: ob.id }, icon: '✏️', name: ob.name, selected: !!ob.select,
+      parent: ob.parent,
+      onSelect: (e) => {
         scene.activeObject = i;
         this.app.setLastPicked({ kind: 'GP', id: ob.id });
-        toggleSel((v) => { ob.select = v; }, !!ob.select, false);
+        toggleSel((v) => { ob.select = v; }, !!ob.select, !!e?.shiftKey);
       },
-      [btn('⬇', () => this.app.exportActiveGP(), { cls: 'icon-btn', title: 'Export this GP object' })]));
-    for (const c of scene.canvases) row('▦', c.name + parentTag(c.parent), c.select,
-      (e?: unknown) => {
+      extras: [btn('⬇', () => this.app.exportActiveGP(), { cls: 'icon-btn', title: 'Export this GP object' })],
+      rename: (v) => { ob.name = v; },
+    }));
+    for (const c of scene.canvases) nodes.push({
+      ref: { kind: 'CANVAS', id: c.id }, icon: '▦', name: c.name, selected: c.select,
+      parent: c.parent,
+      onSelect: (e) => {
         this.app.setLastPicked({ kind: 'CANVAS', id: c.id });
-        toggleSel((v) => { c.select = v; }, c.select, !!(e as MouseEvent)?.shiftKey);
+        toggleSel((v) => { c.select = v; }, c.select, !!e?.shiftKey);
       },
-      [btn(c.drawTarget ? '🖊' : '·', () => { c.drawTarget = !c.drawTarget; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
-        btn(c.visible ? '👁' : '🙈', () => { c.visible = !c.visible; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn' })]);
-    for (const m of scene.meshes) {
-      row(m.kind === 'MODEL' ? '🗿' : '⬢', m.name + parentTag(m.parent), m.select,
-        () => {
-          this.app.setLastPicked({ kind: 'MESH', id: m.id });
-          toggleSel((v) => { m.select = v; }, m.select, false);
-        },
-        [colorField('', [...m.color, 1], (rgb) => { m.color = rgb; }),
-          btn(m.drawTarget ? '🖊' : '·', () => { m.drawTarget = !m.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
-          btn(m.wireframe ? '◻' : '◼', () => { m.wireframe = !m.wireframe; this.refresh(); }, { cls: 'icon-btn', title: 'Wireframe (reference look)' }),
-          btn(m.visible ? '👁' : '🙈', () => { m.visible = !m.visible; this.refresh(); }, { cls: 'icon-btn' })]);
-      if (m.select) {
-        rows.push(el('div', { class: 'row' },
-          slider('Opacity', m.opacity, 0.05, 1, 0.01, (v) => { m.opacity = v; }),
-        ));
-      }
-    }
-    for (const s of scene.splats) row('✳', s.name + parentTag(s.parent), s.select,
-      () => {
+      extras: [
+        btn(c.drawTarget ? '🖊' : '·', () => { c.drawTarget = !c.drawTarget; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
+        btn(c.visible ? '👁' : '🙈', () => { c.visible = !c.visible; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn' }),
+      ],
+      rename: (v) => { c.name = v; },
+    });
+    for (const m of scene.meshes) nodes.push({
+      ref: { kind: 'MESH', id: m.id }, icon: m.kind === 'MODEL' ? '🗿' : '⬢', name: m.name,
+      selected: m.select, parent: m.parent,
+      onSelect: (e) => {
+        this.app.setLastPicked({ kind: 'MESH', id: m.id });
+        toggleSel((v) => { m.select = v; }, m.select, !!e?.shiftKey);
+      },
+      extras: [
+        colorField('', [...m.color, 1], (rgb) => { m.color = rgb; }),
+        btn(m.drawTarget ? '🖊' : '·', () => { m.drawTarget = !m.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
+        btn(m.wireframe ? '◻' : '◼', () => { m.wireframe = !m.wireframe; this.refresh(); }, { cls: 'icon-btn', title: 'Wireframe (reference look)' }),
+        btn(m.visible ? '👁' : '🙈', () => { m.visible = !m.visible; this.refresh(); }, { cls: 'icon-btn' }),
+      ],
+      rename: (v) => { m.name = v; },
+      after: m.select ? [el('div', { class: 'row' },
+        slider('Opacity', m.opacity, 0.05, 1, 0.01, (v) => { m.opacity = v; }),
+      )] : [],
+    });
+    for (const s of scene.splats) nodes.push({
+      ref: { kind: 'SPLAT', id: s.id }, icon: '✳', name: s.name, selected: s.select,
+      parent: s.parent,
+      onSelect: (e) => {
         this.app.setLastPicked({ kind: 'SPLAT', id: s.id });
-        toggleSel((v) => { s.select = v; }, s.select, false);
+        toggleSel((v) => { s.select = v; }, s.select, !!e?.shiftKey);
       },
-      [btn(s.drawTarget ? '🖊' : '·', () => { s.drawTarget = !s.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target (GP surface placement raycasts the splat)' }),
+      extras: [
+        btn(s.drawTarget ? '🖊' : '·', () => { s.drawTarget = !s.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target (GP surface placement raycasts the splat)' }),
         btn('⬇.ply', () => this.app.exportSplatPly(s.id), { cls: 'icon-btn', title: 'Export as 3DGS PLY (PlayCanvas/SuperSplat compatible)' }),
-        btn(s.visible ? '👁' : '🙈', () => { s.visible = !s.visible; this.refresh(); }, { cls: 'icon-btn' })]);
+        btn(s.visible ? '👁' : '🙈', () => { s.visible = !s.visible; this.refresh(); }, { cls: 'icon-btn' }),
+      ],
+      rename: (v) => { s.name = v; },
+    });
 
-    return panel('Objects',
-      el('div', { class: 'row', text: 'Click selects · drag box-selects · Ctrl+P parents to last-picked · Alt+P clears · X deletes' }),
-      ...rows,
-    );
+    // parent → children tree (unknown parents render as roots)
+    const keyOf = (r: { kind: string; id: number }) => `${r.kind}:${r.id}`;
+    const known = new Set(nodes.map((n) => keyOf(n.ref)));
+    const children = new Map<string, NodeDesc[]>();
+    const roots: NodeDesc[] = [];
+    for (const n of nodes) {
+      const pk = n.parent && known.has(keyOf(n.parent)) ? keyOf(n.parent) : '';
+      if (!pk) { roots.push(n); continue; }
+      if (!children.get(pk)) children.set(pk, []);
+      children.get(pk)!.push(n);
+    }
+
+    const reparent = (childKey: string, parentRef: ObjRef | null) => {
+      const [kind, id] = childKey.split(':');
+      const childRef = { kind: kind as ObjRef['kind'], id: Number(id) };
+      if (parentRef && keyOf(childRef) === keyOf(parentRef)) return;
+      ctx.pushUndo();
+      if (setParentKeepWorld(scene, childRef, parentRef)) {
+        ctx.syncCanvases();
+        ctx.requestRender();
+        this.app.refreshWidget();
+        this.refresh();
+      }
+    };
+
+    const rows: Node[] = [];
+    const emit = (n: NodeDesc, depth: number) => {
+      const key = keyOf(n.ref);
+      const kids = children.get(key) ?? [];
+      const collapsed = this.outlinerCollapsed.has(key);
+      const item = el('div', { class: `list-item ${n.selected ? 'active' : ''}` });
+      item.style.paddingLeft = `${6 + depth * 14}px`;
+      item.onclick = (e) => n.onSelect(e as MouseEvent);
+
+      if (kids.length) {
+        const tri = el('span', { class: 'tree-tri', text: collapsed ? '▸' : '▾' });
+        tri.onclick = (e) => {
+          e.stopPropagation();
+          if (collapsed) this.outlinerCollapsed.delete(key);
+          else this.outlinerCollapsed.add(key);
+          this.refresh();
+        };
+        item.append(tri);
+      } else {
+        item.append(el('span', { class: 'tree-tri', text: '·' }));
+      }
+
+      const nameSpan = el('span', { class: 'grow', text: n.name });
+      nameSpan.ondblclick = (e) => {
+        e.stopPropagation();
+        const input = el('input', { type: 'text', value: n.name }) as HTMLInputElement;
+        input.onclick = (ev) => ev.stopPropagation();
+        const commit = () => { n.rename(input.value.trim() || n.name); this.refresh(); };
+        input.onblur = commit;
+        input.onkeydown = (ev) => {
+          ev.stopPropagation();
+          if (ev.key === 'Enter') input.blur();
+          if (ev.key === 'Escape') { input.onblur = null; this.refresh(); }
+        };
+        nameSpan.replaceWith(input);
+        input.focus(); input.select();
+      };
+      item.append(el('span', { text: n.icon }), nameSpan, ...n.extras);
+
+      // drag-to-parent
+      item.draggable = true;
+      item.ondragstart = (e) => e.dataTransfer?.setData('text/tg-ref', key);
+      item.ondragover = (e) => { e.preventDefault(); item.classList.add('drop-target'); };
+      item.ondragleave = () => item.classList.remove('drop-target');
+      item.ondrop = (e) => {
+        e.preventDefault();
+        item.classList.remove('drop-target');
+        const src = e.dataTransfer?.getData('text/tg-ref');
+        if (src && src !== key) reparent(src, n.ref);
+      };
+
+      rows.push(item, ...(n.after ?? []));
+      if (!collapsed) for (const kid of kids) emit(kid, depth + 1);
+    };
+    for (const n of roots) emit(n, 0);
+
+    const hint = el('div', { class: 'row', text: 'Click selects · dbl-click renames · drag onto a row parents · drop here unparents · Ctrl+P/Alt+P · X deletes' });
+    hint.ondragover = (e) => e.preventDefault();
+    hint.ondrop = (e) => {
+      e.preventDefault();
+      const src = e.dataTransfer?.getData('text/tg-ref');
+      if (src) reparent(src, null);
+    };
+
+    return panel('Objects', hint, ...rows);
   }
 
   /** Blender-lite per-object Properties + Material panel (single selection). */
