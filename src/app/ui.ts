@@ -489,30 +489,64 @@ export class UI {
 
   // ------------------------------------------------------------ sidebar
 
+  /** N3: Blender-style properties editor — icon tabs over panel groups. */
+  private propsTab = 'object';
+  private lastMode = '';
+
   private buildSidebar(): void {
     const { ctx } = this.app;
-    const ob = activeObject(ctx.scene);
     const side = $('sidebar');
     side.replaceChildren();
 
-    if (ctx.settings.mode === 'OBJECT') side.append(this.objectsPanel());
-    if (ctx.settings.mode === 'DRAW') side.append(this.brushPanel());
-    if (ctx.settings.mode === 'OBJECT') side.append(this.objectPropsPanel());
-    side.append(this.layersPanel());
-    side.append(this.materialsPanel());
-    if (ctx.settings.mode === 'EDIT') {
-      side.append(this.strokePanel());
-      side.append(this.editOpsPanel());
+    // mode changes nudge the tab the way Blender's context tabs follow mode
+    if (ctx.settings.mode !== this.lastMode) {
+      this.lastMode = ctx.settings.mode;
+      this.propsTab = ctx.settings.mode === 'OBJECT' ? 'object'
+        : ctx.settings.mode === 'EDIT' ? 'data' : 'brush';
     }
-    side.append(this.modifiersPanel());
-    side.append(this.effectsPanel());
-    side.append(this.onionPanel());
-    side.append(this.scorePanel());
-    side.append(this.splatsPanel());
-    side.append(this.solverPanel());
-    side.append(this.routesPanel());
-    side.append(this.ioPanel());
-    void ob;
+
+    const tabs: { id: string; icon: string; title: string; build: () => HTMLElement[] }[] = [
+      {
+        id: 'object', icon: '📦', title: 'Objects — outliner · transform · material',
+        build: () => [this.objectsPanel(), this.objectPropsPanel()],
+      },
+      {
+        id: 'brush', icon: '🖌️', title: 'Brush & GP materials',
+        build: () => [
+          this.brushPanel(), this.materialsPanel(),
+          ...(ctx.settings.mode === 'EDIT' ? [this.strokePanel(), this.editOpsPanel()] : []),
+        ],
+      },
+      {
+        id: 'data', icon: '🗂️', title: 'Data — layers · strokes · onion skin',
+        build: () => [
+          this.layersPanel(),
+          ...(ctx.settings.mode === 'EDIT' ? [this.strokePanel(), this.editOpsPanel()] : []),
+          this.onionPanel(),
+        ],
+      },
+      {
+        id: 'mods', icon: '🔧', title: 'Modifiers & effects',
+        build: () => [this.modifiersPanel(), this.effectsPanel()],
+      },
+      {
+        id: 'bindings', icon: '⚡', title: 'Bindings — score · routes · MIDI/OSC/WS',
+        build: () => [this.scorePanel(), this.routesPanel(), this.ioPanel()],
+      },
+      {
+        id: 'solvers', icon: '🧵', title: 'Solvers — splats · string art · wire art',
+        build: () => [this.splatsPanel(), this.solverPanel()],
+      },
+    ];
+
+    const strip = el('div', { class: 'props-tabs' });
+    for (const t of tabs) {
+      strip.append(btn(t.icon, () => { this.propsTab = t.id; this.refresh(); },
+        { cls: `props-tab${this.propsTab === t.id ? ' active' : ''}`, title: t.title }));
+    }
+    side.append(strip);
+    const active = tabs.find((t) => t.id === this.propsTab) ?? tabs[0];
+    side.append(...active.build());
   }
 
   /** Object-mode outliner: every scene object, selectable + togglable. */

@@ -166,3 +166,15 @@ label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); 
 #palette-list { display: flex; flex-direction: column; }
 #palette .menu-item.palette-sel { background: var(--accent); color: #fff; }
 #palette .menu-item.palette-sel .menu-key { color: #dfe8ff; }
+
+/* N3: properties-editor tab strip (Blender-style, icon-first) */
+.props-tabs {
+  display: flex; gap: 2px; position: sticky; top: -6px; z-index: 5;
+  background: var(--panel); padding: 2px 0 4px; margin: -2px 0 0;
+}
+button.props-tab {
+  flex: 1; height: 26px; padding: 0; font-size: 13px;
+  background: transparent; border-color: transparent;
+}
+button.props-tab:hover { background: var(--panel2); }
+button.props-tab.active { background: var(--panel2); border-color: var(--border); }
