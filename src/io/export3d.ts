@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
+import { PLYExporter } from 'three/examples/jsm/exporters/PLYExporter.js';
 import type { AppCtx } from '../tools/context';
 import { frameAt } from '../core/gpdata';
 import { evaluateModifiers, remapTime } from '../modifiers/index';
@@ -102,6 +103,14 @@ export function exportOBJ(ctx: AppCtx, opts = DEFAULT_EXPORT3D): string {
   const text = new OBJExporter().parse(buildExportGroup(ctx, opts));
   download(text, 'threegrease.obj', 'text/plain');
   return text;
+}
+
+/** Geometry PLY (tubes + fills as one merged mesh cloud, binary). */
+export function exportPLY(ctx: AppCtx, opts = DEFAULT_EXPORT3D): ArrayBuffer | string | null {
+  const group = buildExportGroup(ctx, opts);
+  const result = new PLYExporter().parse(group, () => {}, { binary: true }) as ArrayBuffer | null;
+  if (result) download(result, 'threegrease.ply', 'application/octet-stream');
+  return result;
 }
 
 export function exportSTL(ctx: AppCtx, opts = DEFAULT_EXPORT3D): DataView | string {

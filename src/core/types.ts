@@ -38,6 +38,10 @@ export interface GPStroke {
   fillVertexColor: Vec4;   // alpha 0 = use material fill
   select: boolean;
   style: StrokeStyle;
+  /** event identity: shown in the Stroke panel, used as the default
+   *  message address prefix for cursors/triggers assigned to this stroke */
+  name?: string;
+  address?: string;
 }
 
 export type KeyframeType = 'KEYFRAME' | 'BREAKDOWN' | 'EXTREME' | 'JITTER' | 'MOVING_HOLD';
@@ -114,9 +118,13 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH'; id: number }
+
 export interface GPObject {
+  id: number;              // stable id (parenting, object refs)
   name: string;
   select?: boolean;        // object-mode selection
+  parent?: ParentRef | null;
   layers: GPLayer[];       // index 0 = bottom
   activeLayerId: number;
   materials: GPMaterial[];
@@ -148,6 +156,7 @@ export interface CanvasPlane {
   visible: boolean;
   select: boolean;
   drawTarget: boolean;     // false = reference plane only (not a Surface target)
+  parent?: ParentRef | null;
 }
 
 export interface GPCameraKey {
@@ -240,6 +249,7 @@ export interface TGSplat {
   scale: number;
   visible: boolean;
   select: boolean;
+  parent?: ParentRef | null;
 }
 
 /** A mesh scene object: primitive solid, plane, or imported model —
@@ -258,6 +268,7 @@ export interface TGMesh {
   wireframe: boolean;      // reference look
   color: Vec3;
   opacity: number;
+  parent?: ParentRef | null;
 }
 
 /** Point force for the dynamic string simulation (P5). */

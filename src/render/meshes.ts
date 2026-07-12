@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import type { GPScene, TGMesh } from '../core/types';
+import { worldMatrixOf } from '../tools/objects';
 
 function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
   switch (kind) {
@@ -41,7 +42,7 @@ export class MeshManager {
         this.group.add(entry.root);
         this.entries.set(data.id, entry);
       }
-      this.apply(entry.root, data);
+      this.apply(entry.root, data, scene);
     }
   }
 
@@ -67,10 +68,9 @@ export class MeshManager {
     return mesh;
   }
 
-  private apply(root: THREE.Object3D, data: TGMesh): void {
-    root.position.set(...data.translation);
-    root.rotation.set(...data.rotation);
-    root.scale.set(...data.scale);
+  private apply(root: THREE.Object3D, data: TGMesh, scene: GPScene): void {
+    worldMatrixOf(scene, { kind: 'MESH', id: data.id })
+      .decompose(root.position, root.quaternion, root.scale);
     root.visible = data.visible;
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;

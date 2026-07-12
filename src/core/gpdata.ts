@@ -55,6 +55,7 @@ export function createMaterial(name: string, stroke: Vec4, fill?: Vec4): GPMater
 export function createObject(name: string): GPObject {
   const layer = createLayer('Lines');
   return {
+    id: genId(),
     name, layers: [layer], activeLayerId: layer.id,
     materials: [
       createMaterial('Black', [0.05, 0.05, 0.05, 1]),

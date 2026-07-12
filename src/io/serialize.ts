@@ -33,7 +33,10 @@ export function deserializeScene(json: string): GPScene {
   scene.meshes ??= [];
   scene.meshes = scene.meshes.filter((m) => !(m.src ?? '').startsWith('blob:'));
   for (const m of scene.meshes) m.select ??= false;
-  for (const ob of scene.objects) ob.select ??= false;
+  for (const ob of scene.objects) {
+    ob.select ??= false;
+    ob.id ??= genId();
+  }
   // v1 -> v2: strokes gain baked style
   for (const ob of scene.objects) {
     for (const layer of ob.layers) {
@@ -72,6 +75,8 @@ export function remapGPObjectIds(ob: GPObject): GPObject {
       .filter((id): id is number => id !== undefined);
   }
   ob.activeLayerId = layerIdMap.get(ob.activeLayerId) ?? ob.layers[0]?.id ?? 0;
+  ob.id = genId();
+  ob.parent = null;
   for (const mod of ob.modifiers) {
     mod.id = genId();
     mod.layerFilter = mod.layerFilter === null

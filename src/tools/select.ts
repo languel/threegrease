@@ -70,6 +70,52 @@ export function selectLinked(ctx: AppCtx): void {
   });
 }
 
+/**
+ * Select strokes CONNECTED to the current selection: flood over strokes
+ * whose endpoints touch (within `tol`, object space) an endpoint of an
+ * already-selected stroke — chains like wire-art pieces select as one.
+ */
+export function selectConnected(ctx: AppCtx, tol = 0.05): void {
+  const tol2 = tol * tol;
+  const d2 = (a: number[], b: number[]) =>
+    (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+  const ends = (s: GPStroke) => s.cyclic || s.points.length < 2
+    ? s.points.map((p) => p.co)                     // cyclic: every point can connect
+    : [s.points[0].co, s.points[s.points.length - 1].co];
+
+  // per frame: flood the endpoint-proximity graph
+  const frames = new Map<GPFrame, GPStroke[]>();
+  forEachEditableStroke(ctx, (s, _l, f) => {
+    const arr = frames.get(f) ?? [];
+    arr.push(s);
+    frames.set(f, arr);
+  });
+  for (const strokes of frames.values()) {
+    const selected = new Set(strokes.filter((s) => s.select || s.points.some((p) => p.select)));
+    if (!selected.size) continue;
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const s of strokes) {
+        if (selected.has(s)) continue;
+        const se = ends(s);
+        for (const t of selected) {
+          const te = ends(t);
+          if (se.some((a) => te.some((b) => d2(a, b) < tol2))) {
+            selected.add(s);
+            grew = true;
+            break;
+          }
+        }
+      }
+    }
+    for (const s of selected) {
+      s.select = true;
+      for (const p of s.points) p.select = true;
+    }
+  }
+}
+
 export function selectMoreLess(ctx: AppCtx, more: boolean): void {
   forEachEditableStroke(ctx, (s) => {
     const sel = s.points.map((p) => p.select);

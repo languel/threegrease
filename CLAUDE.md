@@ -111,7 +111,9 @@ the browser console or automated evals:
 - Uncaught exceptions in the render loop kill the rAF chain; `gp.update`
   is wrapped in try/catch — keep it that way.
 - Vite hot-reload wipes app state; browser-eval tests should
-  `location.reload()` first if files changed mid-session.
+  `location.reload()` first if files changed mid-session. Also NEVER
+  `import('/node_modules/...')` in an eval — vite re-optimizes deps and
+  silently reloads the page mid-test (state loss looks like a heisenbug).
 - Fly mode (Blender semantics): `~` starts, Enter/click accepts, Esc
   teleports back to the start pose. Pointer lock swallows the Esc keydown,
   so cancel is detected via `pointerlockchange` + the `flyStopping` flag in

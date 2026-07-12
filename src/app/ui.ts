@@ -59,6 +59,7 @@ export interface AppHandle {
   importGPFile(file: File): void;
   exportSplatPly(id: number): void;
   run(action: string): void;
+  setLastPicked(ref: { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH'; id: number }): void;
   newScene(): void;
   viewAll(): void;
   addCamera(): void;
@@ -299,6 +300,7 @@ export class UI {
       { label: 'GLB', do: async () => { const m = await import('../io/export3d'); m.exportGLB(ctx); } },
       { label: 'OBJ', do: async () => { const m = await import('../io/export3d'); m.exportOBJ(ctx); } },
       { label: 'STL', do: async () => { const m = await import('../io/export3d'); m.exportSTL(ctx); } },
+      { label: 'PLY (geometry)', do: async () => { const m = await import('../io/export3d'); m.exportPLY(ctx); } },
       { label: 'PNG snapshot', do: () => this.app.exportPng() },
     ]);
 
@@ -486,7 +488,10 @@ export class UI {
     side.append(this.layersPanel());
     side.append(this.materialsPanel());
     side.append(this.canvasesPanel());
-    if (ctx.settings.mode === 'EDIT') side.append(this.editOpsPanel());
+    if (ctx.settings.mode === 'EDIT') {
+      side.append(this.strokePanel());
+      side.append(this.editOpsPanel());
+    }
     side.append(this.modifiersPanel());
     side.append(this.effectsPanel());
     side.append(this.onionPanel());
@@ -527,25 +532,49 @@ export class UI {
       this.refresh();
     };
 
-    scene.objects.forEach((ob, i) => row('✏️', ob.name, !!ob.select,
-      () => { scene.activeObject = i; toggleSel((v) => { ob.select = v; }, !!ob.select, false); },
+    const parentTag = (p?: { kind: string; id: number } | null) =>
+      p ? ` ⌊ ${p.kind.toLowerCase()} ${p.id}` : '';
+
+    scene.objects.forEach((ob, i) => row('✏️', ob.name + parentTag(ob.parent), !!ob.select,
+      () => {
+        scene.activeObject = i;
+        this.app.setLastPicked({ kind: 'GP', id: ob.id });
+        toggleSel((v) => { ob.select = v; }, !!ob.select, false);
+      },
       [btn('⬇', () => this.app.exportActiveGP(), { cls: 'icon-btn', title: 'Export this GP object' })]));
-    for (const c of scene.canvases) row('▦', c.name, c.select,
-      (e?: unknown) => toggleSel((v) => { c.select = v; }, c.select, !!(e as MouseEvent)?.shiftKey),
+    for (const c of scene.canvases) row('▦', c.name + parentTag(c.parent), c.select,
+      (e?: unknown) => {
+        this.app.setLastPicked({ kind: 'CANVAS', id: c.id });
+        toggleSel((v) => { c.select = v; }, c.select, !!(e as MouseEvent)?.shiftKey);
+      },
       [btn(c.drawTarget ? '🖊' : '·', () => { c.drawTarget = !c.drawTarget; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
         btn(c.visible ? '👁' : '🙈', () => { c.visible = !c.visible; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn' })]);
-    for (const m of scene.meshes) row(m.kind === 'MODEL' ? '🗿' : '⬢', m.name, m.select,
-      () => toggleSel((v) => { m.select = v; }, m.select, false),
-      [btn(m.drawTarget ? '🖊' : '·', () => { m.drawTarget = !m.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
-        btn(m.wireframe ? '◻' : '◼', () => { m.wireframe = !m.wireframe; this.refresh(); }, { cls: 'icon-btn', title: 'Wireframe (reference look)' }),
-        btn(m.visible ? '👁' : '🙈', () => { m.visible = !m.visible; this.refresh(); }, { cls: 'icon-btn' })]);
-    for (const s of scene.splats) row('✳', s.name, s.select,
-      () => toggleSel((v) => { s.select = v; }, s.select, false),
-      [btn('⬇.ply', () => this.app.exportSplatPly(s.id), { cls: 'icon-btn', title: 'Export as 3DGS PLY' }),
+    for (const m of scene.meshes) {
+      row(m.kind === 'MODEL' ? '🗿' : '⬢', m.name + parentTag(m.parent), m.select,
+        () => {
+          this.app.setLastPicked({ kind: 'MESH', id: m.id });
+          toggleSel((v) => { m.select = v; }, m.select, false);
+        },
+        [colorField('', [...m.color, 1], (rgb) => { m.color = rgb; }),
+          btn(m.drawTarget ? '🖊' : '·', () => { m.drawTarget = !m.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
+          btn(m.wireframe ? '◻' : '◼', () => { m.wireframe = !m.wireframe; this.refresh(); }, { cls: 'icon-btn', title: 'Wireframe (reference look)' }),
+          btn(m.visible ? '👁' : '🙈', () => { m.visible = !m.visible; this.refresh(); }, { cls: 'icon-btn' })]);
+      if (m.select) {
+        rows.push(el('div', { class: 'row' },
+          slider('Opacity', m.opacity, 0.05, 1, 0.01, (v) => { m.opacity = v; }),
+        ));
+      }
+    }
+    for (const s of scene.splats) row('✳', s.name + parentTag(s.parent), s.select,
+      () => {
+        this.app.setLastPicked({ kind: 'SPLAT', id: s.id });
+        toggleSel((v) => { s.select = v; }, s.select, false);
+      },
+      [btn('⬇.ply', () => this.app.exportSplatPly(s.id), { cls: 'icon-btn', title: 'Export as 3DGS PLY (PlayCanvas/SuperSplat compatible)' }),
         btn(s.visible ? '👁' : '🙈', () => { s.visible = !s.visible; this.refresh(); }, { cls: 'icon-btn' })]);
 
     return panel('Objects',
-      el('div', { class: 'row', text: 'Click selects · widget transforms · X deletes' }),
+      el('div', { class: 'row', text: 'Click selects · drag box-selects · Ctrl+P parents to last-picked · Alt+P clears · X deletes' }),
       ...rows,
     );
   }
@@ -787,6 +816,85 @@ export class UI {
       ),
       el('div', { class: 'row', text: 'Use Placement: Surface to draw on canvases' }),
       ...items,
+    );
+  }
+
+  /** Per-stroke identity + event assignment (visible with exactly one stroke selected). */
+  private strokePanel(): HTMLElement {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const obIndex = ctx.scene.activeObject;
+
+    // exactly-one selected stroke across visible editable layers
+    let found: { stroke: import('../core/types').GPStroke; layerId: number } | null = null;
+    let count = 0;
+    for (const layer of ob.layers) {
+      if (layer.hide || layer.lock) continue;
+      const f = frameAt(layer, ctx.scene.frame);
+      if (!f) continue;
+      for (const s of f.strokes) {
+        if (s.select || s.points.some((p) => p.select)) {
+          count++;
+          found = { stroke: s, layerId: layer.id };
+        }
+      }
+    }
+    if (count !== 1 || !found) {
+      return panel('Stroke', el('div', {
+        class: 'row',
+        text: count === 0 ? 'select a stroke to edit its properties'
+          : `${count} strokes selected — Ctrl+J joins, Ctrl+L selects connected`,
+      }));
+    }
+    const { stroke, layerId } = found;
+    const sc = ctx.scene.score;
+
+    const nameInput = el('input', { type: 'text', value: stroke.name ?? '', placeholder: `stroke ${stroke.id}` }) as HTMLInputElement;
+    nameInput.style.width = '110px';
+    nameInput.onchange = () => { stroke.name = nameInput.value.trim() || undefined; };
+    const addrInput = el('input', { type: 'text', value: stroke.address ?? '', placeholder: `/stroke/${stroke.id}` }) as HTMLInputElement;
+    addrInput.style.width = '130px';
+    addrInput.onchange = () => { stroke.address = addrInput.value.trim() || undefined; };
+
+    const path = { objectIndex: obIndex, layerId, strokeId: stroke.id };
+    const addr = () => stroke.address ?? `/stroke/${stroke.id}`;
+    const boundCursors = sc.cursors.filter((c) => c.path.strokeId === stroke.id);
+
+    const worldOf = (co: [number, number, number]): [number, number, number] => [
+      co[0] + ob.translation[0], co[1] + ob.translation[1], co[2] + ob.translation[2],
+    ];
+    const addTrigger = (at: 'start' | 'end') => {
+      ctx.pushUndo();
+      const id = scoreId(ctx.scene);
+      const p = at === 'start' ? stroke.points[0] : stroke.points[stroke.points.length - 1];
+      sc.triggers.push({
+        id, name: `${stroke.name ?? `stroke ${stroke.id}`} ${at}`,
+        position: worldOf(p.co), radius: 0.2, retrigger: true,
+        messages: [{ address: `${addr()}/${at}`, argExprs: ['1'] }],
+      });
+      this.refresh();
+    };
+
+    return panel('Stroke',
+      el('div', { class: 'row' }, 'Name', nameInput),
+      el('div', { class: 'row' }, 'Addr', addrInput),
+      el('div', { class: 'row' },
+        btn('＋Cursor', () => {
+          ctx.pushUndo();
+          const cur = defaultCursor(ctx.scene, path);
+          cur.name = stroke.name ?? cur.name;
+          cur.messages = [{ address: `${addr()}/pos`, argExprs: ['{x}', '{y}', '{z}', '{t}'] }];
+          sc.cursors.push(cur);
+          this.refresh();
+        }, { title: 'Playhead on this stroke emitting at its address' }),
+        btn('＋Trig start', () => addTrigger('start')),
+        btn('＋Trig end', () => addTrigger('end')),
+      ),
+      ...(boundCursors.length ? [el('div', {
+        class: 'row',
+        text: `riding: ${boundCursors.map((c) => c.name).join(', ')}`,
+      })] : []),
+      el('div', { class: 'row', text: `id ${stroke.id} · ${stroke.points.length} pts · events → ${addr()}/…` }),
     );
   }
 

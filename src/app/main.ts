@@ -10,7 +10,7 @@ import { ToolManager, type ToolEvent } from '../tools/toolsys';
 import { DrawTool, EraseTool, TintTool, CutterTool, EyedropperTool } from '../tools/draw';
 import { FillTool } from '../tools/fill';
 import { PrimitiveTool } from '../tools/primitives';
-import { SelectTool, selectAll, selectLinked, selectMoreLess, selectedPoints } from '../tools/select';
+import { SelectTool, selectAll, selectConnected, selectLinked, selectMoreLess, selectedPoints } from '../tools/select';
 
 function hasSelectedPoints(ctx: AppCtx): boolean {
   return selectedPoints(ctx).length > 0;
@@ -38,7 +38,8 @@ import { MeshManager, createMeshObject } from '../render/meshes';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
   ObjectSelectTool, deleteObject, deselectAllObjects, getObjectTransform,
-  listSelected, selectionPivot, setObjectSelected, setObjectTransform,
+  gpIndexOf, listSelected, parentWorldMatrixOf, selectionPivot,
+  setObjectSelected, setObjectTransform, setParentKeepWorld, worldMatrixOf,
   type ObjRef, type ObjTransform,
 } from '../tools/objects';
 import { UI, type AppHandle } from './ui';
@@ -439,8 +440,9 @@ class App implements AppHandle {
           side: THREE.DoubleSide, depthWrite: false,
         }),
       );
-      mesh.position.set(...c.translation);
-      mesh.rotation.set(...c.rotation);
+      worldMatrixOf(this.ctx.scene, { kind: 'CANVAS', id: c.id })
+        .decompose(mesh.position, mesh.quaternion, mesh.scale);
+      mesh.scale.set(1, 1, 1); // canvas size lives in the geometry
       mesh.renderOrder = -1;
       mesh.userData.canvasId = c.id;
       const border = new THREE.LineLoop(
@@ -697,6 +699,9 @@ class App implements AppHandle {
       case 'selectNone': if (this.editLike()) { selectAll(ctx, 'none'); this.gp.markDirty(); } break;
       case 'selectInvert': if (this.editLike()) { selectAll(ctx, 'invert'); this.gp.markDirty(); } break;
       case 'selectLinked': if (this.editLike()) { selectLinked(ctx); this.gp.markDirty(); } break;
+      case 'selectConnected': if (this.editLike()) { ctx.pushUndo(); selectConnected(ctx); this.gp.markDirty(); this.ui.refresh(); } break;
+      case 'join': if (this.editLike()) { ops.joinSelected(ctx); this.ui.refresh(); } break;
+      case 'split': if (this.editLike()) { ops.splitSelected(ctx); this.ui.refresh(); } break;
       case 'selectMore': if (this.editLike()) { selectMoreLess(ctx, true); this.gp.markDirty(); } break;
       case 'selectLess': if (this.editLike()) { selectMoreLess(ctx, false); this.gp.markDirty(); } break;
       case 'delete':
@@ -752,6 +757,32 @@ class App implements AppHandle {
       case 'open': void this.loadScene(); break;
       case 'newScene': this.newScene(); break;
       case 'viewAll': this.viewAll(); break;
+      case 'parentSet': {
+        if (ctx.settings.mode !== 'OBJECT') break;
+        const active = this.objectPick.lastPicked;
+        const refs = listSelected(ctx.scene).filter((r) =>
+          !(active && r.kind === active.kind && r.id === active.id));
+        if (!active || !refs.length) break;
+        ctx.pushUndo();
+        let ok = 0;
+        for (const r of refs) if (setParentKeepWorld(ctx.scene, r, active)) ok++;
+        console.info(`parented ${ok} object(s) to ${active.kind} ${active.id}`);
+        this.syncCanvases();
+        this.gp.markDirty();
+        this.ui.refresh();
+        break;
+      }
+      case 'parentClear': {
+        if (ctx.settings.mode !== 'OBJECT') break;
+        const refs = listSelected(ctx.scene);
+        if (!refs.length) break;
+        ctx.pushUndo();
+        for (const r of refs) setParentKeepWorld(ctx.scene, r, null);
+        this.syncCanvases();
+        this.gp.markDirty();
+        this.ui.refresh();
+        break;
+      }
       case 'centerCursorViewAll':
         ctx.scene.cursor = [0, 0, 0];
         this.gp.markDirty();
@@ -1016,10 +1047,12 @@ class App implements AppHandle {
     };
   }
 
-  /** Proxy deltas -> every selected object, around the pivot. */
+  /** Proxy deltas -> every selected object in WORLD space, written back to
+   *  each object's local transform through its parent inverse. */
   private applyWidgetDrag(): void {
     const base = this.widgetBase;
     if (!base) return;
+    const scene = this.ctx.scene;
     const pivot = new THREE.Vector3(...base.proxy.translation);
     const dPos = this.widgetProxy.position.clone().sub(pivot);
     const qDelta = new THREE.Quaternion().setFromEuler(this.widgetProxy.rotation);
@@ -1028,18 +1061,35 @@ class App implements AppHandle {
       this.widgetProxy.scale.y / base.proxy.scale[1],
       this.widgetProxy.scale.z / base.proxy.scale[2],
     );
+    // deltaM = T(pivot + dPos) * R * S * T(-pivot)
+    const deltaM = new THREE.Matrix4()
+      .makeTranslation(pivot.x + dPos.x, pivot.y + dPos.y, pivot.z + dPos.z)
+      .multiply(new THREE.Matrix4().makeRotationFromQuaternion(qDelta))
+      .multiply(new THREE.Matrix4().makeScale(sDelta.x, sDelta.y, sDelta.z))
+      .multiply(new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z));
+
     base.refs.forEach((ref, i) => {
       const t0 = base.transforms[i];
-      const pos = new THREE.Vector3(...t0.translation);
-      // orbit position around pivot for rotation, scale offset for scaling
-      const offset = pos.clone().sub(pivot).applyQuaternion(qDelta).multiply(sDelta);
-      const newPos = pivot.clone().add(offset).add(dPos);
-      const q0 = new THREE.Quaternion().setFromEuler(new THREE.Euler(...t0.rotation));
-      const e = new THREE.Euler().setFromQuaternion(qDelta.clone().multiply(q0));
-      setObjectTransform(this.ctx.scene, ref, {
-        translation: [newPos.x, newPos.y, newPos.z],
-        rotation: [e.x, e.y, e.z],
-        scale: [t0.scale[0] * sDelta.x, t0.scale[1] * sDelta.y, t0.scale[2] * sDelta.z],
+      // world' = deltaM * parentWorld * local0 ; local' = parentWorld^-1 * world'
+      const parentM = parentWorldMatrixOf(scene, ref);
+      const local0 = new THREE.Matrix4().compose(
+        new THREE.Vector3(...t0.translation),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(...t0.rotation)),
+        ref.kind === 'CANVAS' ? new THREE.Vector3(1, 1, 1) : new THREE.Vector3(...t0.scale),
+      );
+      const world1 = deltaM.clone().multiply(parentM.clone().multiply(local0));
+      const local1 = parentM.clone().invert().multiply(world1);
+      const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
+      local1.decompose(pos, quat, scl);
+      const eul = new THREE.Euler().setFromQuaternion(quat);
+      setObjectTransform(scene, ref, {
+        translation: [pos.x, pos.y, pos.z],
+        rotation: [eul.x, eul.y, eul.z],
+        // canvases carry size in the scale slots (scaled by the delta);
+        // everything else takes the decomposed local scale
+        scale: ref.kind === 'CANVAS'
+          ? [t0.scale[0] * sDelta.x, t0.scale[1] * sDelta.y, 1]
+          : [scl.x, scl.y, scl.z],
       });
     });
     this.syncCanvases();
@@ -1047,6 +1097,8 @@ class App implements AppHandle {
   }
 
   run(action: string): void { this.runAction(action); }
+
+  setLastPicked(ref: ObjRef): void { this.objectPick.lastPicked = ref; }
 
   newScene(): void {
     this.ctx.pushUndo();
@@ -1075,11 +1127,13 @@ class App implements AppHandle {
     const clones: ObjRef[] = [];
     for (const ref of refs) {
       if (ref.kind === 'GP') {
-        const copy = remapGPObjectIds(JSON.parse(JSON.stringify(scene.objects[ref.id])));
+        const src = scene.objects[gpIndexOf(scene, ref.id)];
+        if (!src) continue;
+        const copy = remapGPObjectIds(JSON.parse(JSON.stringify(src)));
         copy.name += ' copy';
         copy.translation = [copy.translation[0] + 0.3, copy.translation[1], copy.translation[2]];
         scene.objects.push(copy);
-        clones.push({ kind: 'GP', id: scene.objects.length - 1 });
+        clones.push({ kind: 'GP', id: copy.id });
       } else if (ref.kind === 'CANVAS') {
         const src = scene.canvases.find((c) => c.id === ref.id);
         if (!src) continue;
@@ -1307,15 +1361,7 @@ class App implements AppHandle {
       .filter((r): r is THREE.Object3D => !!r && r.visible);
     ctx.surfaces = [...this.canvasSurfaces, ...this.meshes.drawTargets(ctx.scene)];
     this.widget.camera = this.nav.active; // ortho/persp swaps
-    // GP object transforms are data-driven; groups must track outside rebuilds
-    ctx.scene.objects.forEach((ob, i) => {
-      const g = this.gp.objectGroups[i];
-      if (g) {
-        g.position.set(...ob.translation);
-        g.rotation.set(...ob.rotation);
-        g.scale.set(...ob.scale);
-      }
-    });
+
     if (ctx.scene.score.attachments.some((a) => a.running && a.target.kind === 'CANVAS')) {
       this.syncCanvases();
     }
@@ -1348,6 +1394,16 @@ class App implements AppHandle {
       if (ob.effects.some((f) => f.enabled)) {
         group.visible = false;
         fxJobs.push({ group, obIndex: i });
+      }
+    });
+
+    // GP object transforms are data-driven (and parent-aware); groups must
+    // track every frame — the renderer only sets them on rebuild
+    ctx.scene.objects.forEach((ob, i) => {
+      const g = this.gp.objectGroups[i];
+      if (g) {
+        worldMatrixOf(ctx.scene, { kind: 'GP', id: ob.id })
+          .decompose(g.position, g.quaternion, g.scale);
       }
     });
 

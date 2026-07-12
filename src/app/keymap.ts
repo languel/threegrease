@@ -35,7 +35,10 @@ export const ACTIONS: ActionDef[] = [
   { id: 'selectAll', label: 'Select all', combo: 'a', category: 'Edit' },
   { id: 'selectNone', label: 'Select none', combo: 'alt+a', category: 'Edit' },
   { id: 'selectInvert', label: 'Invert selection', combo: 'ctrl+i', category: 'Edit' },
-  { id: 'selectLinked', label: 'Select linked', combo: 'l', category: 'Edit' },
+  { id: 'selectLinked', label: 'Select linked (whole stroke)', combo: 'l', category: 'Edit' },
+  { id: 'selectConnected', label: 'Select connected strokes', combo: 'ctrl+l', category: 'Edit' },
+  { id: 'join', label: 'Join selected strokes', combo: 'ctrl+j', category: 'Edit' },
+  { id: 'split', label: 'Split selection into strokes', combo: 'y', category: 'Edit' },
   { id: 'selectMore', label: 'Select more', combo: '=', category: 'Edit' },
   { id: 'selectLess', label: 'Select less', combo: '-', category: 'Edit' },
   { id: 'delete', label: 'Delete selected', combo: 'x', category: 'Edit' },
@@ -43,6 +46,9 @@ export const ACTIONS: ActionDef[] = [
   { id: 'toggleSnap', label: 'Toggle magnet snapping', combo: 'shift+tab', category: 'Edit' },
   { id: 'copy', label: 'Copy strokes', combo: 'ctrl+c', category: 'Edit' },
   { id: 'paste', label: 'Paste strokes', combo: 'ctrl+v', category: 'Edit' },
+  // Object mode
+  { id: 'parentSet', label: 'Parent selected to active (object mode)', combo: 'ctrl+p', category: 'Edit' },
+  { id: 'parentClear', label: 'Clear parent (object mode)', combo: 'alt+p', category: 'Edit' },
   // Animation
   { id: 'play', label: 'Play / pause', combo: 'space', category: 'Animation' },
   { id: 'insertKey', label: 'Insert keyframe', combo: 'i', category: 'Animation' },

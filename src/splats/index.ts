@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import type { GPScene, TGSplat } from '../core/types';
+import { worldMatrixOf } from '../tools/objects';
 
 export class SplatManager {
   readonly group = new THREE.Group();
@@ -46,15 +47,15 @@ export class SplatManager {
         }
       }
       const entry = this.meshes.get(data.id);
-      if (entry) this.applyTransform(entry.mesh, data);
+      if (entry) this.applyTransform(entry.mesh, data, scene);
     }
     void wanted;
   }
 
-  private applyTransform(mesh: SplatMesh, data: TGSplat): void {
-    mesh.position.set(...data.translation);
-    mesh.rotation.set(...data.rotation);
-    mesh.scale.setScalar(data.scale);
+  private applyTransform(mesh: SplatMesh, data: TGSplat, scene: GPScene): void {
+    // parent-aware world placement
+    worldMatrixOf(scene, { kind: 'SPLAT', id: data.id })
+      .decompose(mesh.position, mesh.quaternion, mesh.scale);
     mesh.visible = data.visible;
   }
 
