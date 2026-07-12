@@ -99,14 +99,16 @@ export class MeshManager {
         new THREE.Quaternion().setFromEuler(new THREE.Euler(...data.rotation)),
         new THREE.Vector3(...data.scale),
       );
-      camera.matrixWorld.clone().multiply(local)
-        .decompose(root.position, root.quaternion, root.scale);
-    } else {
+      root.matrixAutoUpdate = false;
+      root.matrix.copy(camera.matrixWorld).multiply(local);
+    } else if (data.billboard === 'FACE_VIEW' && camera) {
+      root.matrixAutoUpdate = true;
       worldMatrixOf(scene, { kind: 'MESH', id: data.id })
         .decompose(root.position, root.quaternion, root.scale);
-      if (data.billboard === 'FACE_VIEW' && camera) {
-        root.quaternion.copy((camera as THREE.PerspectiveCamera).quaternion);
-      }
+      root.quaternion.copy((camera as THREE.PerspectiveCamera).quaternion);
+    } else {
+      root.matrixAutoUpdate = false;
+      root.matrix.copy(worldMatrixOf(scene, { kind: 'MESH', id: data.id }));
     }
     root.visible = data.visible;
     root.traverse((o) => {

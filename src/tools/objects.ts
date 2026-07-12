@@ -147,6 +147,8 @@ export function worldMatrixOf(scene: GPScene, ref: ObjRef, depth = 0): THREE.Mat
   const t = getObjectTransform(scene, ref);
   if (!t) return new THREE.Matrix4();
   const local = composeLocal(t, ref.kind);
+  const baked = (entityOf(scene, ref) as { baked?: number[] } | null)?.baked;
+  if (baked?.length === 16) local.multiply(new THREE.Matrix4().fromArray(baked));
   const parent = getParent(scene, ref);
   if (!parent || depth > 8) return local;
   return worldMatrixOf(scene, parent as ObjRef, depth + 1).multiply(local);
@@ -184,6 +186,42 @@ export function setParentKeepWorld(scene: GPScene, child: ObjRef, parent: ObjRef
     rotation: [eul.x, eul.y, eul.z],
     // canvases keep their size; others take the decomposed scale
     scale: child.kind === 'CANVAS' ? old.scale : [scl.x, scl.y, scl.z],
+  });
+  return true;
+}
+
+/**
+ * Blender Ctrl+A: fold the local TRS into the object data so the transform
+ * resets to identity while the object stays put. GP bakes into stroke
+ * points (+ scales SCENE-unit widths); mesh/splat fold into `baked`.
+ */
+export function applyObjectTransform(scene: GPScene, ref: ObjRef): boolean {
+  const t = getObjectTransform(scene, ref);
+  if (!t || ref.kind === 'CANVAS') return false;
+  const local = composeLocal(t, ref.kind);
+  if (ref.kind === 'GP') {
+    const ob = scene.objects.find((x) => x.id === ref.id);
+    if (!ob) return false;
+    const wScale = (Math.abs(t.scale[0]) + Math.abs(t.scale[1]) + Math.abs(t.scale[2])) / 3;
+    const v = new THREE.Vector3();
+    for (const layer of ob.layers) for (const f of layer.frames) for (const s of f.strokes) {
+      for (const p of s.points) {
+        v.set(...p.co).applyMatrix4(local);
+        p.co = [v.x, v.y, v.z];
+      }
+      if (s.style.unit === 'SCENE') s.lineWidth *= wScale;
+    }
+    ob.translation = [0, 0, 0]; ob.rotation = [0, 0, 0]; ob.scale = [1, 1, 1];
+    return true;
+  }
+  const e = entityOf(scene, ref) as { baked?: number[] } | null;
+  if (!e) return false;
+  // world = parent · local · baked  →  fold local into baked, TRS ← identity
+  const prev = e.baked?.length === 16
+    ? new THREE.Matrix4().fromArray(e.baked) : new THREE.Matrix4();
+  e.baked = local.multiply(prev).toArray();
+  setObjectTransform(scene, ref, {
+    translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
   });
   return true;
 }

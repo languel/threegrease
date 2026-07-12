@@ -250,6 +250,9 @@ export interface TGSplat {
   visible: boolean;
   select: boolean;
   parent?: ParentRef | null;
+  /** applied ("baked") transform, column-major 4x4 — composed after the
+   *  live TRS so Apply Transform can reset TRS without moving the object */
+  baked?: number[];
 }
 
 /** A mesh scene object: primitive solid, plane, or imported model —

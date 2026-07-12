@@ -40,7 +40,7 @@ import { MeshManager, createMeshObject } from '../render/meshes';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
   ObjectSelectTool, deleteObject, deselectAllObjects, getObjectTransform,
-  allRefs, gpIndexOf, listSelected, parentWorldMatrixOf, selectionPivot,
+  allRefs, applyObjectTransform, gpIndexOf, listSelected, parentWorldMatrixOf, selectionPivot,
   setObjectSelected, setObjectTransform, setParentKeepWorld, worldMatrixOf,
   type ObjRef, type ObjTransform,
 } from '../tools/objects';
@@ -707,6 +707,20 @@ class App implements AppHandle {
       case 'redo': this.redo(); break;
       case 'settings': this.ui.openSettings(); break;
       case 'palette': this.ui.openPalette(); break;
+      case 'applyTransform': {
+        if (ctx.settings.mode !== 'OBJECT') break;
+        const refs = listSelected(ctx.scene);
+        if (!refs.length) break;
+        ctx.pushUndo();
+        let n = 0;
+        for (const ref of refs) if (applyObjectTransform(ctx.scene, ref)) n++;
+        if (n) {
+          this.gp.markDirty();
+          this.refreshWidget();
+          this.ui.refresh();
+        }
+        break;
+      }
       case 'inspector': this.ui.toggleInspector(); break;
       case 'presentation': this.togglePresentation(); break;
       case 'toggleEdit': this.setMode(ctx.settings.mode === 'DRAW' ? 'EDIT' : 'DRAW'); break;

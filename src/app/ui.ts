@@ -314,6 +314,8 @@ export class UI {
       { label: 'Undo', action: 'undo' },
       { label: 'Redo', action: 'redo' },
       { sep: true },
+      { label: 'Apply transform (object mode)', action: 'applyTransform' },
+      { sep: true },
       { label: 'Preferences…', action: 'settings' },
     ]);
 

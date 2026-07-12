@@ -53,9 +53,9 @@ export class SplatManager {
   }
 
   private applyTransform(mesh: SplatMesh, data: TGSplat, scene: GPScene): void {
-    // parent-aware world placement
-    worldMatrixOf(scene, { kind: 'SPLAT', id: data.id })
-      .decompose(mesh.position, mesh.quaternion, mesh.scale);
+    // parent-aware world placement (matrix, so baked shear survives)
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(worldMatrixOf(scene, { kind: 'SPLAT', id: data.id }));
     mesh.visible = data.visible;
   }
 
