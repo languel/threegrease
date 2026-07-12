@@ -63,6 +63,7 @@ export interface AppHandle {
   widgetMode: string;
   refreshWidget(): void;
   exportActiveGP(): void;
+  addGPObject(): void;
   saveSelectedAsAsset(): void;
   addAssetToScene(asset: import('../io/assets').TGAsset): void;
   importGPFile(file: File): void;
@@ -343,6 +344,8 @@ export class UI {
       { label: 'Cylinder', do: () => this.app.addMeshObject('CYLINDER') },
       { sep: true },
       { label: 'Model…', do: () => this.filePick('.glb,.gltf,.obj', (f) => this.app.importModelFile(f)) },
+      { sep: true },
+      { label: 'Grease Pencil (blank)', do: () => this.app.addGPObject() },
       { label: 'GP object…', do: () => this.filePick('.json', (f) => this.app.importGPFile(f)) },
       {
         label: 'Splat from URL…',

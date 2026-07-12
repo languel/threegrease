@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createFrame, cloneFrame, frameAt, keyframeIndexAt } from '../core/gpdata';
+import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt } from '../core/gpdata';
 import { History } from '../core/history';
 import type { GPScene } from '../core/types';
 import { GPSceneRenderer, type EditorMode } from '../render/GPSceneRenderer';
@@ -1166,6 +1166,7 @@ class App implements AppHandle {
         () => this.addMeshObject(kind), 'object primitive mesh');
     }
     add('add.camera', 'Add camera at current view', () => this.addCamera(), 'object');
+    add('add.gp', 'Add blank Grease Pencil object', () => this.addGPObject(), 'object grease pencil new');
     add('export.glb', 'Export GLB', async () => (await import('../io/export3d')).exportGLB(this.ctx), 'file');
     add('export.obj', 'Export OBJ', async () => (await import('../io/export3d')).exportOBJ(this.ctx), 'file');
     add('export.stl', 'Export STL', async () => (await import('../io/export3d')).exportSTL(this.ctx), 'file');
@@ -1388,6 +1389,21 @@ class App implements AppHandle {
     const id = Date.now() % 1e9;
     this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, [...this.ctx.scene.cursor], src));
     this.meshes.sync(this.ctx.scene);
+    this.ui.refresh();
+  }
+
+  /** Blender Add > Grease Pencil > Blank: new empty GP object at the 3D cursor. */
+  addGPObject(): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    const n = scene.objects.length + 1;
+    const ob = createObject(`GreasePencil${n}`);
+    ob.translation = [...scene.cursor];
+    scene.objects.push(ob);
+    scene.activeObject = scene.objects.length - 1;
+    setObjectSelected(scene, { kind: 'GP', id: ob.id }, true);
+    this.gp.markDirty();
+    this.refreshWidget();
     this.ui.refresh();
   }
 
