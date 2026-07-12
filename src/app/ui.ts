@@ -3,7 +3,7 @@ import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import { ACTIONS, comboFromEvent, type Keymap } from './keymap';
-import { MODIFIERS, createModifier } from '../modifiers/index';
+import { MODIFIERS, applyModifierToData, createModifier } from '../modifiers/index';
 import { BRUSH_PRESETS } from '../core/brushes';
 import { bus } from '../events/bus';
 import { defaultCursor, scoreId } from '../score/engine';
@@ -1240,6 +1240,11 @@ export class UI {
           checkbox('On', mod.enabled, (v) => { mod.enabled = v; ctx.requestRender(); }),
           btn('▲', () => { if (i > 0) { [ob.modifiers[i - 1], ob.modifiers[i]] = [ob.modifiers[i], ob.modifiers[i - 1]]; ctx.requestRender(); this.refresh(); } }, { cls: 'icon-btn' }),
           btn('▼', () => { if (i < ob.modifiers.length - 1) { [ob.modifiers[i + 1], ob.modifiers[i]] = [ob.modifiers[i], ob.modifiers[i + 1]]; ctx.requestRender(); this.refresh(); } }, { cls: 'icon-btn' }),
+          btn('✓', () => {
+            ctx.pushUndo();
+            if (applyModifierToData(ob, mod.id)) { ctx.requestRender(); this.refresh(); }
+            else alert('Time modifiers cannot be baked into geometry');
+          }, { cls: 'icon-btn', title: 'Apply: bake into keyframes and remove from the stack' }),
           btn('✕', () => { ctx.pushUndo(); ob.modifiers.splice(i, 1); ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn' }),
         ),
         ...this.paramEditors(mod.params, () => ctx.requestRender()),

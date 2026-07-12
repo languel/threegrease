@@ -306,6 +306,41 @@ export function remapTime(ob: GPObject, layer: GPLayer, frame: number): number {
   return f;
 }
 
+/**
+ * Blender "Apply": bake ONE modifier into every keyframe it affects and
+ * remove it from the stack. Baked per-keyframe at that keyframe's own
+ * frame number (mid-stack applies reorder results, like Blender warns).
+ * TIME modifiers can't be baked into geometry — returns false.
+ */
+export function applyModifierToData(ob: GPObject, modId: number): boolean {
+  const idx = ob.modifiers.findIndex((mod) => mod.id === modId);
+  if (idx < 0) return false;
+  const mod = ob.modifiers[idx];
+  if (mod.type === 'TIME') return false;
+  for (const layer of ob.layers) {
+    if (mod.layerFilter !== null && mod.layerFilter !== layer.id) continue;
+    for (const kf of layer.frames) {
+      const ctx: EvalContext = {
+        object: ob, layer, frame: kf.frameNumber, keyFrameNumber: kf.frameNumber,
+      };
+      let subject = kf.strokes;
+      let rest: GPStroke[] = [];
+      if (mod.materialFilter !== null) {
+        subject = kf.strokes.filter((s) => s.materialIndex === mod.materialFilter);
+        rest = kf.strokes.filter((s) => s.materialIndex !== mod.materialFilter);
+      }
+      const cloned = subject.map((s) => {
+        const c = cloneStroke(s);
+        c.id = s.id;
+        return c;
+      });
+      kf.strokes = [...rest, ...MODIFIERS[mod.type].apply(cloned, mod, ctx)];
+    }
+  }
+  ob.modifiers.splice(idx, 1);
+  return true;
+}
+
 /** Run the whole stack over cloned strokes of one layer. */
 export function evaluateModifiers(
   strokes: GPStroke[], ob: GPObject, layer: GPLayer, frame: number, keyFrameNumber: number,
