@@ -8,6 +8,7 @@ import { BRUSH_PRESETS } from '../core/brushes';
 import { bus } from '../events/bus';
 import { defaultCursor, scoreId } from '../score/engine';
 import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
+import { deleteAsset, listAssets } from '../io/assets';
 import {
   getObjectTransform, listSelected as listSelectedObjects, objectName,
   setObjectTransform, setParentKeepWorld, type ObjRef,
@@ -62,6 +63,8 @@ export interface AppHandle {
   widgetMode: string;
   refreshWidget(): void;
   exportActiveGP(): void;
+  saveSelectedAsAsset(): void;
+  addAssetToScene(asset: import('../io/assets').TGAsset): void;
   importGPFile(file: File): void;
   exportSplatPly(id: number): void;
   run(action: string): void;
@@ -319,11 +322,20 @@ export class UI {
       { label: 'Preferences…', action: 'settings' },
     ]);
 
+    const assetItems = listAssets().flatMap((a) => [{
+      label: `${a.kind === 'GP' ? '✏️' : a.kind === 'MESH' ? '⬢' : '✳'} ${a.name}`,
+      do: () => this.app.addAssetToScene(a),
+    }]);
     menu('Add', [
       {
         label: 'Reference / image plane…',
         do: () => this.filePick('image/*', (f) => this.app.importImagePlane(f)),
       },
+      { sep: true },
+      { header: 'Assets' },
+      ...assetItems,
+      { label: '💾 Save selected as asset', do: () => this.app.saveSelectedAsAsset() },
+      ...(assetItems.length ? [{ label: '🗑 Manage assets…', do: () => this.manageAssets() }] : []),
       { sep: true },
       { label: 'Plane', do: () => this.app.addMeshObject('PLANE') },
       { label: 'Box', do: () => this.app.addMeshObject('BOX') },
@@ -1580,6 +1592,19 @@ export class UI {
     const f = layer ? frameAt(layer, ctx.scene.frame) : null;
     const s = f?.strokes.at(-1);
     return layer && s ? { objectIndex: obIndex, layerId: layer.id, strokeId: s.id } : null;
+  }
+
+  /** N6: delete assets by picking from a list (minimal manager). */
+  private manageAssets(): void {
+    const assets = listAssets();
+    if (!assets.length) return;
+    const names = assets.map((a, i) => `${i + 1}. [${a.kind}] ${a.name}`).join('\n');
+    const pick = prompt(`Delete which asset? (number, blank cancels)\n${names}`);
+    const idx = Number(pick) - 1;
+    if (Number.isInteger(idx) && assets[idx]) {
+      deleteAsset(assets[idx].id);
+      this.refresh();
+    }
   }
 
   /** "Follow object" dropdown for triggers/attractors (N5). */

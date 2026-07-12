@@ -30,6 +30,7 @@ import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
 import { BRUSH_PRESETS as BRUSH_PRESETS_CACHE } from '../core/brushes';
+import { listAssets, meshAssetPayload, saveAsset, splatAssetPayload, type TGAsset } from '../io/assets';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { ScoreEngine } from '../score/engine';
@@ -1222,6 +1223,11 @@ class App implements AppHandle {
       }
       return out;
     });
+    // asset library
+    reg.dynamicSources.push(() => listAssets().map((a) => ({
+      id: `asset.add.${a.id}`, title: `Add asset: ${a.name}`, keywords: 'library',
+      run: () => this.addAssetToScene(a),
+    })));
     // brush presets
     reg.dynamicSources.push(() => {
       return BRUSH_PRESETS_CACHE.map((p2) => ({
@@ -1301,6 +1307,50 @@ class App implements AppHandle {
     this.syncCanvases();
     this.gp.markDirty();
     this.refreshWidget();
+    this.ui.refresh();
+  }
+
+  /** N6 assets: snapshot the (single) selected object into the library. */
+  saveSelectedAsAsset(): void {
+    const scene = this.ctx.scene;
+    const refs = listSelected(scene);
+    if (refs.length !== 1) { alert('Select exactly one object to save as asset'); return; }
+    const ref = refs[0];
+    if (ref.kind === 'GP') {
+      const ob = scene.objects.find((o) => o.id === ref.id);
+      if (ob) saveAsset(ob.name, 'GP', serializeGPObject(ob));
+    } else if (ref.kind === 'MESH') {
+      const m = scene.meshes.find((x) => x.id === ref.id);
+      if (m) saveAsset(m.name, 'MESH', meshAssetPayload(m));
+    } else if (ref.kind === 'SPLAT') {
+      const s = scene.splats.find((x) => x.id === ref.id);
+      if (s) saveAsset(s.name, 'SPLAT', splatAssetPayload(s));
+    } else {
+      alert('Canvases are legacy — save is not supported');
+      return;
+    }
+    this.ui.refresh();
+  }
+
+  /** N6 assets: instance an asset at the 3D cursor. */
+  addAssetToScene(asset: TGAsset): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    const at = [...scene.cursor] as [number, number, number];
+    if (asset.kind === 'GP') {
+      importGPObjects(scene, asset.payload);
+      const ob = scene.objects[scene.objects.length - 1];
+      ob.translation = at;
+      scene.activeObject = scene.objects.length - 1;
+      this.gp.markDirty();
+    } else if (asset.kind === 'MESH') {
+      const def = JSON.parse(asset.payload);
+      scene.meshes.push({ ...def, id: Date.now() % 1e9, parent: null, select: false, translation: at });
+      this.meshes.sync(scene);
+    } else {
+      const def = JSON.parse(asset.payload);
+      scene.splats.push({ ...def, id: Date.now() % 1e9, parent: null, select: false, translation: at });
+    }
     this.ui.refresh();
   }
 
