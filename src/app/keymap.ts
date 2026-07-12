@@ -15,6 +15,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'open', label: 'Open scene', combo: 'ctrl+o', category: 'General' },
   { id: 'newScene', label: 'New scene', combo: 'ctrl+alt+n', category: 'General' },
   { id: 'settings', label: 'Open settings', combo: ',', category: 'General' },
+  { id: 'palette', label: 'Command palette', combo: 'f3', category: 'General' },
   { id: 'inspector', label: 'Toggle inspector panel', combo: 'n', category: 'General' },
   { id: 'presentation', label: 'Presentation mode', combo: 'p', category: 'General' },
   // Modes

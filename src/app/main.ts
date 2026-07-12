@@ -27,7 +27,9 @@ import {
 } from '../io/serialize';
 import { drawingPlane, nearestStrokePoint, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
-import { Keymap, comboFromEvent } from './keymap';
+import { ACTIONS, Keymap, comboFromEvent } from './keymap';
+import { CommandRegistry } from './commands';
+import { BRUSH_PRESETS as BRUSH_PRESETS_CACHE } from '../core/brushes';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { ScoreEngine } from '../score/engine';
@@ -107,6 +109,7 @@ class App implements AppHandle {
   lockCamToView = true;
   private camHelper!: THREE.Group; // root: one frustum child per scene camera
   readonly keymap = new Keymap();
+  readonly commands = new CommandRegistry();
   readonly score = new ScoreEngine();
   readonly sim = new StringSim();
   readonly splats = new SplatManager();
@@ -229,7 +232,10 @@ class App implements AppHandle {
     this.tools.setActive(this.ctx, 'draw');
 
     this.ui = new UI(this);
-    (window as unknown as Record<string, unknown>).__tg = this; // debug/scripting handle
+    this.buildCommands();
+    const tg = this as unknown as Record<string, unknown>;
+    tg.execute = (q: string, args?: string) => this.commands.execute(q, args);
+    (window as unknown as Record<string, unknown>).__tg = this; // debug/scripting handle; __tg.execute() = agent API
 
     // event IO (P2): MIDI is async and optional; WS connects if configured
     midi.init().then((ok) => {
@@ -676,6 +682,7 @@ class App implements AppHandle {
       case 'undo': this.undo(); break;
       case 'redo': this.redo(); break;
       case 'settings': this.ui.openSettings(); break;
+      case 'palette': this.ui.openPalette(); break;
       case 'inspector': this.ui.toggleInspector(); break;
       case 'presentation': this.togglePresentation(); break;
       case 'toggleEdit': this.setMode(ctx.settings.mode === 'DRAW' ? 'EDIT' : 'DRAW'); break;
@@ -1101,6 +1108,96 @@ class App implements AppHandle {
   }
 
   run(action: string): void { this.runAction(action); }
+
+  /** N1: every capability, one registry (palette + agent API). */
+  private buildCommands(): void {
+    const reg = this.commands;
+    for (const a of ACTIONS) {
+      reg.register({
+        id: a.id, title: a.label, keywords: a.category,
+        key: this.keymap.comboFor(a.id),
+        run: () => this.runAction(a.id),
+      });
+    }
+    const add = (id: string, title: string, run: (args?: string) => unknown, keywords = '') =>
+      reg.register({ id, title, keywords, run });
+
+    for (const kind of ['PLANE', 'BOX', 'SPHERE', 'CYLINDER'] as const) {
+      add(`add.${kind.toLowerCase()}`, `Add ${kind.toLowerCase()} at cursor`,
+        () => this.addMeshObject(kind), 'object primitive mesh');
+    }
+    add('add.camera', 'Add camera at current view', () => this.addCamera(), 'object');
+    add('export.glb', 'Export GLB', async () => (await import('../io/export3d')).exportGLB(this.ctx), 'file');
+    add('export.obj', 'Export OBJ', async () => (await import('../io/export3d')).exportOBJ(this.ctx), 'file');
+    add('export.stl', 'Export STL', async () => (await import('../io/export3d')).exportSTL(this.ctx), 'file');
+    add('export.ply', 'Export PLY geometry', async () => (await import('../io/export3d')).exportPLY(this.ctx), 'file');
+    add('export.png', 'Export PNG snapshot', () => this.exportPng(), 'file render');
+    add('export.gp', 'Export active GP object', () => this.exportActiveGP(), 'file json');
+    add('view.front', 'View front', () => this.nav.snapView('FRONT'), 'viewpoint');
+    add('view.right', 'View right', () => this.nav.snapView('RIGHT'), 'viewpoint');
+    add('view.top', 'View top', () => this.nav.snapView('TOP'), 'viewpoint');
+    add('view.ortho', 'Toggle orthographic', () => this.nav.toggleOrtho(), 'perspective');
+    add('mode.object', 'Object mode', () => this.setMode('OBJECT'));
+    add('brush.set', 'Set brush size (args: px)', (args) => {
+      const v = Number(args);
+      if (Number.isFinite(v)) this.ctx.settings.brush.size = Math.max(1, v);
+      return this.ctx.settings.brush.size;
+    }, 'radius width');
+
+    // scene-dependent commands, rebuilt on every search/execute
+    reg.dynamicSources.push(() => {
+      const out = [];
+      const scene = this.ctx.scene;
+      for (const ob of scene.objects) {
+        out.push({
+          id: `select.gp.${ob.id}`, title: `Select GP: ${ob.name}`, keywords: 'object',
+          run: () => {
+            this.setMode('OBJECT');
+            deselectAllObjects(scene);
+            ob.select = true;
+            scene.activeObject = gpIndexOf(scene, ob.id);
+            this.refreshWidget(); this.gp.markDirty(); this.ui.refresh();
+          },
+        });
+      }
+      for (const m of scene.meshes) {
+        out.push({
+          id: `select.mesh.${m.id}`, title: `Select mesh: ${m.name}`, keywords: 'object',
+          run: () => {
+            this.setMode('OBJECT');
+            deselectAllObjects(scene);
+            m.select = true;
+            this.refreshWidget(); this.ui.refresh();
+          },
+        });
+      }
+      for (const s of scene.splats) {
+        out.push({
+          id: `select.splat.${s.id}`, title: `Select splat: ${s.name}`, keywords: 'object',
+          run: () => {
+            this.setMode('OBJECT');
+            deselectAllObjects(scene);
+            s.select = true;
+            this.refreshWidget(); this.ui.refresh();
+          },
+        });
+      }
+      return out;
+    });
+    // brush presets
+    reg.dynamicSources.push(() => {
+      return BRUSH_PRESETS_CACHE.map((p2) => ({
+        id: `brush.preset.${p2.name.toLowerCase().replace(/\s+/g, '-')}`,
+        title: `Brush: ${p2.name}`, keywords: 'preset',
+        run: () => {
+          const b = this.ctx.settings.brush;
+          b.preset = p2.name; b.size = p2.size; b.strength = p2.strength;
+          b.hardness = p2.hardness; b.style = { ...p2.style };
+          this.ui.refresh();
+        },
+      }));
+    });
+  }
 
   setLastPicked(ref: ObjRef): void { this.objectPick.lastPicked = ref; }
 

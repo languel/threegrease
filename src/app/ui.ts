@@ -51,6 +51,7 @@ export interface AppHandle {
   togglePresentation(): void;
   setBackground(rgb: [number, number, number]): void;
   keymap: Keymap;
+  commands: import('./commands').CommandRegistry;
   sim: { enabled: boolean; damping: number; stiffness: number; reset(): void };
   splats: { errors: Map<number, string> };
   meshes: { errors: Map<number, string> };
@@ -364,6 +365,7 @@ export class UI {
     ]);
 
     menu('Help', [
+      { label: 'Command palette…', action: 'palette' },
       { label: 'Keyboard shortcuts…', action: 'settings' },
       { label: 'About (GitHub)', do: () => window.open('https://github.com/languel/threegrease', '_blank') },
     ]);
@@ -1251,6 +1253,61 @@ export class UI {
     }));
 
     this.inspectorEl.replaceChildren(...body);
+  }
+
+  // ------------------------------------------------------- command palette
+
+  paletteOpen = false;
+
+  openPalette(): void {
+    if (this.paletteOpen) return;
+    this.paletteOpen = true;
+    const overlay = el('div', { id: 'palette-overlay' });
+    const input = el('input', { type: 'text', placeholder: 'Type a command…  (Enter runs · Esc closes)' }) as HTMLInputElement;
+    const list = el('div', { id: 'palette-list' });
+    const box = el('div', { id: 'palette' }, input, list);
+    overlay.append(box);
+    document.body.append(overlay);
+
+    let items: import('./commands').Command[] = [];
+    let sel = 0;
+    const renderList = () => {
+      items = this.app.commands.search(input.value, 12);
+      sel = Math.min(sel, Math.max(0, items.length - 1));
+      list.replaceChildren(...items.map((c, i) => {
+        const row = el('div', { class: `menu-item ${i === sel ? 'palette-sel' : ''}` },
+          el('span', { text: c.title }),
+          el('span', { class: 'menu-key', text: c.key ?? '' }),
+        );
+        row.onclick = () => { close(); c.run(); };
+        row.onmouseenter = () => { sel = i; renderList(); };
+        return row;
+      }));
+      if (!items.length) list.replaceChildren(el('div', { class: 'menu-header', text: 'no matches' }));
+    };
+    const close = () => {
+      this.paletteOpen = false;
+      overlay.remove();
+      window.removeEventListener('keydown', onKey, true);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); close(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(items.length - 1, sel + 1); renderList(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); renderList(); }
+      else if (e.key === 'Enter') {
+        e.stopPropagation();
+        const cmd = items[sel];
+        close();
+        cmd?.run();
+      } else {
+        e.stopPropagation(); // typing must not hit app shortcuts
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    input.oninput = () => { sel = 0; renderList(); };
+    renderList();
+    setTimeout(() => input.focus(), 0);
   }
 
   // ------------------------------------------------------------ settings
