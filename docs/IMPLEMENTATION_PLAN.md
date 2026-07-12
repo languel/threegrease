@@ -349,7 +349,7 @@ worker fill, stamp instancing) remain open for a future pass.
 Read PRD §1b/§1c first. Order below = impact order. Keep steps small,
 commit each; typecheck+build always, deep verification only when cheap.
 
-## N1 — Command palette (F3)  **[CRUCIAL — do first]**
+## N1 — Command palette (F3)  **[SHIPPED f1336bc]**
 - `src/app/commands.ts`: registry `{ id, title, keywords, run(ctx, args?) }`.
   Sources: every keymap ACTION (auto-registered via runAction), every menu
   item, parameterized commands (add-object kinds, set brush preset,
@@ -361,7 +361,7 @@ commit each; typecheck+build always, deep verification only when cheap.
   in HANDOFF as the official automation entrypoint.
 - Later: command history, argument prompts ("add box at 1,2,0").
 
-## N2 — Selection look & pivots (Blender parity)
+## N2 — Selection look & pivots  **[SHIPPED 42366e3]** (silhouette outline + magnet OBJECT snap still open)
 - Orange outline on selected objects. Cheap pass: per selected object a
   Box3Helper (#ff7a00) sized to its world bounds, refreshed with glyphs;
   GP objects use their layer-group bounds. (True silhouette outline via
@@ -370,7 +370,7 @@ commit each; typecheck+build always, deep verification only when cheap.
   like Blender's origin) — becomes a snap target: extend cursorSnap +
   magnet snap modes with OBJECT (origins) alongside stroke points.
 
-## N3 — Properties editor restructure
+## N3 — Properties editor restructure  **[SHIPPED 5894e4a — sidebar-wide icon tabs; per-selection Bindings subsection still open]**
 - Object mode right panel becomes tabs (icons): Object (transform/parent)
   · Material · Data (per-kind: GP layers?, splat info) · **Bindings**
   (routes touching this object, cursors/triggers/attachments referencing
@@ -379,7 +379,7 @@ commit each; typecheck+build always, deep verification only when cheap.
   selection is relevant (keep the standalone Score/Solvers panels until
   parity is comfortable, then retire).
 
-## N4 — Modifier stack + Apply
+## N4 — Modifier stack + Apply  **[Ctrl+A SHIPPED c9c4cfa via `baked` matrix; per-modifier Apply still open]**
 - GP modifier stack exists; add per-object "Apply" for individual
   modifiers (bake evaluated strokes into the keyframe, remove modifier).
 - Ctrl+A Apply Transform: GP = bake object matrix into stroke points and
@@ -389,7 +389,7 @@ commit each; typecheck+build always, deep verification only when cheap.
   via PackedSplats.forEachSplat/setSplat if feasible; else keep transform
   and report. The 3DGS import→scale→apply flow is the acceptance test.
 
-## N5 — Everything-is-a-surface/field
+## N5 — Everything-is-a-surface/field  **[drawTarget + follow SHIPPED 16a2254; stroke-as-trigger-zone still open]**
 - TGSplat.drawTarget flag → include SplatMesh in ctx.surfaces (Spark
   supports raycast; verify once). GP drawing lands on splat surfaces.
 - Attractors + triggers gain `follow?: ObjRef` — position tracks the

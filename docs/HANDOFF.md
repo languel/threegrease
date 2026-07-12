@@ -229,6 +229,18 @@ New gotchas from the platform build:
   engines manually (sim.step / gp.update), never await wall-clock frames.
 - Wire-art scripting: compute camera eulers via lookAt, never by hand.
 
+N-series status (2026-07-12): N1 palette + `window.__tg.execute()` agent
+API, N2 orange outlines/origin dots + OBJECT cursor snap, N3 tabbed
+properties editor, N4 Ctrl+A apply transform (GP bakes points; mesh/splat
+fold TRS into a `baked` 4x4 composed inside worldMatrixOf — splat/mesh
+roots are now placed via matrixAutoUpdate=false + matrix.copy so baked
+shear survives), N5 splat drawTargets in ctx.surfaces + trigger/attractor
+`follow`. Open: per-modifier Apply, stroke-as-trigger-zone, N6 hierarchy
+tree/assets, N7 icon pass, N8 splat nibs.
+
+`window.__tg.execute('command id | title | fuzzy', args?)` is the official
+automation/agent entrypoint (src/app/commands.ts); F3 opens the palette.
+
 Where next: the N-series (IMPLEMENTATION_PLAN "Next phases", added
 2026-07-12): N1 command palette (crucial, the AI/agent surface) → N2
 selection outline + pivots → N3 properties editor tabs → N4 modifier
