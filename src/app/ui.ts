@@ -466,7 +466,7 @@ export class UI {
         checkbox('Multiframe', s.multiframe, (v) => { s.multiframe = v; }),
         checkbox('🧲 Snap', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
         selectField('', s.snap.mode, [
-          ['INCREMENT', 'Increment'], ['POINT', 'Stroke point'], ['CANVAS', 'Canvas'],
+          ['INCREMENT', 'Increment'], ['POINT', 'Stroke point'], ['CANVAS', 'Canvas'], ['OBJECT', 'Object origin'],
         ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); }),
       );
     } else if (s.mode === 'SCULPT') {

@@ -361,7 +361,7 @@ commit each; typecheck+build always, deep verification only when cheap.
   in HANDOFF as the official automation entrypoint.
 - Later: command history, argument prompts ("add box at 1,2,0").
 
-## N2 — Selection look & pivots  **[SHIPPED 42366e3]** (silhouette outline + magnet OBJECT snap still open)
+## N2 — Selection look & pivots  **[SHIPPED 42366e3 + OBJECT magnet snap]** (silhouette-quality outline still open — current is a Box3Helper, not a true selection silhouette)
 - Orange outline on selected objects. Cheap pass: per selected object a
   Box3Helper (#ff7a00) sized to its world bounds, refreshed with glyphs;
   GP objects use their layer-group bounds. (True silhouette outline via

@@ -4,6 +4,7 @@ import { falloff } from '../core/mathutil';
 import type { AppCtx } from './context';
 import { forEachEditableStroke, selectedPoints } from './select';
 import { nearestStrokePoint, objectToScreen, objectToWorld, pickCanvas, screenToWorld, worldToObject } from './projection';
+import { allRefs, worldMatrixOf } from './objects';
 
 type TransformKind = 'move' | 'rotate' | 'scale' | 'shear';
 type AxisLock = 'none' | 'x' | 'y' | 'z';
@@ -161,6 +162,19 @@ export class ModalTransform {
     } else if (snap.mode === 'CANVAS') {
       const hit = pickCanvas(ctx, pointer.x, pointer.y);
       if (hit) target = worldToObject(ctx, hit.point);
+    } else if (snap.mode === 'OBJECT') {
+      const rect = ctx.canvas.getBoundingClientRect();
+      let best: THREE.Vector3 | null = null;
+      let bestD = 40; // px
+      for (const ref of allRefs(ctx.scene)) {
+        const pos = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(ctx.scene, ref));
+        const ndc = pos.clone().project(ctx.camera);
+        if (ndc.z > 1) continue;
+        const screen = new THREE.Vector2((ndc.x * 0.5 + 0.5) * rect.width, (-ndc.y * 0.5 + 0.5) * rect.height);
+        const d = screen.distanceTo(pointer);
+        if (d < bestD) { bestD = d; best = pos; }
+      }
+      if (best) target = worldToObject(ctx, best);
     }
     if (!target) return delta;
     return [

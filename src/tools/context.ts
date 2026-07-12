@@ -60,7 +60,7 @@ export interface Settings {
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
   /** Blender-style magnet snapping during transforms. */
-  snap: { enabled: boolean; mode: 'INCREMENT' | 'POINT' | 'CANVAS' };
+  snap: { enabled: boolean; mode: 'INCREMENT' | 'POINT' | 'CANVAS' | 'OBJECT' };
 }
 
 // ---- preference persistence (localStorage) --------------------------------
