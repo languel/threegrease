@@ -467,7 +467,7 @@ export class UI {
     bar.append(el('div', { class: 'sep' }));
     bar.append(
       selectField('Cursor snap', s.cursorSnap, [
-        ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SELECTION', 'Selection'],
+        ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SELECTION', 'Selection'], ['OBJECT', 'Object origin'],
       ] as [CursorSnap, string][], (v) => { s.cursorSnap = v; this.app.savePrefs(); }),
     );
   }
@@ -1355,7 +1355,7 @@ export class UI {
       ),
       el('div', { class: 'row' },
         selectField('Cursor snap', s.cursorSnap, [
-          ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SELECTION', 'Selection'],
+          ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SELECTION', 'Selection'], ['OBJECT', 'Object origin'],
         ], (v) => { s.cursorSnap = v as typeof s.cursorSnap; save(); }),
         numField('Grid step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); save(); }),
       ),

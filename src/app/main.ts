@@ -40,7 +40,7 @@ import { MeshManager, createMeshObject } from '../render/meshes';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
   ObjectSelectTool, deleteObject, deselectAllObjects, getObjectTransform,
-  gpIndexOf, listSelected, parentWorldMatrixOf, selectionPivot,
+  allRefs, gpIndexOf, listSelected, parentWorldMatrixOf, selectionPivot,
   setObjectSelected, setObjectTransform, setParentKeepWorld, worldMatrixOf,
   type ObjRef, type ObjTransform,
 } from '../tools/objects';
@@ -96,6 +96,9 @@ class App implements AppHandle {
   private ui!: UI;
   private hud: HTMLCanvasElement;
   private cursorMarker: THREE.Group;
+  /** N2: Blender-style orange outlines + origin dots for selected objects */
+  private selGlyphs = new THREE.Group();
+  private selHelpers = new Map<string, { box: THREE.Box3; helper: THREE.Box3Helper; dot: THREE.Points }>();
   private interpTool = new InterpolateTool();
   private nav!: Navigation;
   private navDrag: { mode: 'orbit' | 'pan' | 'dolly'; x: number; y: number } | null = null;
@@ -187,6 +190,7 @@ class App implements AppHandle {
     this.scene3.add(this.gp.root);
     this.cursorMarker = this.makeCursorMarker();
     this.scene3.add(this.cursorMarker);
+    this.scene3.add(this.selGlyphs);
     // a ground plane for SURFACE placement demos
     this.scene3.add(this.canvasGroup);
     this.scene3.add(this.scoreGroup);
@@ -346,6 +350,26 @@ class App implements AppHandle {
         return;
       }
       // no stroke nearby: fall through to plane placement
+    }
+    if (snap === 'OBJECT') {
+      // nearest object origin in screen space
+      const w = rect.width, h = rect.height;
+      let best: THREE.Vector3 | null = null;
+      let bestD = 80; // px
+      for (const ref of allRefs(ctx.scene)) {
+        const pos = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(ctx.scene, ref));
+        const ndc = pos.clone().project(this.nav.active);
+        if (ndc.z > 1) continue;
+        const dx = (ndc.x * 0.5 + 0.5) * w - (clientX - rect.left);
+        const dy = (-ndc.y * 0.5 + 0.5) * h - (clientY - rect.top);
+        const d = Math.hypot(dx, dy);
+        if (d < bestD) { bestD = d; best = pos; }
+      }
+      if (best) {
+        ctx.scene.cursor = [best.x, best.y, best.z];
+        this.gp.markDirty();
+        return;
+      }
     }
     if (snap === 'SELECTION') {
       const med = new THREE.Vector3();
@@ -1340,6 +1364,60 @@ class App implements AppHandle {
   }
 
   /** Cursor/trigger glyphs: rebuilt when the score roster changes, posed every frame. */
+  /** Orange selection outlines + origin dots (Blender look), object mode only. */
+  private syncSelectionGlyphs(): void {
+    const scene = this.ctx.scene;
+    const active = this.ctx.settings.mode === 'OBJECT' && !this.presentation;
+    this.selGlyphs.visible = active;
+    if (!active) return;
+    const wanted = new Set<string>();
+    const refs = listSelected(scene);
+    const activeGP = scene.objects[scene.activeObject]?.id;
+    for (const ref of refs) {
+      const key = `${ref.kind}:${ref.id}`;
+      const root =
+        ref.kind === 'GP' ? this.gp.objectGroups[gpIndexOf(scene, ref.id)] :
+        ref.kind === 'MESH' ? this.meshes.rootFor(ref.id) :
+        ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) : null;
+      if (!root) continue;
+      wanted.add(key);
+      let entry = this.selHelpers.get(key);
+      if (!entry) {
+        const box = new THREE.Box3();
+        const helper = new THREE.Box3Helper(box, 0xff7a00);
+        (helper.material as THREE.LineBasicMaterial).depthTest = false;
+        (helper.material as THREE.LineBasicMaterial).transparent = true;
+        helper.renderOrder = 999;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+        const dot = new THREE.Points(geo, new THREE.PointsMaterial({
+          color: 0xff7a00, size: 7, sizeAttenuation: false, depthTest: false, transparent: true,
+        }));
+        dot.renderOrder = 1000;
+        this.selGlyphs.add(helper, dot);
+        entry = { box, helper, dot };
+        this.selHelpers.set(key, entry);
+      }
+      entry.box.setFromObject(root);
+      if (entry.box.isEmpty()) {
+        entry.box.setFromCenterAndSize(root.position, new THREE.Vector3(1, 1, 1));
+      }
+      const isActive = ref.kind === 'GP' && ref.id === activeGP;
+      (entry.helper.material as THREE.LineBasicMaterial).color.setHex(isActive ? 0xffb454 : 0xff7a00);
+      worldMatrixOf(scene, ref).decompose(
+        entry.dot.position, new THREE.Quaternion(), new THREE.Vector3());
+    }
+    for (const [key, entry] of this.selHelpers) {
+      if (wanted.has(key)) continue;
+      this.selGlyphs.remove(entry.helper, entry.dot);
+      entry.helper.geometry?.dispose?.();
+      (entry.helper.material as THREE.Material)?.dispose?.();
+      entry.dot.geometry.dispose();
+      (entry.dot.material as THREE.Material).dispose();
+      this.selHelpers.delete(key);
+    }
+  }
+
   private syncScoreGlyphs(): void {
     const sc = this.ctx.scene.score;
     const attractors = this.ctx.scene.attractors;
@@ -1534,6 +1612,7 @@ class App implements AppHandle {
       }
     });
 
+    this.syncSelectionGlyphs();
     this.glRenderer.render(this.scene3, this.nav.active);
 
     for (const job of fxJobs) {
