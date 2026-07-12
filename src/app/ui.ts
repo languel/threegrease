@@ -393,20 +393,20 @@ export class UI {
     const bar = $('topbar');
     bar.replaceChildren();
 
-    const modes: [EditorMode, string][] = [
-      ['OBJECT', 'Object'], ['DRAW', 'Draw'], ['EDIT', 'Edit'], ['SCULPT', 'Sculpt'],
-      ['VERTEX', 'Vertex Paint'], ['WEIGHT', 'Weight Paint'],
+    const modes: [EditorMode, string, string][] = [
+      ['OBJECT', '🞔', 'Object mode'], ['DRAW', '✏️', 'Draw mode'], ['EDIT', '🩹', 'Edit mode'],
+      ['SCULPT', '🗿', 'Sculpt mode'], ['VERTEX', '🎨', 'Vertex paint'], ['WEIGHT', '⚖️', 'Weight paint'],
     ];
-    for (const [m, label] of modes) {
-      bar.append(btn(label, () => this.app.setMode(m), { active: s.mode === m }));
+    for (const [m, icon, label] of modes) {
+      bar.append(btn(icon, () => this.app.setMode(m), { active: s.mode === m, title: label }));
     }
     bar.append(el('div', { class: 'sep' }));
 
     if (s.mode === 'OBJECT') {
       bar.append(
-        btn('Move', () => this.app.setWidgetMode('translate'), { active: this.app.widgetMode === 'translate', title: 'Widget: translate (G)' }),
-        btn('Rotate', () => this.app.setWidgetMode('rotate'), { active: this.app.widgetMode === 'rotate', title: 'Widget: rotate (R)' }),
-        btn('Scale', () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
+        btn('✥', () => this.app.setWidgetMode('translate'), { active: this.app.widgetMode === 'translate', title: 'Widget: move (G)' }),
+        btn('↻', () => this.app.setWidgetMode('rotate'), { active: this.app.widgetMode === 'rotate', title: 'Widget: rotate (R)' }),
+        btn('⤢', () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
       );
     } else if (s.mode === 'DRAW') {
       bar.append(

@@ -379,7 +379,7 @@ commit each; typecheck+build always, deep verification only when cheap.
   selection is relevant (keep the standalone Score/Solvers panels until
   parity is comfortable, then retire).
 
-## N4 — Modifier stack + Apply  **[Ctrl+A SHIPPED c9c4cfa via `baked` matrix; per-modifier Apply still open]**
+## N4 — Modifier stack + Apply  **[SHIPPED: Ctrl+A c9c4cfa; per-modifier Apply a358f4d]**
 - GP modifier stack exists; add per-object "Apply" for individual
   modifiers (bake evaluated strokes into the keyframe, remove modifier).
 - Ctrl+A Apply Transform: GP = bake object matrix into stroke points and
@@ -398,13 +398,13 @@ commit each; typecheck+build always, deep verification only when cheap.
 - Stroke-as-trigger-zone: fire enter/leave when a cursor crosses within
   radius of ANY point of a named stroke (uses stroke.address).
 
-## N6 — Hierarchy tree + assets
+## N6 — Hierarchy tree + assets  **[SHIPPED db124ac + d5f4010 — tree/drag-parent/rename; localStorage asset library]**
 - Outliner: indented tree by parent, expand/collapse, drag-to-parent,
   double-click rename. Asset concept: "save object as asset" = GP-object
   JSON / mesh def stored in an assets list (localStorage or files dir),
   Add menu gains an Assets section.
 
-## N7 — Icon pass
+## N7 — Icon pass  **[STARTED — mode + widget buttons icon-first; panels/timeline remain]**
 - Replace label buttons with icon+tooltip progressively (modes, panels,
   timeline). Keep a small icon helper (emoji or inline SVG map) — no
   icon-font dependency.

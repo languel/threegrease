@@ -235,8 +235,12 @@ properties editor, N4 Ctrl+A apply transform (GP bakes points; mesh/splat
 fold TRS into a `baked` 4x4 composed inside worldMatrixOf — splat/mesh
 roots are now placed via matrixAutoUpdate=false + matrix.copy so baked
 shear survives), N5 splat drawTargets in ctx.surfaces + trigger/attractor
-`follow`. Open: per-modifier Apply, stroke-as-trigger-zone, N6 hierarchy
-tree/assets, N7 icon pass, N8 splat nibs.
+`follow`. N4b per-modifier Apply (bake into keyframes), N6 hierarchy outliner
+(tree + drag-to-parent + rename) and asset library
+(src/io/assets.ts, localStorage `threegrease.assets`, Add-menu section
++ palette commands). Open: stroke-as-trigger-zone, rest of N7 icon pass
+(only mode/widget buttons done), N8 splat nibs, silhouette outlines,
+magnet OBJECT snap.
 
 `window.__tg.execute('command id | title | fuzzy', args?)` is the official
 automation/agent entrypoint (src/app/commands.ts); F3 opens the palette.
