@@ -218,6 +218,9 @@ export interface TGTrigger {
   messages: MsgTemplate[];
   /** track this object's world origin every frame (collider-style triggers) */
   follow?: ParentRef | null;
+  /** stroke-as-trigger-zone: inside = within radius of ANY point of this
+   *  stroke (overrides position when set) */
+  zone?: PathRef | null;
 }
 
 /** A scene object riding a path on its own clock. */

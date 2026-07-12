@@ -389,7 +389,7 @@ commit each; typecheck+build always, deep verification only when cheap.
   via PackedSplats.forEachSplat/setSplat if feasible; else keep transform
   and report. The 3DGS import→scale→apply flow is the acceptance test.
 
-## N5 — Everything-is-a-surface/field  **[drawTarget + follow SHIPPED 16a2254; stroke-as-trigger-zone still open]**
+## N5 — Everything-is-a-surface/field  **[SHIPPED: drawTarget + follow 16a2254; stroke-as-trigger-zone via TGTrigger.zone]**
 - TGSplat.drawTarget flag → include SplatMesh in ctx.surfaces (Spark
   supports raycast; verify once). GP drawing lands on splat surfaces.
 - Attractors + triggers gain `follow?: ObjRef` — position tracks the

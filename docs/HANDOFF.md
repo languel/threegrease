@@ -238,7 +238,7 @@ shear survives), N5 splat drawTargets in ctx.surfaces + trigger/attractor
 `follow`. N4b per-modifier Apply (bake into keyframes), N6 hierarchy outliner
 (tree + drag-to-parent + rename) and asset library
 (src/io/assets.ts, localStorage `threegrease.assets`, Add-menu section
-+ palette commands). Open: stroke-as-trigger-zone, rest of N7 icon pass
++ palette commands). N5c stroke-as-trigger-zone (TGTrigger.zone). Open: rest of N7 icon pass
 (only mode/widget buttons done), N8 splat nibs, silhouette outlines,
 magnet OBJECT snap.
 

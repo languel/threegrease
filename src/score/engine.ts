@@ -165,7 +165,14 @@ export class ScoreEngine {
       // --- triggers vs this cursor ---
       for (const trig of score.triggers) {
         const key = `${trig.id}:${cur.id}`;
-        const inside = state.position.distanceTo(new THREE.Vector3(...trig.position)) < trig.radius;
+        let inside: boolean;
+        if (trig.zone) {
+          // stroke-as-trigger-zone: near ANY polyline point of the stroke
+          const arc = this.arcTable(scene, trig.zone);
+          inside = !!arc && arc.world.some((p) => state.position.distanceTo(p) < trig.radius);
+        } else {
+          inside = state.position.distanceTo(new THREE.Vector3(...trig.position)) < trig.radius;
+        }
         const wasInside = this.triggerInside.get(key) ?? false;
         if (inside && !wasInside && cur.running) {
           const allowed = trig.retrigger || !this.triggerFired.has(key);

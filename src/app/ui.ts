@@ -1140,6 +1140,17 @@ export class UI {
         }, { title: 'Playhead on this stroke emitting at its address' }),
         btn('＋Trig start', () => addTrigger('start')),
         btn('＋Trig end', () => addTrigger('end')),
+        btn('＋Zone', () => {
+          ctx.pushUndo();
+          const id = scoreId(ctx.scene);
+          sc.triggers.push({
+            id, name: `${stroke.name ?? `stroke ${stroke.id}`} zone`,
+            position: worldOf(stroke.points[0].co), radius: 0.2, retrigger: true,
+            zone: path,
+            messages: [{ address: `${addr()}/hit`, argExprs: ['1'] }],
+          });
+          this.refresh();
+        }, { title: 'Whole stroke becomes a trigger zone: fires when a cursor comes within radius of any of its points' }),
       ),
       ...(boundCursors.length ? [el('div', {
         class: 'row',
@@ -1676,7 +1687,8 @@ export class UI {
         ),
         this.msgEditor(trig.messages),
       );
-      items.push(el('div', { class: 'panel' }, el('h3', { text: `◎ ${trig.name}` }), body));
+      items.push(el('div', { class: 'panel' },
+        el('h3', { text: `◎ ${trig.name}${trig.zone ? ' (stroke zone)' : ''}` }), body));
     }
 
     for (const at of sc.attachments) {
