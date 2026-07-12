@@ -238,7 +238,12 @@ shear survives), N5 splat drawTargets in ctx.surfaces + trigger/attractor
 `follow`. N4b per-modifier Apply (bake into keyframes), N6 hierarchy outliner
 (tree + drag-to-parent + rename) and asset library
 (src/io/assets.ts, localStorage `threegrease.assets`, Add-menu section
-+ palette commands). N5c stroke-as-trigger-zone (TGTrigger.zone). Open: rest of N7 icon pass
++ palette commands). N5c stroke-as-trigger-zone (TGTrigger.zone). P11 MediaMime integration:
+src/io/mediamime.ts live landmark registry over the existing WS/OSC bus,
+scene.mediamime.rigs (MMRig) binds any object's translation to a live
+address, triggers are now a full ObjKind ('TRIGGER') — selectable,
+draggable, parentable, in the outliner. MediaMime menu + 🎥 panel (live
+address table, ＋Trigger/＋Rig actions). Open: rest of N7 icon pass
 (only mode/widget buttons done), N8 splat nibs, silhouette outlines,
 magnet OBJECT snap.
 

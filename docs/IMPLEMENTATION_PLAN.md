@@ -413,3 +413,23 @@ commit each; typecheck+build always, deep verification only when cheap.
 - StrokeStyle.texture (image stamp) first; then "splat nib": stamps
   emitted as small gaussian clusters (writes a TGSplat per stroke or a
   generated splat set) — splats as brush matter, per PRD §1b.
+
+
+## P11 — MediaMime integration  **[SHIPPED]**
+- `src/io/mediamime.ts`: live landmark registry fed by the existing WS/OSC
+  bus (no direct MediaPipe dep — threegrease consumes `<prefix>/...`
+  addresses whose args are x,y[,z]; mediamime, or anything else, is the
+  sender). Configurable prefix (default `/mm`) on `scene.mediamime`.
+- `MMRig` (`scene.mediamime.rigs`): the mapping/rigging system — binds a
+  live address to any object's translation (GP/mesh/splat/trigger), with
+  offset + scale, parent-aware (world → parent-local each frame).
+- Triggers are now a full `ObjKind` ('TRIGGER'): selectable, draggable via
+  the transform widget, parentable, shown in the outliner tree — "every
+  trigger is an editable primitive object in the hierarchy."
+- MediaMime menu (menubar) + panel (🎥 properties tab): live address
+  table with per-row ＋Trigger (spawn+rig in one step) / ＋Rig (attach an
+  existing object), rig list with enable/scale/delete.
+- Not done: no in-browser MediaPipe capture (intentionally protocol-only,
+  matches the P9 design note); rig target picker is a `prompt()` list,
+  not a proper dropdown; GP-stroke-vs-trigger proximity isn't wired (only
+  score cursors currently test trigger distance).

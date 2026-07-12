@@ -3,7 +3,7 @@ import { bumpIdCounter, createDefaultCamera, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
 
 const FORMAT = 'threegrease-scene';
-const VERSION = 2; // v2: StrokeStyle on strokes, canvases select/drawTarget
+const VERSION = 3; // v3: MediaMime rigs + trigger select/parent (P11)
 
 export function serializeScene(scene: GPScene): string {
   return JSON.stringify({ format: FORMAT, version: VERSION, scene }, null, 0);
@@ -26,6 +26,11 @@ export function deserializeScene(json: string): GPScene {
   scene.score ??= { cursors: [], triggers: [], attachments: [] };
   scene.routes ??= [];
   scene.attractors ??= [];
+  scene.mediamime ??= { prefix: '/mm', rigs: [] };
+  for (const trig of scene.score.triggers) {
+    trig.select ??= false;
+    trig.parent ??= null;
+  }
   scene.splats ??= [];
   // object-URL sources don't survive reload
   scene.splats = scene.splats.filter((s) => !s.src.startsWith('blob:'));

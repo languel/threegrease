@@ -31,9 +31,10 @@ import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
 import { BRUSH_PRESETS as BRUSH_PRESETS_CACHE } from '../core/brushes';
 import { listAssets, meshAssetPayload, saveAsset, splatAssetPayload, type TGAsset } from '../io/assets';
+import { mediamime } from '../io/mediamime';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
-import { ScoreEngine } from '../score/engine';
+import { ScoreEngine, scoreId } from '../score/engine';
 import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
@@ -1167,6 +1168,7 @@ class App implements AppHandle {
     }
     add('add.camera', 'Add camera at current view', () => this.addCamera(), 'object');
     add('add.gp', 'Add blank Grease Pencil object', () => this.addGPObject(), 'object grease pencil new');
+    add('mediamime.panel', 'Open MediaMime panel', () => this.ui.openTab('mediamime'), 'landmarks rig mediapipe');
     add('export.glb', 'Export GLB', async () => (await import('../io/export3d')).exportGLB(this.ctx), 'file');
     add('export.obj', 'Export OBJ', async () => (await import('../io/export3d')).exportOBJ(this.ctx), 'file');
     add('export.stl', 'Export STL', async () => (await import('../io/export3d')).exportSTL(this.ctx), 'file');
@@ -1355,6 +1357,41 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** MediaMime: spawn a trigger primitive at a live address's current
+   *  position, rigged to follow it — the "make this landmark a trigger"
+   *  quick action from the panel. */
+  addMediaMimeTrigger(address: string, pos: [number, number, number]): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    const id = scoreId(scene);
+    scene.score.triggers.push({
+      id, name: address.split('/').pop() ?? `trigger ${id}`,
+      position: [...pos], radius: 0.15, retrigger: true,
+      messages: [{ address: `/mm/trigger/${id}`, argExprs: ['1'] }],
+    });
+    scene.mediamime.rigs.push({
+      id: scoreId(scene), name: `${address} → trigger`, address,
+      target: { kind: 'TRIGGER', id }, offset: [0, 0, 0], scale: 1, enabled: true,
+    });
+    this.ui.refresh();
+  }
+
+  addMediaMimeRig(address: string, target: import('../tools/objects').ObjRef): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    scene.mediamime.rigs.push({
+      id: scoreId(scene), name: `${address} → ${target.kind.toLowerCase()}`, address,
+      target, offset: [0, 0, 0], scale: 1, enabled: true,
+    });
+    this.ui.refresh();
+  }
+
+  deleteMediaMimeRig(id: number): void {
+    this.ctx.pushUndo();
+    this.ctx.scene.mediamime.rigs = this.ctx.scene.mediamime.rigs.filter((r) => r.id !== id);
+    this.ui.refresh();
+  }
+
   exportActiveGP(): void {
     const ob = activeObject(this.ctx.scene);
     downloadText(serializeGPObject(ob), `${ob.name || 'gp'}.threegrease.json`);
@@ -1458,7 +1495,9 @@ class App implements AppHandle {
       const root =
         ref.kind === 'GP' ? this.gp.objectGroups[gpIndexOf(scene, ref.id)] :
         ref.kind === 'MESH' ? this.meshes.rootFor(ref.id) :
-        ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) : null;
+        ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) :
+        ref.kind === 'TRIGGER' ? this.scoreGroup.children.find((c) => c.userData.triggerId === ref.id) ?? null :
+        null;
       if (!root) continue;
       wanted.add(key);
       let entry = this.selHelpers.get(key);
@@ -1550,8 +1589,8 @@ class App implements AppHandle {
         const trig = sc.triggers.find((t) => t.id === child.userData.triggerId);
         child.visible = !!trig && !this.presentation; // triggers hidden on stage
         if (trig) {
-          child.position.set(...trig.position);
-          child.scale.setScalar(trig.radius);
+          worldMatrixOf(this.ctx.scene, { kind: 'TRIGGER', id: trig.id })
+            .decompose(child.position, child.quaternion, child.scale);
         }
       } else if (child.userData.attractorId !== undefined) {
         const at = attractors.find((a) => a.id === child.userData.attractorId);
@@ -1647,6 +1686,8 @@ class App implements AppHandle {
     }
 
     // score engine: cursors/triggers/attachments run on their own clocks
+    mediamime.setPrefix(ctx.scene.mediamime.prefix);
+    mediamime.update(ctx.scene);
     this.score.update(ctx.scene, dt, now);
     this.syncScoreGlyphs();
     if (this.sim.step(ctx.scene, dt)) ctx.requestRender(this.sim.lastLayerId ?? undefined);

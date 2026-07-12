@@ -118,7 +118,7 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
-export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH'; id: number }
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER'; id: number }
 
 export interface GPObject {
   id: number;              // stable id (parenting, object refs)
@@ -221,6 +221,23 @@ export interface TGTrigger {
   /** stroke-as-trigger-zone: inside = within radius of ANY point of this
    *  stroke (overrides position when set) */
   zone?: PathRef | null;
+  /** hierarchy/object-mode: triggers are selectable, transformable,
+   *  parentable primitives (see tools/objects.ts ObjKind 'TRIGGER') */
+  select?: boolean;
+  parent?: ParentRef | null;
+}
+
+/** MediaMime (P11): binds a live tracked-landmark address (x,y,z over the
+ *  event bus, e.g. '/mm/pose/16') to any scene object's translation — the
+ *  mapping/rigging system for attaching objects to MediaPipe markers. */
+export interface MMRig {
+  id: number;
+  name: string;
+  address: string;
+  target: ParentRef;
+  offset: Vec3;
+  scale: number;
+  enabled: boolean;
 }
 
 /** A scene object riding a path on its own clock. */
@@ -332,4 +349,5 @@ export interface GPScene {
   splats: TGSplat[];
   meshes: TGMesh[];
   attractors: TGAttractor[];
+  mediamime: { prefix: string; rigs: MMRig[] };
 }

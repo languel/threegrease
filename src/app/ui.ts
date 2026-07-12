@@ -8,6 +8,7 @@ import { BRUSH_PRESETS } from '../core/brushes';
 import { bus } from '../events/bus';
 import { defaultCursor, scoreId } from '../score/engine';
 import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
+import { mediamime } from '../io/mediamime';
 import { deleteAsset, listAssets } from '../io/assets';
 import {
   getObjectTransform, listSelected as listSelectedObjects, objectName,
@@ -66,10 +67,13 @@ export interface AppHandle {
   addGPObject(): void;
   saveSelectedAsAsset(): void;
   addAssetToScene(asset: import('../io/assets').TGAsset): void;
+  addMediaMimeTrigger(address: string, pos: [number, number, number]): void;
+  addMediaMimeRig(address: string, target: import('../tools/objects').ObjRef): void;
+  deleteMediaMimeRig(id: number): void;
   importGPFile(file: File): void;
   exportSplatPly(id: number): void;
   run(action: string): void;
-  setLastPicked(ref: { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH'; id: number }): void;
+  setLastPicked(ref: import('../tools/objects').ObjRef): void;
   newScene(): void;
   viewAll(): void;
   addCamera(): void;
@@ -381,6 +385,15 @@ export class UI {
       { label: 'Top', do: () => this.app.snapView('TOP') },
     ]);
 
+    menu('MediaMime', [
+      { label: 'Open MediaMime panel', do: () => this.openTab('mediamime') },
+      { sep: true },
+      { header: `Prefix: ${ctx.scene.mediamime.prefix}` },
+      { label: `${ctx.scene.mediamime.rigs.length} rig(s) · ${mediamime.list().length} live address(es)`, do: () => this.openTab('mediamime') },
+      { sep: true },
+      { label: 'mediamime on GitHub…', do: () => window.open('https://github.com/languel/mediamime', '_blank') },
+    ]);
+
     menu('Help', [
       { label: 'Command palette…', action: 'palette' },
       { label: 'Keyboard shortcuts…', action: 'settings' },
@@ -506,6 +519,9 @@ export class UI {
 
   /** N3: Blender-style properties editor — icon tabs over panel groups. */
   private propsTab = 'object';
+
+  /** Jump the properties editor to a tab by id (agent/palette entrypoint). */
+  openTab(id: string): void { this.propsTab = id; this.refresh(); }
   private lastMode = '';
 
   private buildSidebar(): void {
@@ -549,6 +565,10 @@ export class UI {
         build: () => [this.scorePanel(), this.routesPanel(), this.ioPanel()],
       },
       {
+        id: 'mediamime', icon: '🎥', title: 'MediaMime — live landmarks & object rigging',
+        build: () => [this.mediamimePanel()],
+      },
+      {
         id: 'solvers', icon: '🧵', title: 'Solvers — splats · string art · wire art',
         build: () => [this.splatsPanel(), this.solverPanel()],
       },
@@ -578,6 +598,7 @@ export class UI {
         for (const c of scene.canvases) c.select = false;
         for (const s of scene.splats) s.select = false;
         for (const m of scene.meshes) m.select = false;
+        for (const t of scene.score.triggers) t.select = false;
       }
       apply(shift ? !cur : true);
       ctx.syncCanvases();
@@ -649,6 +670,19 @@ export class UI {
         btn(s.visible ? '👁' : '🙈', () => { s.visible = !s.visible; this.refresh(); }, { cls: 'icon-btn' }),
       ],
       rename: (v) => { s.name = v; },
+    });
+    for (const t of scene.score.triggers) nodes.push({
+      ref: { kind: 'TRIGGER', id: t.id }, icon: '◎', name: t.name, selected: !!t.select,
+      parent: t.parent,
+      onSelect: (e) => {
+        this.app.setLastPicked({ kind: 'TRIGGER', id: t.id });
+        toggleSel((v) => { t.select = v; }, !!t.select, !!e?.shiftKey);
+      },
+      extras: [
+        btn(t.zone ? '〰' : t.follow ? '🔗' : ctx.scene.mediamime.rigs.some((r) => r.target.kind === 'TRIGGER' && r.target.id === t.id) ? '🎥' : '·',
+          () => {}, { cls: 'icon-btn', title: t.zone ? 'Stroke zone' : t.follow ? 'Follows an object' : 'Static / MediaMime-rigged' }),
+      ],
+      rename: (v) => { t.name = v; },
     });
 
     // parent → children tree (unknown parents render as roots)
@@ -829,6 +863,17 @@ export class UI {
         name.onchange = () => { ob.name = name.value; this.refresh(); };
         rows.push(el('div', { class: 'menu-sep' }), el('div', { class: 'row' }, 'Name', name));
       }
+    } else if (ref.kind === 'TRIGGER') {
+      const trig = ctx.scene.score.triggers.find((x) => x.id === ref.id)!;
+      const rig = ctx.scene.mediamime.rigs.find((r) => r.target.kind === 'TRIGGER' && r.target.id === trig.id);
+      rows.push(
+        el('div', { class: 'menu-sep' }),
+        el('div', { class: 'row' },
+          checkbox('Retrigger', trig.retrigger, (v) => { trig.retrigger = v; }),
+          this.followField(() => trig.follow, (v) => { trig.follow = v; }),
+        ),
+        el('div', { class: 'row', text: trig.zone ? 'Zone: whole stroke (see Data → Stroke panel)' : rig ? `MediaMime: ${rig.address}` : 'Static position (drag to move, or bind in the MediaMime panel)' }),
+      );
     }
     return panel(`Properties — ${objectName(ctx.scene, ref)}`, ...rows);
   }
@@ -2018,6 +2063,56 @@ export class UI {
   // ---------------------------------------------------------- events / IO
 
   private monitorPaused = false;
+
+  /** MediaMime (P11): live landmark addresses + the object-rigging table. */
+  private mediamimePanel(): HTMLElement {
+    const { ctx } = this.app;
+    const mm = ctx.scene.mediamime;
+
+    const prefixInput = el('input', { type: 'text', value: mm.prefix, placeholder: '/mm' }) as HTMLInputElement;
+    prefixInput.onchange = () => { mm.prefix = prefixInput.value.trim() || '/mm'; };
+
+    const live = mediamime.list();
+    const liveRows: Node[] = live.length
+      ? live.map((l) => el('div', { class: 'row' },
+          el('span', { class: 'grow', text: `${l.address}  (${l.pos.map((n) => n.toFixed(2)).join(', ')})` }),
+          btn('＋Trigger', () => this.app.addMediaMimeTrigger(l.address, l.pos), { cls: 'icon-btn', title: 'Spawn a trigger primitive rigged to this address' }),
+          btn('＋Rig', () => this.mediamimeRigTargetPicker(l.address), { cls: 'icon-btn', title: 'Attach an existing object to this address' }),
+        ))
+      : [el('div', { class: 'row', text: 'no landmarks seen yet — connect the WS bridge below and point mediamime (or any sender) at this prefix' })];
+
+    const rigRows: Node[] = mm.rigs.map((rig) => el('div', { class: 'row' },
+      checkbox('', rig.enabled, (v) => { rig.enabled = v; }),
+      el('span', { class: 'grow', text: rig.name }),
+      numField('scale', rig.scale, (v) => { rig.scale = v; }, 0.05),
+      btn('✕', () => this.app.deleteMediaMimeRig(rig.id), { cls: 'icon-btn' }),
+    ));
+
+    return panel('MediaMime — landmarks & rigs',
+      el('div', { class: 'row' }, 'Address prefix', prefixInput,
+        el('span', { class: 'row', text: '· uses the WS bridge below (IO panel)' })),
+      el('div', { class: 'menu-header', text: 'Live addresses' }),
+      ...liveRows,
+      el('div', { class: 'menu-header', text: 'Rigs (object ← address)' }),
+      ...(rigRows.length ? rigRows : [el('div', { class: 'row', text: 'none yet' })]),
+    );
+  }
+
+  /** Minimal target picker for "attach an object to this landmark". */
+  private mediamimeRigTargetPicker(address: string): void {
+    const { ctx } = this.app;
+    const scene = ctx.scene;
+    const opts: { label: string; ref: import('../tools/objects').ObjRef }[] = [
+      ...scene.objects.map((o) => ({ label: `GP: ${o.name}`, ref: { kind: 'GP' as const, id: o.id } })),
+      ...scene.meshes.map((m) => ({ label: `Mesh: ${m.name}`, ref: { kind: 'MESH' as const, id: m.id } })),
+      ...scene.splats.map((s) => ({ label: `Splat: ${s.name}`, ref: { kind: 'SPLAT' as const, id: s.id } })),
+      ...scene.score.triggers.map((t) => ({ label: `Trigger: ${t.name}`, ref: { kind: 'TRIGGER' as const, id: t.id } })),
+    ];
+    const listing = opts.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
+    const pick = prompt(`Rig which object to ${address}?\n${listing}`);
+    const idx = Number(pick) - 1;
+    if (Number.isInteger(idx) && opts[idx]) this.app.addMediaMimeRig(address, opts[idx].ref);
+  }
 
   private ioPanel(): HTMLElement {
     const { ctx } = this.app;

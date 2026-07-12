@@ -9,7 +9,7 @@ import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso } from './draw';
 
-export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH';
+export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER';
 export interface ObjRef { kind: ObjKind; id: number }
 
 export function gpIndexOf(scene: GPScene, id: number): number {
@@ -22,6 +22,7 @@ export function listSelected(scene: GPScene): ObjRef[] {
   for (const c of scene.canvases) if (c.select) out.push({ kind: 'CANVAS', id: c.id });
   for (const s of scene.splats) if (s.select) out.push({ kind: 'SPLAT', id: s.id });
   for (const m of scene.meshes) if (m.select) out.push({ kind: 'MESH', id: m.id });
+  for (const t of scene.score.triggers) if (t.select) out.push({ kind: 'TRIGGER', id: t.id });
   return out;
 }
 
@@ -30,6 +31,7 @@ export function deselectAllObjects(scene: GPScene): void {
   for (const c of scene.canvases) c.select = false;
   for (const s of scene.splats) s.select = false;
   for (const m of scene.meshes) m.select = false;
+  for (const t of scene.score.triggers) t.select = false;
 }
 
 function entityOf(scene: GPScene, ref: ObjRef):
@@ -37,6 +39,7 @@ function entityOf(scene: GPScene, ref: ObjRef):
   if (ref.kind === 'GP') return scene.objects.find((o) => o.id === ref.id);
   if (ref.kind === 'CANVAS') return scene.canvases.find((c) => c.id === ref.id);
   if (ref.kind === 'SPLAT') return scene.splats.find((s) => s.id === ref.id);
+  if (ref.kind === 'TRIGGER') return scene.score.triggers.find((t) => t.id === ref.id);
   return scene.meshes.find((m) => m.id === ref.id);
 }
 
@@ -68,6 +71,10 @@ export function getObjectTransform(scene: GPScene, ref: ObjRef): ObjTransform | 
     const s = scene.splats.find((x) => x.id === ref.id);
     return s ? { translation: [...s.translation], rotation: [...s.rotation], scale: [s.scale, s.scale, s.scale] } : null;
   }
+  if (ref.kind === 'TRIGGER') {
+    const t = scene.score.triggers.find((x) => x.id === ref.id);
+    return t ? { translation: [...t.position], rotation: [0, 0, 0], scale: [t.radius, t.radius, t.radius] } : null;
+  }
   const m = scene.meshes.find((x) => x.id === ref.id);
   return m ? { translation: [...m.translation], rotation: [...m.rotation], scale: [...m.scale] } : null;
 }
@@ -89,6 +96,12 @@ export function setObjectTransform(scene: GPScene, ref: ObjRef, t: ObjTransform)
       s.translation = [...t.translation];
       s.rotation = [...t.rotation];
       s.scale = Math.max(0.001, (Math.abs(t.scale[0]) + Math.abs(t.scale[1]) + Math.abs(t.scale[2])) / 3);
+    }
+  } else if (ref.kind === 'TRIGGER') {
+    const tr = scene.score.triggers.find((x) => x.id === ref.id);
+    if (tr) {
+      tr.position = [...t.translation];
+      tr.radius = Math.max(0.01, (Math.abs(t.scale[0]) + Math.abs(t.scale[1]) + Math.abs(t.scale[2])) / 3);
     }
   } else {
     const m = scene.meshes.find((x) => x.id === ref.id);
@@ -112,6 +125,8 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     scene.canvases = scene.canvases.filter((c) => c.id !== ref.id);
   } else if (ref.kind === 'SPLAT') {
     scene.splats = scene.splats.filter((s) => s.id !== ref.id);
+  } else if (ref.kind === 'TRIGGER') {
+    scene.score.triggers = scene.score.triggers.filter((t) => t.id !== ref.id);
   } else {
     scene.meshes = scene.meshes.filter((m) => m.id !== ref.id);
   }
@@ -123,6 +138,7 @@ export function allRefs(scene: GPScene): ObjRef[] {
     ...scene.canvases.map((c) => ({ kind: 'CANVAS' as const, id: c.id })),
     ...scene.splats.map((s) => ({ kind: 'SPLAT' as const, id: s.id })),
     ...scene.meshes.map((m) => ({ kind: 'MESH' as const, id: m.id })),
+    ...scene.score.triggers.map((t) => ({ kind: 'TRIGGER' as const, id: t.id })),
   ];
 }
 
@@ -197,7 +213,7 @@ export function setParentKeepWorld(scene: GPScene, child: ObjRef, parent: ObjRef
  */
 export function applyObjectTransform(scene: GPScene, ref: ObjRef): boolean {
   const t = getObjectTransform(scene, ref);
-  if (!t || ref.kind === 'CANVAS') return false;
+  if (!t || ref.kind === 'CANVAS' || ref.kind === 'TRIGGER') return false;
   const local = composeLocal(t, ref.kind);
   if (ref.kind === 'GP') {
     const ob = scene.objects.find((x) => x.id === ref.id);
@@ -386,6 +402,10 @@ export class ObjectSelectTool implements Tool {
     for (const s of ctx.scene.splats) {
       const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'SPLAT', id: s.id }));
       if (p && Math.hypot(p.x - e.x, p.y - e.y) < 40) return { kind: 'SPLAT', id: s.id };
+    }
+    for (const t of ctx.scene.score.triggers) {
+      const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'TRIGGER', id: t.id }));
+      if (p && Math.hypot(p.x - e.x, p.y - e.y) < 40) return { kind: 'TRIGGER', id: t.id };
     }
     const canvasHit = pickCanvas(ctx, e.x, e.y);
     if (canvasHit) return { kind: 'CANVAS', id: canvasHit.id };
