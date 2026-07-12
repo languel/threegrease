@@ -2072,13 +2072,27 @@ export class UI {
     const prefixInput = el('input', { type: 'text', value: mm.prefix, placeholder: '/mm' }) as HTMLInputElement;
     prefixInput.onchange = () => { mm.prefix = prefixInput.value.trim() || '/mm'; };
 
+    const rigTargets: { label: string; ref: import('../tools/objects').ObjRef }[] = [
+      ...ctx.scene.objects.map((o) => ({ label: `GP: ${o.name}`, ref: { kind: 'GP' as const, id: o.id } })),
+      ...ctx.scene.meshes.map((m) => ({ label: `Mesh: ${m.name}`, ref: { kind: 'MESH' as const, id: m.id } })),
+      ...ctx.scene.splats.map((s) => ({ label: `Splat: ${s.name}`, ref: { kind: 'SPLAT' as const, id: s.id } })),
+      ...ctx.scene.score.triggers.map((t) => ({ label: `Trigger: ${t.name}`, ref: { kind: 'TRIGGER' as const, id: t.id } })),
+    ];
+
     const live = mediamime.list();
     const liveRows: Node[] = live.length
-      ? live.map((l) => el('div', { class: 'row' },
-          el('span', { class: 'grow', text: `${l.address}  (${l.pos.map((n) => n.toFixed(2)).join(', ')})` }),
-          btn('＋Trigger', () => this.app.addMediaMimeTrigger(l.address, l.pos), { cls: 'icon-btn', title: 'Spawn a trigger primitive rigged to this address' }),
-          btn('＋Rig', () => this.mediamimeRigTargetPicker(l.address), { cls: 'icon-btn', title: 'Attach an existing object to this address' }),
-        ))
+      ? live.map((l) => {
+          const targetSel = el('select') as HTMLSelectElement;
+          rigTargets.forEach((t, i) => targetSel.append(el('option', { value: String(i), text: t.label })));
+          return el('div', { class: 'row' },
+            el('span', { class: 'grow', text: `${l.address}  (${l.pos.map((n) => n.toFixed(2)).join(', ')})` }),
+            btn('＋Trigger', () => this.app.addMediaMimeTrigger(l.address, l.pos), { cls: 'icon-btn', title: 'Spawn a trigger primitive rigged to this address' }),
+            ...(rigTargets.length ? [
+              targetSel,
+              btn('Attach', () => this.app.addMediaMimeRig(l.address, rigTargets[Number(targetSel.value)].ref), { cls: 'icon-btn', title: 'Rig the selected object to this address' }),
+            ] : []),
+          );
+        })
       : [el('div', { class: 'row', text: 'no landmarks seen yet — connect the WS bridge below and point mediamime (or any sender) at this prefix' })];
 
     const rigRows: Node[] = mm.rigs.map((rig) => el('div', { class: 'row' },
@@ -2096,22 +2110,6 @@ export class UI {
       el('div', { class: 'menu-header', text: 'Rigs (object ← address)' }),
       ...(rigRows.length ? rigRows : [el('div', { class: 'row', text: 'none yet' })]),
     );
-  }
-
-  /** Minimal target picker for "attach an object to this landmark". */
-  private mediamimeRigTargetPicker(address: string): void {
-    const { ctx } = this.app;
-    const scene = ctx.scene;
-    const opts: { label: string; ref: import('../tools/objects').ObjRef }[] = [
-      ...scene.objects.map((o) => ({ label: `GP: ${o.name}`, ref: { kind: 'GP' as const, id: o.id } })),
-      ...scene.meshes.map((m) => ({ label: `Mesh: ${m.name}`, ref: { kind: 'MESH' as const, id: m.id } })),
-      ...scene.splats.map((s) => ({ label: `Splat: ${s.name}`, ref: { kind: 'SPLAT' as const, id: s.id } })),
-      ...scene.score.triggers.map((t) => ({ label: `Trigger: ${t.name}`, ref: { kind: 'TRIGGER' as const, id: t.id } })),
-    ];
-    const listing = opts.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
-    const pick = prompt(`Rig which object to ${address}?\n${listing}`);
-    const idx = Number(pick) - 1;
-    if (Number.isInteger(idx) && opts[idx]) this.app.addMediaMimeRig(address, opts[idx].ref);
   }
 
   private ioPanel(): HTMLElement {
