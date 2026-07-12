@@ -340,3 +340,76 @@ worker fill, stamp instancing) remain open for a future pass.
 - **Testing habit**: every phase lands with a browser-eval verification
   snippet committed into `docs/verify/<phase>.md` so weaker models can
   re-run regression checks verbatim.
+
+
+---
+
+# Next phases (N-series, added 2026-07-12) — Blender-parity axis
+
+Read PRD §1b/§1c first. Order below = impact order. Keep steps small,
+commit each; typecheck+build always, deep verification only when cheap.
+
+## N1 — Command palette (F3)  **[CRUCIAL — do first]**
+- `src/app/commands.ts`: registry `{ id, title, keywords, run(ctx, args?) }`.
+  Sources: every keymap ACTION (auto-registered via runAction), every menu
+  item, parameterized commands (add-object kinds, set brush preset,
+  select object by name, mode switches).
+- Palette UI: overlay input + fuzzy-filtered list (substring+initials
+  scoring is enough), arrows+Enter, Esc closes; F3 + menubar Help entry.
+- **Agent surface**: `window.__tg.execute('command id or title', args?)`
+  resolving through the same registry; return value serializable. Document
+  in HANDOFF as the official automation entrypoint.
+- Later: command history, argument prompts ("add box at 1,2,0").
+
+## N2 — Selection look & pivots (Blender parity)
+- Orange outline on selected objects. Cheap pass: per selected object a
+  Box3Helper (#ff7a00) sized to its world bounds, refreshed with glyphs;
+  GP objects use their layer-group bounds. (True silhouette outline via
+  postprocess later.)
+- Pivot/origin dot per object (small orange dot at worldMatrix position,
+  like Blender's origin) — becomes a snap target: extend cursorSnap +
+  magnet snap modes with OBJECT (origins) alongside stroke points.
+
+## N3 — Properties editor restructure
+- Object mode right panel becomes tabs (icons): Object (transform/parent)
+  · Material · Data (per-kind: GP layers?, splat info) · **Bindings**
+  (routes touching this object, cursors/triggers/attachments referencing
+  it, quick-create) · Modifiers.
+- Wire/string/IanniX panels fold in as Bindings subsections when the
+  selection is relevant (keep the standalone Score/Solvers panels until
+  parity is comfortable, then retire).
+
+## N4 — Modifier stack + Apply
+- GP modifier stack exists; add per-object "Apply" for individual
+  modifiers (bake evaluated strokes into the keyframe, remove modifier).
+- Ctrl+A Apply Transform: GP = bake object matrix into stroke points and
+  reset transform. MESH primitives = fold rotation+scale into a baked
+  matrix? (three geometry is procedural — store a bakedMatrix on TGMesh
+  applied before transform). SPLAT = fold transform into per-splat data
+  via PackedSplats.forEachSplat/setSplat if feasible; else keep transform
+  and report. The 3DGS import→scale→apply flow is the acceptance test.
+
+## N5 — Everything-is-a-surface/field
+- TGSplat.drawTarget flag → include SplatMesh in ctx.surfaces (Spark
+  supports raycast; verify once). GP drawing lands on splat surfaces.
+- Attractors + triggers gain `follow?: ObjRef` — position tracks the
+  object's world matrix each frame (splat/mesh/GP as moving attractor or
+  trigger zone). Cursors colliding with objects = trigger.follow.
+- Stroke-as-trigger-zone: fire enter/leave when a cursor crosses within
+  radius of ANY point of a named stroke (uses stroke.address).
+
+## N6 — Hierarchy tree + assets
+- Outliner: indented tree by parent, expand/collapse, drag-to-parent,
+  double-click rename. Asset concept: "save object as asset" = GP-object
+  JSON / mesh def stored in an assets list (localStorage or files dir),
+  Add menu gains an Assets section.
+
+## N7 — Icon pass
+- Replace label buttons with icon+tooltip progressively (modes, panels,
+  timeline). Keep a small icon helper (emoji or inline SVG map) — no
+  icon-font dependency.
+
+## N8 — Splat nibs (paint with splats)
+- StrokeStyle.texture (image stamp) first; then "splat nib": stamps
+  emitted as small gaussian clusters (writes a TGSplat per stroke or a
+  generated splat set) — splats as brush matter, per PRD §1b.

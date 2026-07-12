@@ -592,7 +592,11 @@ class App implements AppHandle {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) this.nav.dollyBy(Math.exp(e.deltaY * 0.01));
       else if (e.shiftKey) this.nav.panBy(-e.deltaX, -e.deltaY); // match Alt+Shift-drag direction
-      else this.nav.orbitBy(e.deltaX * 0.005, e.deltaY * 0.005);
+      else {
+        // Blender orbit direction by default; toggle in settings
+        const dir = this.ctx.settings.invertTrackpadOrbit ? 1 : -1;
+        this.nav.orbitBy(e.deltaX * 0.005 * dir, e.deltaY * 0.005 * dir);
+      }
     }, { passive: false });
 
     window.addEventListener('keydown', (e) => this.onKey(e));

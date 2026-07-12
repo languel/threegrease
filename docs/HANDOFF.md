@@ -229,6 +229,11 @@ New gotchas from the platform build:
   engines manually (sim.step / gp.update), never await wall-clock frames.
 - Wire-art scripting: compute camera eulers via lookAt, never by hand.
 
-Where next: deferred perf items (worker fill, stamp instancing,
-in-progress stroke buffer), texture/image stamp brushes, splat painting,
-outliner, curve edit; see PRD §4 for the P1/P2-priority backlog.
+Where next: the N-series (IMPLEMENTATION_PLAN "Next phases", added
+2026-07-12): N1 command palette (crucial, the AI/agent surface) → N2
+selection outline + pivots → N3 properties editor tabs → N4 modifier
+apply/apply-transform → N5 everything-is-a-surface/field → N6 hierarchy
+tree/assets → N7 icon pass → N8 splat nibs. Vision reframe in PRD §1b:
+GP strokes generalize curves, splats generalize points; Blender parity
+is the interaction contract. Also still open: worker fill, stamp
+instancing, texture stamps, curve edit.

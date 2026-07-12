@@ -1288,6 +1288,7 @@ export class UI {
       ),
       el('div', { class: 'row' },
         checkbox('Trackpad navigation (two-finger orbit, Shift pan, Ctrl zoom)', s.trackpadNav, (v) => this.app.setTrackpadNav(v)),
+        checkbox('Invert orbit direction', s.invertTrackpadOrbit, (v) => { s.invertTrackpadOrbit = v; save(); }),
       ),
       el('div', { class: 'row' },
         checkbox('Emulate Numpad (digit-row view keys)', s.emulateNumpad, (v) => { s.emulateNumpad = v; save(); }),

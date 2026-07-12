@@ -56,6 +56,7 @@ export interface Settings {
   cursorSnap: CursorSnap;   // how Shift+RMB places the 3D cursor
   gridStep: number;
   trackpadNav: boolean;     // two-finger orbit, shift pan, ctrl/pinch zoom
+  invertTrackpadOrbit: boolean; // false = Blender direction (default)
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
   /** Blender-style magnet snapping during transforms. */
@@ -67,7 +68,7 @@ export interface Settings {
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'cursorSnap', 'gridStep',
-  'trackpadNav', 'upAxis', 'showAxes', 'background', 'snap',
+  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'background', 'snap',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -143,6 +144,7 @@ export function defaultSettings(): Settings {
     cursorSnap: 'PLANE',
     gridStep: 0.5,
     trackpadNav: true,
+    invertTrackpadOrbit: false,
     upAxis: 'Z',
     showAxes: false,
     snap: { enabled: false, mode: 'INCREMENT' },

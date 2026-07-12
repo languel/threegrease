@@ -18,6 +18,51 @@ by a cursor emitting music, used as a rail for an animated object, treated
 as a string in a physical simulation, or counted as a chord in a
 string-art solver. The platform makes those readings interchangeable.
 
+## 1b. The primitives (revised 2026-07-12)
+
+Working with the tool clarified what it actually is: **a 3D drawing
+system whose first-class citizens are Grease Pencil strokes and Gaussian
+splats.**
+
+- **GP strokes replace curves.** They are the generalization of curves
+  and paths — but carrying our infrastructure: per-stroke identity and
+  event addresses, cursors/triggers, routes, physics (string sim),
+  solver output format, Blender interop. Anything a curve would do in a
+  DCC, a stroke does here, plus it performs.
+- **Splats generalize points.** A splat set is simultaneously: captured
+  reality to draw in and on, a point cloud, a paint *nib* (stamp/brush
+  matter), and a target/source for algorithms (attractors, growth,
+  scattering). Splats stand in where other tools reach for meshes.
+- **Meshes/polygons are supporting cast** — references, draw surfaces,
+  attractors, colliders. Important but secondary.
+- **Algorithms are guests.** String art, wire art, IanniX scores are the
+  first residents of a growing library; the system's job is to host any
+  such algorithm by reading/writing the same stroke+splat data.
+- **Blender parity is the interaction contract.** Where we overlap with
+  Blender we match it — visually and functionally — because it is mature,
+  standard, and (most importantly) muscle memory.
+
+## 1c. Immediate objectives (2026-07-12, priority order)
+
+1. **Command palette (F3)** — fuzzy text access to every command, with a
+   programmatic `execute()` API as the future AI/agent surface. CRUCIAL.
+2. **Blender-look selection**: orange outline/highlight on selected
+   objects; visible object pivots/origins (snapping targets for objects,
+   splats, paths).
+3. **Hierarchy & assets**: outliner as a true indented tree (parenting
+   drag), imported assets (models, 3DGS) as ordinary hierarchy objects
+   (mostly done), an asset notion for reuse.
+4. **Properties editor, our version**: per-object tabs hosting transform,
+   material, and OUR data — OSC/MIDI constraints (routes), score
+   bindings (wire/string/IanniX as subsections), modifier stack.
+5. **Modifier stack per object + Apply**: apply individual modifiers or
+   transforms (the canonical flow: import 3DGS → scale/position → apply
+   transform).
+6. **Cross-integration**: splats as GP draw surfaces, as attractors for
+   string art, as colliders/triggers for cursors — and the same for
+   meshes and strokes. Everything is a surface/field for everything.
+7. **Icon-first UI**: shift dense labels to icons with hover tooltips.
+
 ## 2. Background — projects being unified
 
 - **threegrease today**: feature-complete GP match (see docs/HANDOFF.md §2).
