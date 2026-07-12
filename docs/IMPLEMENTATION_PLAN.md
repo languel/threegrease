@@ -409,10 +409,20 @@ commit each; typecheck+build always, deep verification only when cheap.
   timeline). Keep a small icon helper (emoji or inline SVG map) — no
   icon-font dependency.
 
-## N8 — Splat nibs (paint with splats)
-- StrokeStyle.texture (image stamp) first; then "splat nib": stamps
-  emitted as small gaussian clusters (writes a TGSplat per stroke or a
-  generated splat set) — splats as brush matter, per PRD §1b.
+## N8 — Splat nibs (paint with splats)  **[scoped, not started]**
+- StrokeStyle.texture (image stamp) first. Architectural note from
+  inspecting materials.ts: the stroke shader is ONE ShaderMaterial shared
+  across every stroke in a layer/blend group (per-stroke params ride
+  vertex attributes: aStamp, aSeed, aColor, ...). A per-stroke image
+  therefore needs a shared brush-texture ATLAS + a per-vertex atlas-UV
+  attribute, not just a sampler2D uniform — real scope, not a one-line
+  add. Do this before splat nibs, as a dedicated pass with its own
+  verification (atlas packing, UV migration, GPSceneRenderer batching).
+- Then "splat nib": stamps emitted as small gaussian clusters (writes a
+  TGSplat per stroke or a generated splat set). Needs a research spike
+  into Spark'''s in-memory splat construction API (existing code only
+  reads via forEachSplat for PLY export — no write/construct path
+  explored yet) before implementation.
 
 
 ## P11 — MediaMime integration  **[SHIPPED]**
