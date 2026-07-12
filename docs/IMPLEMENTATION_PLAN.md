@@ -429,7 +429,10 @@ commit each; typecheck+build always, deep verification only when cheap.
 - MediaMime menu (menubar) + panel (🎥 properties tab): live address
   table with per-row ＋Trigger (spawn+rig in one step) / ＋Rig (attach an
   existing object), rig list with enable/scale/delete.
+- Rig target picker is now an inline dropdown + Attach button (was a
+  `prompt()` list). GP-stroke-vs-trigger proximity is now wired: any
+  stroke point (sampled, ~60/stroke cap, parent-aware world matrix)
+  within a trigger's radius fires it, same hysteresis/retrigger semantics
+  as cursor-vs-trigger (score/engine.ts).
 - Not done: no in-browser MediaPipe capture (intentionally protocol-only,
-  matches the P9 design note); rig target picker is a `prompt()` list,
-  not a proper dropdown; GP-stroke-vs-trigger proximity isn't wired (only
-  score cursors currently test trigger distance).
+  matches the P9 design note).

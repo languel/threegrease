@@ -7,6 +7,7 @@ import type {
 } from '../core/types';
 import { activeCam, frameAt } from '../core/gpdata';
 import { bus } from '../events/bus';
+import { worldMatrixOf } from '../tools/objects';
 
 interface ArcTable {
   key: string;
@@ -68,7 +69,7 @@ export function samplePhase(phase: number, loop: LoopMode): number {
 export class ScoreEngine {
   private arcs = new Map<number, ArcTable>();       // strokeId -> table
   private lastEmit = new Map<number, number>();     // cursorId -> time
-  private triggerInside = new Map<string, boolean>(); // `${trigId}:${curId}`
+  private triggerInside = new Map<string, boolean>(); // `${trigId}:${curId}` or `${trigId}:gp:${obId}`
   private triggerFired = new Set<string>();
   /** live cursor states for rendering (id -> state) */
   readonly states = new Map<number, CursorState>();
@@ -182,6 +183,51 @@ export class ScoreEngine {
               id: trig.id, name: trig.name, cursor: cur.id,
               x: trig.position[0], y: trig.position[1], z: trig.position[2],
               t: +samplePhase(cur.phase, cur.loop).toFixed(4),
+            });
+          }
+        }
+        this.triggerInside.set(key, inside);
+      }
+    }
+
+    // --- GP objects vs triggers: any stroke point within radius fires
+    // (objects/GPs interact with triggers by proximity, not just cursors —
+    // e.g. a drawn stroke crossing a MediaMime-rigged trigger) ---
+    const tmpV = new THREE.Vector3();
+    for (const trig of score.triggers) {
+      const zoneArc = trig.zone ? this.arcTable(scene, trig.zone) : null;
+      const trigPos = new THREE.Vector3(...trig.position);
+      for (const ob of scene.objects) {
+        const key = `${trig.id}:gp:${ob.id}`;
+        const matrix = worldMatrixOf(scene, { kind: 'GP', id: ob.id });
+        let inside = false;
+        outer: for (const layer of ob.layers) {
+          if (layer.hide) continue;
+          const frame = frameAt(layer, scene.frame);
+          if (!frame) continue;
+          for (const s of frame.strokes) {
+            const n = s.points.length;
+            if (!n) continue;
+            const step = Math.max(1, Math.floor(n / 60)); // cap ~60 samples/stroke
+            const test = (i: number): boolean => {
+              tmpV.set(...s.points[i].co).applyMatrix4(matrix);
+              return zoneArc
+                ? zoneArc.world.some((p) => tmpV.distanceTo(p) < trig.radius)
+                : tmpV.distanceTo(trigPos) < trig.radius;
+            };
+            for (let i = 0; i < n; i += step) if (test(i)) { inside = true; break outer; }
+            if ((n - 1) % step !== 0 && test(n - 1)) { inside = true; break outer; } // don't skip the last point
+          }
+        }
+        const wasInside = this.triggerInside.get(key) ?? false;
+        if (inside && !wasInside) {
+          const allowed = trig.retrigger || !this.triggerFired.has(key);
+          if (allowed) {
+            this.triggerFired.add(key);
+            fireMessages(`trigger:${trig.id}`, trig.messages, {
+              id: trig.id, name: trig.name, object: ob.name,
+              x: trig.position[0], y: trig.position[1], z: trig.position[2],
+              t: 0,
             });
           }
         }
