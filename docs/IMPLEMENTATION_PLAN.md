@@ -404,7 +404,7 @@ commit each; typecheck+build always, deep verification only when cheap.
   JSON / mesh def stored in an assets list (localStorage or files dir),
   Add menu gains an Assets section.
 
-## N7 — Icon pass  **[STARTED — mode + widget buttons icon-first; panels/timeline remain]**
+## N7 — Icon pass  **[SHIPPED: mode/widget buttons + Stroke Ops panel icon-first; timeline/solver panels remain labeled by design (rare, one-off actions)]**
 - Replace label buttons with icon+tooltip progressively (modes, panels,
   timeline). Keep a small icon helper (emoji or inline SVG map) — no
   icon-font dependency.
