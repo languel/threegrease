@@ -582,7 +582,8 @@ export class UI {
         this.app.setLastPicked({ kind: 'SPLAT', id: s.id });
         toggleSel((v) => { s.select = v; }, s.select, false);
       },
-      [btn('⬇.ply', () => this.app.exportSplatPly(s.id), { cls: 'icon-btn', title: 'Export as 3DGS PLY (PlayCanvas/SuperSplat compatible)' }),
+      [btn(s.drawTarget ? '🖊' : '·', () => { s.drawTarget = !s.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target (GP surface placement raycasts the splat)' }),
+        btn('⬇.ply', () => this.app.exportSplatPly(s.id), { cls: 'icon-btn', title: 'Export as 3DGS PLY (PlayCanvas/SuperSplat compatible)' }),
         btn(s.visible ? '👁' : '🙈', () => { s.visible = !s.visible; this.refresh(); }, { cls: 'icon-btn' })]);
 
     return panel('Objects',
@@ -666,6 +667,7 @@ export class UI {
         el('div', { class: 'menu-sep' }),
         el('div', { class: 'row' },
           checkbox('Visible', s.visible, (v) => { s.visible = v; }),
+          checkbox('Draw target', !!s.drawTarget, (v) => { s.drawTarget = v; }),
           btn('⬇ .ply', () => this.app.exportSplatPly(s.id), { title: '3DGS PLY (PlayCanvas/SuperSplat)' }),
         ),
       );
@@ -1444,6 +1446,22 @@ export class UI {
     return layer && s ? { objectIndex: obIndex, layerId: layer.id, strokeId: s.id } : null;
   }
 
+  /** "Follow object" dropdown for triggers/attractors (N5). */
+  private followField(get: () => import('../core/types').ParentRef | null | undefined,
+    set: (v: import('../core/types').ParentRef | null) => void): HTMLElement {
+    const { ctx } = this.app;
+    const cur = get();
+    const opts: [string, string][] = [['', '— fixed —']];
+    for (const ob of ctx.scene.objects) opts.push([`GP:${ob.id}`, `GP: ${ob.name}`]);
+    for (const m of ctx.scene.meshes) opts.push([`MESH:${m.id}`, `Mesh: ${m.name}`]);
+    for (const sp of ctx.scene.splats) opts.push([`SPLAT:${sp.id}`, `Splat: ${sp.name}`]);
+    return selectField('Follow', cur ? `${cur.kind}:${cur.id}` : '', opts, (v) => {
+      if (!v) { set(null); return; }
+      const [kind, id] = v.split(':');
+      set({ kind: kind as 'GP' | 'MESH' | 'SPLAT', id: Number(id) });
+    });
+  }
+
   private msgEditor(messages: { address: string; argExprs: string[] }[]): HTMLElement {
     const { ctx } = this.app;
     const m = messages[0];
@@ -1487,6 +1505,7 @@ export class UI {
         el('div', { class: 'row' },
           numField('Radius', trig.radius, (v) => { trig.radius = Math.max(0.01, v); }, 0.05),
           checkbox('Retrigger', trig.retrigger, (v) => { trig.retrigger = v; }),
+          this.followField(() => trig.follow, (v) => { trig.follow = v; }),
           btn('✕', () => { ctx.pushUndo(); sc.triggers.splice(sc.triggers.indexOf(trig), 1); this.refresh(); }, { cls: 'icon-btn' }),
         ),
         this.msgEditor(trig.messages),
@@ -1676,6 +1695,7 @@ export class UI {
       el('span', { text: at.name }),
       numField('str', at.strength, (v) => { at.strength = v; }, 0.1),
       numField('rad', at.radius, (v) => { at.radius = Math.max(0.01, v); }, 0.1),
+      this.followField(() => at.follow, (v) => { at.follow = v; }),
       btn('⌖', () => { at.position = [...ctx.scene.cursor] as [number, number, number]; }, { cls: 'icon-btn', title: 'Move to 3D cursor' }),
       btn('✕', () => {
         ctx.pushUndo();

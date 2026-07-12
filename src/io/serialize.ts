@@ -29,7 +29,7 @@ export function deserializeScene(json: string): GPScene {
   scene.splats ??= [];
   // object-URL sources don't survive reload
   scene.splats = scene.splats.filter((s) => !s.src.startsWith('blob:'));
-  for (const s of scene.splats) s.select ??= false;
+  for (const s of scene.splats) { s.select ??= false; s.drawTarget ??= false; }
   scene.meshes ??= [];
   scene.meshes = scene.meshes.filter((m) => !(m.src ?? '').startsWith('blob:'));
   for (const m of scene.meshes) {

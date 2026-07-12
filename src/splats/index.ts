@@ -61,6 +61,14 @@ export class SplatManager {
 
   meshFor(id: number): SplatMesh | null { return this.meshes.get(id)?.mesh ?? null; }
 
+  /** Splats flagged as draw targets, for ctx.surfaces (SURFACE placement). */
+  drawTargets(scene: GPScene): THREE.Object3D[] {
+    return scene.splats
+      .filter((s) => s.visible && s.drawTarget)
+      .map((s) => this.meshes.get(s.id)?.mesh)
+      .filter((m): m is SplatMesh => !!m);
+  }
+
   dispose(): void {
     for (const { mesh } of this.meshes.values()) {
       this.group.remove(mesh);

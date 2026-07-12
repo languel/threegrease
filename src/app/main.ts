@@ -1569,6 +1569,17 @@ class App implements AppHandle {
     this.syncCameraHelpers();
     if (!this.nav.flying) this.controls.update();
 
+    // followers: triggers/attractors pinned to an object's world origin
+    const followPos = new THREE.Vector3();
+    for (const trig of ctx.scene.score.triggers) if (trig.follow) {
+      followPos.setFromMatrixPosition(worldMatrixOf(ctx.scene, trig.follow as ObjRef));
+      trig.position = [followPos.x, followPos.y, followPos.z];
+    }
+    for (const at of ctx.scene.attractors) if (at.follow) {
+      followPos.setFromMatrixPosition(worldMatrixOf(ctx.scene, at.follow as ObjRef));
+      at.position = [followPos.x, followPos.y, followPos.z];
+    }
+
     // score engine: cursors/triggers/attachments run on their own clocks
     this.score.update(ctx.scene, dt, now);
     this.syncScoreGlyphs();
@@ -1578,7 +1589,11 @@ class App implements AppHandle {
     ctx.pickableMeshes = ctx.scene.meshes
       .map((m) => this.meshes.rootFor(m.id))
       .filter((r): r is THREE.Object3D => !!r && r.visible);
-    ctx.surfaces = [...this.canvasSurfaces, ...this.meshes.drawTargets(ctx.scene)];
+    ctx.surfaces = [
+      ...this.canvasSurfaces,
+      ...this.meshes.drawTargets(ctx.scene),
+      ...this.splats.drawTargets(ctx.scene),
+    ];
     this.widget.camera = this.nav.active; // ortho/persp swaps
 
     if (ctx.scene.score.attachments.some((a) => a.running && a.target.kind === 'CANVAS')) {

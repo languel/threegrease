@@ -216,6 +216,8 @@ export interface TGTrigger {
   radius: number;
   retrigger: boolean;      // false = fire once per cursor until scene reload
   messages: MsgTemplate[];
+  /** track this object's world origin every frame (collider-style triggers) */
+  follow?: ParentRef | null;
 }
 
 /** A scene object riding a path on its own clock. */
@@ -253,6 +255,8 @@ export interface TGSplat {
   /** applied ("baked") transform, column-major 4x4 — composed after the
    *  live TRS so Apply Transform can reset TRS without moving the object */
   baked?: number[];
+  /** raycast target for SURFACE stroke placement (draw on the splat) */
+  drawTarget?: boolean;
 }
 
 /** A mesh scene object: primitive solid, plane, or imported model —
@@ -290,6 +294,8 @@ export interface TGAttractor {
   position: Vec3;      // world space
   strength: number;    // negative repels
   radius: number;
+  /** track this object's world origin every frame (moving attractor) */
+  follow?: ParentRef | null;
 }
 
 export type RouteMapMode = 'RAW' | 'SCALE' | 'CLAMP' | 'WRAP';
