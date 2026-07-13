@@ -301,12 +301,16 @@ export function scoreId(scene: GPScene): number {
   return nextScoreId++;
 }
 
+/** New traveler (TGCursor — a stroke-riding playhead, distinct from the
+ *  3D cursor). Type/field names stay `cursor` internally for now (touches
+ *  serialize.ts, the Blender addon, and score.cursors); only user-facing
+ *  text and the default OSC address use "traveler". */
 export function defaultCursor(scene: GPScene, path: PathRef): TGCursor {
   const id = scoreId(scene);
   return {
-    id, name: `Cursor ${id}`, path, speed: 0.2, phase: 0, loop: 'LOOP',
+    id, name: `Traveler ${id}`, path, speed: 0.2, phase: 0, loop: 'LOOP',
     running: true, rate: 30,
-    messages: [{ address: '/cursor/{id}/pos', argExprs: ['{x}', '{y}', '{z}', '{t}'] }],
+    messages: [{ address: '/traveler/{id}/pos', argExprs: ['{x}', '{y}', '{z}', '{t}'] }],
     color: [1, 0.6, 0.15],
   };
 }

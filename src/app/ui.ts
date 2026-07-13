@@ -1335,14 +1335,14 @@ export class UI {
       el('div', { class: 'row' }, 'Name', nameInput),
       el('div', { class: 'row' }, 'Addr', addrInput),
       el('div', { class: 'row' },
-        btn('＋Cursor', () => {
+        btn('＋Traveler', () => {
           ctx.pushUndo();
           const cur = defaultCursor(ctx.scene, path);
           cur.name = stroke.name ?? cur.name;
           cur.messages = [{ address: `${addr()}/pos`, argExprs: ['{x}', '{y}', '{z}', '{t}'] }];
           sc.cursors.push(cur);
           this.refresh();
-        }, { title: 'Playhead on this stroke emitting at its address' }),
+        }, { title: 'Traveler (playhead) on this stroke emitting at its address' }),
         btn('＋Trig start', () => addTrigger('start')),
         btn('＋Trig end', () => addTrigger('end')),
         btn('＋Zone', () => {
@@ -1355,11 +1355,11 @@ export class UI {
             messages: [{ address: `${addr()}/hit`, argExprs: ['1'] }],
           });
           this.refresh();
-        }, { title: 'Whole stroke becomes a trigger zone: fires when a cursor comes within radius of any of its points' }),
+        }, { title: 'Whole stroke becomes a trigger zone: fires when a traveler comes within radius of any of its points' }),
       ),
       ...(boundCursors.length ? [el('div', {
         class: 'row',
-        text: `riding: ${boundCursors.map((c) => c.name).join(', ')}`,
+        text: `traveler(s) riding this: ${boundCursors.map((c) => c.name).join(', ')}`,
       })] : []),
       el('div', { class: 'row', text: `id ${stroke.id} · ${stroke.points.length} pts · events → ${addr()}/…` }),
     );
@@ -1881,7 +1881,7 @@ export class UI {
         ),
         this.msgEditor(cur.messages),
       );
-      items.push(el('div', { class: 'panel' }, el('h3', { text: `🏃 ${cur.name}` }), body));
+      items.push(el('div', { class: 'panel' }, el('h3', { text: `🏃 Traveler: ${cur.name}` }), body));
     }
 
     for (const trig of sc.triggers) {
@@ -1917,15 +1917,15 @@ export class UI {
     ctx.scene.cameras.forEach((cam, i) => attachTarget.append(el('option', { value: `CAMERA:${i}`, text: `Camera: ${cam.name}` })));
     for (const s of ctx.scene.splats) attachTarget.append(el('option', { value: `SPLAT:${s.id}`, text: `Splat: ${s.name}` }));
 
-    return panel('Score (cursors · triggers · paths)',
+    return panel('Score (travelers · triggers · paths)',
       el('div', { class: 'row' },
-        btn('＋Cursor on stroke', () => {
+        btn('＋Traveler on stroke', () => {
           const path = this.selectedPathRef();
           if (!path) return;
           ctx.pushUndo();
           sc.cursors.push(defaultCursor(ctx.scene, path));
           this.refresh();
-        }, { title: 'Attach a playhead to the selected (or last) stroke' }),
+        }, { title: 'Attach a traveler (playhead) to the selected (or last) stroke' }),
         btn('＋Trigger at cursor', () => {
           ctx.pushUndo();
           const id = scoreId(ctx.scene);

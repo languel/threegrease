@@ -34,7 +34,7 @@ import { listAssets, meshAssetPayload, saveAsset, splatAssetPayload, type TGAsse
 import { mediamime } from '../io/mediamime';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
-import { ScoreEngine, scoreId } from '../score/engine';
+import { defaultCursor, ScoreEngine, scoreId } from '../score/engine';
 import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
@@ -756,6 +756,8 @@ class App implements AppHandle {
         }
         break;
       }
+      case 'addTriggerAtCursor': this.addTriggerAtCursor(); break;
+      case 'addTravelerNearestStroke': this.addTravelerNearestStroke(); break;
       case 'inspector': this.ui.toggleInspector(); break;
       case 'presentation': this.togglePresentation(); break;
       case 'toggleEdit': this.setMode(ctx.settings.mode === 'DRAW' ? 'EDIT' : 'DRAW'); break;
@@ -1346,6 +1348,49 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** Shift+T: drop a trigger sphere at the current 3D cursor. */
+  addTriggerAtCursor(): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    const id = scoreId(scene);
+    scene.score.triggers.push({
+      id, name: `Trigger ${id}`, position: [...scene.cursor] as [number, number, number],
+      radius: 0.25, retrigger: true,
+      messages: [{ address: `/trigger/${id}`, argExprs: ['1'] }],
+    });
+    this.ui.refresh();
+  }
+
+  /** Shift+G: ride a traveler on whichever stroke point is nearest the 3D
+   *  cursor — the "drag the cursor along a stroke, then drop a traveler"
+   *  workflow (Shift+RMB drag positions the cursor; this places the
+   *  traveler where it landed). */
+  addTravelerNearestStroke(): void {
+    const scene = this.ctx.scene;
+    const cursor = new THREE.Vector3(...scene.cursor);
+    let best: { d: number; layerId: number; strokeId: number } | null = null;
+    const ob = activeObject(scene);
+    const m = new THREE.Matrix4().compose(
+      new THREE.Vector3(...ob.translation),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+      new THREE.Vector3(...ob.scale),
+    );
+    for (const layer of ob.layers) {
+      if (layer.hide) continue;
+      const f = frameAt(layer, scene.frame);
+      if (!f) continue;
+      for (const s of f.strokes) for (const p of s.points) {
+        const d = new THREE.Vector3(...p.co).applyMatrix4(m).distanceTo(cursor);
+        if (!best || d < best.d) best = { d, layerId: layer.id, strokeId: s.id };
+      }
+    }
+    if (!best) return;
+    this.ctx.pushUndo();
+    const path = { objectIndex: scene.activeObject, layerId: best.layerId, strokeId: best.strokeId };
+    scene.score.cursors.push(defaultCursor(scene, path));
+    this.ui.refresh();
+  }
+
   /** N6 assets: snapshot the (single) selected object into the library. */
   saveSelectedAsAsset(): void {
     const scene = this.ctx.scene;
@@ -1877,8 +1922,8 @@ class App implements AppHandle {
     const s = this.ctx.settings;
     const status = document.getElementById('status')!;
     const hints: Record<string, string> = {
-      OBJECT: 'LMB select (Shift extends) · widget or G/R/S mode · X delete · Add… for primitives/models',
-      DRAW: 'LMB draw · MMB orbit · RMB pan · Shift+RMB set cursor · Tab edit mode',
+      OBJECT: 'LMB select (Shift extends) · widget or G/R/S mode · X delete · Add… for primitives/models · Shift+RMB drag cursor · RMB menu',
+      DRAW: 'LMB draw · MMB orbit · RMB pan · Shift+RMB drag cursor · Tab edit mode',
       EDIT: 'LMB select (drag box, Ctrl lasso) · G/R/S transform · X delete · Shift+D dup · A all',
       SCULPT: 'LMB sculpt · Ctrl inverts brush',
       VERTEX: 'LMB paint vertex color',
