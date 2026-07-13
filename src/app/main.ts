@@ -35,7 +35,7 @@ import { mediamime } from '../io/mediamime';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { defaultCursor, ScoreEngine, scoreId } from '../score/engine';
-import { constraintEngine } from '../score/constraints';
+import { constraintEngine, constraintsOf } from '../score/constraints';
 import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
@@ -1198,6 +1198,22 @@ class App implements AppHandle {
       const local1 = parentM.clone().invert().multiply(world1);
       const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
       local1.decompose(pos, quat, scl);
+      // Follow Path travelers are leashed to their stroke: a widget drag
+      // re-projects onto the path and becomes a PHASE edit (timing /
+      // relative positioning), not a free move
+      const fp = constraintsOf(scene, ref).find((k) => k.enabled && k.type === 'FOLLOW_PATH' && k.path);
+      if (fp?.path) {
+        const dragWorld = new THREE.Vector3().setFromMatrixPosition(world1);
+        const phase = this.score.nearestPhase(scene, fp.path, dragWorld);
+        if (phase !== null) {
+          fp.phase = phase;
+          const st = { position: new THREE.Vector3(), tangent: new THREE.Vector3(), valid: false };
+          if (this.score.sample(scene, fp.path, phase, st)) {
+            const snapped = st.position.clone().applyMatrix4(parentM.clone().invert());
+            pos.copy(snapped);
+          }
+        }
+      }
       const eul = new THREE.Euler().setFromQuaternion(quat);
       setObjectTransform(scene, ref, {
         translation: [pos.x, pos.y, pos.z],

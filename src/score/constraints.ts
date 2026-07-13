@@ -14,7 +14,7 @@ import {
   advancePhase, fireMessages, samplePhase, type CursorState, type ScoreEngine,
 } from './engine';
 
-function constraintsOf(scene: GPScene, ref: ObjRef): TGConstraint[] {
+export function constraintsOf(scene: GPScene, ref: ObjRef): TGConstraint[] {
   const e =
     ref.kind === 'GP' ? scene.objects.find((o) => o.id === ref.id) :
     ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id) :
