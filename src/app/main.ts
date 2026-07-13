@@ -389,9 +389,31 @@ class App implements AppHandle {
     const world = screenToWorld(ctx, clientX, clientY);
     if (!world) return;
     if (snap.enabled && snap.mode === 'INCREMENT') {
-      // snap within the placement plane (not the invisible 3D lattice —
-      // rounding all axes would pull the cursor off the plane)
       const g = ctx.settings.gridStep;
+      // Blender semantics: grid = the visible world floor grid, not a
+      // lattice on the current drawing plane. Raycast the ground plane
+      // and round the two in-plane world coordinates.
+      const zUp = ctx.settings.upAxis === 'Z';
+      const groundNormal = zUp ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+      const ndc = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(ndc, this.nav.active);
+      const hit = new THREE.Vector3();
+      if (Math.abs(ray.ray.direction.dot(groundNormal)) > 0.05
+        && ray.ray.intersectPlane(new THREE.Plane(groundNormal, 0), hit)) {
+        if (zUp) {
+          ctx.scene.cursor = [Math.round(hit.x / g) * g, Math.round(hit.y / g) * g, 0];
+        } else {
+          ctx.scene.cursor = [Math.round(hit.x / g) * g, 0, Math.round(hit.z / g) * g];
+        }
+        this.gp.markDirty();
+        return;
+      }
+      // grazing view (front/side): the floor grid is edge-on, so snap on
+      // the drawing plane's lattice instead (matches Blender's ortho grid)
       const plane = drawingPlane(ctx);
       const anchor = plane.normal.clone().multiplyScalar(-plane.constant);
       const tmp = Math.abs(plane.normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
