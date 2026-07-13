@@ -25,6 +25,19 @@ const AXES: Record<Exclude<AxisLock, 'none'>, THREE.Vector3> = {
 
 export interface ObjModalMods { ctrl: boolean; shift: boolean }
 
+// custom rotate cursor (circular arrow, white on black outline for
+// visibility on any background); move/scale use native CSS cursors
+const ROTATE_SVG = encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">`
+  + `<g fill="none"><path d="M19 12a7 7 0 1 1-7-7" stroke="black" stroke-width="4.5" stroke-linecap="round"/>`
+  + `<path d="M19 12a7 7 0 1 1-7-7" stroke="white" stroke-width="2" stroke-linecap="round"/>`
+  + `<path d="M12 1.5 L16.5 5 L12 8.5 Z" fill="white" stroke="black" stroke-width="1"/></g></svg>`);
+const CURSORS: Record<ObjModalKind, string> = {
+  move: 'move',
+  rotate: `url("data:image/svg+xml,${ROTATE_SVG}") 12 12, grabbing`,
+  scale: 'nwse-resize',
+};
+
 export class ObjectModalTransform {
   active = false;
   kind: ObjModalKind = 'move';
@@ -67,6 +80,7 @@ export class ObjectModalTransform {
     this.pivotScreen.copy(this.worldToScreen(ctx, this.pivot));
     this.startWorld.copy(this.viewPlaneHit(ctx, pointer.x, pointer.y) ?? this.pivot);
     this.active = true;
+    ctx.canvas.style.cursor = CURSORS[kind];
     this.apply(ctx);
     return true;
   }
@@ -88,6 +102,7 @@ export class ObjectModalTransform {
     this.startPointer.copy(this.lastPointer);
     this.startWorld.copy(this.viewPlaneHit(ctx, this.lastPointer.x, this.lastPointer.y) ?? this.pivot);
     this.numeric = '';
+    ctx.canvas.style.cursor = CURSORS[this.kind];
     this.apply(ctx);
   }
 
@@ -241,9 +256,10 @@ export class ObjectModalTransform {
     return target ? target.clone().sub(this.pivot) : d;
   }
 
-  confirm(): void {
+  confirm(ctx: AppCtx): void {
     this.active = false;
     this.info = '';
+    ctx.canvas.style.cursor = 'default';
   }
 
   /** Esc/RMB: put every object back where it started. */
@@ -258,6 +274,7 @@ export class ObjectModalTransform {
     this.restore(ctx);
     this.active = false;
     this.info = '';
+    ctx.canvas.style.cursor = 'default';
   }
 
   private worldToScreen(ctx: AppCtx, v: THREE.Vector3): THREE.Vector2 {

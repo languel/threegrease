@@ -561,7 +561,7 @@ class App implements AppHandle {
       if (this.objModal.active) {
         e.stopImmediatePropagation();
         e.preventDefault();
-        if (e.button === 0) this.objModal.confirm();
+        if (e.button === 0) this.objModal.confirm(this.ctx);
         else this.objModal.cancel(this.ctx);
         this.refreshWidget();
         this.ui.refresh();
@@ -727,6 +727,22 @@ class App implements AppHandle {
       return;
     }
 
+    // object-mode G/R/S modal takes precedence over everything
+    if (this.objModal.active) {
+      const om = this.objModal;
+      if (key === 'Escape') { om.cancel(ctx); this.refreshWidget(); this.ui.refresh(); }
+      else if (key === 'Enter') { om.confirm(ctx); this.refreshWidget(); this.ui.refresh(); }
+      else if (key === 'g' || key === 'G') om.switchKind(ctx, 'move');
+      else if (key === 'r' || key === 'R') om.switchKind(ctx, 'rotate');
+      else if (key === 's' || key === 'S') om.switchKind(ctx, 'scale');
+      else if (key === 'x' || key === 'X') om.setAxis(ctx, 'x', e.shiftKey);
+      else if (key === 'y' || key === 'Y') om.setAxis(ctx, 'y', e.shiftKey);
+      else if (key === 'z' || key === 'Z') om.setAxis(ctx, 'z', e.shiftKey);
+      else om.handleNumeric(ctx, key);
+      e.preventDefault();
+      return;
+    }
+
     // numpad view keys — real numpad always, digit row when Emulate Numpad is on
     const isNumpad = e.code.startsWith('Numpad');
     if (isNumpad || ctx.settings.emulateNumpad) {
@@ -745,22 +761,6 @@ class App implements AppHandle {
         default: handled = false;
       }
       if (handled) { e.preventDefault(); return; }
-    }
-
-    // object-mode G/R/S modal takes precedence over everything
-    if (this.objModal.active) {
-      const om = this.objModal;
-      if (key === 'Escape') { om.cancel(ctx); this.refreshWidget(); this.ui.refresh(); }
-      else if (key === 'Enter') { om.confirm(); this.refreshWidget(); this.ui.refresh(); }
-      else if (key === 'g' || key === 'G') om.switchKind(ctx, 'move');
-      else if (key === 'r' || key === 'R') om.switchKind(ctx, 'rotate');
-      else if (key === 's' || key === 'S') om.switchKind(ctx, 'scale');
-      else if (key === 'x' || key === 'X') om.setAxis(ctx, 'x', e.shiftKey);
-      else if (key === 'y' || key === 'Y') om.setAxis(ctx, 'y', e.shiftKey);
-      else if (key === 'z' || key === 'Z') om.setAxis(ctx, 'z', e.shiftKey);
-      else om.handleNumeric(ctx, key);
-      e.preventDefault();
-      return;
     }
 
     // modal transform takes precedence
