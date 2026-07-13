@@ -65,8 +65,12 @@ body {
   font-size: 11px; pointer-events: none; text-shadow: 0 1px 2px #000;
 }
 #sidebar {
-  width: 260px; background: var(--panel); border-left: 1px solid var(--border);
-  overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 8px;
+  width: 288px; background: var(--panel); border-left: 1px solid var(--border);
+  padding: 0; display: flex; flex-direction: row; gap: 0; overflow: hidden;
+}
+.props-content {
+  flex: 1; min-width: 0; overflow-y: auto; padding: 6px;
+  display: flex; flex-direction: column; gap: 8px;
 }
 #timeline {
   background: var(--panel); border-top: 1px solid var(--border); padding: 4px 8px;
@@ -167,17 +171,18 @@ label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); 
 #palette .menu-item.palette-sel { background: var(--accent); color: #fff; }
 #palette .menu-item.palette-sel .menu-key { color: #dfe8ff; }
 
-/* N3: properties-editor tab strip (Blender-style, icon-first) */
+/* N3: properties-editor tabs — vertical icon column, Blender-style */
 .props-tabs {
-  display: flex; gap: 2px; position: sticky; top: -6px; z-index: 5;
-  background: var(--panel); padding: 2px 0 4px; margin: -2px 0 0;
+  display: flex; flex-direction: column; gap: 2px; width: 30px; flex: none;
+  background: var(--bg); border-right: 1px solid var(--border);
+  padding: 4px 2px; overflow-y: auto;
 }
 button.props-tab {
-  flex: 1; height: 26px; padding: 0; font-size: 13px;
-  background: transparent; border-color: transparent;
+  width: 26px; height: 26px; padding: 0; font-size: 13px;
+  background: transparent; border-color: transparent; border-radius: 4px 0 0 4px;
 }
 button.props-tab:hover { background: var(--panel2); }
-button.props-tab.active { background: var(--panel2); border-color: var(--border); }
+button.props-tab.active { background: var(--panel); border-color: var(--border); border-right-color: var(--panel); }
 
 /* N6: outliner tree */
 .tree-tri { width: 12px; color: var(--dim); cursor: pointer; text-align: center; flex: none; }

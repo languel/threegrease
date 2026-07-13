@@ -10,6 +10,8 @@ import { defaultCursor, scoreId } from '../score/engine';
 import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
 import { mediamime } from '../io/mediamime';
 import { deleteAsset, listAssets } from '../io/assets';
+import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
+import type { ConstraintType, TGConstraint } from '../core/types';
 import {
   getObjectTransform, listSelected as listSelectedObjects, objectName, selectionPivot,
   setObjectTransform, setParentKeepWorld, type ObjRef,
@@ -695,6 +697,10 @@ export class UI {
         build: () => [this.objectsPanel(), this.objectPropsPanel()],
       },
       {
+        id: 'constraints', icon: '⛓️', title: 'Constraints — travelers · triggers · physics',
+        build: () => [this.constraintsPanel()],
+      },
+      {
         id: 'brush', icon: '🖌️', title: 'Brush & GP materials',
         build: () => [
           this.brushPanel(), this.materialsPanel(),
@@ -727,14 +733,16 @@ export class UI {
       },
     ];
 
+    // Blender-style vertical tab column beside the panel stack
     const strip = el('div', { class: 'props-tabs' });
     for (const t of tabs) {
       strip.append(btn(t.icon, () => { this.propsTab = t.id; this.refresh(); },
         { cls: `props-tab${this.propsTab === t.id ? ' active' : ''}`, title: t.title }));
     }
-    side.append(strip);
+    const content = el('div', { class: 'props-content' });
     const active = tabs.find((t) => t.id === this.propsTab) ?? tabs[0];
-    side.append(...active.build());
+    content.append(...active.build());
+    side.append(strip, content);
   }
 
   /** N6: hierarchy outliner — tree by parent, drag-to-parent, dbl-click rename. */
@@ -2220,6 +2228,137 @@ export class UI {
   // ---------------------------------------------------------- events / IO
 
   private monitorPaused = false;
+
+  /** Blender-style constraint stack for the selected object. */
+  private constraintsPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const refs = listSelectedObjects(ctx.scene);
+    if (refs.length !== 1) {
+      return panel('Constraints', el('div', {
+        class: 'row',
+        text: refs.length === 0 ? 'select one object (object mode)' : 'select exactly one object',
+      }));
+    }
+    const ref = refs[0];
+    const entity = (
+      ref.kind === 'GP' ? ctx.scene.objects.find((o) => o.id === ref.id) :
+      ref.kind === 'MESH' ? ctx.scene.meshes.find((m) => m.id === ref.id) :
+      ref.kind === 'SPLAT' ? ctx.scene.splats.find((s) => s.id === ref.id) :
+      ref.kind === 'TRIGGER' ? ctx.scene.score.triggers.find((t) => t.id === ref.id) :
+      undefined
+    ) as { constraints?: TGConstraint[] } | undefined;
+    if (!entity) return panel('Constraints', el('div', { class: 'row', text: 'unsupported object' }));
+    entity.constraints ??= [];
+    const stack = entity.constraints;
+
+    // grouped Add dropdown (Blender's Add Object Constraint)
+    const addSel = el('select') as HTMLSelectElement;
+    addSel.append(el('option', { value: '', text: 'Add Object Constraint…' }));
+    const groups = new Map<string, [string, string][]>();
+    for (const [type, def] of Object.entries(CONSTRAINT_DEFS)) {
+      if (!groups.has(def.group)) groups.set(def.group, []);
+      groups.get(def.group)!.push([type, def.label]);
+    }
+    for (const [group, items] of groups) {
+      const og = document.createElement('optgroup');
+      og.label = group;
+      for (const [type, label] of items) og.append(el('option', { value: type, text: label }));
+      addSel.append(og);
+    }
+    addSel.onchange = () => {
+      if (!addSel.value) return;
+      ctx.pushUndo();
+      stack.push(createConstraint(addSel.value as ConstraintType));
+      this.refresh();
+    };
+
+    const targetField = (c: TGConstraint) => {
+      const sel = el('select') as HTMLSelectElement;
+      sel.append(el('option', { value: '', text: '— target —' }));
+      const opts: [string, string][] = [
+        ...ctx.scene.objects.map((o): [string, string] => [`GP:${o.id}`, `GP: ${o.name}`]),
+        ...ctx.scene.meshes.map((m): [string, string] => [`MESH:${m.id}`, `Mesh: ${m.name}`]),
+        ...ctx.scene.splats.map((s): [string, string] => [`SPLAT:${s.id}`, `Splat: ${s.name}`]),
+        ...ctx.scene.score.triggers.map((t): [string, string] => [`TRIGGER:${t.id}`, `Trigger: ${t.name}`]),
+      ];
+      for (const [v, label] of opts) {
+        if (v === `${ref.kind}:${ref.id}`) continue; // not itself
+        sel.append(el('option', { value: v, text: label }));
+      }
+      sel.value = c.target ? `${c.target.kind}:${c.target.id}` : '';
+      sel.onchange = () => {
+        if (!sel.value) { c.target = null; return; }
+        const [kind, id] = sel.value.split(':');
+        c.target = { kind: kind as ObjRef['kind'], id: Number(id) } as TGConstraint['target'];
+      };
+      return el('div', { class: 'row' }, 'Target', sel);
+    };
+
+    const items: Node[] = [];
+    stack.forEach((c, i) => {
+      const rows: Node[] = [
+        el('div', { class: 'row' },
+          checkbox('', c.enabled, (v) => { c.enabled = v; }),
+          el('span', { class: 'grow', text: CONSTRAINT_DEFS[c.type].label }),
+          btn('▲', () => { if (i > 0) { [stack[i - 1], stack[i]] = [stack[i], stack[i - 1]]; this.refresh(); } }, { cls: 'icon-btn' }),
+          btn('▼', () => { if (i < stack.length - 1) { [stack[i + 1], stack[i]] = [stack[i], stack[i + 1]]; this.refresh(); } }, { cls: 'icon-btn' }),
+          btn('✕', () => { ctx.pushUndo(); stack.splice(i, 1); this.refresh(); }, { cls: 'icon-btn' }),
+        ),
+      ];
+      if (c.type === 'FOLLOW_PATH') {
+        rows.push(
+          el('div', { class: 'row' },
+            btn(c.path ? `path: stroke #${c.path.strokeId}` : 'Use selected stroke', () => {
+              const path = this.selectedPathRef();
+              if (path) { c.path = path; this.refresh(); }
+              else alert('Select a stroke first (EDIT mode), or draw one — the last stroke is used');
+            }, { title: 'Bind to the selected (or last) GP stroke' }),
+            btn(c.running ? '⏸' : '▶', () => { c.running = !c.running; this.refresh(); }, { cls: 'icon-btn', active: c.running }),
+          ),
+          el('div', { class: 'row' },
+            slider('Phase', c.phase ?? 0, 0, 1, 0.001, (v) => { c.phase = v; }),
+          ),
+          el('div', { class: 'row' },
+            numField('Speed', c.speed ?? 0.2, (v) => { c.speed = v; }, 0.05),
+            selectField('', c.loop ?? 'LOOP', [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { c.loop = v as typeof c.loop; }),
+            checkbox('Orient', !!c.orient, (v) => { c.orient = v; }),
+          ),
+        );
+      } else if (c.type === 'TRIGGER') {
+        rows.push(
+          el('div', { class: 'row' },
+            numField('Radius', c.radius ?? 0.25, (v) => { c.radius = Math.max(0.01, v); }, 0.05),
+            checkbox('Retrigger', c.retrigger !== false, (v) => { c.retrigger = v; }),
+          ),
+          this.msgEditor(c.messages ??= []),
+        );
+      } else if (c.type === 'LIMIT_DISTANCE') {
+        rows.push(targetField(c), el('div', { class: 'row' },
+          numField('Distance', c.distance ?? 1, (v) => { c.distance = Math.max(0.001, v); }, 0.1)));
+      } else if (c.type === 'SPRING') {
+        rows.push(targetField(c), el('div', { class: 'row' },
+          numField('Stiffness', c.stiffness ?? 12, (v) => { c.stiffness = Math.max(0, v); }, 1),
+          numField('Damping', c.damping ?? 4, (v) => { c.damping = Math.max(0, v); }, 0.5)));
+      } else if (c.type === 'SHRINKWRAP' || c.type === 'FLOOR') {
+        rows.push(el('div', { class: 'row' },
+          numField('Offset', c.offset ?? 0, (v) => { c.offset = v; }, 0.05)));
+      } else {
+        rows.push(targetField(c));
+      }
+      if (c.type !== 'TRIGGER' && c.type !== 'FLOOR' && c.type !== 'SHRINKWRAP') {
+        rows.push(el('div', { class: 'row' },
+          slider('Influence', c.influence, 0, 1, 0.01, (v) => { c.influence = v; })));
+      }
+      items.push(el('div', { class: 'panel' },
+        el('h3', { text: `${c.enabled ? '' : '· '}${c.name}` }),
+        el('div', { class: 'body' }, ...rows)));
+    });
+
+    return panel(`Constraints — ${objectName(ctx.scene, ref)}`,
+      addSel,
+      ...(items.length ? items : [el('div', { class: 'row', text: 'no constraints — Follow Path makes this a traveler, Trigger makes it a proximity zone' })]),
+    );
+  }
 
   /** MediaMime (P11): live landmark addresses + the object-rigging table. */
   private mediamimePanel(): HTMLElement {
