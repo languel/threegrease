@@ -247,7 +247,14 @@ address table, ＋Trigger/＋Rig actions). N7 icon pass: mode/widget
 buttons + Stroke Ops panel now icon-first. N2 follow-up: OBJECT magnet
 snap for point transforms. Object right-click context menu (viewport RMB
 + outliner row RMB, object mode): Set Origin/Mirror/Clear/Apply/Snap,
-src/tools/objectops.ts + ui.ts openContextMenu(). Open:
+src/tools/objectops.ts + ui.ts openContextMenu(). Global Snap: fixed
+Shift+RMB to drag the 3D cursor continuously (was single-click only —
+the reported inconsistent-snapping bug), added SURFACE cursor snap
+(mesh/3DGS raycast), unified the magnet into one always-visible topbar
+cluster driving both EDIT point-drags and the OBJECT translate widget.
+TGCursor relabeled Traveler in all UI text (3D cursor keeps the word
+cursor). Shift+T/Shift+G drop a trigger/traveler at the current 3D
+cursor. Open:
 (only mode/widget buttons done), N8 splat nibs, silhouette outlines,
 magnet OBJECT snap.
 
