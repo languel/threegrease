@@ -112,6 +112,7 @@ class App implements AppHandle {
   private gizmoDrag: { x: number; y: number; startX: number; startY: number; dragged: boolean } | null = null;
   private rmbDown: { x: number; y: number } | null = null;
   private cursorDrag = false;
+  private objectPicking: ((ref: ObjRef | null) => void) | null = null;
   presentation = false;
   cameraView = false;
   lockCamToView = true;
@@ -587,6 +588,14 @@ class App implements AppHandle {
         return;
       }
       if (e.button !== 0) return;
+      if (this.objectPicking) {
+        const hit = this.objectPick.pick(this.ctx, this.toolEvent(e));
+        const cb = this.objectPicking;
+        this.objectPicking = null;
+        this.ctx.canvas.style.cursor = 'default';
+        cb(hit);
+        return;
+      }
       if (this.modal.active) { this.modal.confirm(this.ctx); this.ui.refresh(); return; }
       // transform widget owns clicks that land on its gizmo
       if (this.ctx.settings.mode === 'OBJECT' && this.widget.enabled && this.widget.axis) return;
@@ -682,6 +691,13 @@ class App implements AppHandle {
     const mod = e.ctrlKey || e.metaKey;
 
     if (this.ui.settingsOpen) return; // dialog handles its own keys
+    if (this.objectPicking && key === 'Escape') {
+      const cb = this.objectPicking;
+      this.objectPicking = null;
+      this.ctx.canvas.style.cursor = 'default';
+      cb(null);
+      return;
+    }
 
     // fly mode swallows its keys (the fly toggle itself is a keymap action)
     if (this.nav.handleFlyKey(e, true)) { e.preventDefault(); return; }
@@ -1330,6 +1346,14 @@ class App implements AppHandle {
   }
 
   setLastPicked(ref: ObjRef): void { this.objectPick.lastPicked = ref; }
+
+  /** Blender-style eyedropper: next viewport click resolves the object
+   *  (Esc cancels, callback gets null). Used for constraint/rig target
+   *  pickers. */
+  pickObject(cb: (ref: ObjRef | null) => void): void {
+    this.objectPicking = cb;
+    this.ctx.canvas.style.cursor = 'crosshair';
+  }
 
   newScene(): void {
     this.ctx.pushUndo();

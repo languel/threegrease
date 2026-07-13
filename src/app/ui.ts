@@ -85,6 +85,7 @@ export interface AppHandle {
   exportSplatPly(id: number): void;
   run(action: string): void;
   setLastPicked(ref: import('../tools/objects').ObjRef): void;
+  pickObject(cb: (ref: import('../tools/objects').ObjRef | null) => void): void;
   newScene(): void;
   viewAll(): void;
   addCamera(): void;
@@ -1852,6 +1853,63 @@ export class UI {
     });
   }
 
+  /**
+   * Blender-style object target field: eyedropper (click, then click an
+   * object in the viewport) + dropdown of candidates + editable name field
+   * for manual entry. Used for constraint targets and any other
+   * "pick an object" control.
+   */
+  private objectPickerField(
+    label: string,
+    get: () => ObjRef | null,
+    set: (v: ObjRef | null) => void,
+    exclude?: ObjRef,
+  ): HTMLElement {
+    const { ctx } = this.app;
+    const candidates: { ref: ObjRef; label: string }[] = [
+      ...ctx.scene.objects.map((o) => ({ ref: { kind: 'GP' as const, id: o.id }, label: `GP: ${o.name}` })),
+      ...ctx.scene.meshes.map((m) => ({ ref: { kind: 'MESH' as const, id: m.id }, label: `Mesh: ${m.name}` })),
+      ...ctx.scene.splats.map((s) => ({ ref: { kind: 'SPLAT' as const, id: s.id }, label: `Splat: ${s.name}` })),
+      ...ctx.scene.score.triggers.map((t) => ({ ref: { kind: 'TRIGGER' as const, id: t.id }, label: `Trigger: ${t.name}` })),
+    ].filter((c) => !exclude || c.ref.kind !== exclude.kind || c.ref.id !== exclude.id);
+
+    const cur = get();
+
+    const eyedrop = btn('◎', () => {
+      this.app.pickObject((ref) => {
+        if (ref && (!exclude || ref.kind !== exclude.kind || ref.id !== exclude.id)) set(ref);
+        this.refresh();
+      });
+    }, { cls: 'icon-btn', title: 'Click, then click an object in the viewport to pick it (Esc cancels)' });
+
+    const sel = el('select') as HTMLSelectElement;
+    sel.append(el('option', { value: '', text: '— none —' }));
+    for (const c of candidates) sel.append(el('option', { value: `${c.ref.kind}:${c.ref.id}`, text: c.label }));
+    sel.value = cur ? `${cur.kind}:${cur.id}` : '';
+    sel.onchange = () => {
+      if (!sel.value) { set(null); this.refresh(); return; }
+      const [kind, id] = sel.value.split(':');
+      set({ kind: kind as ObjRef['kind'], id: Number(id) });
+      this.refresh();
+    };
+
+    const name = el('input', {
+      type: 'text', value: cur ? objectName(ctx.scene, cur) : '',
+      placeholder: '(type a name)',
+    }) as HTMLInputElement;
+    const commitName = () => {
+      const q = name.value.trim().toLowerCase();
+      if (!q) { set(null); this.refresh(); return; }
+      const match = candidates.find((c) => c.label.split(': ').pop()!.toLowerCase() === q);
+      if (match) { set(match.ref); this.refresh(); }
+      else name.value = cur ? objectName(ctx.scene, cur) : ''; // no match: revert
+    };
+    name.onchange = commitName;
+    name.onkeydown = (e) => { if (e.key === 'Enter') name.blur(); };
+
+    return el('div', { class: 'row' }, label, eyedrop, sel, name);
+  }
+
   private msgEditor(messages: { address: string; argExprs: string[] }[]): HTMLElement {
     const { ctx } = this.app;
     const m = messages[0];
@@ -2272,27 +2330,10 @@ export class UI {
       this.refresh();
     };
 
-    const targetField = (c: TGConstraint) => {
-      const sel = el('select') as HTMLSelectElement;
-      sel.append(el('option', { value: '', text: '— target —' }));
-      const opts: [string, string][] = [
-        ...ctx.scene.objects.map((o): [string, string] => [`GP:${o.id}`, `GP: ${o.name}`]),
-        ...ctx.scene.meshes.map((m): [string, string] => [`MESH:${m.id}`, `Mesh: ${m.name}`]),
-        ...ctx.scene.splats.map((s): [string, string] => [`SPLAT:${s.id}`, `Splat: ${s.name}`]),
-        ...ctx.scene.score.triggers.map((t): [string, string] => [`TRIGGER:${t.id}`, `Trigger: ${t.name}`]),
-      ];
-      for (const [v, label] of opts) {
-        if (v === `${ref.kind}:${ref.id}`) continue; // not itself
-        sel.append(el('option', { value: v, text: label }));
-      }
-      sel.value = c.target ? `${c.target.kind}:${c.target.id}` : '';
-      sel.onchange = () => {
-        if (!sel.value) { c.target = null; return; }
-        const [kind, id] = sel.value.split(':');
-        c.target = { kind: kind as ObjRef['kind'], id: Number(id) } as TGConstraint['target'];
-      };
-      return el('div', { class: 'row' }, 'Target', sel);
-    };
+    const targetField = (c: TGConstraint) => this.objectPickerField('Target',
+      () => c.target ?? null,
+      (v) => { c.target = v as TGConstraint['target']; },
+      ref);
 
     const items: Node[] = [];
     stack.forEach((c, i) => {
