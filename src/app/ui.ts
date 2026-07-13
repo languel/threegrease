@@ -473,10 +473,6 @@ export class UI {
         selectField('Select', s.selectMode, [['POINT', 'Point'], ['STROKE', 'Stroke']], (v) => { s.selectMode = v; ctx.requestRender(); }),
         checkbox('Proportional', s.propEdit.enabled, (v) => { s.propEdit.enabled = v; }),
         checkbox('Multiframe', s.multiframe, (v) => { s.multiframe = v; }),
-        checkbox('🧲 Snap', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
-        selectField('', s.snap.mode, [
-          ['INCREMENT', 'Increment'], ['POINT', 'Stroke point'], ['CANVAS', 'Canvas'], ['OBJECT', 'Object origin'],
-        ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); }),
       );
     } else if (s.mode === 'SCULPT') {
       const brushes: [SculptBrush, string][] = [
@@ -504,10 +500,17 @@ export class UI {
     }
 
     bar.append(el('div', { class: 'sep' }));
+    // Global Snap cluster (Blender parity): 3D-cursor snap always applies;
+    // the magnet (G/R/S in EDIT, the widget in OBJECT) is mode-relevant in
+    // both, so it lives here instead of being EDIT-only.
     bar.append(
       selectField('Cursor snap', s.cursorSnap, [
         ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SURFACE', 'Surface (mesh/3DGS)'], ['SELECTION', 'Selection'], ['OBJECT', 'Object origin'],
       ] as [CursorSnap, string][], (v) => { s.cursorSnap = v; this.app.savePrefs(); }),
+      checkbox('🧲 Magnet', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
+      selectField('', s.snap.mode, [
+        ['INCREMENT', 'Grid'], ['POINT', 'Stroke point'], ['OBJECT', 'Object origin'], ['CANVAS', 'Canvas'],
+      ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); }),
     );
   }
 

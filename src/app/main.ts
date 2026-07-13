@@ -1135,9 +1135,34 @@ class App implements AppHandle {
 
   /** Proxy deltas -> every selected object in WORLD space, written back to
    *  each object's local transform through its parent inverse. */
+  /** Magnet snap for the OBJECT-mode translate widget (grid / nearest
+   *  object origin) — the same `settings.snap` the EDIT-mode modal
+   *  transform uses, so one magnet setting works in both modes. */
+  private snapWidgetPosition(): void {
+    const snap = this.ctx.settings.snap;
+    if (!snap.enabled || this.widget.mode !== 'translate') return;
+    const p = this.widgetProxy.position;
+    if (snap.mode === 'INCREMENT') {
+      const g = this.ctx.settings.gridStep;
+      p.set(Math.round(p.x / g) * g, Math.round(p.y / g) * g, Math.round(p.z / g) * g);
+    } else if (snap.mode === 'OBJECT') {
+      const dragging = new Set(this.widgetBase?.refs.map((r) => `${r.kind}:${r.id}`));
+      let best: THREE.Vector3 | null = null;
+      let bestD = Infinity;
+      for (const ref of allRefs(this.ctx.scene)) {
+        if (dragging.has(`${ref.kind}:${ref.id}`)) continue; // don't snap to itself
+        const pos = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(this.ctx.scene, ref));
+        const d = pos.distanceTo(p);
+        if (d < bestD) { bestD = d; best = pos; }
+      }
+      if (best && bestD < 0.5) p.copy(best);
+    }
+  }
+
   private applyWidgetDrag(): void {
     const base = this.widgetBase;
     if (!base) return;
+    this.snapWidgetPosition();
     const scene = this.ctx.scene;
     const pivot = new THREE.Vector3(...base.proxy.translation);
     const dPos = this.widgetProxy.position.clone().sub(pivot);

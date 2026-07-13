@@ -472,3 +472,33 @@ commit each; typecheck+build always, deep verification only when cheap.
 - Blender's Center of Mass Set-Origin variants were intentionally
   dropped — GP strokes have no mass model, only Geometry↔Origin and
   Origin↔Cursor are implemented.
+
+
+## Global Snap menu + cursor drag fixes  **[SHIPPED]**
+- Root-caused and fixed 'cursor not snapping consistently': Shift+RMB
+  only ever placed the cursor once on pointerdown; a held drag fell
+  through to native OrbitControls RMB-pan instead of continuing to
+  reposition the cursor. main.ts now tracks a cursorDrag state and calls
+  placeCursor() on every pointermove until release.
+- New CursorSnap 'SURFACE' (projection.ts raycastSurfaces()) — the 3D
+  cursor (and the whole drag) can now ride a mesh or 3DGS surface, not
+  just strokes/grid/plane.
+- The magnet (settings.snap) is no longer EDIT-mode-only: it's a single
+  always-visible topbar cluster (Cursor snap + 🧲 Magnet + target) that
+  now also drives the OBJECT-mode translate widget
+  (main.ts snapWidgetPosition(), INCREMENT/OBJECT targets) — one magnet
+  setting, both modes, matching the ask for a Blender-style global snap
+  that works in object and drawing modes. Verified live: two boxes
+  dragged within 0.5 world units of each other snapped to the exact
+  same Loc.
+- Terminology: TGCursor (a stroke-riding playhead) is now labeled
+  'Traveler' everywhere in the UI, reserving 'cursor' for the 3D cursor.
+  Default new-traveler OSC address changed /cursor/{id}/pos ->
+  /traveler/{id}/pos (only affects newly-created travelers; internal
+  type/field names (score.cursors, TGCursor) are untouched — a full
+  rename would ripple through serialize.ts and the Blender addon for no
+  runtime benefit).
+- New Shift+T 'Add trigger at 3D cursor' / Shift+G 'Add traveler on
+  nearest stroke' — the drag-then-drop workflow: Shift+RMB drags the
+  cursor along a stroke or surface, a keypress drops a marker where it
+  landed. Both auto-registered in the command palette via the keymap.
