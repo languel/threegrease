@@ -190,3 +190,31 @@ button.props-tab.active { background: var(--panel); border-color: var(--border);
 
 .menu-item-disabled { color: var(--dim); cursor: default; opacity: 0.5; }
 .menu-item-disabled:hover { background: transparent; color: var(--dim); }
+
+/* Blender-style mode pie (Ctrl+Tab) */
+.pie-root {
+  position: fixed; z-index: 220; width: 0; height: 0;
+  transform: translate(-0.5px, -0.5px);
+  pointer-events: none;
+}
+.pie-ring {
+  position: absolute; left: -32px; top: -32px; width: 64px; height: 64px;
+  border-radius: 50%; border: 10px solid rgba(20,20,22,0.7);
+}
+.pie-center {
+  position: absolute; left: -30px; top: -46px; width: 60px; text-align: center;
+  font-size: 11px; color: var(--dim);
+}
+.pie-item {
+  position: absolute; transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 6px;
+  background: rgba(20,20,22,0.92); border: 1px solid var(--border);
+  white-space: nowrap; pointer-events: auto; cursor: pointer;
+  font-size: 13px;
+}
+.pie-item:hover { background: var(--accent); border-color: var(--accent); }
+.pie-item-active { border-color: var(--accent2); color: var(--accent2); }
+.pie-icon { font-size: 14px; }
+.pie-key { margin-left: 4px; color: var(--dim); font: 10px ui-monospace, monospace; }
+.pie-item:hover .pie-key { color: #dfe8ff; }

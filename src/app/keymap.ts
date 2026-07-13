@@ -19,7 +19,9 @@ export const ACTIONS: ActionDef[] = [
   { id: 'inspector', label: 'Toggle inspector panel', combo: 'n', category: 'General' },
   { id: 'presentation', label: 'Presentation mode', combo: 'p', category: 'General' },
   // Modes
-  { id: 'toggleEdit', label: 'Toggle Draw ↔ Edit', combo: 'tab', category: 'Modes' },
+  { id: 'toggleEdit', label: 'Toggle last two modes', combo: 'tab', category: 'Modes' },
+  { id: 'modeObject', label: 'Object mode', combo: '', category: 'Modes' },
+  { id: 'modePie', label: 'Mode pie menu', combo: 'ctrl+tab', category: 'Modes' },
   { id: 'modeDraw', label: 'Draw mode', combo: '1', category: 'Modes' },
   { id: 'modeEdit', label: 'Edit mode', combo: '2', category: 'Modes' },
   { id: 'modeSculpt', label: 'Sculpt mode', combo: '3', category: 'Modes' },

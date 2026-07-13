@@ -271,12 +271,22 @@ class App implements AppHandle {
 
   // ---------------------------------------------------------- AppHandle
 
+  /** [previous, current] — Tab toggles back to `modeHistory[0]`. */
+  private modeHistory: EditorMode[] = ['DRAW', 'EDIT'];
+
   setMode(mode: EditorMode): void {
+    if (mode !== this.ctx.settings.mode) this.modeHistory = [this.ctx.settings.mode, mode];
     this.ctx.settings.mode = mode;
     this.setTool(DEFAULT_TOOL[mode]);
     this.gp.markDirty();
     this.refreshWidget();
     this.ui.refresh();
+  }
+
+  /** Tab: swap back to whichever mode you were in before the current one. */
+  toggleLastMode(): void {
+    const prev = this.modeHistory[0];
+    if (prev && prev !== this.ctx.settings.mode) this.setMode(prev);
   }
 
   setTool(id: string): void {
@@ -819,7 +829,9 @@ class App implements AppHandle {
       case 'addTravelerNearestStroke': this.addTravelerNearestStroke(); break;
       case 'inspector': this.ui.toggleInspector(); break;
       case 'presentation': this.togglePresentation(); break;
-      case 'toggleEdit': this.setMode(ctx.settings.mode === 'DRAW' ? 'EDIT' : 'DRAW'); break;
+      case 'toggleEdit': this.toggleLastMode(); break;
+      case 'modeObject': this.setMode('OBJECT'); break;
+      case 'modePie': this.ui.openModePie(this.tools.lastPointer); break;
       case 'modeDraw': this.setMode('DRAW'); break;
       case 'modeEdit': this.setMode('EDIT'); break;
       case 'modeSculpt': this.setMode('SCULPT'); break;

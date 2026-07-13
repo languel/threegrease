@@ -552,6 +552,75 @@ export class UI {
     this.ctxCloseHandler = null;
   }
 
+  private pieEls: HTMLElement[] = [];
+  private pieCloseHandler: ((e: KeyboardEvent | MouseEvent) => void) | null = null;
+
+  closeModePie(): void {
+    for (const el2 of this.pieEls) el2.remove();
+    this.pieEls = [];
+    if (this.pieCloseHandler) {
+      window.removeEventListener('keydown', this.pieCloseHandler, true);
+      window.removeEventListener('mousedown', this.pieCloseHandler, true);
+    }
+    this.pieCloseHandler = null;
+  }
+
+  /**
+   * Blender Ctrl+Tab mode pie: click a wedge OR press its numpad-style
+   * digit (works as a blind chord too — Ctrl+Tab then 8 lands on Draw
+   * even before the menu paints). Esc/outside-click cancels.
+   */
+  openModePie(center: { x: number; y: number }): void {
+    this.closeModePie();
+    const { ctx } = this.app;
+    type Slot = { mode: EditorMode; label: string; icon: string; key: string; angleDeg: number };
+    const SLOTS: Slot[] = [
+      { mode: 'DRAW', label: 'Draw Mode', icon: '✏️', key: '8', angleDeg: -90 },
+      { mode: 'SCULPT', label: 'Sculpt Mode', icon: '🗿', key: '2', angleDeg: 90 },
+      { mode: 'OBJECT', label: 'Object Mode', icon: '🞔', key: '4', angleDeg: 180 },
+      { mode: 'EDIT', label: 'Edit Mode', icon: '🩹', key: '6', angleDeg: 0 },
+      { mode: 'WEIGHT', label: 'Weight Paint', icon: '⚖️', key: '7', angleDeg: -135 },
+      { mode: 'VERTEX', label: 'Vertex Paint', icon: '🎨', key: '9', angleDeg: -45 },
+    ];
+    const R = 105;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const cx = Math.min(Math.max(center.x, R + 20), rect.width - R - 20) + rect.left;
+    const cy = Math.min(Math.max(center.y, R + 20), rect.height - R - 20) + rect.top;
+
+    const root = el('div', { class: 'pie-root' });
+    root.style.left = `${cx}px`;
+    root.style.top = `${cy}px`;
+    root.append(el('div', { class: 'pie-ring' }), el('div', { class: 'pie-center', text: 'Mode' }));
+
+    const choose = (mode: EditorMode) => { this.closeModePie(); this.app.setMode(mode); };
+    for (const s of SLOTS) {
+      const rad = (s.angleDeg * Math.PI) / 180;
+      const item = el('div', { class: `pie-item${ctx.settings.mode === s.mode ? ' pie-item-active' : ''}` },
+        el('span', { class: 'pie-icon', text: s.icon }),
+        el('span', { text: s.label }),
+        el('span', { class: 'pie-key', text: s.key }),
+      );
+      item.style.left = `${R * Math.cos(rad)}px`;
+      item.style.top = `${R * Math.sin(rad)}px`;
+      item.onclick = () => choose(s.mode);
+      root.append(item);
+    }
+    document.body.append(root);
+    this.pieEls = [root];
+
+    this.pieCloseHandler = (e: Event) => {
+      if (e instanceof KeyboardEvent) {
+        if (e.key === 'Escape') { this.closeModePie(); return; }
+        const slot = SLOTS.find((s) => s.key === e.key);
+        if (slot) { e.preventDefault(); choose(slot.mode); }
+        return;
+      }
+      if (!root.contains(e.target as Node)) this.closeModePie();
+    };
+    window.addEventListener('keydown', this.pieCloseHandler as (e: KeyboardEvent) => void, true);
+    window.addEventListener('mousedown', this.pieCloseHandler as (e: MouseEvent) => void, true);
+  }
+
   /** Generic right-click popup: flat items + one level of ▶ submenus. */
   openContextMenu(x: number, y: number, items: CtxItem[]): void {
     this.closeContextMenu();
