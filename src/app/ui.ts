@@ -11,9 +11,18 @@ import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
 import { mediamime } from '../io/mediamime';
 import { deleteAsset, listAssets } from '../io/assets';
 import {
-  getObjectTransform, listSelected as listSelectedObjects, objectName,
+  getObjectTransform, listSelected as listSelectedObjects, objectName, selectionPivot,
   setObjectTransform, setParentKeepWorld, type ObjRef,
 } from '../tools/objects';
+import {
+  applyObjectTransformPartial, clearObjectTransform, geometryToOrigin, mirrorObject,
+  originToCursor, originToGeometry, snapCursorToSelectionMedian, snapSelectionToCursor,
+} from '../tools/objectops';
+
+type CtxItem =
+  | { label: string; action?: string; do?: () => void; items?: CtxItem[]; disabled?: boolean }
+  | { sep: true }
+  | { header: string };
 import {
   DEFAULT_STRINGART, loadTargetImage, pinSourceStroke, runStringArt,
   type StringArtRun,
@@ -515,6 +524,149 @@ export class UI {
     }
   }
 
+  // ------------------------------------------------------- context menu
+
+  private ctxMenuEls: HTMLElement[] = [];
+  private ctxCloseHandler: ((e: MouseEvent) => void) | null = null;
+
+  closeContextMenu(): void {
+    for (const el2 of this.ctxMenuEls) el2.remove();
+    this.ctxMenuEls = [];
+    if (this.ctxCloseHandler) window.removeEventListener('mousedown', this.ctxCloseHandler, true);
+    this.ctxCloseHandler = null;
+  }
+
+  /** Generic right-click popup: flat items + one level of ▶ submenus. */
+  openContextMenu(x: number, y: number, items: CtxItem[]): void {
+    this.closeContextMenu();
+    const build = (its: CtxItem[], px: number, py: number, depth: number): HTMLElement => {
+      const pop = el('div', { class: 'menu-pop' });
+      pop.style.position = 'fixed';
+      pop.style.left = `${px}px`;
+      pop.style.top = `${py}px`;
+      pop.style.zIndex = String(200 + depth);
+      for (const item of its) {
+        if ('sep' in item) { pop.append(el('div', { class: 'menu-sep' })); continue; }
+        if ('header' in item) { pop.append(el('div', { class: 'menu-header', text: item.header })); continue; }
+        const row = el('div', { class: `menu-item${item.disabled ? ' menu-item-disabled' : ''}` },
+          el('span', { text: item.label }),
+          el('span', { class: 'menu-key', text: item.items ? '▶' : (item.action ? this.app.keymap.comboFor(item.action) : '') }),
+        );
+        if (item.disabled) { pop.append(row); continue; }
+        if (item.items) {
+          row.onmouseenter = () => {
+            this.ctxMenuEls.splice(depth + 1).forEach((e2) => e2.remove());
+            const rect = row.getBoundingClientRect();
+            const child = build(item.items!, rect.right, rect.top, depth + 1);
+            document.body.append(child);
+            this.ctxMenuEls[depth + 1] = child;
+          };
+        } else {
+          row.onclick = () => {
+            this.closeContextMenu();
+            if (item.action) this.app.run(item.action);
+            else item.do?.();
+          };
+        }
+        pop.append(row);
+      }
+      return pop;
+    };
+    const root = build(items, x, y, 0);
+    document.body.append(root);
+    this.ctxMenuEls = [root];
+    this.ctxCloseHandler = (e: MouseEvent) => {
+      if (this.ctxMenuEls.some((el2) => el2.contains(e.target as Node))) return;
+      this.closeContextMenu();
+    };
+    window.addEventListener('mousedown', this.ctxCloseHandler, true);
+  }
+
+  /** Blender Object context menu (RMB in the viewport, object mode). */
+  openObjectContextMenu(clientX: number, clientY: number): void {
+    const { ctx } = this.app;
+    const refs = listSelectedObjects(ctx.scene);
+    if (!refs.length) return;
+    const gpOnly = refs.every((r) => r.kind === 'GP');
+    const one = refs.length === 1 ? refs[0] : null;
+
+    const items: CtxItem[] = [
+      { label: 'Duplicate', action: 'duplicate' },
+      { label: 'Delete', action: 'delete' },
+      { sep: true },
+      {
+        label: 'Set Origin', items: [
+          { label: 'Geometry to Origin', do: () => this.runObjectOp((ref) => geometryToOrigin(ctx.scene, ref)), disabled: !gpOnly },
+          { label: 'Origin to Geometry', do: () => this.runObjectOp((ref) => originToGeometry(ctx.scene, ref)), disabled: !gpOnly },
+          { label: 'Origin to 3D Cursor', do: () => this.runObjectOp((ref) => originToCursor(ctx.scene, ref)), disabled: !gpOnly },
+        ],
+      },
+      {
+        label: 'Mirror', items: [
+          { label: 'X Global', do: () => this.runObjectOp((ref) => (mirrorObject(ctx.scene, ref, 0), true)) },
+          { label: 'Y Global', do: () => this.runObjectOp((ref) => (mirrorObject(ctx.scene, ref, 1), true)) },
+          { label: 'Z Global', do: () => this.runObjectOp((ref) => (mirrorObject(ctx.scene, ref, 2), true)) },
+        ],
+      },
+      {
+        label: 'Clear', items: [
+          { label: 'Location', do: () => this.runObjectOp((ref) => (clearObjectTransform(ctx.scene, ref, 'LOC'), true)) },
+          { label: 'Rotation', do: () => this.runObjectOp((ref) => (clearObjectTransform(ctx.scene, ref, 'ROT'), true)) },
+          { label: 'Scale', do: () => this.runObjectOp((ref) => (clearObjectTransform(ctx.scene, ref, 'SCALE'), true)) },
+          { label: 'All Transforms', do: () => this.runObjectOp((ref) => (clearObjectTransform(ctx.scene, ref, 'ALL'), true)) },
+        ],
+      },
+      {
+        label: 'Apply', items: [
+          { label: 'Location', do: () => this.runObjectOp((ref) => applyObjectTransformPartial(ctx.scene, ref, 'LOC')), disabled: !gpOnly },
+          { label: 'Rotation', do: () => this.runObjectOp((ref) => applyObjectTransformPartial(ctx.scene, ref, 'ROT')), disabled: !gpOnly },
+          { label: 'Scale', do: () => this.runObjectOp((ref) => applyObjectTransformPartial(ctx.scene, ref, 'SCALE')), disabled: !gpOnly },
+          { label: 'All Transforms', action: 'applyTransform' },
+        ],
+      },
+      {
+        label: 'Snap', items: [
+          { label: 'Selection to Cursor', do: () => { ctx.pushUndo(); snapSelectionToCursor(ctx.scene); this.afterObjectOp(); } },
+          { label: 'Cursor to Selected', do: () => { ctx.pushUndo(); snapCursorToSelectionMedian(ctx.scene, selectionPivot(ctx.scene)); this.afterObjectOp(); } },
+        ],
+      },
+      { sep: true },
+      { label: 'Parent to last-picked', action: 'parentSet' },
+      { label: 'Clear parent', action: 'parentClear' },
+      ...(one ? [{ sep: true as const }, { label: `Rename ${objectName(ctx.scene, one)}…`, do: () => this.renameViaPrompt(one) }] : []),
+    ];
+    this.openContextMenu(clientX, clientY, items);
+  }
+
+  private runObjectOp(fn: (ref: import('../tools/objects').ObjRef) => boolean): void {
+    const { ctx } = this.app;
+    ctx.pushUndo();
+    for (const ref of listSelectedObjects(ctx.scene)) fn(ref);
+    this.afterObjectOp();
+  }
+
+  private afterObjectOp(): void {
+    const { ctx } = this.app;
+    ctx.syncCanvases();
+    this.app.refreshWidget();
+    ctx.requestRender();
+    this.refresh();
+  }
+
+  private renameViaPrompt(ref: import('../tools/objects').ObjRef): void {
+    const { ctx } = this.app;
+    const cur = objectName(ctx.scene, ref);
+    const next = prompt('Rename object', cur);
+    if (next?.trim()) {
+      if (ref.kind === 'GP') ctx.scene.objects.find((o) => o.id === ref.id)!.name = next.trim();
+      else if (ref.kind === 'MESH') ctx.scene.meshes.find((m) => m.id === ref.id)!.name = next.trim();
+      else if (ref.kind === 'SPLAT') ctx.scene.splats.find((s) => s.id === ref.id)!.name = next.trim();
+      else if (ref.kind === 'TRIGGER') ctx.scene.score.triggers.find((t) => t.id === ref.id)!.name = next.trim();
+      else if (ref.kind === 'CANVAS') ctx.scene.canvases.find((c) => c.id === ref.id)!.name = next.trim();
+      this.refresh();
+    }
+  }
+
   // ------------------------------------------------------------ sidebar
 
   /** N3: Blender-style properties editor — icon tabs over panel groups. */
@@ -718,6 +870,11 @@ export class UI {
       const item = el('div', { class: `list-item ${n.selected ? 'active' : ''}` });
       item.style.paddingLeft = `${6 + depth * 14}px`;
       item.onclick = (e) => n.onSelect(e as MouseEvent);
+      item.oncontextmenu = (e) => {
+        e.preventDefault();
+        if (!n.selected) n.onSelect(undefined);
+        this.openObjectContextMenu(e.clientX, e.clientY);
+      };
 
       if (kids.length) {
         const tri = el('span', { class: 'tree-tri', text: collapsed ? '▸' : '▾' });

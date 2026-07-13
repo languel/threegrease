@@ -109,6 +109,7 @@ class App implements AppHandle {
   private grid!: THREE.GridHelper;
   private axes!: THREE.Group;
   private gizmoDrag: { x: number; y: number; startX: number; startY: number; dragged: boolean } | null = null;
+  private rmbDown: { x: number; y: number } | null = null;
   presentation = false;
   cameraView = false;
   lockCamToView = true;
@@ -561,6 +562,12 @@ class App implements AppHandle {
         e.preventDefault();
         return;
       }
+      if (e.button === 2) {
+        // plain right-click: track for a context menu on release (a drag
+        // means it was a pan, not a click — OrbitControls handles that)
+        this.rmbDown = { x: e.clientX, y: e.clientY };
+        return;
+      }
       if (e.button !== 0) return;
       if (this.modal.active) { this.modal.confirm(this.ctx); this.ui.refresh(); return; }
       // transform widget owns clicks that land on its gizmo
@@ -597,6 +604,15 @@ class App implements AppHandle {
     });
 
     canvas.addEventListener('pointerup', (e) => {
+      if (e.button === 2) {
+        const down = this.rmbDown;
+        this.rmbDown = null;
+        if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5
+          && this.ctx.settings.mode === 'OBJECT' && !this.presentation) {
+          this.ui.openObjectContextMenu(e.clientX, e.clientY);
+        }
+        return;
+      }
       if (e.button !== 0) return;
       if (this.gizmoDrag) {
         if (!this.gizmoDrag.dragged) {

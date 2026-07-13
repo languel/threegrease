@@ -446,3 +446,29 @@ commit each; typecheck+build always, deep verification only when cheap.
   as cursor-vs-trigger (score/engine.ts).
 - Not done: no in-browser MediaPipe capture (intentionally protocol-only,
   matches the P9 design note).
+
+
+## Object right-click context menu  **[SHIPPED]**
+- src/tools/objectops.ts: Blender Object-menu operators — mirrorObject
+  (flip a scale axis), clearObjectTransform (Loc/Rot/Scale/All),
+  applyObjectTransformPartial (Loc/Rot/Scale — GP bakes into stroke
+  points via a derived S⁻¹·R·S map so world position is preserved
+  correctly under non-uniform scale; ALL delegates to the existing
+  objects.ts full apply), snapSelectionToCursor / snapCursorToSelectionMedian.
+  GP origin ops (originToGeometry / geometryToOrigin / originToCursor) use
+  a shared retargetOrigin() that moves the local translation while
+  shifting stroke points by the R·S⁻¹-transformed delta, so world-space
+  geometry never jumps when the origin moves — verified numerically
+  in-browser against hand-derived expected values for all three, plus
+  mirror/clear/apply-scale/snap.
+- ui.ts: generic openContextMenu(x, y, items) — flat items + one level of
+  ▶ submenus, reuses the menubar's menu-pop/menu-item CSS. Wired to:
+  viewport right-click in object mode (main.ts tracks RMB down/up,
+  treats a <5px move as a click — a real drag still pans via
+  OrbitControls, RMB context menu only fires on a stationary click), and
+  outliner row right-click (selects the row first if not already
+  selected). Verified end-to-end with real right_click/hover/left_click
+  automation, not just unit-level ops.
+- Blender's Center of Mass Set-Origin variants were intentionally
+  dropped — GP strokes have no mass model, only Geometry↔Origin and
+  Origin↔Cursor are implemented.

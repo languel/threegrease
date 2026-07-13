@@ -182,3 +182,6 @@ button.props-tab.active { background: var(--panel2); border-color: var(--border)
 /* N6: outliner tree */
 .tree-tri { width: 12px; color: var(--dim); cursor: pointer; text-align: center; flex: none; }
 .list-item.drop-target { outline: 1px dashed var(--accent2); }
+
+.menu-item-disabled { color: var(--dim); cursor: default; opacity: 0.5; }
+.menu-item-disabled:hover { background: transparent; color: var(--dim); }
