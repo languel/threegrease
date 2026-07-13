@@ -254,7 +254,12 @@ the reported inconsistent-snapping bug), added SURFACE cursor snap
 cluster driving both EDIT point-drags and the OBJECT translate widget.
 TGCursor relabeled Traveler in all UI text (3D cursor keeps the word
 cursor). Shift+T/Shift+G drop a trigger/traveler at the current 3D
-cursor. Open:
+cursor. Constraint system (src/score/constraints.ts): per-object
+Blender-style stacks — FOLLOW_PATH travelers, TRIGGER zones, Copy/Track/
+Limit/Shrinkwrap/Floor/Spring — vertical-tab properties editor with a
+Constraints tab, drag-along-path phase editing, Shift+A add-at-mouse.
+Legacy score cursors/triggers still run side by side (not migrated).
+Open:
 (only mode/widget buttons done), N8 splat nibs, silhouette outlines,
 magnet OBJECT snap.
 

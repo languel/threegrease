@@ -523,3 +523,26 @@ commit each; typecheck+build always, deep verification only when cheap.
 - Cursor visual: Blender-style red/white dashed ring + dark crosshair
   ticks, billboarded to the view and held at ~10px screen radius for
   both persp and ortho (updateCursorMarker in the render loop).
+
+
+## Constraint system (Blender-style)  **[SHIPPED c1b511d..a8df48f]**
+- ANY object can now be a traveler or a trigger: per-object constraint
+  stack (TGConstraint on GP/mesh/splat/trigger, src/score/constraints.ts,
+  evaluated every frame after ScoreEngine). Types: FOLLOW_PATH (traveler),
+  TRIGGER (proximity zone vs all travelers incl. legacy score cursors),
+  COPY_LOCATION/ROTATION/SCALE, TRACK_TO, LIMIT_DISTANCE, SHRINKWRAP,
+  FLOOR, SPRING (damped, dt-clamped).
+- Properties editor tabs are now a vertical icon column (Blender look);
+  new Constraints tab (⛓️) with the grouped Add Object Constraint
+  dropdown and per-constraint panels.
+- Drag-along-path: widget-dragging a Follow Path object re-projects onto
+  its stroke (ScoreEngine.nearestPhase) and edits the PHASE — travelers
+  are leashed to their path; composes with the grid magnet.
+- Shift+A Add menu at the mouse; on-stroke detection spawns travelers/
+  triggers exactly at the clicked arc-length position.
+- The legacy score cursors/triggers (Bindings tab) still work and remain
+  the reference/event-dispatch panel; new work should prefer constraints.
+  NOT migrated: existing TGTrigger entities and score.cursors are not
+  auto-converted to constraints (both systems run side by side); legacy
+  score-cursor glyphs cannot be dragged along paths (only constraint
+  travelers can).
