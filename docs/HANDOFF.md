@@ -229,48 +229,79 @@ New gotchas from the platform build:
   engines manually (sim.step / gp.update), never await wall-clock frames.
 - Wire-art scripting: compute camera eulers via lookAt, never by hand.
 
-N-series status (2026-07-12): N1 palette + `window.__tg.execute()` agent
-API, N2 orange outlines/origin dots + OBJECT cursor snap, N3 tabbed
-properties editor, N4 Ctrl+A apply transform (GP bakes points; mesh/splat
-fold TRS into a `baked` 4x4 composed inside worldMatrixOf — splat/mesh
-roots are now placed via matrixAutoUpdate=false + matrix.copy so baked
-shear survives), N5 splat drawTargets in ctx.surfaces + trigger/attractor
-`follow`. N4b per-modifier Apply (bake into keyframes), N6 hierarchy outliner
-(tree + drag-to-parent + rename) and asset library
-(src/io/assets.ts, localStorage `threegrease.assets`, Add-menu section
-+ palette commands). N5c stroke-as-trigger-zone (TGTrigger.zone). P11 MediaMime integration:
-src/io/mediamime.ts live landmark registry over the existing WS/OSC bus,
-scene.mediamime.rigs (MMRig) binds any object's translation to a live
-address, triggers are now a full ObjKind ('TRIGGER') — selectable,
-draggable, parentable, in the outliner. MediaMime menu + 🎥 panel (live
-address table, ＋Trigger/＋Rig actions). N7 icon pass: mode/widget
-buttons + Stroke Ops panel now icon-first. N2 follow-up: OBJECT magnet
-snap for point transforms. Object right-click context menu (viewport RMB
-+ outliner row RMB, object mode): Set Origin/Mirror/Clear/Apply/Snap,
-src/tools/objectops.ts + ui.ts openContextMenu(). Global Snap: fixed
-Shift+RMB to drag the 3D cursor continuously (was single-click only —
-the reported inconsistent-snapping bug), added SURFACE cursor snap
-(mesh/3DGS raycast), unified the magnet into one always-visible topbar
-cluster driving both EDIT point-drags and the OBJECT translate widget.
-TGCursor relabeled Traveler in all UI text (3D cursor keeps the word
-cursor). Shift+T/Shift+G drop a trigger/traveler at the current 3D
-cursor. Constraint system (src/score/constraints.ts): per-object
-Blender-style stacks — FOLLOW_PATH travelers, TRIGGER zones, Copy/Track/
-Limit/Shrinkwrap/Floor/Spring — vertical-tab properties editor with a
-Constraints tab, drag-along-path phase editing, Shift+A add-at-mouse.
-Legacy score cursors/triggers still run side by side (not migrated).
-Open:
-(only mode/widget buttons done), N8 splat nibs, silhouette outlines,
-magnet OBJECT snap.
+## Session log (2026-07-12 → 2026-07-13)
 
-`window.__tg.execute('command id | title | fuzzy', args?)` is the official
-automation/agent entrypoint (src/app/commands.ts); F3 opens the palette.
+Full detail for each item lives in IMPLEMENTATION_PLAN.md under its own
+`## heading`, in commit order — this is the short index.
 
-Where next: the N-series (IMPLEMENTATION_PLAN "Next phases", added
-2026-07-12): N1 command palette (crucial, the AI/agent surface) → N2
-selection outline + pivots → N3 properties editor tabs → N4 modifier
-apply/apply-transform → N5 everything-is-a-surface/field → N6 hierarchy
-tree/assets → N7 icon pass → N8 splat nibs. Vision reframe in PRD §1b:
-GP strokes generalize curves, splats generalize points; Blender parity
-is the interaction contract. Also still open: worker fill, stamp
-instancing, texture stamps, curve edit.
+**N-series (object-mode parity + AI surface)**
+- N1 command palette (F3) + `window.__tg.execute('id | title | fuzzy', args?)`
+  — the official automation/agent entrypoint (src/app/commands.ts)
+- N2 orange selection outlines/origin dots, OBJECT cursor snap, OBJECT
+  magnet-snap for point transforms
+- N3 properties editor: icon tabs, later upgraded to a Blender-style
+  vertical tab column (see Constraints below)
+- N4 Ctrl+A apply transform (GP bakes points; mesh/splat fold TRS into a
+  `baked` 4x4 inside worldMatrixOf) + per-modifier Apply (bake into
+  keyframes)
+- N5 everything-is-a-surface: splat drawTargets in ctx.surfaces,
+  trigger/attractor `follow`, stroke-as-trigger-zone (TGTrigger.zone)
+- N6 hierarchy outliner (tree, drag-to-parent, rename) + asset library
+  (src/io/assets.ts, localStorage `threegrease.assets`)
+- N7 icon-first pass: mode/widget buttons + Stroke Ops panel
+- N8 splat nibs: NOT started (needs a texture-atlas redesign of the
+  stroke shader + a Spark in-memory splat construction spike — scoped
+  but out of budget so far)
+
+**P11 MediaMime integration** — src/io/mediamime.ts: live landmark
+registry over the existing WS/OSC bus; scene.mediamime.rigs (MMRig)
+binds any object's translation to a live address; triggers are a full
+ObjKind ('TRIGGER') — selectable/draggable/parentable/in the outliner;
+MediaMime menu + 🎥 panel.
+
+**Object right-click context menu** — viewport RMB + outliner row RMB
+(object mode): Set Origin / Mirror / Clear / Apply / Snap
+(src/tools/objectops.ts + ui.ts openContextMenu()).
+
+**Global Snap + 3D cursor fixes** — two real bugs fixed, not just
+features: (1) Shift+RMB only placed the cursor once on pointerdown, so
+a held drag fell through to OrbitControls' RMB-pan — fixed with a
+capture-phase pointerdown that claims Shift+RMB before OrbitControls
+sees it. (2) grid snap rounded on a lattice over the current drawing
+plane (view-aligned by default) instead of the visible floor grid — now
+raycasts the world ground plane (X·Y for Z-up, X·Z for Y-up) and rounds
+the two in-plane coordinates, matching Blender. The old `cursorSnap`
+setting is retired; the 3D cursor now follows the single global magnet
+(off = free move, on = Grid/Stroke point/Object origin/Surface).
+SURFACE mode added (mesh/3DGS raycast via projection.ts
+raycastSurfaces()). Cursor visual redrawn to match Blender (red/white
+dashed ring + crosshair ticks, constant screen size).
+
+**Terminology** — TGCursor (a stroke-riding playhead) is labeled
+"Traveler" in all UI text; "cursor" is reserved for the 3D cursor.
+Shift+T / Shift+G drop a trigger/traveler at the current 3D cursor.
+
+**Constraint system (Blender-style)** — src/score/constraints.ts: any
+object (GP/mesh/splat/trigger) can carry a constraint stack now, evaluated
+every frame. FOLLOW_PATH = traveler (rides a stroke on its own clock),
+TRIGGER = proximity zone (tested against every traveler, including
+legacy score cursors). Also COPY_LOCATION/ROTATION/SCALE, TRACK_TO,
+LIMIT_DISTANCE, SHRINKWRAP, FLOOR, SPRING. Properties editor is now a
+vertical icon-tab column (Blender look) with a Constraints tab (⛓️) and
+the grouped Add Object Constraint dropdown. Drag-along-path:
+widget-dragging a Follow Path object re-projects onto its stroke and
+edits the phase instead of pulling it off the path. Shift+A opens an
+Add menu at the mouse; on-stroke detection spawns travelers/triggers at
+the clicked arc-length position. Object target fields (constraint
+targets, and reusable anywhere else) got a Blender-style picker:
+eyedropper (crosshair pick-mode via App.pickObject) + dropdown + editable
+name field (src/app/ui.ts objectPickerField()).
+NOT migrated: legacy score.cursors/score.triggers still run side by
+side with the new constraint system — nothing auto-converts, and only
+constraint-based travelers support drag-along-path.
+
+Where next: N8 splat nibs (needs the atlas/Spark spikes above); rest of
+PRD §1b vision items (worker fill, stamp instancing, texture stamps,
+curve edit); consider migrating legacy score cursors/triggers onto the
+constraint system now that it's proven out, to collapse the two
+parallel traveler/trigger implementations into one.

@@ -126,32 +126,65 @@ the browser console or automated evals:
   unlit/doubleSided/billboard) instead.
 - `setPointerCapture` is wrapped in `App.capture()` (throws on synthetic
   pointer ids) — use it, never call setPointerCapture directly.
-- Object mode: unified selection over GP/canvas/splat/mesh objects lives
-  in `src/tools/objects.ts`; the TransformControls widget applies DELTAS
-  from a proxy at the pivot (see App.applyWidgetDrag). GP object-group
-  transforms are re-applied every frame in the loop (the renderer only
-  sets them on rebuild). Mesh objects need the scene lights.
+- Object mode: unified selection over GP/canvas/splat/mesh/trigger
+  objects lives in `src/tools/objects.ts` (`ObjKind`, includes
+  `'TRIGGER'`); the TransformControls widget applies DELTAS from a proxy
+  at the pivot (see `App.applyWidgetDrag`). GP object-group transforms
+  are re-applied every frame in the loop (the renderer only sets them on
+  rebuild). Mesh objects need the scene lights.
+- **Pointer listener order matters for hijacking a button/modifier
+  combo**: `OrbitControls` registers its own `pointerdown` at
+  construction, before `App.bindEvents` runs. A same-phase (bubble)
+  listener added later CANNOT stop a control OrbitControls already
+  claimed that pointer event for (e.g. RIGHT = PAN) — you must add a
+  **capture-phase** listener with `stopImmediatePropagation()` to
+  intercept it first. See the Shift+RMB cursor-drag handler in
+  `main.ts` for the pattern.
+- Object constraints (`src/score/constraints.ts`, `TGConstraint` on
+  GP/mesh/splat/trigger) run in their own `ConstraintEngine.update()`
+  pass AFTER `ScoreEngine.update()` in the frame loop — order matters
+  because TRIGGER constraints test proximity against travelers gathered
+  during that same pass (FOLLOW_PATH objects + legacy score cursors).
+  Legacy `score.cursors`/`score.triggers` are a SEPARATE system that
+  still runs in parallel; don't assume one implies the other.
+- Background-tab rAF throttle (see Testing above) applies to constraint
+  verification too — drive `constraintEngine.update(...)` and
+  `score.update(...)` manually in a loop rather than awaiting wall-clock
+  frames when testing FOLLOW_PATH/TRIGGER behavior headlessly.
 
 ## Where to pick up (roadmap, rough priority)
 
-0. **NPR brush engine** (current focus — see PLAN.md "NPR brush engine"):
-   scene-unit widths, per-stroke style (stamp/spacing/angle/aspect/grain),
-   stamp rendering with procedural grain, brush presets. Stroke appearance
-   params must be BAKED onto the stroke (`GPStroke`), not read from live
-   brush settings, so finished strokes keep their look.
-1. **Perf pass** (before heavy scenes): incremental/dirty-region geometry
-   rebuilds in `GPSceneRenderer` (currently full rebuild), instanced
-   segments, worker-side bucket fill. Stamp brushes multiply vertex count —
-   this becomes urgent once NPR brushes land.
-2. **Camera bookmark transitions**: eased "jump to camera N over t seconds"
-   action for live performance (nav has `startAnim` easing to build on).
-3. **Mental-Canvas gestures**: grabbable canvas planes (drag/rotate in
-   viewport instead of numeric fields), push/pull strokes between planes,
-   pen+touch simultaneous input.
-4. **Live performance**: MIDI/OSC bindings for brush params, audio-reactive
-   modifier params, timed stroke-replay (action painting playback).
-5. **Parity leftovers** (PLAN.md unchecked): SVG import/export, curve edit
-   mode, armature/lattice parenting.
+NPR brush engine, canvas retirement, object mode, and the N1–N8 Blender-
+parity series are all done — see `docs/HANDOFF.md` "Session log" for the
+full list of what shipped and its detail lives in
+`docs/IMPLEMENTATION_PLAN.md` (one `##` heading per feature, in commit
+order). Don't re-derive status from this file; it drifts, HANDOFF is the
+live source.
+
+Open items, current priority order:
+
+1. **N8 splat nibs** (paint with splats): needs a texture-atlas redesign
+   of the stroke shader first (the shared ShaderMaterial takes per-stroke
+   params via vertex attributes, not per-stroke samplers — see
+   IMPLEMENTATION_PLAN "N8"), then a Spark in-memory splat-construction
+   research spike (existing splat code only reads via `forEachSplat` for
+   PLY export).
+2. **Perf pass** (before heavy scenes): incremental/dirty-region geometry
+   rebuilds in `GPSceneRenderer` (currently full rebuild per dirty
+   layer), instanced segments, worker-side bucket fill.
+3. **Legacy traveler/trigger consolidation**: `score.cursors` /
+   `score.triggers` (Bindings tab) and the new constraint system
+   (`src/score/constraints.ts`, FOLLOW_PATH/TRIGGER on any object) run
+   side by side. Now that constraints are proven out, consider migrating
+   the legacy entities onto constraints to collapse the duplication.
+4. **Camera bookmark transitions**: eased "jump to camera N over t
+   seconds" action for live performance (nav has `startAnim` easing to
+   build on).
+5. **Live performance**: audio-reactive modifier params, timed
+   stroke-replay (action painting playback) — MIDI/OSC binding already
+   exists via routes.
+6. **Parity leftovers** (PLAN.md unchecked): SVG import/export, curve
+   edit mode, armature/lattice parenting.
 
 ## Repo hygiene
 

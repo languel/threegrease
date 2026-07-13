@@ -43,14 +43,16 @@ npm run dev     # open http://localhost:5199
 - **Navigation & QoL**: Blender-style *Emulate Numpad* (digit-row view keys)
   and *Emulate 3 Button Mouse* (Alt+drag orbit / +Shift pan / +Ctrl zoom —
   trackpad friendly), clickable axis gizmo with animated view transitions,
-  ortho/perspective toggle, flythrough mode (`~`), **canvas planes**
-  (drawable quads placed at the 3D cursor — raycast targets for Surface
-  placement), and **Stroke placement** with All/End/First-point targets so
-  new strokes inherit depth from existing ones (grow forms in 3D) — depth
-  snaps to the nearest stroke only (against stroke *segments*, with a live
-  HUD indicator showing the anchor point) and holds while drawing past its
-  edges. The 3D cursor (`Shift+RMB`) has snap modes: Plane, Grid, nearest
-  Stroke point, Selection center.
+  ortho/perspective toggle, flythrough mode (`~`), **reference planes**
+  (textured quads — world/face-view/camera-locked, optional raycast target
+  for Surface placement), and **Stroke placement** with All/End/First-point
+  targets so new strokes inherit depth from existing ones (grow forms in
+  3D) — depth snaps to the nearest stroke only (against stroke *segments*,
+  with a live HUD indicator showing the anchor point) and holds while
+  drawing past its edges. The 3D cursor (`Shift+RMB`, drag to move it
+  continuously) follows the single global magnet — off moves freely on the
+  drawing plane, on snaps to Grid (the visible floor, Blender-style),
+  Stroke point, Object origin, or Surface (mesh/3DGS raycast).
 - **Presentation / performance mode** (`P`): all UI panels, grid, gizmo and
   overlays disappear — just rendered strokes on a solid background while
   every shortcut keeps working. Made for live drawing.
@@ -81,10 +83,28 @@ npm run dev     # open http://localhost:5199
   Blender-lite per-object Material panel — color, opacity, texture,
   unlit, two-sided, wireframe, world/face-view/camera lock, draw-target
   flag. Old canvas planes migrate automatically into these.
-- **Magnet snapping** (`Shift+Tab` or 🧲 in the edit topbar): during moves,
-  snap the selection to grid increments, the nearest stroke point, or a
-  point on a canvas plane. Cursor grid-snap works within the drawing plane
-  (no more off-plane jumps to the invisible 3D lattice).
+- **Magnet snapping** (`Shift+Tab` or 🧲 in the topbar, works in every
+  mode): one setting drives point moves (Edit `G/R/S`), the object
+  translate widget (Object mode), and the 3D cursor drag (`Shift+RMB`).
+  Targets: grid increments (the visible floor, Blender-style), nearest
+  stroke point, nearest object origin, or a mesh/3DGS surface.
+- **Object mode**: unified selection/transform over GP objects, meshes,
+  splats, and triggers — outliner with hierarchy/parenting/drag-to-parent,
+  a right-click context menu (viewport or outliner row) with Set Origin,
+  Mirror, Clear, Apply, and Snap submenus, and a save/instance asset
+  library.
+- **Constraints** (Constraints tab, vertical icon column like Blender's
+  Properties editor): any object can carry a stack — *Follow Path* rides
+  a GP stroke on its own clock (making the object a "traveler"), *Trigger*
+  turns an object's origin into a proximity zone, plus Copy
+  Location/Rotation/Scale, Track To, Limit Distance, Shrinkwrap, Floor,
+  and Spring. Grab a Follow Path object with the transform widget and drag
+  it *along* its path to retime it. Object/target fields have a Blender-
+  style picker: eyedropper, dropdown, or type a name.
+- **MediaMime bridge**: live tracked-landmark positions (from
+  [mediamime](https://github.com/languel/mediamime) or any sender) arrive
+  over the WS/OSC bridge and can rig any object's translation, or spawn a
+  trigger at a landmark, from the MediaMime menu/panel.
 
 See [PLAN.md](PLAN.md) for the feature checklist against the Blender manual.
 The project brief lives in [docs/PRD.md](docs/PRD.md) (platform vision:
@@ -104,15 +124,16 @@ defaults — open Settings (`,`) to rebind any of them.
 | `1–5` / `Tab` | modes (Draw/Edit/Sculpt/Vertex/Weight; Tab toggles Draw↔Edit) |
 | `D/E/F` | draw / erase / fill tools |
 | `G/R/S` + `X/Y/Z` | move/rotate/scale with axis lock (Edit) |
-| `A` / `Shift+A` / `Ctrl+I` / `L` | select all / none / invert / linked |
+| `A` / `Alt+A` / `Ctrl+I` / `L` | select all / none / invert / linked |
+| `Shift+A` | Add menu at the mouse (objects, or a traveler/trigger *on* the stroke under the pointer) |
 | `X` | delete selected · `Shift+D` duplicate |
 | `Ctrl+C/V` `Ctrl+Z` | copy/paste, undo |
 | `Ctrl+S` / `Ctrl+O` | save / open scene |
-| `Alt+A` | deselect all (Blender parity) |
 | `Home` / `Shift+C` | frame all / center cursor & frame all |
 | `I` / `Shift+I` | insert / remove keyframe |
 | `Space` `←→` `↑↓` | play, step frame, jump keyframe |
-| MMB / RMB | orbit / pan · `Shift+RMB` place 3D cursor |
+| MMB / RMB | orbit / pan · `Shift+RMB` drag-place the 3D cursor (snaps per the magnet) · plain `RMB` opens the object context menu |
+| `Shift+T` / `Shift+G` | add a trigger at the 3D cursor / add a traveler on the nearest stroke |
 | `Alt+LMB` | orbit (trackpad) · `+Shift` pan · `+Ctrl/Cmd` zoom |
 | two-finger drag | orbit · `+Shift` pan · `+Ctrl`/pinch zoom |
 | `1/3/7` | front/right/top view (`Ctrl` = opposite) · `9` flip |

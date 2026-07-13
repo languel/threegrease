@@ -525,6 +525,18 @@ commit each; typecheck+build always, deep verification only when cheap.
   both persp and ortho (updateCursorMarker in the render loop).
 
 
+## Grid snap = the visible floor grid  **[SHIPPED aa3ae18]**
+- Bug: INCREMENT snap rounded on a lattice laid over the CURRENT DRAWING
+  PLANE (view-aligned by default), so the cursor snapped to an invisible
+  grid floating in front of the camera instead of the visible floor.
+- Fix: raycast the world ground plane (X·Y for Z-up, X·Z for Y-up) and
+  round the two in-plane coordinates. Grazing views (front/side, floor
+  edge-on and unhittable) fall back to the drawing-plane lattice, which
+  in those views IS the vertical grid Blender shows in ortho.
+- Verified live two ways: perspective drag landed on z=0 with x/y on the
+  0.5 lattice at every sampled step; front-view drag held y constant
+  with x/z on-lattice.
+
 ## Constraint system (Blender-style)  **[SHIPPED c1b511d..a8df48f]**
 - ANY object can now be a traveler or a trigger: per-object constraint
   stack (TGConstraint on GP/mesh/splat/trigger, src/score/constraints.ts,
@@ -546,3 +558,20 @@ commit each; typecheck+build always, deep verification only when cheap.
   auto-converted to constraints (both systems run side by side); legacy
   score-cursor glyphs cannot be dragged along paths (only constraint
   travelers can).
+
+## Blender-style object target picker  **[SHIPPED 812db3e]**
+- Constraint targets (and any future "pick an object" control) get three
+  ways in, matching Blender's object field: an eyedropper (App.pickObject
+  arms crosshair pick-mode; next viewport click resolves via the
+  existing ObjectSelectTool.pick() raycast/proximity logic; Esc cancels),
+  a dropdown of every GP/mesh/splat/trigger in the scene (self excluded),
+  and an editable name field (exact-match on commit; an unmatched name
+  reverts instead of silently clearing the target).
+- src/app/ui.ts objectPickerField() is the reusable widget; the
+  constraint panel's targetField() now just delegates to it. The
+  MediaMime rig-target dropdown is the obvious next thing to upgrade to
+  this widget if wanted — not done yet, kept as its own simpler flow.
+- Verified live: armed the eyedropper, synthetic click on a sphere set
+  the constraint target to that exact mesh id and the cursor reverted
+  from crosshair; typing a valid object name retargeted it; typing a
+  bogus name reverted the field rather than nulling the target.

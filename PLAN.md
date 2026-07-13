@@ -133,9 +133,12 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 ### Blender parity gaps spotted in use (reference screenshots 2026-07-06)
 - [x] Drawing Plane: "Cursor" option (plane through the 3D cursor)
 - [x] Surface placement: Offset distance (project-onto-selected pending)
-- [ ] Brush Advanced: Size Unit (View px vs Scene world units), Spacing,
-      Angle/Factor, Aspect X/Y (see Blender's Ink Pen Rough panel)
-- [ ] Draw on real mesh surfaces (cube etc.), not just canvas planes
+- [x] Brush Advanced: Size Unit (View px vs Scene world units), Spacing,
+      Angle/Factor, Aspect X/Y (see Blender's Ink Pen Rough panel) — done
+      as part of the NPR brush engine below (StrokeStyle)
+- [x] Draw on real mesh surfaces (cube etc.), not just canvas planes —
+      SURFACE placement raycasts TGMesh/TGSplat draw targets
+      (`ctx.surfaces`); canvas planes themselves are retired
 
 ## NPR brush engine (the current focus)
 Goal: expressive natural-media brushes (ink, charcoal, marker, airbrush)
