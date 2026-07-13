@@ -575,3 +575,27 @@ commit each; typecheck+build always, deep verification only when cheap.
   the constraint target to that exact mesh id and the cursor reverted
   from crosshair; typing a valid object name retargeted it; typing a
   bogus name reverted the field rather than nulling the target.
+
+
+## Blender G/R/S modal transform (object mode)  **[SHIPPED d0374cc]**
+- src/tools/objectmodal.ts: the primary transform interface is now the
+  Blender modal, not the gizmo. G/R/S -> mouse drives, LMB/Enter
+  confirm, RMB/Esc cancel-and-restore. X/Y/Z axis lock, Shift+axis =
+  plane lock, same key clears. G/R/S switch mid-modal, RR = trackball,
+  digits = exact numeric (G X 2 / R Z 45 / S 3), Shift = precision.
+- Ctrl INVERTS the global magnet during the gesture (both directions).
+  Move snaps per magnet mode (grid / stroke point / object origin /
+  surface); rotate 5-degree steps; scale 0.1 steps. This enables the
+  "make an object, snap to stroke, attach to a GP, set as trigger" flow.
+- App.applyWorldDelta() extracted from applyWidgetDrag — one shared
+  path for gizmo + modal, so parenting and Follow-Path drag-as-phase-
+  edit behave identically in both.
+- Gizmo hidden by default (settings.showGizmo pref, topbar 🧭 toggle in
+  object mode + settings checkbox); orange outline + origin dot remain.
+  During a modal: Blender-style header overlay (Dx/Dy/Dz (len), angle,
+  scale, 🧲 flag) + modifier hints in the status bar.
+- Capture-phase pointerdown claims the confirm/cancel click before
+  OrbitControls (same pattern as the Shift+RMB cursor drag).
+- Not done: local-axis orientation on double axis-press (X X in
+  Blender), B set-snap-base, automatic-constraint MMB. Edit-mode point
+  modal (tools/transform.ts) still has its own simpler implementation.

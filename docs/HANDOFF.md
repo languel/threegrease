@@ -300,6 +300,14 @@ NOT migrated: legacy score.cursors/score.triggers still run side by
 side with the new constraint system — nothing auto-converts, and only
 constraint-based travelers support drag-along-path.
 
+**Blender G/R/S modal transform** — src/tools/objectmodal.ts: object
+mode now transforms Blender-style (G/R/S, axis/plane locks, RR
+trackball, numeric input, Shift precision, Ctrl inverts the magnet
+mid-gesture); gizmo hidden behind the new showGizmo pref (topbar 🧭);
+header overlay + status hints during the modal; shared
+App.applyWorldDelta() so gizmo and modal apply deltas identically
+(parenting + Follow-Path leash).
+
 Where next: N8 splat nibs (needs the atlas/Spark spikes above); rest of
 PRD §1b vision items (worker fill, stamp instancing, texture stamps,
 curve edit); consider migrating legacy score cursors/triggers onto the
