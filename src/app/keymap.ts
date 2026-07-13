@@ -45,6 +45,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'delete', label: 'Delete selected', combo: 'x', category: 'Edit' },
   { id: 'duplicate', label: 'Duplicate', combo: 'shift+d', category: 'Edit' },
   { id: 'toggleSnap', label: 'Toggle magnet snapping', combo: 'shift+tab', category: 'Edit' },
+  { id: 'addMenu', label: 'Add menu (at mouse)', combo: 'shift+a', category: 'General' },
   { id: 'addTriggerAtCursor', label: 'Add trigger at 3D cursor', combo: 'shift+t', category: 'General' },
   { id: 'addTravelerNearestStroke', label: 'Add traveler on nearest stroke', combo: 'shift+g', category: 'General' },
   { id: 'copy', label: 'Copy strokes', combo: 'ctrl+c', category: 'Edit' },

@@ -25,7 +25,7 @@ import {
   downloadScene, downloadText, importGPObjects, openSceneFile,
   remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
-import { drawingPlane, nearestStrokePoint, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
+import { drawingPlane, nearestStrokePoint, objectToScreen, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
@@ -35,7 +35,7 @@ import { mediamime } from '../io/mediamime';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { defaultCursor, ScoreEngine, scoreId } from '../score/engine';
-import { constraintEngine, constraintsOf } from '../score/constraints';
+import { constraintEngine, constraintsOf, createConstraint } from '../score/constraints';
 import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
@@ -762,6 +762,7 @@ class App implements AppHandle {
         }
         break;
       }
+      case 'addMenu': this.openAddMenu(); break;
       case 'addTriggerAtCursor': this.addTriggerAtCursor(); break;
       case 'addTravelerNearestStroke': this.addTravelerNearestStroke(); break;
       case 'inspector': this.ui.toggleInspector(); break;
@@ -1395,6 +1396,107 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** Shift+A (Blender): Add menu anchored at the mouse. The spawn point
+   *  is the nearest stroke point under the pointer (within 60px) if any —
+   *  so adding a traveler/trigger while drawing a path lands ON the path —
+   *  else the pointer projected onto the drawing plane. */
+  openAddMenu(): void {
+    const ctx = this.ctx;
+    const px = this.tools.lastPointer;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const clientX = px.x + rect.left, clientY = px.y + rect.top;
+    const strokeHit = nearestStrokePoint(ctx, px.x, px.y, 60);
+    const world = strokeHit ?? screenToWorld(ctx, clientX, clientY);
+    if (!world) return;
+    const at: [number, number, number] = [world.x, world.y, world.z];
+    this.ui.openContextMenu(clientX, clientY, [
+      { header: strokeHit ? 'Add — on stroke' : 'Add — at pointer' },
+      { label: '🚶 Traveler here', do: () => this.addTravelerObjectAt(at, px.x, px.y), disabled: !strokeHit },
+      { label: '◎ Trigger here', do: () => this.addTriggerAt(at) },
+      { sep: true },
+      { label: '✏️ Grease Pencil (blank)', do: () => this.addGPObject(at) },
+      { label: '⬛ Plane', do: () => this.addMeshObject('PLANE', undefined, at) },
+      { label: '⬛ Box', do: () => this.addMeshObject('BOX', undefined, at) },
+      { label: '⚪ Sphere', do: () => this.addMeshObject('SPHERE', undefined, at) },
+      { label: '⬭ Cylinder', do: () => this.addMeshObject('CYLINDER', undefined, at) },
+      { sep: true },
+      { label: '⌖ Move 3D cursor here', do: () => { ctx.scene.cursor = at; this.gp.markDirty(); } },
+    ]);
+  }
+
+  addTriggerAt(pos: [number, number, number]): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    const id = scoreId(scene);
+    scene.score.triggers.push({
+      id, name: `Trigger ${id}`, position: [...pos],
+      radius: 0.25, retrigger: true,
+      messages: [{ address: `/trigger/${id}`, argExprs: ['1'] }],
+    });
+    this.ui.refresh();
+  }
+
+  /** Constraint-era traveler: a small sphere with FOLLOW_PATH bound to the
+   *  stroke under the pointer, phase set to where you clicked. */
+  addTravelerObjectAt(at: [number, number, number], screenX: number, screenY: number): void {
+    const scene = this.ctx.scene;
+    const path = this.pathUnderPointer(screenX, screenY);
+    if (!path) return;
+    this.ctx.pushUndo();
+    const id = Date.now() % 1e9;
+    const mesh = createMeshObject(id, 'SPHERE', at);
+    mesh.name = `Traveler ${id % 1000}`;
+    mesh.scale = [0.12, 0.12, 0.12];
+    mesh.color = [1, 0.6, 0.15];
+    mesh.unlit = true;
+    mesh.drawTarget = false;
+    const fp = createConstraint('FOLLOW_PATH');
+    fp.path = path;
+    fp.phase = this.score.nearestPhase(scene, path, new THREE.Vector3(...at)) ?? 0;
+    mesh.constraints = [fp];
+    scene.meshes.push(mesh);
+    this.meshes.sync(scene);
+    this.ui.refresh();
+  }
+
+  /** Nearest stroke (as a PathRef) to a canvas-local pointer position. */
+  private pathUnderPointer(screenX: number, screenY: number): { objectIndex: number; layerId: number; strokeId: number } | null {
+    const scene = this.ctx.scene;
+    const cursor = new THREE.Vector2(screenX, screenY);
+    type Best = { d: number; path: { objectIndex: number; layerId: number; strokeId: number } };
+    let best: Best | null = null as Best | null;
+    const saveActive = scene.activeObject;
+    try {
+      scene.objects.forEach((ob, oi) => {
+        scene.activeObject = oi;
+        for (const layer of ob.layers) {
+          if (layer.hide) continue;
+          const f = frameAt(layer, scene.frame);
+          if (!f) continue;
+          for (const s of f.strokes) {
+            // distance to SEGMENTS in screen space, not just sampled points
+            // (a 2-point stroke has interior area a point test would miss)
+            let prev = objectToScreen(this.ctx, s.points[0].co);
+            for (let i = 1; i < s.points.length; i++) {
+              const next = objectToScreen(this.ctx, s.points[i].co);
+              const ab = next.clone().sub(prev);
+              const len2 = ab.lengthSq();
+              const k = len2 > 1e-9 ? THREE.MathUtils.clamp(cursor.clone().sub(prev).dot(ab) / len2, 0, 1) : 0;
+              const d = prev.clone().addScaledVector(ab, k).distanceTo(cursor);
+              if (d < 60 && (!best || d < best.d)) {
+                best = { d, path: { objectIndex: oi, layerId: layer.id, strokeId: s.id } };
+              }
+              prev = next;
+            }
+          }
+        }
+      });
+    } finally {
+      scene.activeObject = saveActive;
+    }
+    return best?.path ?? null;
+  }
+
   /** Shift+T: drop a trigger sphere at the current 3D cursor. */
   addTriggerAtCursor(): void {
     const scene = this.ctx.scene;
@@ -1546,21 +1648,21 @@ class App implements AppHandle {
     URL.revokeObjectURL(a.href);
   }
 
-  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER', src?: string): void {
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER', src?: string, at?: [number, number, number]): void {
     this.ctx.pushUndo();
     const id = Date.now() % 1e9;
-    this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, [...this.ctx.scene.cursor], src));
+    this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, at ?? [...this.ctx.scene.cursor], src));
     this.meshes.sync(this.ctx.scene);
     this.ui.refresh();
   }
 
   /** Blender Add > Grease Pencil > Blank: new empty GP object at the 3D cursor. */
-  addGPObject(): void {
+  addGPObject(at?: [number, number, number]): void {
     const scene = this.ctx.scene;
     this.ctx.pushUndo();
     const n = scene.objects.length + 1;
     const ob = createObject(`GreasePencil${n}`);
-    ob.translation = [...scene.cursor];
+    ob.translation = at ?? [...scene.cursor];
     scene.objects.push(ob);
     scene.activeObject = scene.objects.length - 1;
     setObjectSelected(scene, { kind: 'GP', id: ob.id }, true);
