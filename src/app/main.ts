@@ -35,6 +35,7 @@ import { mediamime } from '../io/mediamime';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { defaultCursor, ScoreEngine, scoreId } from '../score/engine';
+import { constraintEngine } from '../score/constraints';
 import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';

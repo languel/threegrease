@@ -27,7 +27,7 @@ function fillTemplate(tpl: string, vars: Record<string, number | string>): strin
   return tpl.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? 0));
 }
 
-function fireMessages(
+export function fireMessages(
   source: string, messages: MsgTemplate[], vars: Record<string, number | string>,
 ): void {
   for (const m of messages) {
@@ -115,6 +115,24 @@ export class ScoreEngine {
     };
     this.arcs.set(ref.strokeId, table);
     return table;
+  }
+
+  /** Nearest phase (0..1 arc-length) on a path to a world position —
+   *  used to drag travelers along their stroke. */
+  nearestPhase(scene: GPScene, ref: PathRef, world: THREE.Vector3): number | null {
+    const arc = this.arcTable(scene, ref);
+    if (!arc) return null;
+    let bestI = 0, bestD = Infinity, bestK = 0;
+    for (let i = 1; i < arc.world.length; i++) {
+      const a = arc.world[i - 1], b = arc.world[i];
+      const ab = b.clone().sub(a);
+      const len2 = ab.lengthSq();
+      const k = len2 > 1e-12 ? THREE.MathUtils.clamp(world.clone().sub(a).dot(ab) / len2, 0, 1) : 0;
+      const d = a.clone().addScaledVector(ab, k).distanceToSquared(world);
+      if (d < bestD) { bestD = d; bestI = i; bestK = k; }
+    }
+    const s = arc.cum[bestI - 1] + (arc.cum[bestI] - arc.cum[bestI - 1]) * bestK;
+    return THREE.MathUtils.clamp(s / arc.total, 0, 1);
   }
 
   /** Sample world position + tangent at t in [0,1]. */

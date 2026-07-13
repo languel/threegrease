@@ -120,9 +120,47 @@ export interface GPEffect {
 
 export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER'; id: number }
 
+// ---- object constraints (Blender-style stack, evaluated every frame) ----
+
+export type ConstraintType =
+  | 'FOLLOW_PATH'      // traveler: ride a GP stroke on its own clock
+  | 'TRIGGER'          // proximity trigger: fires when a traveler enters
+  | 'COPY_LOCATION' | 'COPY_ROTATION' | 'COPY_SCALE'
+  | 'TRACK_TO'         // aim at a target object
+  | 'LIMIT_DISTANCE'   // clamp within a radius of a target
+  | 'SHRINKWRAP'       // project onto the nearest draw-target surface
+  | 'FLOOR'            // don't sink below the ground plane
+  | 'SPRING';          // damped spring toward a target (physics-lite)
+
+export interface TGConstraint {
+  id: number;
+  type: ConstraintType;
+  name: string;
+  enabled: boolean;
+  influence: number;             // 0..1 blend for transform constraints
+  target?: ParentRef | null;     // COPY_* / TRACK_TO / LIMIT_DISTANCE / SPRING
+  path?: PathRef | null;         // FOLLOW_PATH
+  // FOLLOW_PATH clock
+  phase?: number;
+  speed?: number;
+  loop?: LoopMode;
+  running?: boolean;
+  orient?: boolean;              // align to path tangent
+  // TRIGGER
+  radius?: number;
+  retrigger?: boolean;
+  messages?: MsgTemplate[];
+  // LIMIT_DISTANCE / SPRING / FLOOR / SHRINKWRAP
+  distance?: number;
+  stiffness?: number;
+  damping?: number;
+  offset?: number;
+}
+
 export interface GPObject {
   id: number;              // stable id (parenting, object refs)
   name: string;
+  constraints?: TGConstraint[];
   select?: boolean;        // object-mode selection
   parent?: ParentRef | null;
   layers: GPLayer[];       // index 0 = bottom
@@ -225,6 +263,7 @@ export interface TGTrigger {
    *  parentable primitives (see tools/objects.ts ObjKind 'TRIGGER') */
   select?: boolean;
   parent?: ParentRef | null;
+  constraints?: TGConstraint[];
 }
 
 /** MediaMime (P11): binds a live tracked-landmark address (x,y,z over the
@@ -277,6 +316,7 @@ export interface TGSplat {
   baked?: number[];
   /** raycast target for SURFACE stroke placement (draw on the splat) */
   drawTarget?: boolean;
+  constraints?: TGConstraint[];
 }
 
 /** A mesh scene object: primitive solid, plane, or imported model —
@@ -296,6 +336,7 @@ export interface TGMesh {
   color: Vec3;
   opacity: number;
   parent?: ParentRef | null;
+  constraints?: TGConstraint[];
   // ---- material (Blender-lite, the parts we need) ----
   /** image map (dataURL persists in the scene; URLs allowed) */
   texture?: string | null;

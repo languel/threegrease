@@ -30,15 +30,17 @@ export function deserializeScene(json: string): GPScene {
   for (const trig of scene.score.triggers) {
     trig.select ??= false;
     trig.parent ??= null;
+    trig.constraints ??= [];
   }
   scene.splats ??= [];
   // object-URL sources don't survive reload
   scene.splats = scene.splats.filter((s) => !s.src.startsWith('blob:'));
-  for (const s of scene.splats) { s.select ??= false; s.drawTarget ??= false; }
+  for (const s of scene.splats) { s.select ??= false; s.drawTarget ??= false; s.constraints ??= []; }
   scene.meshes ??= [];
   scene.meshes = scene.meshes.filter((m) => !(m.src ?? '').startsWith('blob:'));
   for (const m of scene.meshes) {
     m.select ??= false;
+    m.constraints ??= [];
     m.texture ??= null;
     if (m.texture?.startsWith('blob:')) m.texture = null; // session-only
     m.unlit ??= false;
@@ -70,6 +72,7 @@ export function deserializeScene(json: string): GPScene {
   scene.canvases = [];
   for (const ob of scene.objects) {
     ob.select ??= false;
+    ob.constraints ??= [];
     ob.id ??= genId();
   }
   // v1 -> v2: strokes gain baked style
