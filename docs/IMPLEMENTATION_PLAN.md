@@ -599,3 +599,18 @@ commit each; typecheck+build always, deep verification only when cheap.
 - Not done: local-axis orientation on double axis-press (X X in
   Blender), B set-snap-base, automatic-constraint MMB. Edit-mode point
   modal (tools/transform.ts) still has its own simpler implementation.
+
+
+## Fix: stroke-point snap only searched the active GP object  **[SHIPPED 9ce61f2]**
+- gatherDepthCandidates() (projection.ts) is scoped to activeObject() by
+  design (draw-time depth sampling), but every magnet/cursor POINT-snap
+  call site routed through it too, so snapping silently ignored every
+  GP object except whichever one was active - explains the reported
+  "picks a random stroke and won't attach to any other" behavior.
+- New nearestStrokePointAll(ctx, x, y, radius, scope) scans every
+  scene.objects entry directly; scope ANY (default) or SELECTED.
+  settings.snap.strokeScope wired into object modal, EDIT-mode point
+  transform, and 3D-cursor drag - one shared setting, topbar dropdown
+  shown when magnet mode is Stroke point.
+- Verified against the exact reported scenario: two GP objects, only
+  one active, dragging a mesh snapped onto the INACTIVE object's stroke.
