@@ -340,13 +340,15 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
-  /** Place the 3D cursor with the active snap mode (plane/grid/stroke/selection). */
+  /** Place the 3D cursor. Snapping follows the global magnet (Blender
+   *  semantics): magnet off = free move on the drawing plane; magnet on =
+   *  snap per its mode (grid / stroke point / object origin / surface). */
   private placeCursor(clientX: number, clientY: number): void {
     const ctx = this.ctx;
     const rect = ctx.canvas.getBoundingClientRect();
-    const snap = ctx.settings.cursorSnap;
+    const snap = ctx.settings.snap;
 
-    if (snap === 'STROKE') {
+    if (snap.enabled && snap.mode === 'POINT') {
       const hit = nearestStrokePoint(ctx, clientX - rect.left, clientY - rect.top, 60);
       if (hit) {
         ctx.scene.cursor = [hit.x, hit.y, hit.z];
@@ -355,7 +357,7 @@ class App implements AppHandle {
       }
       // no stroke nearby: fall through to plane placement
     }
-    if (snap === 'SURFACE') {
+    if (snap.enabled && (snap.mode === 'SURFACE' || snap.mode === 'CANVAS')) {
       const hit = raycastSurfaces(ctx, clientX, clientY);
       if (hit) {
         ctx.scene.cursor = [hit.x, hit.y, hit.z];
@@ -364,7 +366,7 @@ class App implements AppHandle {
       }
       // nothing under the pointer: fall through to plane placement
     }
-    if (snap === 'OBJECT') {
+    if (snap.enabled && snap.mode === 'OBJECT') {
       // nearest object origin in screen space
       const w = rect.width, h = rect.height;
       let best: THREE.Vector3 | null = null;
@@ -384,34 +386,9 @@ class App implements AppHandle {
         return;
       }
     }
-    if (snap === 'SELECTION') {
-      const med = new THREE.Vector3();
-      let n = 0;
-      const ob = activeObject(ctx.scene);
-      for (const layer of ob.layers) {
-        if (layer.hide) continue;
-        const f = frameAt(layer, ctx.scene.frame);
-        if (!f) continue;
-        for (const s of f.strokes) for (const p of s.points) {
-          if (p.select) { med.add(new THREE.Vector3(...p.co)); n++; }
-        }
-      }
-      if (n > 0) {
-        med.divideScalar(n);
-        const m = new THREE.Matrix4().compose(
-          new THREE.Vector3(...ob.translation),
-          new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
-          new THREE.Vector3(...ob.scale),
-        );
-        med.applyMatrix4(m);
-        ctx.scene.cursor = [med.x, med.y, med.z];
-        this.gp.markDirty();
-        return;
-      }
-    }
     const world = screenToWorld(ctx, clientX, clientY);
     if (!world) return;
-    if (snap === 'GRID') {
+    if (snap.enabled && snap.mode === 'INCREMENT') {
       // snap within the placement plane (not the invisible 3D lattice —
       // rounding all axes would pull the cursor off the plane)
       const g = ctx.settings.gridStep;
@@ -545,6 +522,19 @@ class App implements AppHandle {
   private bindEvents(canvas: HTMLCanvasElement): void {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
+    // Shift+RMB = drag the 3D cursor. MUST run in the capture phase:
+    // OrbitControls registered its own pointerdown first (RIGHT = PAN),
+    // so a bubble-phase listener can't stop the camera from panning
+    // underneath the cursor drag.
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.button !== 2 || !e.shiftKey || this.nav.flying) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      this.cursorDrag = true;
+      this.placeCursor(e.clientX, e.clientY);
+      this.capture(e);
+    }, { capture: true });
+
     canvas.addEventListener('pointerdown', (e) => {
       (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer = this.toolEvent(e);
       if (this.nav.flying) {
@@ -565,13 +555,6 @@ class App implements AppHandle {
           x: te0.x, y: te0.y,
         };
         this.capture(e);
-        return;
-      }
-      if (e.button === 2 && e.shiftKey) {
-        this.cursorDrag = true;
-        this.placeCursor(e.clientX, e.clientY);
-        this.capture(e);
-        e.preventDefault();
         return;
       }
       if (e.button === 2) {
@@ -1706,22 +1689,58 @@ class App implements AppHandle {
     }
   }
 
+  /** Blender-style 3D cursor: red/white dashed ring + crosshair ticks,
+   *  billboarded and kept at constant screen size in the render loop. */
   private makeCursorMarker(): THREE.Group {
     const g = new THREE.Group();
-    const mat = new THREE.LineBasicMaterial({ color: 0xd05555, depthTest: false });
-    const mkLine = (a: THREE.Vector3, b: THREE.Vector3) => {
-      const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-      const line = new THREE.Line(geo, mat);
-      line.renderOrder = 20000;
-      return line;
-    };
-    const r = 0.08;
-    g.add(
-      mkLine(new THREE.Vector3(-r, 0, 0), new THREE.Vector3(r, 0, 0)),
-      mkLine(new THREE.Vector3(0, -r, 0), new THREE.Vector3(0, r, 0)),
-      mkLine(new THREE.Vector3(0, 0, -r), new THREE.Vector3(0, 0, r)),
+    const SEG = 32;
+    const ringPts = (r: number) => Array.from({ length: SEG + 1 }, (_, i) => {
+      const a = (i / SEG) * Math.PI * 2;
+      return new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, 0);
+    });
+    const R = 1; // unit radius; loop scales to px
+    const white = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(ringPts(R)),
+      new THREE.LineBasicMaterial({ color: 0xf2f2f2, depthTest: false }),
     );
+    const red = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(ringPts(R)),
+      new THREE.LineDashedMaterial({ color: 0xd04848, depthTest: false, dashSize: R * 0.35, gapSize: R * 0.35 }),
+    );
+    red.computeLineDistances();
+    // crosshair ticks poking out past the ring (screen-plane, like Blender)
+    const tickMat = new THREE.LineBasicMaterial({ color: 0x2a2a2a, depthTest: false });
+    const tick = (a: THREE.Vector3, b: THREE.Vector3) =>
+      new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), tickMat);
+    const t0 = R * 0.55, t1 = R * 1.6;
+    g.add(
+      white, red,
+      tick(new THREE.Vector3(t0, 0, 0), new THREE.Vector3(t1, 0, 0)),
+      tick(new THREE.Vector3(-t0, 0, 0), new THREE.Vector3(-t1, 0, 0)),
+      tick(new THREE.Vector3(0, t0, 0), new THREE.Vector3(0, t1, 0)),
+      tick(new THREE.Vector3(0, -t0, 0), new THREE.Vector3(0, -t1, 0)),
+    );
+    g.traverse((o) => { o.renderOrder = 20000; });
     return g;
+  }
+
+  /** Face the camera and hold ~10px screen radius (persp and ortho). */
+  private updateCursorMarker(): void {
+    const cam = this.nav.active;
+    const m = this.cursorMarker;
+    m.quaternion.copy(cam.quaternion);
+    const PX = 10;
+    const vpH = this.ctx.canvas.clientHeight || 1;
+    let worldPerPx: number;
+    if ((cam as THREE.PerspectiveCamera).isPerspectiveCamera) {
+      const persp = cam as THREE.PerspectiveCamera;
+      const dist = persp.position.distanceTo(m.position);
+      worldPerPx = (2 * dist * Math.tan(THREE.MathUtils.degToRad(persp.fov) / 2)) / vpH;
+    } else {
+      const ortho = cam as THREE.OrthographicCamera;
+      worldPerPx = (ortho.top - ortho.bottom) / ortho.zoom / vpH;
+    }
+    m.scale.setScalar(Math.max(1e-6, worldPerPx * PX));
   }
 
   private resize(): void {
@@ -1829,6 +1848,7 @@ class App implements AppHandle {
       }
     }
     this.cursorMarker.position.set(...ctx.scene.cursor);
+    this.updateCursorMarker();
 
     // hide groups whose object has active effects; composite them after
     const fxJobs: { group: THREE.Group; obIndex: number }[] = [];

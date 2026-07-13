@@ -3,7 +3,7 @@ import type { CanvasPlane, GPPoint, Vec3 } from '../core/types';
 import { falloff } from '../core/mathutil';
 import type { AppCtx } from './context';
 import { forEachEditableStroke, selectedPoints } from './select';
-import { nearestStrokePoint, objectToScreen, objectToWorld, pickCanvas, screenToWorld, worldToObject } from './projection';
+import { nearestStrokePoint, objectToScreen, objectToWorld, pickCanvas, raycastSurfaces, screenToWorld, worldToObject } from './projection';
 import { allRefs, worldMatrixOf } from './objects';
 
 type TransformKind = 'move' | 'rotate' | 'scale' | 'shear';
@@ -159,9 +159,11 @@ export class ModalTransform {
     } else if (snap.mode === 'POINT') {
       const world = nearestStrokePoint(ctx, pointer.x, pointer.y, 40);
       if (world) target = worldToObject(ctx, world);
-    } else if (snap.mode === 'CANVAS') {
-      const hit = pickCanvas(ctx, pointer.x, pointer.y);
-      if (hit) target = worldToObject(ctx, hit.point);
+    } else if (snap.mode === 'SURFACE' || snap.mode === 'CANVAS') {
+      const rect = ctx.canvas.getBoundingClientRect();
+      const hit = raycastSurfaces(ctx, pointer.x + rect.left, pointer.y + rect.top)
+        ?? pickCanvas(ctx, pointer.x, pointer.y)?.point;
+      if (hit) target = worldToObject(ctx, hit);
     } else if (snap.mode === 'OBJECT') {
       const rect = ctx.canvas.getBoundingClientRect();
       let best: THREE.Vector3 | null = null;

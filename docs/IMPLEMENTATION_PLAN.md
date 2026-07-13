@@ -502,3 +502,24 @@ commit each; typecheck+build always, deep verification only when cheap.
   nearest stroke' — the drag-then-drop workflow: Shift+RMB drags the
   cursor along a stroke or surface, a keypress drops a marker where it
   landed. Both auto-registered in the command palette via the keymap.
+
+
+## 3D cursor: real fix + Blender visual  **[SHIPPED]**
+- The remaining cursor-drag bug: OrbitControls registers its pointerdown
+  at construction (RIGHT = PAN), BEFORE App.bindEvents — so on Shift+RMB
+  the camera pan started first and our bubble-phase handler could never
+  stop it (the camera slid under the cursor drag; looked like broken
+  snapping). Fixed with a capture-phase pointerdown that claims
+  Shift+RMB via stopImmediatePropagation before OrbitControls sees it.
+- Snap unification: the separate cursorSnap setting is RETIRED (removed
+  from Settings/PREF_FIELDS/topbar/settings dialog). The 3D cursor now
+  follows the ONE global magnet, like Blender: magnet off = free move on
+  the drawing plane; magnet on = snap per mode. Magnet modes are now
+  Grid / Stroke point / Object origin / Surface (mesh/3DGS raycast;
+  legacy CANVAS prefs value treated as SURFACE everywhere).
+- Verified with a synthetic Shift+RMB drag, gridStep 0.5: cursor stepped
+  exactly 0 -> 0.5 -> 1.0 AND the camera position was bit-identical
+  before/after (the old code panned it).
+- Cursor visual: Blender-style red/white dashed ring + dark crosshair
+  ticks, billboarded to the view and held at ~10px screen radius for
+  both persp and ortho (updateCursorMarker in the render loop).

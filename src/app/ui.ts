@@ -1,4 +1,4 @@
-import type { AppCtx, CursorSnap, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush, StrokeTarget } from '../tools/context';
+import type { AppCtx, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush, StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
@@ -500,16 +500,14 @@ export class UI {
     }
 
     bar.append(el('div', { class: 'sep' }));
-    // Global Snap cluster (Blender parity): 3D-cursor snap always applies;
-    // the magnet (G/R/S in EDIT, the widget in OBJECT) is mode-relevant in
-    // both, so it lives here instead of being EDIT-only.
+    // Global Snap cluster (Blender parity): ONE magnet setting drives
+    // G/R/S point drags (EDIT), the translate widget (OBJECT), and the 3D
+    // cursor (Shift+RMB drag). Magnet off = cursor moves freely on the
+    // drawing plane.
     bar.append(
-      selectField('Cursor snap', s.cursorSnap, [
-        ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SURFACE', 'Surface (mesh/3DGS)'], ['SELECTION', 'Selection'], ['OBJECT', 'Object origin'],
-      ] as [CursorSnap, string][], (v) => { s.cursorSnap = v; this.app.savePrefs(); }),
-      checkbox('🧲 Magnet', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
-      selectField('', s.snap.mode, [
-        ['INCREMENT', 'Grid'], ['POINT', 'Stroke point'], ['OBJECT', 'Object origin'], ['CANVAS', 'Canvas'],
+      checkbox('🧲 Snap', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
+      selectField('', s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode, [
+        ['INCREMENT', 'Grid'], ['POINT', 'Stroke point'], ['OBJECT', 'Object origin'], ['SURFACE', 'Surface (mesh/3DGS)'],
       ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); }),
     );
   }
@@ -1732,9 +1730,6 @@ export class UI {
         checkbox('Emulate 3-Button Mouse (Alt+LMB navigates)', s.emulate3Button, (v) => { s.emulate3Button = v; save(); }),
       ),
       el('div', { class: 'row' },
-        selectField('Cursor snap', s.cursorSnap, [
-          ['PLANE', 'Plane'], ['GRID', 'Grid'], ['STROKE', 'Stroke point'], ['SURFACE', 'Surface (mesh/3DGS)'], ['SELECTION', 'Selection'], ['OBJECT', 'Object origin'],
-        ], (v) => { s.cursorSnap = v as typeof s.cursorSnap; save(); }),
         numField('Grid step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); save(); }),
       ),
       el('div', { class: 'row' },

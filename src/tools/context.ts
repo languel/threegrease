@@ -6,7 +6,6 @@ import type { EditorMode, GPSceneRenderer } from '../render/GPSceneRenderer';
 
 export type PlacementMode = 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'STROKE';
 export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
-export type CursorSnap = 'PLANE' | 'GRID' | 'STROKE' | 'SELECTION' | 'OBJECT' | 'SURFACE';
 export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
 export type EraserMode = 'POINT' | 'STROKE' | 'SOFT';
@@ -53,21 +52,21 @@ export interface Settings {
   background: Vec3;
   emulateNumpad: boolean;   // 1..9 become view keys instead of mode switching
   emulate3Button: boolean;  // Alt+LMB orbits (Shift pan, Ctrl zoom) for trackpads
-  cursorSnap: CursorSnap;   // how Shift+RMB places the 3D cursor
   gridStep: number;
   trackpadNav: boolean;     // two-finger orbit, shift pan, ctrl/pinch zoom
   invertTrackpadOrbit: boolean; // false = Blender direction (default)
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
-  /** Blender-style magnet snapping during transforms. */
-  snap: { enabled: boolean; mode: 'INCREMENT' | 'POINT' | 'CANVAS' | 'OBJECT' };
+  /** Blender-style magnet: one snap setting for transforms AND the 3D
+   *  cursor (Shift+RMB drag). 'CANVAS' is a legacy alias for 'SURFACE'. */
+  snap: { enabled: boolean; mode: 'INCREMENT' | 'POINT' | 'CANVAS' | 'OBJECT' | 'SURFACE' };
 }
 
 // ---- preference persistence (localStorage) --------------------------------
 
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
-  'emulateNumpad', 'emulate3Button', 'cursorSnap', 'gridStep',
+  'emulateNumpad', 'emulate3Button', 'gridStep',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'background', 'snap',
 ] as const;
 
@@ -141,7 +140,6 @@ export function defaultSettings(): Settings {
     background: [0.11, 0.11, 0.12],
     emulateNumpad: true,
     emulate3Button: true,
-    cursorSnap: 'PLANE',
     gridStep: 0.5,
     trackpadNav: true,
     invertTrackpadOrbit: false,
