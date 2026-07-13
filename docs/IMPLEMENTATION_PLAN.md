@@ -614,3 +614,19 @@ commit each; typecheck+build always, deep verification only when cheap.
   shown when magnet mode is Stroke point.
 - Verified against the exact reported scenario: two GP objects, only
   one active, dragging a mesh snapped onto the INACTIVE object's stroke.
+
+
+## Mode pie menu + Edge snap  **[SHIPPED 1634824, f782d2f]**
+- Ctrl+Tab opens a Blender-layout radial mode picker (ui.openModePie):
+  Draw N/8, Sculpt S/2, Object W/4, Edit E/6, Weight NW/7, Vertex NE/9.
+  Click a wedge or press its digit - works as a blind chord too, since
+  Ctrl+Tab opens synchronously and starts listening before the next
+  keydown lands. Tab is no longer hardcoded Draw<->Edit: App tracks a
+  2-slot mode history and toggles back to whatever the previous mode
+  actually was. Object mode gained its first keyboard entry point.
+- Edge snap target added alongside Vertex (renamed from "Stroke
+  point"): projection.ts nearestStrokeEdgeAll() finds the closest point
+  on any stroke SEGMENT (not just its vertices), across every GP object,
+  honoring the same Any/Selected scope. Wired into all three magnet call
+  sites. This is what lets an object snap anywhere along a path, the way
+  travelers already ride it continuously.
