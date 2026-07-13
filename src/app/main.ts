@@ -36,6 +36,7 @@ import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { defaultCursor, ScoreEngine, scoreId } from '../score/engine';
 import { constraintEngine, constraintsOf, createConstraint } from '../score/constraints';
+import { ObjectModalTransform } from '../tools/objectmodal';
 import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
@@ -113,6 +114,8 @@ class App implements AppHandle {
   private rmbDown: { x: number; y: number } | null = null;
   private cursorDrag = false;
   private objectPicking: ((ref: ObjRef | null) => void) | null = null;
+  /** Blender-style G/R/S modal transform for object mode */
+  readonly objModal = new ObjectModalTransform();
   presentation = false;
   cameraView = false;
   lockCamToView = true;
@@ -222,6 +225,8 @@ class App implements AppHandle {
     this.widget.addEventListener('objectChange', () => this.applyWidgetDrag());
     this.widget.enabled = false;
     this.objectPick.onSelectionChange = () => this.refreshWidget();
+    this.objModal.onDelta = (deltaM) =>
+      this.applyWorldDelta(this.objModal.refs, this.objModal.base, deltaM);
     this.axes = this.makeAxes();
     this.scene3.add(this.axes);
     this.applyUpAxis(true);
@@ -551,6 +556,17 @@ class App implements AppHandle {
     // so a bubble-phase listener can't stop the camera from panning
     // underneath the cursor drag.
     canvas.addEventListener('pointerdown', (e) => {
+      // G/R/S modal owns ALL buttons while active: LMB confirms, RMB/others
+      // cancel. Capture phase so OrbitControls (registered first) never pans.
+      if (this.objModal.active) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        if (e.button === 0) this.objModal.confirm();
+        else this.objModal.cancel(this.ctx);
+        this.refreshWidget();
+        this.ui.refresh();
+        return;
+      }
       if (e.button !== 2 || !e.shiftKey || this.nav.flying) return;
       e.stopImmediatePropagation();
       e.preventDefault();
@@ -625,6 +641,10 @@ class App implements AppHandle {
         else if (this.navDrag.mode === 'pan') this.nav.panBy(dx, dy);
         else this.nav.dollyBy(Math.exp(dy * 0.005));
         this.navDrag.x = te.x; this.navDrag.y = te.y;
+        return;
+      }
+      if (this.objModal.active) {
+        this.objModal.update(this.ctx, te, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
         return;
       }
       if (this.modal.active) { this.modal.update(this.ctx, te); return; }
@@ -727,6 +747,22 @@ class App implements AppHandle {
       if (handled) { e.preventDefault(); return; }
     }
 
+    // object-mode G/R/S modal takes precedence over everything
+    if (this.objModal.active) {
+      const om = this.objModal;
+      if (key === 'Escape') { om.cancel(ctx); this.refreshWidget(); this.ui.refresh(); }
+      else if (key === 'Enter') { om.confirm(); this.refreshWidget(); this.ui.refresh(); }
+      else if (key === 'g' || key === 'G') om.switchKind(ctx, 'move');
+      else if (key === 'r' || key === 'R') om.switchKind(ctx, 'rotate');
+      else if (key === 's' || key === 'S') om.switchKind(ctx, 'scale');
+      else if (key === 'x' || key === 'X') om.setAxis(ctx, 'x', e.shiftKey);
+      else if (key === 'y' || key === 'Y') om.setAxis(ctx, 'y', e.shiftKey);
+      else if (key === 'z' || key === 'Z') om.setAxis(ctx, 'z', e.shiftKey);
+      else om.handleNumeric(ctx, key);
+      e.preventDefault();
+      return;
+    }
+
     // modal transform takes precedence
     if (this.modal.active) {
       if (key === 'Escape') { this.modal.cancel(ctx); }
@@ -793,15 +829,15 @@ class App implements AppHandle {
       case 'toolErase': if (ctx.settings.mode === 'DRAW') this.setTool('erase'); break;
       case 'toolFill': if (ctx.settings.mode === 'DRAW') this.setTool('fill'); break;
       case 'move':
-        if (ctx.settings.mode === 'OBJECT') this.setWidgetMode('translate');
+        if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'move', this.tools.lastPointer);
         else if (this.editLike()) this.modal.begin(ctx, 'move', this.tools.lastPointer);
         break;
       case 'rotate':
-        if (ctx.settings.mode === 'OBJECT') this.setWidgetMode('rotate');
+        if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'rotate', this.tools.lastPointer);
         else if (this.editLike()) this.modal.begin(ctx, 'rotate', this.tools.lastPointer);
         break;
       case 'scale':
-        if (ctx.settings.mode === 'OBJECT') this.setWidgetMode('scale');
+        if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'scale', this.tools.lastPointer);
         else if (this.editLike()) this.modal.begin(ctx, 'scale', this.tools.lastPointer);
         break;
       case 'selectAll': if (this.editLike()) { selectAll(ctx, 'all'); this.gp.markDirty(); } break;
@@ -1119,7 +1155,7 @@ class App implements AppHandle {
 
   /** Re-attach the transform widget to the current object selection pivot. */
   refreshWidget(): void {
-    const inObjectMode = this.ctx.settings.mode === 'OBJECT';
+    const inObjectMode = this.ctx.settings.mode === 'OBJECT' && this.ctx.settings.showGizmo;
     const pivot = inObjectMode ? selectionPivot(this.ctx.scene) : null;
     if (pivot) {
       this.widgetProxy.position.copy(pivot);
@@ -1202,8 +1238,22 @@ class App implements AppHandle {
       .multiply(new THREE.Matrix4().makeScale(sDelta.x, sDelta.y, sDelta.z))
       .multiply(new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z));
 
-    base.refs.forEach((ref, i) => {
-      const t0 = base.transforms[i];
+    this.applyWorldDelta(base.refs, base.transforms, deltaM, sDelta);
+  }
+
+  /**
+   * Apply a world-space delta matrix to a set of objects through their
+   * parent inverses. Shared by the gizmo widget and the G/R/S modal —
+   * both get parenting and Follow-Path leashing (drag-as-phase-edit).
+   */
+  private applyWorldDelta(
+    refs: ObjRef[], baseTransforms: ObjTransform[], deltaM: THREE.Matrix4,
+    sDelta = new THREE.Vector3(1, 1, 1),
+  ): void {
+    const scene = this.ctx.scene;
+    refs.forEach((ref, i) => {
+      const t0 = baseTransforms[i];
+      if (!t0) return;
       // world' = deltaM * parentWorld * local0 ; local' = parentWorld^-1 * world'
       const parentM = parentWorldMatrixOf(scene, ref);
       const local0 = new THREE.Matrix4().compose(
@@ -1215,7 +1265,7 @@ class App implements AppHandle {
       const local1 = parentM.clone().invert().multiply(world1);
       const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
       local1.decompose(pos, quat, scl);
-      // Follow Path travelers are leashed to their stroke: a widget drag
+      // Follow Path travelers are leashed to their stroke: a drag
       // re-projects onto the path and becomes a PHASE edit (timing /
       // relative positioning), not a free move
       const fp = constraintsOf(scene, ref).find((k) => k.enabled && k.type === 'FOLLOW_PATH' && k.path);
@@ -2091,6 +2141,23 @@ class App implements AppHandle {
     g.scale(devicePixelRatio, devicePixelRatio);
     this.drawTargetOverlay(g, this.hud.width / devicePixelRatio, this.hud.height / devicePixelRatio);
     this.tools.active?.drawHud?.(this.ctx, g);
+    if (this.objModal.active) {
+      const w = this.hud.width / devicePixelRatio;
+      const kind = this.objModal.trackball ? 'Rotate (trackball)'
+        : this.objModal.kind === 'move' ? 'Move'
+        : this.objModal.kind === 'rotate' ? 'Rotate' : 'Scale';
+      const lock = this.objModal.axis === 'none' ? ''
+        : this.objModal.planeLock ? ` ⟂${this.objModal.axis.toUpperCase()}` : ` ${this.objModal.axis.toUpperCase()}`;
+      g.font = '12px ui-monospace, monospace';
+      g.textAlign = 'center';
+      const line = `${kind}${lock}   ${this.objModal.info}`;
+      const tw = g.measureText(line).width + 20;
+      g.fillStyle = 'rgba(20,20,22,0.85)';
+      g.fillRect(w / 2 - tw / 2, 8, tw, 22);
+      g.fillStyle = '#e8e8ec';
+      g.fillText(line, w / 2, 23);
+      g.textAlign = 'left';
+    }
     // STROKE placement: show which stroke the depth will lock to
     if (this.ctx.settings.mode === 'DRAW' && this.ctx.settings.placement === 'STROKE' && !this.nav.flying) {
       const { x, y } = this.tools.lastPointer;
@@ -2139,7 +2206,9 @@ class App implements AppHandle {
       VERTEX: 'LMB paint vertex color',
       WEIGHT: 'LMB paint weight · Ctrl erases',
     };
-    status.textContent = `${s.mode} — ${s.activeTool} · frame ${this.ctx.scene.frame} · ${hints[s.mode]}`;
+    status.textContent = this.objModal.active
+      ? 'LMB/Enter confirm · RMB/Esc cancel · X/Y/Z axis (Shift+axis = plane, again clears) · G/R/S switch · RR trackball · type a number for exact · Shift precision · Ctrl inverts snap'
+      : `${s.mode} — ${s.activeTool} · frame ${this.ctx.scene.frame} · ${hints[s.mode]}`;
   }
 }
 

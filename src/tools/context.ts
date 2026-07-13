@@ -55,6 +55,9 @@ export interface Settings {
   gridStep: number;
   trackpadNav: boolean;     // two-finger orbit, shift pan, ctrl/pinch zoom
   invertTrackpadOrbit: boolean; // false = Blender direction (default)
+  /** show the transform gizmo widget (hidden by default — G/R/S modal is
+   *  the primary transform interface, Blender-style) */
+  showGizmo: boolean;
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
   /** Blender-style magnet: one snap setting for transforms AND the 3D
@@ -66,7 +69,7 @@ export interface Settings {
 
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
-  'emulateNumpad', 'emulate3Button', 'gridStep',
+  'emulateNumpad', 'emulate3Button', 'gridStep', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'background', 'snap',
 ] as const;
 
@@ -143,6 +146,7 @@ export function defaultSettings(): Settings {
     gridStep: 0.5,
     trackpadNav: true,
     invertTrackpadOrbit: false,
+    showGizmo: false,
     upAxis: 'Z',
     showAxes: false,
     snap: { enabled: false, mode: 'INCREMENT' },

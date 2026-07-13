@@ -432,10 +432,16 @@ export class UI {
 
     if (s.mode === 'OBJECT') {
       bar.append(
-        btn('✥', () => this.app.setWidgetMode('translate'), { active: this.app.widgetMode === 'translate', title: 'Widget: move (G)' }),
-        btn('↻', () => this.app.setWidgetMode('rotate'), { active: this.app.widgetMode === 'rotate', title: 'Widget: rotate (R)' }),
-        btn('⤢', () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
+        btn('🧭', () => { s.showGizmo = !s.showGizmo; this.app.savePrefs(); this.app.refreshWidget(); this.refresh(); },
+          { active: s.showGizmo, title: 'Show transform gizmo (off = Blender-style G/R/S modal only)' }),
       );
+      if (s.showGizmo) {
+        bar.append(
+          btn('✥', () => this.app.setWidgetMode('translate'), { active: this.app.widgetMode === 'translate', title: 'Widget: move (G)' }),
+          btn('↻', () => this.app.setWidgetMode('rotate'), { active: this.app.widgetMode === 'rotate', title: 'Widget: rotate (R)' }),
+          btn('⤢', () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
+        );
+      }
     } else if (s.mode === 'DRAW') {
       bar.append(
         selectField('Brush', s.brush.preset,
@@ -1740,6 +1746,7 @@ export class UI {
       ),
       el('div', { class: 'row' },
         numField('Grid step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); save(); }),
+        checkbox('Show transform gizmo', s.showGizmo, (v) => { s.showGizmo = v; this.app.refreshWidget(); save(); }),
       ),
       el('div', { class: 'row' },
         colorField('Background', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); }),
