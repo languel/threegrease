@@ -6,7 +6,7 @@ import type { EditorMode, GPSceneRenderer } from '../render/GPSceneRenderer';
 
 export type PlacementMode = 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'STROKE';
 export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
-export type CursorSnap = 'PLANE' | 'GRID' | 'STROKE' | 'SELECTION' | 'OBJECT';
+export type CursorSnap = 'PLANE' | 'GRID' | 'STROKE' | 'SELECTION' | 'OBJECT' | 'SURFACE';
 export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
 export type EraserMode = 'POINT' | 'STROKE' | 'SOFT';

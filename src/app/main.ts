@@ -25,7 +25,7 @@ import {
   downloadScene, downloadText, importGPObjects, openSceneFile,
   remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
-import { drawingPlane, nearestStrokePoint, screenToWorld, strokeSnapPreview } from '../tools/projection';
+import { drawingPlane, nearestStrokePoint, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
@@ -110,6 +110,7 @@ class App implements AppHandle {
   private axes!: THREE.Group;
   private gizmoDrag: { x: number; y: number; startX: number; startY: number; dragged: boolean } | null = null;
   private rmbDown: { x: number; y: number } | null = null;
+  private cursorDrag = false;
   presentation = false;
   cameraView = false;
   lockCamToView = true;
@@ -354,6 +355,15 @@ class App implements AppHandle {
       }
       // no stroke nearby: fall through to plane placement
     }
+    if (snap === 'SURFACE') {
+      const hit = raycastSurfaces(ctx, clientX, clientY);
+      if (hit) {
+        ctx.scene.cursor = [hit.x, hit.y, hit.z];
+        this.gp.markDirty();
+        return;
+      }
+      // nothing under the pointer: fall through to plane placement
+    }
     if (snap === 'OBJECT') {
       // nearest object origin in screen space
       const w = rect.width, h = rect.height;
@@ -558,7 +568,9 @@ class App implements AppHandle {
         return;
       }
       if (e.button === 2 && e.shiftKey) {
+        this.cursorDrag = true;
         this.placeCursor(e.clientX, e.clientY);
+        this.capture(e);
         e.preventDefault();
         return;
       }
@@ -579,6 +591,10 @@ class App implements AppHandle {
     canvas.addEventListener('pointermove', (e) => {
       const te = this.toolEvent(e);
       (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer = te;
+      if (this.cursorDrag) {
+        this.placeCursor(e.clientX, e.clientY);
+        return;
+      }
       if (this.gizmoDrag) {
         const dx = te.x - this.gizmoDrag.x, dy = te.y - this.gizmoDrag.y;
         if (Math.hypot(te.x - this.gizmoDrag.startX, te.y - this.gizmoDrag.startY) > 3) {
@@ -605,6 +621,7 @@ class App implements AppHandle {
 
     canvas.addEventListener('pointerup', (e) => {
       if (e.button === 2) {
+        if (this.cursorDrag) { this.cursorDrag = false; return; }
         const down = this.rmbDown;
         this.rmbDown = null;
         if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5

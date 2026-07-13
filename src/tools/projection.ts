@@ -213,6 +213,20 @@ export function drawingPlane(ctx: AppCtx): THREE.Plane {
   return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor);
 }
 
+/** Screen px -> nearest point on any mesh/splat/canvas surface, regardless
+ *  of the current draw-placement mode. Used by 3D-cursor SURFACE snap. */
+export function raycastSurfaces(ctx: AppCtx, x: number, y: number): THREE.Vector3 | null {
+  if (!ctx.surfaces.length) return null;
+  const rect = ctx.canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(
+    ((x - rect.left) / rect.width) * 2 - 1,
+    -((y - rect.top) / rect.height) * 2 + 1,
+  );
+  raycaster.setFromCamera(ndc, ctx.camera);
+  const hits = raycaster.intersectObjects(ctx.surfaces, true);
+  return hits.length ? hits[0].point.clone() : null;
+}
+
 /** Screen px -> point on drawing plane (or surface), in world space. */
 export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 | null {
   const rect = ctx.canvas.getBoundingClientRect();
