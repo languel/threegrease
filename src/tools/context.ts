@@ -65,7 +65,7 @@ export interface Settings {
    *  strokeScope limits POINT snapping to selected strokes only. */
   snap: {
     enabled: boolean;
-    mode: 'INCREMENT' | 'POINT' | 'CANVAS' | 'OBJECT' | 'SURFACE';
+    mode: 'INCREMENT' | 'POINT' | 'EDGE' | 'CANVAS' | 'OBJECT' | 'SURFACE';
     strokeScope?: 'ANY' | 'SELECTED';
   };
 }

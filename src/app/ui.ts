@@ -516,9 +516,10 @@ export class UI {
     bar.append(
       checkbox('🧲 Snap', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
       selectField('', s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode, [
-        ['INCREMENT', 'Grid'], ['POINT', 'Stroke point'], ['OBJECT', 'Object origin'], ['SURFACE', 'Surface (mesh/3DGS)'],
+        ['INCREMENT', 'Grid'], ['POINT', 'Vertex'], ['EDGE', 'Edge (along path)'],
+        ['OBJECT', 'Object origin'], ['SURFACE', 'Surface (mesh/3DGS)'],
       ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); }),
-      ...(s.snap.mode === 'POINT' ? [
+      ...(s.snap.mode === 'POINT' || s.snap.mode === 'EDGE' ? [
         selectField('', s.snap.strokeScope ?? 'ANY', [
           ['ANY', 'Any GP'], ['SELECTED', 'Selected only'],
         ], (v) => { s.snap.strokeScope = v as 'ANY' | 'SELECTED'; this.app.savePrefs(); },
@@ -1824,7 +1825,7 @@ export class UI {
         checkbox('Show transform gizmo', s.showGizmo, (v) => { s.showGizmo = v; this.app.refreshWidget(); save(); }),
       ),
       el('div', { class: 'row' },
-        selectField('Snap to stroke point scope', s.snap.strokeScope ?? 'ANY', [
+        selectField('Snap to stroke scope (vertex/edge)', s.snap.strokeScope ?? 'ANY', [
           ['ANY', 'Any GP object'], ['SELECTED', 'Selected strokes only'],
         ], (v) => { s.snap.strokeScope = v as 'ANY' | 'SELECTED'; save(); }),
       ),

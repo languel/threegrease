@@ -3,7 +3,7 @@ import type { CanvasPlane, GPPoint, Vec3 } from '../core/types';
 import { falloff } from '../core/mathutil';
 import type { AppCtx } from './context';
 import { forEachEditableStroke, selectedPoints } from './select';
-import { nearestStrokePointAll, objectToScreen, objectToWorld, pickCanvas, raycastSurfaces, screenToWorld, worldToObject } from './projection';
+import { nearestStrokeEdgeAll, nearestStrokePointAll, objectToScreen, objectToWorld, pickCanvas, raycastSurfaces, screenToWorld, worldToObject } from './projection';
 import { allRefs, worldMatrixOf } from './objects';
 
 type TransformKind = 'move' | 'rotate' | 'scale' | 'shear';
@@ -158,6 +158,9 @@ export class ModalTransform {
       target = moved.map((v) => Math.round(v / g) * g) as Vec3;
     } else if (snap.mode === 'POINT') {
       const world = nearestStrokePointAll(ctx, pointer.x, pointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
+      if (world) target = worldToObject(ctx, world);
+    } else if (snap.mode === 'EDGE') {
+      const world = nearestStrokeEdgeAll(ctx, pointer.x, pointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
       if (world) target = worldToObject(ctx, world);
     } else if (snap.mode === 'SURFACE' || snap.mode === 'CANVAS') {
       const rect = ctx.canvas.getBoundingClientRect();

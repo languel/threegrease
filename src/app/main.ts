@@ -25,7 +25,7 @@ import {
   downloadScene, downloadText, importGPObjects, openSceneFile,
   remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
-import { drawingPlane, nearestStrokePointAll, objectToScreen, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
+import { drawingPlane, nearestStrokeEdgeAll, nearestStrokePointAll, objectToScreen, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
@@ -373,6 +373,16 @@ class App implements AppHandle {
         return;
       }
       // no stroke nearby: fall through to plane placement
+    }
+    if (snap.enabled && snap.mode === 'EDGE') {
+      // continuous along the path — this is how the cursor rides a stroke
+      // freely instead of jumping vertex to vertex
+      const hit = nearestStrokeEdgeAll(ctx, clientX - rect.left, clientY - rect.top, 60, ctx.settings.snap.strokeScope ?? 'ANY');
+      if (hit) {
+        ctx.scene.cursor = [hit.x, hit.y, hit.z];
+        this.gp.markDirty();
+        return;
+      }
     }
     if (snap.enabled && (snap.mode === 'SURFACE' || snap.mode === 'CANVAS')) {
       const hit = raycastSurfaces(ctx, clientX, clientY);

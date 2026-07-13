@@ -193,6 +193,60 @@ export function nearestStrokePointAll(
 }
 
 /**
+ * Nearest point ANYWHERE along a stroke's line (Blender "Edge" snap target,
+ * as opposed to "Vertex"), across every GP object — the closest point on
+ * each screen-projected segment, unprojected by lerping the segment's two
+ * endpoint world positions. This is what lets a traveler or a dragged
+ * object slide continuously along a path instead of jumping vertex to
+ * vertex.
+ */
+export function nearestStrokeEdgeAll(
+  ctx: AppCtx, screenX: number, screenY: number, radius = 40,
+  scope: 'ANY' | 'SELECTED' = 'ANY',
+): THREE.Vector3 | null {
+  const rect = ctx.canvas.getBoundingClientRect();
+  const projected = new THREE.Vector3();
+  let best: { d: number; world: THREE.Vector3 } | null = null;
+  for (const ob of ctx.scene.objects) {
+    const matrix = new THREE.Matrix4().compose(
+      new THREE.Vector3(...ob.translation),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+      new THREE.Vector3(...ob.scale),
+    );
+    for (const layer of ob.layers) {
+      if (layer.hide) continue;
+      const frame = frameAt(layer, ctx.scene.frame);
+      if (!frame) continue;
+      for (const s of frame.strokes) {
+        if (scope === 'SELECTED' && !s.select && !s.points.some((p) => p.select)) continue;
+        if (s.points.length < 2) continue;
+        const proj = s.points.map((p) => {
+          const world = new THREE.Vector3(...p.co).applyMatrix4(matrix);
+          projected.copy(world).project(ctx.camera);
+          if (projected.z > 1) return null;
+          return { world, sx: (projected.x * 0.5 + 0.5) * rect.width, sy: (-projected.y * 0.5 + 0.5) * rect.height };
+        });
+        const segCount = s.cyclic ? s.points.length : s.points.length - 1;
+        for (let i = 0; i < segCount; i++) {
+          const a = proj[i], b = proj[(i + 1) % s.points.length];
+          if (!a || !b) continue;
+          const abx = b.sx - a.sx, aby = b.sy - a.sy;
+          const len2 = abx * abx + aby * aby;
+          const t = len2 < 1e-9 ? 0 :
+            THREE.MathUtils.clamp(((screenX - a.sx) * abx + (screenY - a.sy) * aby) / len2, 0, 1);
+          const sx = a.sx + abx * t, sy = a.sy + aby * t;
+          const d = Math.hypot(sx - screenX, sy - screenY);
+          if (d < radius && (!best || d < best.d)) {
+            best = { d, world: a.world.clone().lerp(b.world, t) };
+          }
+        }
+      }
+    }
+  }
+  return best?.world ?? null;
+}
+
+/**
  * STROKE placement: snap depth to the nearest existing stroke. Depth is
  * blended only along the stroke that owns the nearest point (no cross-stroke
  * averaging), and while a stroke is being drawn the last good depth is kept
