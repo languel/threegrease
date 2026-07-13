@@ -151,11 +151,45 @@ export function pickCanvas(ctx: AppCtx, x: number, y: number): { id: number; poi
   return null;
 }
 
-/** Nearest existing stroke point (world space) within `radius` px, or null. */
-export function nearestStrokePoint(ctx: AppCtx, screenX: number, screenY: number, radius = 40): THREE.Vector3 | null {
-  const candidates = gatherDepthCandidates(ctx, screenX, screenY, radius, 'ALL');
-  if (!candidates.length) return null;
-  return candidates.reduce((a, b) => (b.d < a.d ? b : a)).world;
+/**
+ * Nearest stroke point across EVERY GP object (gatherDepthCandidates only
+ * looks at the ACTIVE object — right for draw-time depth, wrong for
+ * magnet snapping, where it made snap-to-stroke ignore all other GPs).
+ * scope 'SELECTED' restricts to selected strokes (stroke or any point
+ * selected — set in EDIT mode), so you can mark the path you want first.
+ */
+export function nearestStrokePointAll(
+  ctx: AppCtx, screenX: number, screenY: number, radius = 40,
+  scope: 'ANY' | 'SELECTED' = 'ANY',
+): THREE.Vector3 | null {
+  const rect = ctx.canvas.getBoundingClientRect();
+  const projected = new THREE.Vector3();
+  let best: { d: number; world: THREE.Vector3 } | null = null;
+  for (const ob of ctx.scene.objects) {
+    const matrix = new THREE.Matrix4().compose(
+      new THREE.Vector3(...ob.translation),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+      new THREE.Vector3(...ob.scale),
+    );
+    for (const layer of ob.layers) {
+      if (layer.hide) continue;
+      const frame = frameAt(layer, ctx.scene.frame);
+      if (!frame) continue;
+      for (const s of frame.strokes) {
+        if (scope === 'SELECTED' && !s.select && !s.points.some((p) => p.select)) continue;
+        for (const p of s.points) {
+          const world = new THREE.Vector3(...p.co).applyMatrix4(matrix);
+          projected.copy(world).project(ctx.camera);
+          if (projected.z > 1) continue;
+          const dx = (projected.x * 0.5 + 0.5) * rect.width - screenX;
+          const dy = (-projected.y * 0.5 + 0.5) * rect.height - screenY;
+          const d = Math.hypot(dx, dy);
+          if (d < radius && (!best || d < best.d)) best = { d, world };
+        }
+      }
+    }
+  }
+  return best?.world ?? null;
 }
 
 /**

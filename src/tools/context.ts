@@ -61,8 +61,13 @@ export interface Settings {
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
   /** Blender-style magnet: one snap setting for transforms AND the 3D
-   *  cursor (Shift+RMB drag). 'CANVAS' is a legacy alias for 'SURFACE'. */
-  snap: { enabled: boolean; mode: 'INCREMENT' | 'POINT' | 'CANVAS' | 'OBJECT' | 'SURFACE' };
+   *  cursor (Shift+RMB drag). 'CANVAS' is a legacy alias for 'SURFACE'.
+   *  strokeScope limits POINT snapping to selected strokes only. */
+  snap: {
+    enabled: boolean;
+    mode: 'INCREMENT' | 'POINT' | 'CANVAS' | 'OBJECT' | 'SURFACE';
+    strokeScope?: 'ANY' | 'SELECTED';
+  };
 }
 
 // ---- preference persistence (localStorage) --------------------------------
@@ -149,6 +154,6 @@ export function defaultSettings(): Settings {
     showGizmo: false,
     upAxis: 'Z',
     showAxes: false,
-    snap: { enabled: false, mode: 'INCREMENT' },
+    snap: { enabled: false, mode: 'INCREMENT', strokeScope: 'ANY' },
   };
 }

@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import type { AppCtx } from './context';
 import { getObjectTransform, listSelected, selectionPivot, setObjectTransform, type ObjRef, type ObjTransform } from './objects';
-import { nearestStrokePoint, raycastSurfaces } from './projection';
+import { nearestStrokePointAll, raycastSurfaces } from './projection';
 import { allRefs, worldMatrixOf } from './objects';
 
 export type ObjModalKind = 'move' | 'rotate' | 'scale';
@@ -239,7 +239,7 @@ export class ObjectModalTransform {
       target = new THREE.Vector3(
         Math.round(moved.x / g) * g, Math.round(moved.y / g) * g, Math.round(moved.z / g) * g);
     } else if (mode === 'POINT') {
-      target = nearestStrokePoint(ctx, this.lastPointer.x, this.lastPointer.y, 40);
+      target = nearestStrokePointAll(ctx, this.lastPointer.x, this.lastPointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
     } else if (mode === 'SURFACE' || mode === 'CANVAS') {
       const rect = ctx.canvas.getBoundingClientRect();
       target = raycastSurfaces(ctx, this.lastPointer.x + rect.left, this.lastPointer.y + rect.top);

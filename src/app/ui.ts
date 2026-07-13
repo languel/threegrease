@@ -518,6 +518,12 @@ export class UI {
       selectField('', s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode, [
         ['INCREMENT', 'Grid'], ['POINT', 'Stroke point'], ['OBJECT', 'Object origin'], ['SURFACE', 'Surface (mesh/3DGS)'],
       ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); }),
+      ...(s.snap.mode === 'POINT' ? [
+        selectField('', s.snap.strokeScope ?? 'ANY', [
+          ['ANY', 'Any GP'], ['SELECTED', 'Selected only'],
+        ], (v) => { s.snap.strokeScope = v as 'ANY' | 'SELECTED'; this.app.savePrefs(); },
+        ),
+      ] : []),
     );
   }
 
@@ -1747,6 +1753,11 @@ export class UI {
       el('div', { class: 'row' },
         numField('Grid step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); save(); }),
         checkbox('Show transform gizmo', s.showGizmo, (v) => { s.showGizmo = v; this.app.refreshWidget(); save(); }),
+      ),
+      el('div', { class: 'row' },
+        selectField('Snap to stroke point scope', s.snap.strokeScope ?? 'ANY', [
+          ['ANY', 'Any GP object'], ['SELECTED', 'Selected strokes only'],
+        ], (v) => { s.snap.strokeScope = v as 'ANY' | 'SELECTED'; save(); }),
       ),
       el('div', { class: 'row' },
         colorField('Background', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); }),

@@ -25,7 +25,7 @@ import {
   downloadScene, downloadText, importGPObjects, openSceneFile,
   remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
-import { drawingPlane, nearestStrokePoint, objectToScreen, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
+import { drawingPlane, nearestStrokePointAll, objectToScreen, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
@@ -356,7 +356,7 @@ class App implements AppHandle {
     const snap = ctx.settings.snap;
 
     if (snap.enabled && snap.mode === 'POINT') {
-      const hit = nearestStrokePoint(ctx, clientX - rect.left, clientY - rect.top, 60);
+      const hit = nearestStrokePointAll(ctx, clientX - rect.left, clientY - rect.top, 60, ctx.settings.snap.strokeScope ?? 'ANY');
       if (hit) {
         ctx.scene.cursor = [hit.x, hit.y, hit.z];
         this.gp.markDirty();
@@ -1479,7 +1479,7 @@ class App implements AppHandle {
     const px = this.tools.lastPointer;
     const rect = ctx.canvas.getBoundingClientRect();
     const clientX = px.x + rect.left, clientY = px.y + rect.top;
-    const strokeHit = nearestStrokePoint(ctx, px.x, px.y, 60);
+    const strokeHit = nearestStrokePointAll(ctx, px.x, px.y, 60, 'ANY');
     const world = strokeHit ?? screenToWorld(ctx, clientX, clientY);
     if (!world) return;
     const at: [number, number, number] = [world.x, world.y, world.z];
