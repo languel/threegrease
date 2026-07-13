@@ -243,7 +243,11 @@ src/io/mediamime.ts live landmark registry over the existing WS/OSC bus,
 scene.mediamime.rigs (MMRig) binds any object's translation to a live
 address, triggers are now a full ObjKind ('TRIGGER') — selectable,
 draggable, parentable, in the outliner. MediaMime menu + 🎥 panel (live
-address table, ＋Trigger/＋Rig actions). Open: rest of N7 icon pass
+address table, ＋Trigger/＋Rig actions). N7 icon pass: mode/widget
+buttons + Stroke Ops panel now icon-first. N2 follow-up: OBJECT magnet
+snap for point transforms. Object right-click context menu (viewport RMB
++ outliner row RMB, object mode): Set Origin/Mirror/Clear/Apply/Snap,
+src/tools/objectops.ts + ui.ts openContextMenu(). Open:
 (only mode/widget buttons done), N8 splat nibs, silhouette outlines,
 magnet OBJECT snap.
 
