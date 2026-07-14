@@ -630,3 +630,26 @@ commit each; typecheck+build always, deep verification only when cheap.
   honoring the same Any/Selected scope. Wired into all three magnet call
   sites. This is what lets an object snap anywhere along a path, the way
   travelers already ride it continuously.
+
+
+## Multi-select: Cmd/Ctrl alias + generalized active-object highlight  **[SHIPPED cb7e29c]**
+- Investigated the report that shift/cmd multi-select "doesn't work":
+  Shift-click multi-select was already correct in ObjectSelectTool, but
+  Cmd/Ctrl-click was never wired as an alias (Mac users reaching for Cmd
+  first found nothing), box-select never set an active/target object at
+  all, and the brighter "active" selection-outline color only ever
+  compared against scene.activeObject - i.e. GP objects only, so
+  selecting a mesh/splat/trigger as the last-touched object never showed
+  it as visually distinct even though parentSet (Ctrl+P) already
+  correctly used objectPick.lastPicked as its target internally.
+- Fixed: e.ctrl (already ctrlKey||metaKey) now also triggers add-to-
+  selection; box-select sets lastPicked to the last matched ref;
+  syncSelectionGlyphs' isActive check now compares against
+  objectPick.lastPicked (falling back to the active GP) instead of
+  scene.activeObject, so the active/target highlight works for any kind.
+- Mode pie default combo moved from Ctrl+Tab to Alt+Tab (Ctrl+Tab is a
+  browser-level tab-cycle shortcut that does not reliably reach page JS).
+- Verified live: Cmd-click added a sphere to an existing box selection
+  without deselecting the box, and the sphere (last-touched) picked up
+  the bright active outline color while the box kept the dimmer
+  selected color - read directly off the actual Box3Helper materials.
