@@ -692,3 +692,16 @@ commit each; typecheck+build always, deep verification only when cheap.
   object). Verified live: 2-stroke connected chain + 1 isolated stroke
   -> exactly 1 new object; world-space geometry checked unchanged on
   both sides after the origin retarget.
+
+
+## Multi-object Object Properties transform  **[SHIPPED c73b5a0]**
+- Selecting 2+ objects used to collapse Object Properties to a dead
+  "N selected - properties need one" message. New
+  multiObjectTransformPanel(): shows the active/last-picked object's
+  Loc/Rot/Scale; editing a field writes that value ABSOLUTELY to the
+  same axis on every selected object (independent per axis) - type 0
+  in Z, everyone drops to the ground plane, each keeping its own X/Y.
+- App.getLastPicked() exposes the active/target ref to ui.ts.
+- Verified live: 3 meshes at different Z, all selected, active shows
+  its own Loc; typing Z=0 set all three to Z=0 exactly while X/Y per
+  object stayed untouched.
