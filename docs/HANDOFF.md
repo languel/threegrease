@@ -308,8 +308,76 @@ header overlay + status hints during the modal; shared
 App.applyWorldDelta() so gizmo and modal apply deltas identically
 (parenting + Follow-Path leash).
 
+**Mode pie menu + Tab history** — Alt+Tab opens a Blender-layout radial
+mode picker (ui.openModePie): click a wedge or press its numpad-style
+digit, works as a blind chord too (Alt+Tab 8 → Draw before the menu even
+paints). Wedge labels are short (Draw/Sculpt/Object/Edit, "Mode" dropped)
+with Weight Paint/Vertex Paint spread further from Draw so it isn't
+crowded. Tab no longer hardcodes Draw↔Edit — App tracks a 2-slot mode
+history and toggles back to whichever mode you were actually in before.
+Object mode got its first keyboard entry point (`modeObject` action,
+unbound by default — 1-5 are taken — but reachable via the pie).
+Platform caveat on record: Ctrl+Tab is a browser tab-cycle shortcut and
+doesn't reliably reach the page, which is why the default moved to Alt+Tab.
+
+**Edge snap + stroke-point snap bug fix** — the reported "picks a random
+stroke and won't attach to any other" bug was real: every POINT-snap call
+site routed through `gatherDepthCandidates`, which is deliberately scoped
+to `activeObject()` (correct for draw-time depth, wrong for magnet
+snapping). New `nearestStrokePointAll`/`nearestStrokeEdgeAll`
+(projection.ts) search every GP object directly, with an Any-GP/Selected-
+only scope (`settings.snap.strokeScope`). Edge snap is new: continuous
+closest-point-on-segment, not just vertices — the "Vertex" (renamed from
+"Stroke point") vs "Edge (along path)" distinction now matches Blender.
+Wired into all three magnet call sites (object modal, EDIT-mode point
+transform, 3D-cursor drag).
+
+**Multi-select fixes** — Cmd/Ctrl-click now aliases Shift for add-to-
+selection (was Shift-only); box-select now sets the active/target object
+(`objectPick.lastPicked`) like click-select already did; the brighter
+"active" selection-outline color generalized from GP-only
+(`scene.activeObject`) to any kind via `lastPicked`.
+
+**Stroke Ops right-click menu (Edit mode) + Separate** — RMB in Edit mode
+opens the full stroke-op set with shortcut hints auto-shown. New
+`editops.ts separateSelected()` = Blender GP Separate (P, shadows the
+global Presentation-mode binding while in Edit mode — same shadow
+pattern as Emulate Numpad). Y (Split) already existed.
+
+**Auto-Separate Connected Strokes (object menu) + Origin to First Point**
+— `objectops.ts separateConnectedIntoObjects()`: Blender "Separate by
+Loose Parts" for GP, partitions the CURRENT FRAME's strokes into
+connected components by endpoint proximity (every stroke is a flood-fill
+seed — generalizes selectConnected/Ctrl+L's grow-from-selection graph
+into a full partition), each component beyond the first becomes a new GP
+object, and EVERY resulting object gets its origin retargeted to its own
+first point (`originToFirstPoint`, also added standalone to the Set
+Origin submenu). Scoped to the current frame only — documented, not
+silently wrong for animated content.
+
+**Multi-object Object Properties** — selecting 2+ objects used to
+collapse the panel to a dead "N selected" message. Now shows the active
+(last-picked) object's Loc/Rot/Scale, and editing a field applies that
+value ABSOLUTELY to every selected object on that axis independently
+("type 0 in Z, everyone drops to the ground plane, each keeps its own
+X/Y"). `App.getLastPicked()` exposes the active ref to ui.ts.
+
+**UI cleanup pass** — icon-only Snap toggle (was "🧲 Snap" text);
+resizable sidebar (`#sidebar-resize` drag handle, 200-640px, persisted);
+two real bugs fixed, not just polish: (1) a focused `<select>` silently
+disabled every keyboard shortcut until a manual click into the viewport
+(App.onKey bails on SELECT/INPUT/TEXTAREA targets) — fixed by blurring
+any SELECT on `change` and on Escape; (2) right-click "Rename…" did
+nothing because it used `window.prompt()`, which is silently blocked/
+no-op in sandboxed embeds — replaced with `renameObjectInline()` reusing
+the outliner's already-working double-click field; F2 now renames the
+active object from anywhere. Default GP object names changed
+GreasePencil→PencilN.
+
 Where next: N8 splat nibs (needs the atlas/Spark spikes above); rest of
 PRD §1b vision items (worker fill, stamp instancing, texture stamps,
 curve edit); consider migrating legacy score cursors/triggers onto the
 constraint system now that it's proven out, to collapse the two
-parallel traveler/trigger implementations into one.
+parallel traveler/trigger implementations into one; Blender's post-
+transform redo panel (re-editable numeric readout after G/R/S confirms)
+isn't built, only the live-modal HUD exists.
