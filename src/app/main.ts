@@ -1813,7 +1813,7 @@ class App implements AppHandle {
     const scene = this.ctx.scene;
     this.ctx.pushUndo();
     const n = scene.objects.length + 1;
-    const ob = createObject(`GreasePencil${n}`);
+    const ob = createObject(`Pencil${n}`);
     ob.translation = at ?? [...scene.cursor];
     scene.objects.push(ob);
     scene.activeObject = scene.objects.length - 1;

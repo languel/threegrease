@@ -586,12 +586,14 @@ export class UI {
     const { ctx } = this.app;
     type Slot = { mode: EditorMode; label: string; icon: string; key: string; angleDeg: number };
     const SLOTS: Slot[] = [
-      { mode: 'DRAW', label: 'Draw Mode', icon: '✏️', key: '8', angleDeg: -90 },
-      { mode: 'SCULPT', label: 'Sculpt Mode', icon: '🗿', key: '2', angleDeg: 90 },
-      { mode: 'OBJECT', label: 'Object Mode', icon: '🞔', key: '4', angleDeg: 180 },
-      { mode: 'EDIT', label: 'Edit Mode', icon: '🩹', key: '6', angleDeg: 0 },
-      { mode: 'WEIGHT', label: 'Weight Paint', icon: '⚖️', key: '7', angleDeg: -135 },
-      { mode: 'VERTEX', label: 'Vertex Paint', icon: '🎨', key: '9', angleDeg: -45 },
+      { mode: 'DRAW', label: 'Draw', icon: '✏️', key: '8', angleDeg: -90 },
+      { mode: 'SCULPT', label: 'Sculpt', icon: '🗿', key: '2', angleDeg: 90 },
+      { mode: 'OBJECT', label: 'Object', icon: '🞔', key: '4', angleDeg: 180 },
+      { mode: 'EDIT', label: 'Edit', icon: '🩹', key: '6', angleDeg: 0 },
+      // pushed further from Draw (N, -90) than a plain ±45 hexagon would
+      // put them, so Draw has breathing room at the top
+      { mode: 'WEIGHT', label: 'Weight Paint', icon: '⚖️', key: '7', angleDeg: -150 },
+      { mode: 'VERTEX', label: 'Vertex Paint', icon: '🎨', key: '9', angleDeg: -30 },
     ];
     const R = 105;
     const rect = ctx.canvas.getBoundingClientRect();

@@ -83,7 +83,7 @@ export function activeCam(scene: GPScene): GPCamera {
 
 export function createScene(): GPScene {
   return {
-    objects: [createObject('GreasePencil')], activeObject: 0,
+    objects: [createObject('Pencil1')], activeObject: 0,
     frame: 1, frameStart: 1, frameEnd: 250, fps: 24, cursor: [0, 0, 0],
     canvases: [],
     cameras: [createDefaultCamera()],
