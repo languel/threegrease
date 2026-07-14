@@ -673,3 +673,22 @@ commit each; typecheck+build always, deep verification only when cheap.
   correct (materials/positions checked exactly); P in Edit -> Separate,
   P in Object -> Presentation; live menu rendered all 20 items with
   correct shortcuts.
+
+
+## Auto-Separate Connected Strokes + Origin to First Point  **[SHIPPED 19dfc40]**
+- objectops.ts originToFirstPoint(): GP origin -> first point of the
+  first stroke, geometry held fixed in world space. Added to the Set
+  Origin submenu alongside the existing Geometry/Cursor variants.
+- objectops.ts separateConnectedIntoObjects(): Blender Separate-by-
+  Loose-Parts for GP. Partitions the CURRENT FRAME's strokes (every
+  layer) into connected components by endpoint proximity - every stroke
+  is a flood-fill seed (generalizes selectConnected/Ctrl+L's grow-from-
+  selection graph into a full partition). Each component beyond the
+  first becomes a new GP object (world transform + cloned materials
+  preserved); EVERY resulting object gets its origin retargeted to its
+  own first point. Scoped to the current frame only - documented as a
+  deliberate limitation, not silently wrong for animated content.
+- New object-menu item Auto-Separate Connected Strokes (single GP
+  object). Verified live: 2-stroke connected chain + 1 isolated stroke
+  -> exactly 1 new object; world-space geometry checked unchanged on
+  both sides after the origin retarget.
