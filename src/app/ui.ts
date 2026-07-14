@@ -18,7 +18,7 @@ import {
 } from '../tools/objects';
 import {
   applyObjectTransformPartial, clearObjectTransform, geometryToOrigin, mirrorObject,
-  originToCursor, originToFirstPoint, originToGeometry, separateConnectedIntoObjects,
+  originToCursor, originToFirstPoint, originToGeometry, originToGeometryBase, separateConnectedIntoObjects,
   snapCursorToSelectionMedian, snapSelectionToCursor,
 } from '../tools/objectops';
 
@@ -744,6 +744,10 @@ export class UI {
     const refs = listSelectedObjects(ctx.scene);
     if (!refs.length) return;
     const gpOnly = refs.every((r) => r.kind === 'GP');
+    // Origin to Geometry/Cursor/Base support GP + primitive MESH kinds
+    // (image planes are PLANE mesh objects — see HANDOFF "canvas retirement");
+    // MODEL (loaded) geometry isn't supported (no known local bounds).
+    const gpOrMesh = refs.every((r) => r.kind === 'GP' || r.kind === 'MESH');
     const one = refs.length === 1 ? refs[0] : null;
 
     const items: CtxItem[] = [
@@ -753,8 +757,9 @@ export class UI {
       {
         label: 'Set Origin', items: [
           { label: 'Geometry to Origin', do: () => this.runObjectOp((ref) => geometryToOrigin(ctx.scene, ref)), disabled: !gpOnly },
-          { label: 'Origin to Geometry', do: () => this.runObjectOp((ref) => originToGeometry(ctx.scene, ref)), disabled: !gpOnly },
-          { label: 'Origin to 3D Cursor', do: () => this.runObjectOp((ref) => originToCursor(ctx.scene, ref)), disabled: !gpOnly },
+          { label: 'Origin to Geometry', do: () => this.runObjectOp((ref) => originToGeometry(ctx.scene, ref)), disabled: !gpOrMesh },
+          { label: 'Origin to Geometry (Base)', do: () => this.runObjectOp((ref) => originToGeometryBase(ctx.scene, ref, ctx.settings.upAxis)), disabled: !gpOrMesh },
+          { label: 'Origin to 3D Cursor', do: () => this.runObjectOp((ref) => originToCursor(ctx.scene, ref)), disabled: !gpOrMesh },
           { label: 'Origin to First Point', do: () => this.runObjectOp((ref) => originToFirstPoint(ctx.scene, ref)), disabled: !gpOnly },
         ],
       },

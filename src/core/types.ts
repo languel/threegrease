@@ -346,6 +346,11 @@ export interface TGMesh {
   /** NONE = world; FACE_VIEW = always face the viewport (billboard);
    *  CAMERA = locked to the view — transform becomes a camera-space offset */
   billboard?: 'NONE' | 'FACE_VIEW' | 'CAMERA';
+  /** Local-space offset baked into the (procedural, primitive-only)
+   *  geometry so "Set Origin" can move the translation pivot without the
+   *  geometry moving in world space — mirrors GP's point-shift trick since
+   *  primitive geometry has no persisted vertex data of its own. */
+  originOffset?: Vec3;
 }
 
 /** Point force for the dynamic string simulation (P5). */

@@ -4,8 +4,12 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import type { GPScene, TGMesh } from '../core/types';
+import type { GPScene, TGMesh, Vec3 } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
+
+function vec3Eq(a: Vec3, b: Vec3): boolean {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
 
 function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
   switch (kind) {
@@ -19,7 +23,7 @@ function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
 
 export class MeshManager {
   readonly group = new THREE.Group();
-  private entries = new Map<number, { root: THREE.Object3D; src?: string; kind: string; unlit?: boolean }>();
+  private entries = new Map<number, { root: THREE.Object3D; src?: string; kind: string; unlit?: boolean; originOffset: Vec3 }>();
   private textures = new Map<string, THREE.Texture>();
   readonly errors = new Map<number, string>();
 
@@ -49,7 +53,7 @@ export class MeshManager {
       if (!entry) {
         // build() always makes a Standard material; unlit:false so the
         // first sync swaps it when the data says unlit
-        entry = { root: this.build(data), src: data.src, kind: data.kind, unlit: false };
+        entry = { root: this.build(data), src: data.src, kind: data.kind, unlit: false, originOffset: [0, 0, 0] };
         entry.root.userData.meshId = data.id;
         entry.root.traverse((o) => { o.userData.meshId = data.id; });
         this.group.add(entry.root);
@@ -63,6 +67,18 @@ export class MeshManager {
           ? new THREE.MeshBasicMaterial()
           : new THREE.MeshStandardMaterial();
         entry.unlit = !!data.unlit;
+      }
+      // Set Origin (primitives only, see objectops.ts meshLocalBounds): the
+      // origin op writes translation + originOffset together so world-space
+      // geometry doesn't jump; bake the offset DELTA into the procedural
+      // geometry's vertex positions (it has no other persisted shape data).
+      const off = data.originOffset ?? [0, 0, 0];
+      if (data.kind !== 'MODEL' && !vec3Eq(off, entry.originOffset)) {
+        const geo = (entry.root as THREE.Mesh).geometry;
+        geo.translate(off[0] - entry.originOffset[0], off[1] - entry.originOffset[1], off[2] - entry.originOffset[2]);
+        geo.computeBoundingBox();
+        geo.computeBoundingSphere();
+        entry.originOffset = [...off];
       }
       this.apply(entry.root, data, scene, camera);
     }
@@ -163,5 +179,6 @@ export function createMeshObject(id: number, kind: TGMesh['kind'], at: [number, 
     visible: true, select: false, drawTarget: true, wireframe: false,
     color: [0.62, 0.65, 0.72], opacity: 1,
     parent: null, texture: null, unlit: false, doubleSided: true, billboard: 'NONE',
+    originOffset: [0, 0, 0],
   };
 }

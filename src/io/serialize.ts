@@ -46,6 +46,7 @@ export function deserializeScene(json: string): GPScene {
     m.unlit ??= false;
     m.doubleSided ??= true;
     m.billboard ??= 'NONE';
+    m.originOffset ??= [0, 0, 0];
   }
   // canvases are retired: migrate them to PLANE mesh objects (same ids, so
   // parent refs survive; attachments/routes rewritten below)

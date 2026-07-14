@@ -756,3 +756,32 @@ commit each; typecheck+build always, deep verification only when cheap.
   selection outline live; toggling Auto grid color off + setting a
   manual grid color rebuilds the grid with the new color; restored
   defaults after testing.
+
+
+## Set Origin for MESH objects + Origin to Geometry (Base)
+- Set Origin (Origin to Geometry, Origin to 3D Cursor) previously only
+  worked on GP objects — disabled for mesh/plane objects, including
+  image planes (which are PLANE mesh objects post canvas-retirement).
+  Extended objectops.ts's origin ops to primitive MESH kinds
+  (PLANE/BOX/SPHERE/CYLINDER; MODEL/loaded geometry stays unsupported —
+  no known local bounds without a runtime geometry query).
+- Primitive geometry is procedural (built fresh from `kind` in
+  render/meshes.ts, not persisted per-vertex like GP strokes), so moving
+  its origin without moving the geometry needed a new persisted field:
+  TGMesh.originOffset (Vec3, default [0,0,0]) — the MESH-kind analog of
+  GP's retargetOrigin point-shift, baked into the geometry's vertex
+  buffer incrementally by MeshManager.sync() (geometry.translate() by
+  the delta between old/new offset) whenever originOffset changes.
+- New op: Origin to Geometry (Base) — moves the origin to the XY-center
+  of the object's bottom face (min along the up axis), for staging/
+  floor-placement. Works for GP (from point bounds) and primitive MESH
+  (from a canonical per-kind local-bounds table matching the
+  primitiveGeometry() constructors in meshes.ts).
+- Verified live: added a box, moved it to [2,3,5], ran Origin to
+  Geometry (Base) — origin landed at [2,3,4.5] (bottom face) with
+  world-space bounding box unchanged ([1.5,2.5,4.5]..[2.5,3.5,5.5]);
+  Origin to 3D Cursor for MESH also verified (world bounds pinned,
+  translation moved to cursor); confirmed through the real right-click
+  Set Origin submenu (both new/extended items enabled for a MESH
+  selection, GP-only items correctly still disabled); undo correctly
+  reverts both translation and originOffset.

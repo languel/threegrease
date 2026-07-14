@@ -4,7 +4,7 @@
 // are GP-only (other kinds have no local-space geometry independent of
 // their translation, so "moving the origin" would just move the object).
 import * as THREE from 'three';
-import type { GPObject, GPScene, GPStroke, Vec3 } from '../core/types';
+import type { GPObject, GPScene, GPStroke, TGMesh, Vec3 } from '../core/types';
 import { createFrame, createLayer, createObject, frameAt } from '../core/gpdata';
 import {
   applyObjectTransform, getObjectTransform, listSelected, parentWorldMatrixOf, setObjectTransform,
@@ -87,23 +87,122 @@ function localCentroid(ob: GPObject): THREE.Vector3 | null {
   return n ? c.divideScalar(n) : null;
 }
 
+function localBoundsGP(ob: GPObject): THREE.Box3 | null {
+  const box = new THREE.Box3();
+  let any = false;
+  forEachPoint(ob, (p) => { box.expandByPoint(new THREE.Vector3(...p.co)); any = true; });
+  return any ? box : null;
+}
+
+/** Canonical local-space bounds of the procedural primitive geometries
+ *  built in render/meshes.ts (primitiveGeometry) — kept in sync with those
+ *  constructors since we compute origin targets without touching three.js
+ *  here (tools stay scene-only). MODEL geometry is arbitrary/loaded async,
+ *  so it isn't supported by the origin-to-geometry ops. */
+function primitiveLocalBounds(kind: TGMesh['kind']): THREE.Box3 | null {
+  switch (kind) {
+    case 'PLANE': return new THREE.Box3(new THREE.Vector3(-1, -1, 0), new THREE.Vector3(1, 1, 0));
+    case 'BOX': return new THREE.Box3(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5));
+    case 'SPHERE': return new THREE.Box3(new THREE.Vector3(-0.6, -0.6, -0.6), new THREE.Vector3(0.6, 0.6, 0.6));
+    case 'CYLINDER': return new THREE.Box3(new THREE.Vector3(-0.5, -0.6, -0.5), new THREE.Vector3(0.5, 0.6, 0.5));
+    default: return null; // MODEL
+  }
+}
+
+function meshLocalBounds(m: TGMesh): THREE.Box3 | null {
+  const base = primitiveLocalBounds(m.kind);
+  if (!base) return null;
+  const off = new THREE.Vector3(...(m.originOffset ?? [0, 0, 0]));
+  return base.translate(off);
+}
+
+/** Move a mesh's translation to `worldPoint`, compensating with
+ *  originOffset (baked into the primitive's geometry by MeshManager) so the
+ *  geometry doesn't move in world space — the MESH-kind analog of GP's
+ *  retargetOrigin, since primitive geometry has no persisted vertex data of
+ *  its own to shift directly. */
+function retargetMeshOrigin(scene: GPScene, ref: ObjRef, m: TGMesh, worldPoint: THREE.Vector3): void {
+  const newT = worldPoint.clone().applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
+  const rsInv = new THREE.Matrix4().compose(
+    new THREE.Vector3(), new THREE.Quaternion().setFromEuler(new THREE.Euler(...m.rotation)), new THREE.Vector3(...m.scale),
+  ).invert();
+  const oldT = new THREE.Vector3(...m.translation);
+  const deltaLocal = oldT.clone().sub(newT).applyMatrix4(rsInv);
+  const newOffset = new THREE.Vector3(...(m.originOffset ?? [0, 0, 0])).add(deltaLocal);
+  m.originOffset = [newOffset.x, newOffset.y, newOffset.z];
+  m.translation = [newT.x, newT.y, newT.z];
+}
+
+function meshWorldMatrix(m: TGMesh): THREE.Matrix4 {
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(...m.translation),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...m.rotation)),
+    new THREE.Vector3(...m.scale),
+  );
+}
+
 /** Blender "Origin to Geometry": origin moves to the object's geometric
- *  median; geometry doesn't move in world space. */
+ *  median; geometry doesn't move in world space. GP + primitive MESH kinds
+ *  (image planes included — they're PLANE mesh objects, see HANDOFF). */
 export function originToGeometry(scene: GPScene, ref: ObjRef): boolean {
-  if (ref.kind !== 'GP') return false;
-  const ob = scene.objects.find((o) => o.id === ref.id);
-  if (!ob) return false;
-  const c = localCentroid(ob);
-  if (!c) return false;
-  // world position of the local centroid, converted back to parent-local
-  const worldC = c.clone().applyMatrix4(new THREE.Matrix4().compose(
-    new THREE.Vector3(...ob.translation),
-    new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
-    new THREE.Vector3(...ob.scale),
-  ));
-  const newT = worldC.applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
-  retargetOrigin(ob, [newT.x, newT.y, newT.z]);
-  return true;
+  if (ref.kind === 'GP') {
+    const ob = scene.objects.find((o) => o.id === ref.id);
+    if (!ob) return false;
+    const c = localCentroid(ob);
+    if (!c) return false;
+    const worldC = c.clone().applyMatrix4(new THREE.Matrix4().compose(
+      new THREE.Vector3(...ob.translation),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+      new THREE.Vector3(...ob.scale),
+    ));
+    const newT = worldC.applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
+    retargetOrigin(ob, [newT.x, newT.y, newT.z]);
+    return true;
+  }
+  if (ref.kind === 'MESH') {
+    const m = scene.meshes.find((mm) => mm.id === ref.id);
+    if (!m) return false;
+    const bounds = meshLocalBounds(m);
+    if (!bounds) return false;
+    const center = bounds.getCenter(new THREE.Vector3());
+    retargetMeshOrigin(scene, ref, m, center.applyMatrix4(meshWorldMatrix(m)));
+    return true;
+  }
+  return false;
+}
+
+/** New: "Origin to Geometry (Base)" — origin moves to the XY-center of the
+ *  object's bottom face (min along the up axis), a natural pivot for
+ *  staging/floor-placement. GP + primitive MESH kinds. */
+export function originToGeometryBase(scene: GPScene, ref: ObjRef, upAxis: 'Y' | 'Z' = 'Z'): boolean {
+  const axis = upAxis === 'Y' ? 1 : 2;
+  if (ref.kind === 'GP') {
+    const ob = scene.objects.find((o) => o.id === ref.id);
+    if (!ob) return false;
+    const box = localBoundsGP(ob);
+    if (!box) return false;
+    const base = box.getCenter(new THREE.Vector3());
+    base.setComponent(axis, box.min.getComponent(axis));
+    const worldC = base.applyMatrix4(new THREE.Matrix4().compose(
+      new THREE.Vector3(...ob.translation),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+      new THREE.Vector3(...ob.scale),
+    ));
+    const newT = worldC.applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
+    retargetOrigin(ob, [newT.x, newT.y, newT.z]);
+    return true;
+  }
+  if (ref.kind === 'MESH') {
+    const m = scene.meshes.find((mm) => mm.id === ref.id);
+    if (!m) return false;
+    const bounds = meshLocalBounds(m);
+    if (!bounds) return false;
+    const base = bounds.getCenter(new THREE.Vector3());
+    base.setComponent(axis, bounds.min.getComponent(axis));
+    retargetMeshOrigin(scene, ref, m, base.applyMatrix4(meshWorldMatrix(m)));
+    return true;
+  }
+  return false;
 }
 
 /** Blender "Geometry to Origin": geometry shifts so its median lands on
@@ -122,15 +221,23 @@ export function geometryToOrigin(scene: GPScene, ref: ObjRef): boolean {
 }
 
 /** Blender "Origin to 3D Cursor": origin moves to the cursor; geometry
- *  doesn't move in world space. */
+ *  doesn't move in world space. GP + primitive MESH kinds. */
 export function originToCursor(scene: GPScene, ref: ObjRef): boolean {
-  if (ref.kind !== 'GP') return false;
-  const ob = scene.objects.find((o) => o.id === ref.id);
-  if (!ob) return false;
-  const cursor = new THREE.Vector3(...scene.cursor);
-  const newT = cursor.clone().applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
-  retargetOrigin(ob, [newT.x, newT.y, newT.z]);
-  return true;
+  if (ref.kind === 'GP') {
+    const ob = scene.objects.find((o) => o.id === ref.id);
+    if (!ob) return false;
+    const cursor = new THREE.Vector3(...scene.cursor);
+    const newT = cursor.clone().applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
+    retargetOrigin(ob, [newT.x, newT.y, newT.z]);
+    return true;
+  }
+  if (ref.kind === 'MESH') {
+    const m = scene.meshes.find((mm) => mm.id === ref.id);
+    if (!m) return false;
+    retargetMeshOrigin(scene, ref, m, new THREE.Vector3(...scene.cursor));
+    return true;
+  }
+  return false;
 }
 
 /** Origin to the first point of the first stroke (layer/frame order) —
