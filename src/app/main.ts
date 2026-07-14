@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt } from '../core/gpdata';
 import { History } from '../core/history';
 import type { GPScene } from '../core/types';
@@ -14,6 +17,23 @@ import { SelectTool, selectAll, selectConnected, selectLinked, selectMoreLess, s
 
 function hasSelectedPoints(ctx: AppCtx): boolean {
   return selectedPoints(ctx).length > 0;
+}
+
+/** 12 edges (24 endpoints) of a Box3, flattened for LineSegmentsGeometry. */
+function boxEdgePositions(box: THREE.Box3): number[] {
+  const { min, max } = box;
+  const corners = [
+    [min.x, min.y, min.z], [max.x, min.y, min.z], [max.x, max.y, min.z], [min.x, max.y, min.z],
+    [min.x, min.y, max.z], [max.x, min.y, max.z], [max.x, max.y, max.z], [min.x, max.y, max.z],
+  ];
+  const edges = [
+    [0, 1], [1, 2], [2, 3], [3, 0],
+    [4, 5], [5, 6], [6, 7], [7, 4],
+    [0, 4], [1, 5], [2, 6], [3, 7],
+  ];
+  const out: number[] = [];
+  for (const [a, b] of edges) out.push(...corners[a], ...corners[b]);
+  return out;
 }
 import { ModalTransform } from '../tools/transform';
 import { SculptTool } from '../tools/sculpt';
@@ -102,7 +122,7 @@ class App implements AppHandle {
   private cursorMarker: THREE.Group;
   /** N2: Blender-style orange outlines + origin dots for selected objects */
   private selGlyphs = new THREE.Group();
-  private selHelpers = new Map<string, { box: THREE.Box3; helper: THREE.Box3Helper; dot: THREE.Points }>();
+  private selHelpers = new Map<string, { box: THREE.Box3; helper: LineSegments2; dot: THREE.Points }>();
   private interpTool = new InterpolateTool();
   private nav!: Navigation;
   private navDrag: { mode: 'orbit' | 'pan' | 'dolly'; x: number; y: number } | null = null;
@@ -1945,9 +1965,12 @@ class App implements AppHandle {
       let entry = this.selHelpers.get(key);
       if (!entry) {
         const box = new THREE.Box3();
-        const helper = new THREE.Box3Helper(box, this.highlightColor());
-        (helper.material as THREE.LineBasicMaterial).depthTest = false;
-        (helper.material as THREE.LineBasicMaterial).transparent = true;
+        const vp = document.getElementById('viewport');
+        const mat = new LineMaterial({
+          color: this.highlightColor().getHex(), linewidth: 2, // px, screen-space
+          depthTest: false, transparent: true, resolution: new THREE.Vector2(vp?.clientWidth || 1, vp?.clientHeight || 1),
+        });
+        const helper = new LineSegments2(new LineSegmentsGeometry(), mat);
         helper.renderOrder = 999;
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
@@ -1963,8 +1986,9 @@ class App implements AppHandle {
       if (entry.box.isEmpty()) {
         entry.box.setFromCenterAndSize(root.position, new THREE.Vector3(1, 1, 1));
       }
+      entry.helper.geometry.setPositions(boxEdgePositions(entry.box));
       const isActive = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
-      (entry.helper.material as THREE.LineBasicMaterial).color.copy(this.highlightColor(isActive));
+      entry.helper.material.color.copy(this.highlightColor(isActive));
       worldMatrixOf(scene, ref).decompose(
         entry.dot.position, new THREE.Quaternion(), new THREE.Vector3());
     }
@@ -2109,6 +2133,7 @@ class App implements AppHandle {
     this.fx.setSize(w * devicePixelRatio, h * devicePixelRatio);
     this.hud.width = w * devicePixelRatio;
     this.hud.height = h * devicePixelRatio;
+    for (const entry of this.selHelpers.values()) entry.helper.material.resolution.set(w, h);
     this.gp.markDirty();
     this.ui?.drawTimeline();
   }
