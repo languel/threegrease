@@ -64,6 +64,8 @@ export interface AppHandle {
   removeCameraKeyAtFrame(): void;
   togglePresentation(): void;
   setBackground(rgb: [number, number, number]): void;
+  applyThemeColors(): void;
+  rebuildGrid(): void;
   keymap: Keymap;
   commands: import('./commands').CommandRegistry;
   sim: { enabled: boolean; damping: number; stiffness: number; reset(): void };
@@ -1957,6 +1959,22 @@ export class UI {
       el('div', { class: 'row' },
         colorField('Background', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); }),
         checkbox('Auto-key', s.autoKey, (v) => { s.autoKey = v; }),
+      ),
+      el('div', { class: 'menu-header', text: 'Theme' }),
+      el('div', { class: 'row' },
+        colorField('Accent', [...s.uiAccent, 1], (rgb) => { s.uiAccent = rgb; this.app.applyThemeColors(); save(); }),
+        colorField('Highlight', [...s.uiHighlight, 1], (rgb) => {
+          s.uiHighlight = rgb; this.app.applyThemeColors(); this.app.refreshWidget(); save();
+        }),
+      ),
+      el('div', { class: 'row' },
+        checkbox('Auto grid color (matches Background)', !s.gridColor, (v) => {
+          s.gridColor = v ? null : [...s.background];
+          this.app.rebuildGrid(); save(); this.refresh();
+        }),
+        ...(s.gridColor ? [colorField('Grid', [...s.gridColor, 1], (rgb) => {
+          s.gridColor = rgb; this.app.rebuildGrid(); save();
+        })] : []),
       ),
       el('div', { class: 'row', text: 'While Emulate Numpad is on, digit keys are view keys and mode shortcuts are shadowed (use the topbar or Tab).' }),
     );

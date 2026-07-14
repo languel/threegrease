@@ -191,9 +191,10 @@ class App implements AppHandle {
 
     // scene dressing
     this.scene3.background = new THREE.Color(...settings.background);
-    this.grid = new THREE.GridHelper(20, 40, 0x3a3a44, 0x2a2a30);
+    this.grid = this.makeGrid();
     this.grid.position.y = -2;
     this.scene3.add(this.grid);
+    this.applyThemeColors();
     this.camHelper = new THREE.Group();
     this.scene3.add(this.camHelper);
     this.scene3.add(this.gp.root);
@@ -1225,7 +1226,64 @@ class App implements AppHandle {
   setBackground(rgb: [number, number, number]): void {
     this.ctx.settings.background = rgb;
     (this.scene3.background as THREE.Color).setRGB(rgb[0], rgb[1], rgb[2]);
+    this.rebuildGrid(); // auto grid color tracks background unless overridden
     this.gp.markDirty();
+  }
+
+  // ------------------------------------------------------------- theming
+
+  /** Grid color when settings.gridColor is unset: lighten/darken the
+   *  background for contrast, so the grid stays visible against any
+   *  background instead of the old hardcoded dark-theme grays. */
+  private autoGridColor(bg: [number, number, number]): THREE.Color {
+    const lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
+    const delta = lum < 0.5 ? 0.16 : -0.16;
+    return new THREE.Color(
+      Math.min(1, Math.max(0, bg[0] + delta)),
+      Math.min(1, Math.max(0, bg[1] + delta)),
+      Math.min(1, Math.max(0, bg[2] + delta)),
+    );
+  }
+
+  private makeGrid(): THREE.GridHelper {
+    const s = this.ctx.settings;
+    const main = s.gridColor ? new THREE.Color(...s.gridColor) : this.autoGridColor(s.background);
+    const sub = main.clone().multiplyScalar(0.6);
+    const g = new THREE.GridHelper(20, 40, main, sub);
+    g.rotation.copy(this.grid?.rotation ?? g.rotation);
+    g.position.copy(this.grid?.position ?? g.position);
+    g.visible = this.grid?.visible ?? true;
+    return g;
+  }
+
+  /** Rebuild the grid (its colors are baked into vertex data at
+   *  construction, so a color change means a new GridHelper). */
+  rebuildGrid(): void {
+    const old = this.grid;
+    this.grid = this.makeGrid();
+    this.scene3.add(this.grid);
+    if (old) {
+      this.scene3.remove(old);
+      old.geometry.dispose();
+      (old.material as THREE.Material).dispose();
+    }
+  }
+
+  /** Push uiAccent/uiHighlight to the CSS custom properties every DOM
+   *  panel already styles against, so the whole app re-themes at once. */
+  applyThemeColors(): void {
+    const s = this.ctx.settings;
+    const toHex = (c: [number, number, number]) =>
+      `#${c.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('')}`;
+    document.documentElement.style.setProperty('--accent', toHex(s.uiAccent));
+    document.documentElement.style.setProperty('--accent2', toHex(s.uiHighlight));
+  }
+
+  /** Selection-outline color (three.js side): mirrors uiHighlight, active
+   *  object gets a lightened variant, matching the old fixed 0xffb454. */
+  highlightColor(active = false): THREE.Color {
+    const c = new THREE.Color(...this.ctx.settings.uiHighlight);
+    return active ? c.lerp(new THREE.Color(1, 1, 1), 0.3) : c;
   }
 
   // --------------------------------------------------------- object mode
@@ -1887,14 +1945,14 @@ class App implements AppHandle {
       let entry = this.selHelpers.get(key);
       if (!entry) {
         const box = new THREE.Box3();
-        const helper = new THREE.Box3Helper(box, 0xff7a00);
+        const helper = new THREE.Box3Helper(box, this.highlightColor());
         (helper.material as THREE.LineBasicMaterial).depthTest = false;
         (helper.material as THREE.LineBasicMaterial).transparent = true;
         helper.renderOrder = 999;
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
         const dot = new THREE.Points(geo, new THREE.PointsMaterial({
-          color: 0xff7a00, size: 7, sizeAttenuation: false, depthTest: false, transparent: true,
+          color: this.highlightColor(), size: 7, sizeAttenuation: false, depthTest: false, transparent: true,
         }));
         dot.renderOrder = 1000;
         this.selGlyphs.add(helper, dot);
@@ -1906,7 +1964,7 @@ class App implements AppHandle {
         entry.box.setFromCenterAndSize(root.position, new THREE.Vector3(1, 1, 1));
       }
       const isActive = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
-      (entry.helper.material as THREE.LineBasicMaterial).color.setHex(isActive ? 0xffb454 : 0xff7a00);
+      (entry.helper.material as THREE.LineBasicMaterial).color.copy(this.highlightColor(isActive));
       worldMatrixOf(scene, ref).decompose(
         entry.dot.position, new THREE.Quaternion(), new THREE.Vector3());
     }

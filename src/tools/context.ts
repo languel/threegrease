@@ -58,6 +58,13 @@ export interface Settings {
   /** show the transform gizmo widget (hidden by default — G/R/S modal is
    *  the primary transform interface, Blender-style) */
   showGizmo: boolean;
+  /** UI theme colors: accent (menu highlights/active states) and
+   *  highlight (selection outlines) drive both CSS custom properties and
+   *  three.js selection glyph colors. gridColor null = auto-contrast
+   *  against `background`. */
+  uiAccent: Vec3;
+  uiHighlight: Vec3;
+  gridColor: Vec3 | null;
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
   /** Blender-style magnet: one snap setting for transforms AND the 3D
@@ -76,6 +83,7 @@ const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'gridStep', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'background', 'snap',
+  'uiAccent', 'uiHighlight', 'gridColor',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -152,6 +160,9 @@ export function defaultSettings(): Settings {
     trackpadNav: true,
     invertTrackpadOrbit: false,
     showGizmo: false,
+    uiAccent: [0.31, 0.55, 1],
+    uiHighlight: [1, 0.48, 0],
+    gridColor: null,
     upAxis: 'Z',
     showAxes: false,
     snap: { enabled: false, mode: 'INCREMENT', strokeScope: 'ANY' },

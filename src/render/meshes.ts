@@ -130,8 +130,8 @@ export class MeshManager {
       mat.transparent = data.opacity < 1 || !!(mat.map);
       mat.opacity = data.opacity;
       mat.depthWrite = data.opacity >= 0.99;
-      (mat as unknown as { emissive?: THREE.Color }).emissive
-        ?.setRGB(data.select ? 0.35 : 0, data.select ? 0.2 : 0, 0);
+      // selection feedback is the Box3Helper outline (App.syncSelectionGlyphs)
+      // only, Blender-style — no whole-object color wash here.
     });
   }
 
