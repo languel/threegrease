@@ -668,6 +668,62 @@ export class UI {
     window.addEventListener('mousedown', this.ctxCloseHandler, true);
   }
 
+  /** Blender Stroke/Point context menu (RMB in the viewport, Edit mode). */
+  openStrokeOpsContextMenu(clientX: number, clientY: number): void {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const run = (fn: () => void) => () => { fn(); this.refresh(); };
+
+    const items: CtxItem[] = [
+      { label: 'Move', action: 'move' },
+      { label: 'Rotate', action: 'rotate' },
+      { label: 'Scale', action: 'scale' },
+      { sep: true },
+      { label: 'Duplicate', action: 'duplicate' },
+      { label: 'Delete', action: 'delete' },
+      { label: 'Dissolve', do: run(() => ops.deleteSelected(ctx, true)) },
+      { sep: true },
+      { label: 'Split', action: 'split' },
+      { label: 'Separate', action: 'separate' },
+      { label: 'Join', action: 'join' },
+      { label: 'Merge by Distance', do: run(() => ops.mergeByDistance(ctx)) },
+      { sep: true },
+      { label: 'Subdivide', do: run(() => ops.subdivideSelected(ctx)) },
+      { label: 'Simplify', do: run(() => ops.simplifySelected(ctx)) },
+      { label: 'Smooth', do: run(() => ops.smoothSelected(ctx)) },
+      { sep: true },
+      { label: 'Toggle Cyclic', do: run(() => ops.toggleCyclic(ctx)) },
+      { label: 'Switch Direction', do: run(() => ops.switchDirection(ctx)) },
+      { label: 'Set Start Point', do: run(() => ops.setStartPoint(ctx)) },
+      {
+        label: 'Normalize', items: [
+          { label: 'Thickness', do: run(() => ops.normalizeThickness(ctx)) },
+          { label: 'Opacity', do: run(() => ops.normalizeOpacity(ctx)) },
+        ],
+      },
+      {
+        label: 'Arrange', items: [
+          { label: 'Bring to Front', do: run(() => ops.arrangeSelected(ctx, 'TOP')) },
+          { label: 'Move Up', do: run(() => ops.arrangeSelected(ctx, 'UP')) },
+          { label: 'Move Down', do: run(() => ops.arrangeSelected(ctx, 'DOWN')) },
+          { label: 'Send to Back', do: run(() => ops.arrangeSelected(ctx, 'BOTTOM')) },
+        ],
+      },
+      {
+        label: 'Snap', items: [
+          { label: 'Selection to Cursor', do: run(() => ops.snapToCursor(ctx)) },
+          { label: 'Selection to Grid', do: run(() => ops.snapToGrid(ctx, ctx.settings.gridStep)) },
+        ],
+      },
+      {
+        label: 'Move to Layer', items: ob.layers.map((l) => ({
+          label: l.name, do: run(() => ops.moveToLayer(ctx, l.id)),
+        })),
+      },
+    ];
+    this.openContextMenu(clientX, clientY, items);
+  }
+
   /** Blender Object context menu (RMB in the viewport, object mode). */
   openObjectContextMenu(clientX: number, clientY: number): void {
     const { ctx } = this.app;

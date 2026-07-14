@@ -679,9 +679,9 @@ class App implements AppHandle {
         if (this.cursorDrag) { this.cursorDrag = false; return; }
         const down = this.rmbDown;
         this.rmbDown = null;
-        if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5
-          && this.ctx.settings.mode === 'OBJECT' && !this.presentation) {
-          this.ui.openObjectContextMenu(e.clientX, e.clientY);
+        if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5 && !this.presentation) {
+          if (this.ctx.settings.mode === 'OBJECT') this.ui.openObjectContextMenu(e.clientX, e.clientY);
+          else if (this.ctx.settings.mode === 'EDIT') this.ui.openStrokeOpsContextMenu(e.clientX, e.clientY);
         }
         return;
       }
@@ -803,6 +803,15 @@ class App implements AppHandle {
     }
     if (mod && key === 'y') { this.redo(); e.preventDefault(); return; }
 
+    // P is context-dependent, Blender-style: Separate in Edit mode shadows
+    // the global Presentation-mode binding (same pattern as Emulate Numpad
+    // shadowing 1-9 — see the CLAUDE.md gotcha).
+    if (ctx.settings.mode === 'EDIT' && comboFromEvent(e) === 'p') {
+      e.preventDefault();
+      this.runAction('separate');
+      return;
+    }
+
     const action = this.keymap.actionFor(comboFromEvent(e));
     if (!action) return;
     e.preventDefault();
@@ -869,6 +878,7 @@ class App implements AppHandle {
       case 'selectConnected': if (this.editLike()) { ctx.pushUndo(); selectConnected(ctx); this.gp.markDirty(); this.ui.refresh(); } break;
       case 'join': if (this.editLike()) { ops.joinSelected(ctx); this.ui.refresh(); } break;
       case 'split': if (this.editLike()) { ops.splitSelected(ctx); this.ui.refresh(); } break;
+      case 'separate': if (this.editLike()) { ops.separateSelected(ctx); this.gp.markDirty(); this.ui.refresh(); } break;
       case 'selectMore': if (this.editLike()) { selectMoreLess(ctx, true); this.gp.markDirty(); } break;
       case 'selectLess': if (this.editLike()) { selectMoreLess(ctx, false); this.gp.markDirty(); } break;
       case 'delete':

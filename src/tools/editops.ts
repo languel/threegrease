@@ -1,7 +1,8 @@
 // Edit-mode stroke operators (the Stroke/Point menus in Blender).
-import type { GPStroke, Vec3 } from '../core/types';
+import type { GPLayer, GPStroke, Vec3 } from '../core/types';
 import {
-  activeLayer, activeObject, cloneStroke, clonePoint, ensureFrame, genId,
+  activeLayer, activeObject, cloneStroke, clonePoint, createFrame, createLayer,
+  createObject, ensureFrame, genId,
 } from '../core/gpdata';
 import {
   simplifyStroke, smoothPoints, subdivideStroke, v3dist, strokeLength,
@@ -87,6 +88,64 @@ export function splitSelected(ctx: AppCtx): void {
     frame.strokes.splice(frame.strokes.indexOf(s), 1, ...runsUnsel, ...runsSel);
   });
   ctx.requestRender();
+}
+
+/**
+ * Blender GP "Separate" (P): move the selection out into a brand new GP
+ * object — same world transform and a cloned material list (so
+ * materialIndex stays valid), one new layer per source layer touched.
+ * Point-mode partial selections split first (like splitSelected) so only
+ * the selected run leaves; the rest stays behind. Returns strokes moved.
+ */
+export function separateSelected(ctx: AppCtx): number {
+  const ob = activeObject(ctx.scene);
+  const newOb = createObject(`${ob.name} split`);
+  newOb.translation = [...ob.translation];
+  newOb.rotation = [...ob.rotation];
+  newOb.scale = [...ob.scale];
+  newOb.materials = ob.materials.map((m) => ({ ...m }));
+  newOb.activeMaterial = ob.activeMaterial;
+  newOb.layers = [];
+  const layerMap = new Map<number, GPLayer>();
+  let count = 0;
+
+  const placeInNewObject = (stroke: GPStroke, oldLayer: GPLayer, frameNumber: number) => {
+    let newLayer = layerMap.get(oldLayer.id);
+    if (!newLayer) {
+      newLayer = createLayer(oldLayer.name);
+      layerMap.set(oldLayer.id, newLayer);
+      newOb.layers.push(newLayer);
+    }
+    let newFrame = newLayer.frames.find((f) => f.frameNumber === frameNumber);
+    if (!newFrame) { newFrame = createFrame(frameNumber); newLayer.frames.push(newFrame); }
+    stroke.select = false;
+    for (const p of stroke.points) p.select = false;
+    newFrame.strokes.push(stroke);
+    count++;
+  };
+
+  ctx.pushUndo();
+  forEachEditableStroke(ctx, (s, layer, frame) => {
+    if (!strokeSelected(ctx, s)) return;
+    const selPts = s.points.filter((p) => p.select);
+    if (ctx.settings.selectMode === 'POINT' && selPts.length && selPts.length < s.points.length) {
+      const runsSel = splitRuns(s, s.points.map((p) => p.select));
+      const runsUnsel = splitRuns(s, s.points.map((p) => !p.select));
+      frame.strokes.splice(frame.strokes.indexOf(s), 1, ...runsUnsel);
+      for (const run of runsSel) placeInNewObject(run, layer, frame.frameNumber);
+      return;
+    }
+    frame.strokes.splice(frame.strokes.indexOf(s), 1);
+    placeInNewObject(s, layer, frame.frameNumber);
+  });
+
+  if (count > 0) {
+    newOb.activeLayerId = newOb.layers[0].id;
+    const i = ctx.scene.objects.indexOf(ob);
+    ctx.scene.objects.splice(i + 1, 0, newOb);
+  }
+  ctx.requestRender();
+  return count;
 }
 
 export function joinSelected(ctx: AppCtx): void {
