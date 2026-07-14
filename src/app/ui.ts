@@ -18,7 +18,8 @@ import {
 } from '../tools/objects';
 import {
   applyObjectTransformPartial, clearObjectTransform, geometryToOrigin, mirrorObject,
-  originToCursor, originToGeometry, snapCursorToSelectionMedian, snapSelectionToCursor,
+  originToCursor, originToFirstPoint, originToGeometry, separateConnectedIntoObjects,
+  snapCursorToSelectionMedian, snapSelectionToCursor,
 } from '../tools/objectops';
 
 type CtxItem =
@@ -741,7 +742,19 @@ export class UI {
           { label: 'Geometry to Origin', do: () => this.runObjectOp((ref) => geometryToOrigin(ctx.scene, ref)), disabled: !gpOnly },
           { label: 'Origin to Geometry', do: () => this.runObjectOp((ref) => originToGeometry(ctx.scene, ref)), disabled: !gpOnly },
           { label: 'Origin to 3D Cursor', do: () => this.runObjectOp((ref) => originToCursor(ctx.scene, ref)), disabled: !gpOnly },
+          { label: 'Origin to First Point', do: () => this.runObjectOp((ref) => originToFirstPoint(ctx.scene, ref)), disabled: !gpOnly },
         ],
+      },
+      {
+        label: 'Auto-Separate Connected Strokes',
+        do: () => {
+          if (!one || one.kind !== 'GP') return;
+          ctx.pushUndo();
+          const n = separateConnectedIntoObjects(ctx.scene, one);
+          this.afterObjectOp();
+          if (n === 0) alert('Already one connected piece (or nothing to separate) — origin was still set to the first point.');
+        },
+        disabled: !one || one.kind !== 'GP',
       },
       {
         label: 'Mirror', items: [

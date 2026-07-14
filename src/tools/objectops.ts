@@ -4,7 +4,8 @@
 // are GP-only (other kinds have no local-space geometry independent of
 // their translation, so "moving the origin" would just move the object).
 import * as THREE from 'three';
-import type { GPObject, GPScene, Vec3 } from '../core/types';
+import type { GPObject, GPScene, GPStroke, Vec3 } from '../core/types';
+import { createFrame, createLayer, createObject, frameAt } from '../core/gpdata';
 import {
   applyObjectTransform, getObjectTransform, listSelected, parentWorldMatrixOf, setObjectTransform,
   type ObjRef,
@@ -130,6 +131,122 @@ export function originToCursor(scene: GPScene, ref: ObjRef): boolean {
   const newT = cursor.clone().applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
   retargetOrigin(ob, [newT.x, newT.y, newT.z]);
   return true;
+}
+
+/** Origin to the first point of the first stroke (layer/frame order) —
+ *  a natural pivot for a traveler/path object. */
+export function originToFirstPoint(scene: GPScene, ref: ObjRef): boolean {
+  if (ref.kind !== 'GP') return false;
+  const ob = scene.objects.find((o) => o.id === ref.id);
+  if (!ob) return false;
+  let firstPt: Vec3 | null = null;
+  outer: for (const layer of ob.layers) {
+    for (const frame of layer.frames) {
+      for (const s of frame.strokes) {
+        if (s.points.length) { firstPt = s.points[0].co; break outer; }
+      }
+    }
+  }
+  if (!firstPt) return false;
+  const world = new THREE.Vector3(...firstPt).applyMatrix4(new THREE.Matrix4().compose(
+    new THREE.Vector3(...ob.translation),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+    new THREE.Vector3(...ob.scale),
+  ));
+  const newT = world.applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
+  retargetOrigin(ob, [newT.x, newT.y, newT.z]);
+  return true;
+}
+
+/**
+ * Blender "Separate by Loose Parts", GP-flavored: partitions the CURRENT
+ * FRAME's strokes (across every layer of the object) into connected
+ * components by endpoint proximity — the same graph selectConnected (Ctrl+L)
+ * grows from a seed, but here every stroke is a seed, partitioning the
+ * whole object. Each component beyond the first becomes a new GP object
+ * (world transform + materials preserved); every resulting object
+ * (original included) gets its origin set to the first point of its own
+ * first stroke via originToFirstPoint.
+ *
+ * Scoped to the current frame only: strokes on other keyframes of the
+ * same layers are untouched and stay on the original object — GP
+ * connectivity can change over time, and splitting that consistently
+ * across every keyframe is a separate, harder problem.
+ */
+export function separateConnectedIntoObjects(scene: GPScene, ref: ObjRef, tol = 0.05): number {
+  if (ref.kind !== 'GP') return 0;
+  const ob = scene.objects.find((o) => o.id === ref.id);
+  if (!ob) return 0;
+
+  interface Entry { layer: import('../core/types').GPLayer; stroke: GPStroke }
+  const entries: Entry[] = [];
+  for (const layer of ob.layers) {
+    const frame = frameAt(layer, scene.frame);
+    if (!frame) continue;
+    for (const stroke of frame.strokes) entries.push({ layer, stroke });
+  }
+  if (entries.length < 2) { originToFirstPoint(scene, ref); return 0; }
+
+  const tol2 = tol * tol;
+  const d2 = (a: Vec3, b: Vec3) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+  const ends = (s: GPStroke): Vec3[] => (s.cyclic || s.points.length < 2)
+    ? s.points.map((p) => p.co)
+    : [s.points[0].co, s.points[s.points.length - 1].co];
+
+  const visited = new Set<Entry>();
+  const groups: Entry[][] = [];
+  for (const seed of entries) {
+    if (visited.has(seed)) continue;
+    const group = [seed];
+    visited.add(seed);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const e of entries) {
+        if (visited.has(e)) continue;
+        const se = ends(e.stroke);
+        for (const g of group) {
+          if (se.some((a) => ends(g.stroke).some((b) => d2(a, b) < tol2))) {
+            group.push(e); visited.add(e); grew = true; break;
+          }
+        }
+      }
+    }
+    groups.push(group);
+  }
+
+  if (groups.length < 2) { originToFirstPoint(scene, ref); return 0; }
+
+  let created = 0;
+  for (let gi = 1; gi < groups.length; gi++) {
+    const group = groups[gi];
+    const newOb = createObject(`${ob.name} ${gi + 1}`);
+    newOb.translation = [...ob.translation];
+    newOb.rotation = [...ob.rotation];
+    newOb.scale = [...ob.scale];
+    newOb.materials = ob.materials.map((m) => ({ ...m }));
+    newOb.activeMaterial = ob.activeMaterial;
+    newOb.layers = [];
+    const layerMap = new Map<number, import('../core/types').GPLayer>();
+    for (const { layer, stroke } of group) {
+      const frame = layer.frames.find((f) => f.strokes.includes(stroke));
+      if (frame) frame.strokes.splice(frame.strokes.indexOf(stroke), 1);
+      let newLayer = layerMap.get(layer.id);
+      if (!newLayer) { newLayer = createLayer(layer.name); layerMap.set(layer.id, newLayer); newOb.layers.push(newLayer); }
+      let newFrame = newLayer.frames.find((f) => f.frameNumber === scene.frame);
+      if (!newFrame) { newFrame = createFrame(scene.frame); newLayer.frames.push(newFrame); }
+      newFrame.strokes.push(stroke);
+    }
+    if (!newOb.layers.length) continue;
+    newOb.activeLayerId = newOb.layers[0].id;
+    const newRef: ObjRef = { kind: 'GP', id: newOb.id };
+    const insertAt = scene.objects.indexOf(ob) + created + 1;
+    scene.objects.splice(insertAt, 0, newOb);
+    originToFirstPoint(scene, newRef);
+    created++;
+  }
+  originToFirstPoint(scene, ref);
+  return created;
 }
 
 // ------------------------------------------------------------- apply
