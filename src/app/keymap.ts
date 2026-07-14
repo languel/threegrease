@@ -43,6 +43,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'join', label: 'Join selected strokes', combo: 'ctrl+j', category: 'Edit' },
   { id: 'split', label: 'Split selection into strokes', combo: 'y', category: 'Edit' },
   { id: 'separate', label: 'Separate to new object (Edit mode)', combo: 'p', category: 'Edit' },
+  { id: 'renameObject', label: 'Rename active object', combo: 'f2', category: 'Edit' },
   { id: 'selectMore', label: 'Select more', combo: '=', category: 'Edit' },
   { id: 'selectLess', label: 'Select less', combo: '-', category: 'Edit' },
   { id: 'delete', label: 'Delete selected', combo: 'x', category: 'Edit' },

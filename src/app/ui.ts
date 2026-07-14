@@ -146,6 +146,14 @@ function checkbox(label: string, value: boolean, onChange: (v: boolean) => void)
   return el('label', { class: 'inline' }, input, label);
 }
 
+/** Icon-only checkbox (no visible text) with a hover tooltip. */
+function iconCheckbox(icon: string, title: string, value: boolean, onChange: (v: boolean) => void): HTMLElement {
+  const input = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  input.checked = value;
+  input.onchange = () => onChange(input.checked);
+  return el('label', { class: 'inline', title }, input, icon);
+}
+
 function colorField(label: string, rgba: number[], onChange: (rgb: [number, number, number]) => void): HTMLElement {
   const input = el('input', { type: 'color', value: rgbToHex(rgba) }) as HTMLInputElement;
   input.oninput = () => onChange(hexToRgb(input.value));
@@ -516,7 +524,7 @@ export class UI {
     // cursor (Shift+RMB drag). Magnet off = cursor moves freely on the
     // drawing plane.
     bar.append(
-      checkbox('🧲 Snap', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
+      iconCheckbox('🧲', 'Magnet snapping', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
       selectField('', s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode, [
         ['INCREMENT', 'Grid'], ['POINT', 'Vertex'], ['EDGE', 'Edge (along path)'],
         ['OBJECT', 'Object origin'], ['SURFACE', 'Surface (mesh/3DGS)'],
@@ -789,7 +797,7 @@ export class UI {
       { sep: true },
       { label: 'Parent to last-picked', action: 'parentSet' },
       { label: 'Clear parent', action: 'parentClear' },
-      ...(one ? [{ sep: true as const }, { label: `Rename ${objectName(ctx.scene, one)}…`, do: () => this.renameViaPrompt(one) }] : []),
+      ...(one ? [{ sep: true as const }, { label: `Rename ${objectName(ctx.scene, one)}… (F2)`, do: () => this.renameObjectInline(one) }] : []),
     ];
     this.openContextMenu(clientX, clientY, items);
   }
@@ -809,18 +817,25 @@ export class UI {
     this.refresh();
   }
 
-  private renameViaPrompt(ref: import('../tools/objects').ObjRef): void {
-    const { ctx } = this.app;
-    const cur = objectName(ctx.scene, ref);
-    const next = prompt('Rename object', cur);
-    if (next?.trim()) {
-      if (ref.kind === 'GP') ctx.scene.objects.find((o) => o.id === ref.id)!.name = next.trim();
-      else if (ref.kind === 'MESH') ctx.scene.meshes.find((m) => m.id === ref.id)!.name = next.trim();
-      else if (ref.kind === 'SPLAT') ctx.scene.splats.find((s) => s.id === ref.id)!.name = next.trim();
-      else if (ref.kind === 'TRIGGER') ctx.scene.score.triggers.find((t) => t.id === ref.id)!.name = next.trim();
-      else if (ref.kind === 'CANVAS') ctx.scene.canvases.find((c) => c.id === ref.id)!.name = next.trim();
-      this.refresh();
-    }
+  /**
+   * Rename via the outliner's inline text field (NOT window.prompt() —
+   * that's silently blocked/no-op in sandboxed embeds, which is why the
+   * old right-click "Rename…" appeared to do nothing). Switches to the
+   * Objects tab if needed so the row exists, then simulates the same
+   * double-click-to-edit the outliner already supports.
+   */
+  renameObjectInline(ref: import('../tools/objects').ObjRef): void {
+    if (this.propsTab !== 'object') this.openTab('object');
+    const key = `${ref.kind}:${ref.id}`;
+    const row = document.querySelector(`#sidebar [data-ref="${CSS.escape(key)}"]`);
+    const nameSpan = row?.querySelector('.grow') as HTMLElement | null;
+    nameSpan?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  }
+
+  /** F2: rename the active (last-picked) object, from anywhere. */
+  renameActiveObject(): void {
+    const ref = this.app.getLastPicked();
+    if (ref) this.renameObjectInline(ref);
   }
 
   // ------------------------------------------------------------ sidebar
@@ -1029,7 +1044,7 @@ export class UI {
       const key = keyOf(n.ref);
       const kids = children.get(key) ?? [];
       const collapsed = this.outlinerCollapsed.has(key);
-      const item = el('div', { class: `list-item ${n.selected ? 'active' : ''}` });
+      const item = el('div', { class: `list-item ${n.selected ? 'active' : ''}`, 'data-ref': key });
       item.style.paddingLeft = `${6 + depth * 14}px`;
       item.onclick = (e) => n.onSelect(e as MouseEvent);
       item.oncontextmenu = (e) => {

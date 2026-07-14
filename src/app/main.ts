@@ -265,8 +265,38 @@ class App implements AppHandle {
     routes.init(this.ctx);
     routes.onLearned = () => this.ui?.refresh();
     this.bindEvents(glCanvas);
+    this.bindSidebarResize();
     this.resize();
     requestAnimationFrame(() => this.loop());
+  }
+
+  /** Drag #sidebar-resize to resize the properties sidebar; width persists. */
+  private bindSidebarResize(): void {
+    const handle = document.getElementById('sidebar-resize');
+    const sidebar = document.getElementById('sidebar');
+    if (!handle || !sidebar) return;
+    const MIN = 200, MAX = 640;
+    const saved = Number(localStorage.getItem('threegrease.sidebarWidth'));
+    if (saved) sidebar.style.width = `${Math.min(MAX, Math.max(MIN, saved))}px`;
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      handle.classList.add('dragging');
+      const startX = e.clientX;
+      const startW = sidebar.getBoundingClientRect().width;
+      const onMove = (me: PointerEvent) => {
+        const w = Math.min(MAX, Math.max(MIN, startW - (me.clientX - startX)));
+        sidebar.style.width = `${w}px`;
+        this.resize();
+      };
+      const onUp = () => {
+        handle.classList.remove('dragging');
+        localStorage.setItem('threegrease.sidebarWidth', String(sidebar.getBoundingClientRect().width));
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
   }
 
   // ---------------------------------------------------------- AppHandle
@@ -720,6 +750,20 @@ class App implements AppHandle {
     }, { passive: false });
 
     window.addEventListener('keydown', (e) => this.onKey(e));
+
+    // Dropdowns keep keyboard focus after a pick (or after Escape closes
+    // the native popup without picking), which silently disables every
+    // shortcut until the user clicks back into the viewport — App.onKey
+    // bails whenever e.target is a SELECT. Blur it ourselves so the very
+    // next keystroke reaches the app again.
+    window.addEventListener('change', (e) => {
+      if ((e.target as HTMLElement)?.tagName === 'SELECT') (e.target as HTMLElement).blur();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && (document.activeElement as HTMLElement)?.tagName === 'SELECT') {
+        (document.activeElement as HTMLElement).blur();
+      }
+    }, true);
     window.addEventListener('resize', () => this.resize());
   }
 
@@ -879,6 +923,7 @@ class App implements AppHandle {
       case 'join': if (this.editLike()) { ops.joinSelected(ctx); this.ui.refresh(); } break;
       case 'split': if (this.editLike()) { ops.splitSelected(ctx); this.ui.refresh(); } break;
       case 'separate': if (this.editLike()) { ops.separateSelected(ctx); this.gp.markDirty(); this.ui.refresh(); } break;
+      case 'renameObject': this.ui.renameActiveObject(); break;
       case 'selectMore': if (this.editLike()) { selectMoreLess(ctx, true); this.gp.markDirty(); } break;
       case 'selectLess': if (this.editLike()) { selectMoreLess(ctx, false); this.gp.markDirty(); } break;
       case 'delete':

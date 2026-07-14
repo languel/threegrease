@@ -218,3 +218,9 @@ button.props-tab.active { background: var(--panel); border-color: var(--border);
 .pie-icon { font-size: 14px; }
 .pie-key { margin-left: 4px; color: var(--dim); font: 10px ui-monospace, monospace; }
 .pie-item:hover .pie-key { color: #dfe8ff; }
+
+#sidebar-resize {
+  width: 5px; flex: none; cursor: col-resize; background: transparent;
+  position: relative; z-index: 10;
+}
+#sidebar-resize:hover, #sidebar-resize.dragging { background: var(--accent); }
