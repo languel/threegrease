@@ -1428,6 +1428,7 @@ class App implements AppHandle {
   }
 
   setLastPicked(ref: ObjRef): void { this.objectPick.lastPicked = ref; }
+  getLastPicked(): ObjRef | null { return this.objectPick.lastPicked; }
 
   /** Blender-style eyedropper: next viewport click resolves the object
    *  (Esc cancels, callback gets null). Used for constraint/rig target

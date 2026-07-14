@@ -86,6 +86,7 @@ export interface AppHandle {
   exportSplatPly(id: number): void;
   run(action: string): void;
   setLastPicked(ref: import('../tools/objects').ObjRef): void;
+  getLastPicked(): import('../tools/objects').ObjRef | null;
   pickObject(cb: (ref: import('../tools/objects').ObjRef | null) => void): void;
   newScene(): void;
   viewAll(): void;
@@ -1096,15 +1097,53 @@ export class UI {
   }
 
   /** Blender-lite per-object Properties + Material panel (single selection). */
+  /**
+   * Blender-lite multi-object transform: fields show the ACTIVE (last-
+   * picked) object's values; editing a field sets that axis ABSOLUTELY on
+   * every selected object (not a delta — "type 0 in Z, everyone drops to
+   * the ground plane" is the point). Kind-specific material fields still
+   * need exactly one selection, same as before.
+   */
+  private multiObjectTransformPanel(refs: ObjRef[]): HTMLElement {
+    const { ctx } = this.app;
+    const lastPicked = this.app.getLastPicked();
+    const activeRef = (lastPicked && refs.some((r) => r.kind === lastPicked.kind && r.id === lastPicked.id))
+      ? lastPicked : refs[0];
+    const t = getObjectTransform(ctx.scene, activeRef);
+    const rows: Node[] = [];
+    if (t) {
+      const setAxis = (group: 'translation' | 'rotation' | 'scale', i: number, v: number) => {
+        for (const r of refs) {
+          const rt = getObjectTransform(ctx.scene, r);
+          if (!rt) continue;
+          rt[group][i] = v;
+          setObjectTransform(ctx.scene, r, rt);
+        }
+        ctx.syncCanvases();
+        ctx.requestRender();
+        this.app.refreshWidget();
+        this.refresh();
+      };
+      rows.push(
+        el('div', { class: 'row', text: `Editing sets that value on all ${refs.length} selected` }),
+        el('div', { class: 'row' }, 'Loc',
+          ...[0, 1, 2].map((i) => numField('', +t.translation[i].toFixed(3), (v) => setAxis('translation', i, v)))),
+        el('div', { class: 'row' }, 'Rot',
+          ...[0, 1, 2].map((i) => numField('', +t.rotation[i].toFixed(3), (v) => setAxis('rotation', i, v)))),
+        el('div', { class: 'row' }, 'Scale',
+          ...[0, 1, 2].map((i) => numField('', +t.scale[i].toFixed(3), (v) => setAxis('scale', i, v)))),
+      );
+    }
+    return panel(`Object Properties — ${refs.length} selected`, ...rows);
+  }
+
   private objectPropsPanel(): HTMLElement {
     const { ctx } = this.app;
     const refs = listSelectedObjects(ctx.scene);
-    if (refs.length !== 1) {
-      return panel('Object Properties', el('div', {
-        class: 'row',
-        text: refs.length === 0 ? 'select one object' : `${refs.length} selected — properties need one`,
-      }));
+    if (!refs.length) {
+      return panel('Object Properties', el('div', { class: 'row', text: 'select one or more objects' }));
     }
+    if (refs.length > 1) return this.multiObjectTransformPanel(refs);
     const ref = refs[0];
     const rows: Node[] = [];
     const t = getObjectTransform(ctx.scene, ref);
