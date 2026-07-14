@@ -1812,7 +1812,12 @@ class App implements AppHandle {
     if (!active) return;
     const wanted = new Set<string>();
     const refs = listSelected(scene);
-    const activeGP = scene.objects[scene.activeObject]?.id;
+    // Blender: the last object touched (click, box-select, shift/cmd-add)
+    // is the "active"/target object — brighter outline, and the implicit
+    // target for Ctrl+P parenting, Apply, etc. Falls back to the active GP
+    // object so something is always highlighted even before any click.
+    const activeRef = this.objectPick.lastPicked
+      ?? (scene.objects[scene.activeObject] ? { kind: 'GP' as const, id: scene.objects[scene.activeObject].id } : null);
     for (const ref of refs) {
       const key = `${ref.kind}:${ref.id}`;
       const root =
@@ -1844,7 +1849,7 @@ class App implements AppHandle {
       if (entry.box.isEmpty()) {
         entry.box.setFromCenterAndSize(root.position, new THREE.Vector3(1, 1, 1));
       }
-      const isActive = ref.kind === 'GP' && ref.id === activeGP;
+      const isActive = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
       (entry.helper.material as THREE.LineBasicMaterial).color.setHex(isActive ? 0xffb454 : 0xff7a00);
       worldMatrixOf(scene, ref).decompose(
         entry.dot.position, new THREE.Quaternion(), new THREE.Vector3());

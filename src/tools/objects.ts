@@ -288,18 +288,26 @@ export class ObjectSelectTool implements Tool {
     this.down = false;
     const scene = ctx.scene;
     ctx.pushUndo();
+    const multi = e.shift || e.ctrl; // Shift or Cmd/Ctrl adds to the selection
     if (this.dragging) {
       const min = new THREE.Vector2(Math.min(this.start.x, e.x), Math.min(this.start.y, e.y));
       const max = new THREE.Vector2(Math.max(this.start.x, e.x), Math.max(this.start.y, e.y));
-      if (!e.shift) deselectAllObjects(scene);
+      if (!multi) deselectAllObjects(scene);
       for (const ref of allRefs(scene)) {
-        if (this.refInRect(ctx, ref, min, max)) setObjectSelected(scene, ref, true);
+        if (this.refInRect(ctx, ref, min, max)) {
+          setObjectSelected(scene, ref, true);
+          this.lastPicked = ref; // Blender: the last one touched becomes active/target
+          if (ref.kind === 'GP') {
+            const i = gpIndexOf(scene, ref.id);
+            if (i >= 0) scene.activeObject = i;
+          }
+        }
       }
     } else {
       const hit = this.pick(ctx, e);
-      if (!e.shift) deselectAllObjects(scene);
+      if (!multi) deselectAllObjects(scene);
       if (hit) {
-        setObjectSelected(scene, hit, e.shift ? !isObjectSelected(scene, hit) : true);
+        setObjectSelected(scene, hit, multi ? !isObjectSelected(scene, hit) : true);
         this.lastPicked = hit;
         if (hit.kind === 'GP') {
           const i = gpIndexOf(scene, hit.id);

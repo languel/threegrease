@@ -21,7 +21,7 @@ export const ACTIONS: ActionDef[] = [
   // Modes
   { id: 'toggleEdit', label: 'Toggle last two modes', combo: 'tab', category: 'Modes' },
   { id: 'modeObject', label: 'Object mode', combo: '', category: 'Modes' },
-  { id: 'modePie', label: 'Mode pie menu', combo: 'ctrl+tab', category: 'Modes' },
+  { id: 'modePie', label: 'Mode pie menu', combo: 'alt+tab', category: 'Modes' },
   { id: 'modeDraw', label: 'Draw mode', combo: '1', category: 'Modes' },
   { id: 'modeEdit', label: 'Edit mode', combo: '2', category: 'Modes' },
   { id: 'modeSculpt', label: 'Sculpt mode', combo: '3', category: 'Modes' },
