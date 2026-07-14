@@ -381,3 +381,52 @@ constraint system now that it's proven out, to collapse the two
 parallel traveler/trigger implementations into one; Blender's post-
 transform redo panel (re-editable numeric readout after G/R/S confirms)
 isn't built, only the live-modal HUD exists.
+
+## Session log (2026-07-14)
+
+Full detail for each item lives in IMPLEMENTATION_PLAN.md under its own
+`## heading`, in commit order — this is the short index.
+
+**Selection outline + theme colors** `[14bda5f, 2b2f561, 9025a01]` —
+root-caused "whole object highlighted instead of outlined": MeshManager
+was applying an emissive tint on top of the existing Box3Helper outline;
+removed the tint. New Theme settings (uiAccent/uiHighlight/gridColor)
+drive both CSS vars and three.js selection-glyph colors; grid
+auto-contrasts against background unless overridden. The outline itself
+was then rebuilt on `LineSegments2`/`LineMaterial` (three/examples/jsm/
+lines) because `LineBasicMaterial.linewidth` is a WebGL no-op on every
+platform — the old outline was correct in color but invisible at 1px.
+Two follow-on color bugs, both from the same root cause: outliner-row
+selection was hardcoded to a stale blue instead of `var(--accent)`, and
+`THREE.Color`'s default constructor treats numbers as already-linear,
+silently brightening gamma-encoded settings colors on every round trip
+— fixed with a `srgbColor()` helper used everywhere a settings color
+becomes a `THREE.Color`.
+
+**Set Origin for MESH objects + Origin to Geometry (Base)** `[3daa1ec]`
+— Set Origin (Geometry/Cursor) previously GP-only; extended to
+primitive MESH kinds (image planes included, they're PLANE mesh objects
+post canvas-retirement). Primitive geometry is procedural, not
+persisted per-vertex, so a new `TGMesh.originOffset` field mirrors GP's
+retargetOrigin point-shift trick, baked into the geometry incrementally
+by `MeshManager.sync()`. New op: Origin to Geometry (Base) — pivot to
+the bottom-face XY-center, for staging/floor-placement.
+
+**Aesthetic pass: icons, checkboxes, outliner view/lock** `[5e31c94]` —
+new `src/app/icons.ts`, a curated Heroicons-style inline SVG set;
+replaced every emoji/unicode icon app-wide (toolbar, mode switcher,
+gizmo/widget buttons, mode pie, sidebar tab strip, outliner, layers,
+stroke ops, playback) with it. `btn()`/`iconCheckbox()` now accept a
+`Node` label. Checkboxes restyled globally via CSS
+(`appearance: none` + drawn checkmark), zero call-site changes. Every
+outliner row gained a consistent eye/lock icon pair: GP objects and
+triggers gained object-level `hide`/`lock` (GP visibility was
+previously per-layer only; triggers had neither); mesh/splat gained
+`lock`. Lock blocks viewport click/box-select
+(`isObjectLocked()`/`objects.ts`) but the outliner row itself stays
+selectable — Blender's "lock guards against stray clicks" semantics,
+not "unselectable everywhere."
+
+Where next: same as above (N8 splat nibs, PRD §1b vision items, legacy
+score/constraint consolidation, post-transform redo panel) — nothing
+in this session changed those priorities.
