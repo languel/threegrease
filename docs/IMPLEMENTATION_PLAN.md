@@ -732,3 +732,27 @@ commit each; typecheck+build always, deep verification only when cheap.
   inline field and commit correctly (verified with a real blur
   FocusEvent, since .blur() itself does not synchronously fire in this
   headless harness).
+
+
+## Selection outline only + theme-aware colors  **[SHIPPED 14bda5f]**
+- Root-caused "whole object highlighted instead of an outline like
+  Blender": MeshManager.apply() was setting an emissive tint on every
+  selected mesh's material, on top of the existing Box3Helper outline -
+  the tint dominated visually. Removed it; selection feedback is now
+  the outline + origin dot only.
+- Added Theme settings (context.ts): uiAccent, uiHighlight (Vec3, drive
+  both --accent/--accent2 CSS vars via App.applyThemeColors() and the
+  three.js selection glyph colors via App.highlightColor()), gridColor
+  (Vec3 | null - null means auto-contrast against settings.background
+  luminance).
+- GridHelper bakes vertex colors at construction, so recoloring means
+  disposing and rebuilding (App.rebuildGrid()); called from
+  setBackground() and from the new Settings dialog rows.
+- Settings dialog gained a "Theme" section: Accent + Highlight color
+  fields, and an "Auto grid color (matches Background)" checkbox that
+  reveals a manual Grid color field when unchecked.
+- Verified live: selected plane shows outline-only (no fill wash);
+  Settings dialog Theme rows render; changing Highlight recolors the
+  selection outline live; toggling Auto grid color off + setting a
+  manual grid color rebuilds the grid with the new color; restored
+  defaults after testing.
