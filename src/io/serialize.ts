@@ -29,17 +29,20 @@ export function deserializeScene(json: string): GPScene {
   scene.mediamime ??= { prefix: '/mm', rigs: [] };
   for (const trig of scene.score.triggers) {
     trig.select ??= false;
+    trig.hide ??= false;
+    trig.lock ??= false;
     trig.parent ??= null;
     trig.constraints ??= [];
   }
   scene.splats ??= [];
   // object-URL sources don't survive reload
   scene.splats = scene.splats.filter((s) => !s.src.startsWith('blob:'));
-  for (const s of scene.splats) { s.select ??= false; s.drawTarget ??= false; s.constraints ??= []; }
+  for (const s of scene.splats) { s.select ??= false; s.lock ??= false; s.drawTarget ??= false; s.constraints ??= []; }
   scene.meshes ??= [];
   scene.meshes = scene.meshes.filter((m) => !(m.src ?? '').startsWith('blob:'));
   for (const m of scene.meshes) {
     m.select ??= false;
+    m.lock ??= false;
     m.constraints ??= [];
     m.texture ??= null;
     if (m.texture?.startsWith('blob:')) m.texture = null; // session-only
@@ -73,6 +76,8 @@ export function deserializeScene(json: string): GPScene {
   scene.canvases = [];
   for (const ob of scene.objects) {
     ob.select ??= false;
+    ob.hide ??= false;
+    ob.lock ??= false;
     ob.constraints ??= [];
     ob.id ??= genId();
   }

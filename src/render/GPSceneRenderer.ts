@@ -80,6 +80,7 @@ export class GPSceneRenderer {
       group.position.set(...ob.translation);
       group.rotation.set(...ob.rotation);
       group.scale.set(...ob.scale);
+      group.visible = !ob.hide;
 
       ob.layers.forEach((layer, li) => {
         const cached = this.layerCache.get(layer.id);

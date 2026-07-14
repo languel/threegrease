@@ -785,3 +785,61 @@ commit each; typecheck+build always, deep verification only when cheap.
   Set Origin submenu (both new/extended items enabled for a MESH
   selection, GP-only items correctly still disabled); undo correctly
   reverts both translation and originOffset.
+
+
+## Aesthetic pass: consistent icons, prettier checkboxes, outliner view/lock
+- New src/app/icons.ts: a curated set of Heroicons-style outline SVGs
+  (24x24 grid, 1.6 stroke, round joins — same visual language as
+  heroicons.com, redrawn inline since the app has no external asset
+  fetching at runtime). icon(name) returns a fresh <svg>, sized/colored
+  via CSS (.hi { stroke: currentColor }) so it follows button/text color
+  including hover/active/disabled states automatically.
+- btn() now accepts a Node label (not just string), so call sites can
+  pass icon('eye') etc. Swapped every emoji/unicode glyph icon-btn in
+  ui.ts (close/delete, eye/eyeOff, lock, chevron up/down, play/pause,
+  download, outliner kind icons, draw-target/wireframe toggles) for the
+  new icon set — one visual language app-wide instead of mismatched
+  platform emoji rendering.
+- Checkboxes: replaced the OS-native control with a CSS-only prettied
+  one (input[type=checkbox] { appearance:none } + a hand-drawn checkmark
+  and --accent fill) — applies globally with zero call-site changes,
+  themes off the same accent color as everything else.
+- Outliner view/lock: GP objects and triggers gained object-level
+  hide/lock fields (previously GP visibility was per-layer only, and
+  triggers had neither); mesh/splat gained lock (visible already
+  existed). Every outliner row now has a consistent eye/lock icon pair
+  (viewLockBtns() in ui.ts) — eye toggles rendering (GPSceneRenderer
+  respects ob.hide via group.visible; mesh/splat already read
+  .visible), lock blocks viewport click/box-select
+  (isObjectLocked()/objects.ts, checked in ObjectSelectTool.onUp) while
+  the outliner row itself remains clickable — Blender's "lock guards
+  against stray clicks, not every path to selection" behavior.
+- Verified live: box hidden via row eye icon (mesh disappears, outline
+  glyph still shows since still selected); box locked via row lock icon
+  then viewport click on it left select:false (blocked), outliner-row
+  click still set select:true while lock:true (Blender-style), unlock
+  via the row icon restored viewport click-select.
+
+
+## Aesthetic pass part 2: convert every remaining icon app-wide
+- Extended src/app/icons.ts with the rest of the app's icon vocabulary
+  (eraser, line/polyline/arc/curve/hand tool glyphs, folder, wrench,
+  compass, rotate, gear, floppy, photo, target, skipBack, check, invert,
+  arrow up/down/right) so every icon-btn/toolbar/mode/pie/tab-strip glyph
+  in the app now draws from the same Heroicons-style set, not just the
+  outliner (previous entry).
+- Converted: draw-mode toolbar (12 tools), edit/sculpt/vertex/weight
+  toolbars, topbar mode buttons + gizmo/widget buttons, magnet snap
+  checkbox, mode pie menu (6 slots), sidebar tab strip (8 tabs), Stroke
+  Ops panel (18 icon buttons), texture load/clear, onion toggle, layer
+  move up/down, modifier apply/reorder, camera-view/settings-gear/
+  playback-skip topbar icons, mask-remove chip, string-art/camera-target
+  image buttons, event-monitor play/pause. iconLabel() helper added for
+  buttons needing icon+text together (e.g. "replace texture…").
+- Left as plain text (no icon conversion): the standard ✓ menu-checkmark
+  prefix (CtxItem.label is string-only; converting would mean a larger
+  CtxItem-type change for one glyph) and a few decorative panel-title
+  emoji prefixes, which were simply removed rather than iconified.
+- Verified live: reloaded and screenshotted Draw/Object/Edit modes, the
+  mode pie, and Data/Stroke-Ops panels — no emoji glyphs remain in any
+  toolbar, mode switcher, tab strip, or icon-btn; tsc + vite build clean.

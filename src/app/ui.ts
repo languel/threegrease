@@ -38,6 +38,7 @@ import { EFFECT_DEFAULTS, createEffect } from '../fx/effects';
 import { interpolateFrame, interpolateSequence } from '../anim/interpolate';
 import * as ops from '../tools/editops';
 import { selectAll, selectLinked, selectMoreLess } from '../tools/select';
+import { icon, type IconName } from './icons';
 
 export interface AppHandle {
   ctx: AppCtx;
@@ -120,11 +121,13 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return e;
 }
 
-function btn(label: string, onclick: () => void, opts: { active?: boolean; title?: string; cls?: string } = {}): HTMLButtonElement {
-  return el('button', {
-    text: label, onclick, title: opts.title ?? label,
+function btn(label: string | Node, onclick: () => void, opts: { active?: boolean; title?: string; cls?: string } = {}): HTMLButtonElement {
+  const b = el('button', {
+    onclick, title: opts.title ?? (typeof label === 'string' ? label : ''),
     class: `${opts.cls ?? ''} ${opts.active ? 'active' : ''}`,
   });
+  b.append(label);
+  return b;
 }
 
 function slider(
@@ -149,11 +152,11 @@ function checkbox(label: string, value: boolean, onChange: (v: boolean) => void)
 }
 
 /** Icon-only checkbox (no visible text) with a hover tooltip. */
-function iconCheckbox(icon: string, title: string, value: boolean, onChange: (v: boolean) => void): HTMLElement {
+function iconCheckbox(iconEl: string | Node, title: string, value: boolean, onChange: (v: boolean) => void): HTMLElement {
   const input = el('input', { type: 'checkbox' }) as HTMLInputElement;
   input.checked = value;
   input.onchange = () => onChange(input.checked);
-  return el('label', { class: 'inline', title }, input, icon);
+  return el('label', { class: 'inline', title }, input, iconEl);
 }
 
 function colorField(label: string, rgba: number[], onChange: (rgb: [number, number, number]) => void): HTMLElement {
@@ -184,6 +187,11 @@ function hexToRgb(hex: string): [number, number, number] {
   ];
 }
 
+/** Icon + text combo for buttons whose label needs both (e.g. "replace texture…"). */
+function iconLabel(iconName: IconName, text: string): HTMLElement {
+  return el('span', { class: 'icon-label' }, icon(iconName, 14), text);
+}
+
 function panel(title: string, ...children: (Node | string)[]): HTMLElement {
   const body = el('div', { class: 'body' }, ...children);
   const h = el('h3', { text: title });
@@ -193,23 +201,23 @@ function panel(title: string, ...children: (Node | string)[]): HTMLElement {
 
 // ---------------------------------------------------------------------------
 
-const TOOLS_BY_MODE: Record<EditorMode, [string, string, string][]> = {
-  OBJECT: [['object-select', '⬚', 'Select objects (Shift extends)']],
+const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
+  OBJECT: [['object-select', 'cursorArrow', 'Select objects (Shift extends)']],
   DRAW: [
-    ['draw', '✏️', 'Draw (D)'], ['erase', '◌', 'Erase (E)'], ['fill', '🪣', 'Fill (F)'],
-    ['tint', '🖌', 'Tint'], ['cutter', '✂️', 'Cutter'], ['eyedropper', '💧', 'Eyedropper'],
-    ['line', '╱', 'Line'], ['polyline', '⌇', 'Polyline'], ['arc', '◜', 'Arc'],
-    ['curve', '∿', 'Curve'], ['box', '▭', 'Box'], ['circle', '◯', 'Circle'],
-    ['interpolate', '⇄', 'Interpolate (drag)'],
+    ['draw', 'pencil', 'Draw (D)'], ['erase', 'eraser', 'Erase (E)'], ['fill', 'swatch', 'Fill (F)'],
+    ['tint', 'brush', 'Tint'], ['cutter', 'scissors', 'Cutter'], ['eyedropper', 'droplet', 'Eyedropper'],
+    ['line', 'lineTool', 'Line'], ['polyline', 'polylineTool', 'Polyline'], ['arc', 'arcTool', 'Arc'],
+    ['curve', 'curveTool', 'Curve'], ['box', 'square', 'Box'], ['circle', 'circle', 'Circle'],
+    ['interpolate', 'arrowsRightLeft', 'Interpolate (drag)'],
   ],
   EDIT: [
-    ['select', '⬚', 'Box select (Ctrl lasso, C circle)'],
-    ['select-lasso', '⟁', 'Lasso select'],
-    ['select-circle', '◯', 'Circle select ([ ] size)'],
+    ['select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
+    ['select-lasso', 'lasso', 'Lasso select'],
+    ['select-circle', 'circle', 'Circle select ([ ] size)'],
   ],
-  SCULPT: [['sculpt', '🫳', 'Sculpt brush']],
-  VERTEX: [['vertexpaint', '🎨', 'Vertex paint']],
-  WEIGHT: [['weightpaint', '⚖️', 'Weight paint']],
+  SCULPT: [['sculpt', 'hand', 'Sculpt brush']],
+  VERTEX: [['vertexpaint', 'brush', 'Vertex paint']],
+  WEIGHT: [['weightpaint', 'adjustments', 'Weight paint']],
 };
 
 export class UI {
@@ -352,7 +360,7 @@ export class UI {
     ]);
 
     const assetItems = listAssets().flatMap((a) => [{
-      label: `${a.kind === 'GP' ? '✏️' : a.kind === 'MESH' ? '⬢' : '✳'} ${a.name}`,
+      label: a.name,
       do: () => this.app.addAssetToScene(a),
     }]);
     menu('Add', [
@@ -363,8 +371,8 @@ export class UI {
       { sep: true },
       { header: 'Assets' },
       ...assetItems,
-      { label: '💾 Save selected as asset', do: () => this.app.saveSelectedAsAsset() },
-      ...(assetItems.length ? [{ label: '🗑 Manage assets…', do: () => this.manageAssets() }] : []),
+      { label: 'Save selected as asset', do: () => this.app.saveSelectedAsAsset() },
+      ...(assetItems.length ? [{ label: 'Manage assets…', do: () => this.manageAssets() }] : []),
       { sep: true },
       { label: 'Plane', do: () => this.app.addMeshObject('PLANE') },
       { label: 'Box', do: () => this.app.addMeshObject('BOX') },
@@ -433,25 +441,25 @@ export class UI {
     const bar = $('topbar');
     bar.replaceChildren();
 
-    const modes: [EditorMode, string, string][] = [
-      ['OBJECT', '🞔', 'Object mode'], ['DRAW', '✏️', 'Draw mode'], ['EDIT', '🩹', 'Edit mode'],
-      ['SCULPT', '🗿', 'Sculpt mode'], ['VERTEX', '🎨', 'Vertex paint'], ['WEIGHT', '⚖️', 'Weight paint'],
+    const modes: [EditorMode, IconName, string][] = [
+      ['OBJECT', 'cursorArrow', 'Object mode'], ['DRAW', 'pencil', 'Draw mode'], ['EDIT', 'pencilSquare', 'Edit mode'],
+      ['SCULPT', 'hand', 'Sculpt mode'], ['VERTEX', 'brush', 'Vertex paint'], ['WEIGHT', 'adjustments', 'Weight paint'],
     ];
-    for (const [m, icon, label] of modes) {
-      bar.append(btn(icon, () => this.app.setMode(m), { active: s.mode === m, title: label }));
+    for (const [m, iconName, label] of modes) {
+      bar.append(btn(icon(iconName), () => this.app.setMode(m), { active: s.mode === m, title: label }));
     }
     bar.append(el('div', { class: 'sep' }));
 
     if (s.mode === 'OBJECT') {
       bar.append(
-        btn('🧭', () => { s.showGizmo = !s.showGizmo; this.app.savePrefs(); this.app.refreshWidget(); this.refresh(); },
+        btn(icon('compass'), () => { s.showGizmo = !s.showGizmo; this.app.savePrefs(); this.app.refreshWidget(); this.refresh(); },
           { active: s.showGizmo, title: 'Show transform gizmo (off = Blender-style G/R/S modal only)' }),
       );
       if (s.showGizmo) {
         bar.append(
-          btn('✥', () => this.app.setWidgetMode('translate'), { active: this.app.widgetMode === 'translate', title: 'Widget: move (G)' }),
-          btn('↻', () => this.app.setWidgetMode('rotate'), { active: this.app.widgetMode === 'rotate', title: 'Widget: rotate (R)' }),
-          btn('⤢', () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
+          btn(icon('scale'), () => this.app.setWidgetMode('translate'), { active: this.app.widgetMode === 'translate', title: 'Widget: move (G)' }),
+          btn(icon('rotate'), () => this.app.setWidgetMode('rotate'), { active: this.app.widgetMode === 'rotate', title: 'Widget: rotate (R)' }),
+          btn(icon('arrowsRightLeft'), () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
         );
       }
     } else if (s.mode === 'DRAW') {
@@ -526,7 +534,7 @@ export class UI {
     // cursor (Shift+RMB drag). Magnet off = cursor moves freely on the
     // drawing plane.
     bar.append(
-      iconCheckbox('🧲', 'Magnet snapping', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
+      iconCheckbox(icon('magnet'), 'Magnet snapping', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
       selectField('', s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode, [
         ['INCREMENT', 'Grid'], ['POINT', 'Vertex'], ['EDGE', 'Edge (along path)'],
         ['OBJECT', 'Object origin'], ['SURFACE', 'Surface (mesh/3DGS)'],
@@ -546,8 +554,8 @@ export class UI {
     const { ctx } = this.app;
     const bar = $('toolbar');
     bar.replaceChildren();
-    for (const [id, icon, title] of TOOLS_BY_MODE[ctx.settings.mode]) {
-      bar.append(btn(icon, () => this.app.setTool(id), {
+    for (const [id, iconName, title] of TOOLS_BY_MODE[ctx.settings.mode]) {
+      bar.append(btn(icon(iconName, 18), () => this.app.setTool(id), {
         active: ctx.settings.activeTool === id, title, cls: 'tool',
       }));
     }
@@ -586,16 +594,16 @@ export class UI {
   openModePie(center: { x: number; y: number }): void {
     this.closeModePie();
     const { ctx } = this.app;
-    type Slot = { mode: EditorMode; label: string; icon: string; key: string; angleDeg: number };
+    type Slot = { mode: EditorMode; label: string; icon: IconName; key: string; angleDeg: number };
     const SLOTS: Slot[] = [
-      { mode: 'DRAW', label: 'Draw', icon: '✏️', key: '8', angleDeg: -90 },
-      { mode: 'SCULPT', label: 'Sculpt', icon: '🗿', key: '2', angleDeg: 90 },
-      { mode: 'OBJECT', label: 'Object', icon: '🞔', key: '4', angleDeg: 180 },
-      { mode: 'EDIT', label: 'Edit', icon: '🩹', key: '6', angleDeg: 0 },
+      { mode: 'DRAW', label: 'Draw', icon: 'pencil', key: '8', angleDeg: -90 },
+      { mode: 'SCULPT', label: 'Sculpt', icon: 'hand', key: '2', angleDeg: 90 },
+      { mode: 'OBJECT', label: 'Object', icon: 'cursorArrow', key: '4', angleDeg: 180 },
+      { mode: 'EDIT', label: 'Edit', icon: 'pencilSquare', key: '6', angleDeg: 0 },
       // pushed further from Draw (N, -90) than a plain ±45 hexagon would
       // put them, so Draw has breathing room at the top
-      { mode: 'WEIGHT', label: 'Weight Paint', icon: '⚖️', key: '7', angleDeg: -150 },
-      { mode: 'VERTEX', label: 'Vertex Paint', icon: '🎨', key: '9', angleDeg: -30 },
+      { mode: 'WEIGHT', label: 'Weight Paint', icon: 'adjustments', key: '7', angleDeg: -150 },
+      { mode: 'VERTEX', label: 'Vertex Paint', icon: 'brush', key: '9', angleDeg: -30 },
     ];
     const R = 105;
     const rect = ctx.canvas.getBoundingClientRect();
@@ -611,7 +619,7 @@ export class UI {
     for (const s of SLOTS) {
       const rad = (s.angleDeg * Math.PI) / 180;
       const item = el('div', { class: `pie-item${ctx.settings.mode === s.mode ? ' pie-item-active' : ''}` },
-        el('span', { class: 'pie-icon', text: s.icon }),
+        el('span', { class: 'pie-icon' }, icon(s.icon, 18)),
         el('span', { text: s.label }),
         el('span', { class: 'pie-key', text: s.key }),
       );
@@ -868,24 +876,24 @@ export class UI {
         : ctx.settings.mode === 'EDIT' ? 'data' : 'brush';
     }
 
-    const tabs: { id: string; icon: string; title: string; build: () => HTMLElement[] }[] = [
+    const tabs: { id: string; icon: IconName; title: string; build: () => HTMLElement[] }[] = [
       {
-        id: 'object', icon: '📦', title: 'Objects — outliner · transform · material',
+        id: 'object', icon: 'cube', title: 'Objects — outliner · transform · material',
         build: () => [this.objectsPanel(), this.objectPropsPanel()],
       },
       {
-        id: 'constraints', icon: '⛓️', title: 'Constraints — travelers · triggers · physics',
+        id: 'constraints', icon: 'link', title: 'Constraints — travelers · triggers · physics',
         build: () => [this.constraintsPanel()],
       },
       {
-        id: 'brush', icon: '🖌️', title: 'Brush & GP materials',
+        id: 'brush', icon: 'brush', title: 'Brush & GP materials',
         build: () => [
           this.brushPanel(), this.materialsPanel(),
           ...(ctx.settings.mode === 'EDIT' ? [this.strokePanel(), this.editOpsPanel()] : []),
         ],
       },
       {
-        id: 'data', icon: '🗂️', title: 'Data — layers · strokes · onion skin',
+        id: 'data', icon: 'folder', title: 'Data — layers · strokes · onion skin',
         build: () => [
           this.layersPanel(),
           ...(ctx.settings.mode === 'EDIT' ? [this.strokePanel(), this.editOpsPanel()] : []),
@@ -893,19 +901,19 @@ export class UI {
         ],
       },
       {
-        id: 'mods', icon: '🔧', title: 'Modifiers & effects',
+        id: 'mods', icon: 'wrench', title: 'Modifiers & effects',
         build: () => [this.modifiersPanel(), this.effectsPanel()],
       },
       {
-        id: 'bindings', icon: '⚡', title: 'Bindings — score · routes · MIDI/OSC/WS',
+        id: 'bindings', icon: 'boltCircle', title: 'Bindings — score · routes · MIDI/OSC/WS',
         build: () => [this.scorePanel(), this.routesPanel(), this.ioPanel()],
       },
       {
-        id: 'mediamime', icon: '🎥', title: 'MediaMime — live landmarks & object rigging',
+        id: 'mediamime', icon: 'camera', title: 'MediaMime — live landmarks & object rigging',
         build: () => [this.mediamimePanel()],
       },
       {
-        id: 'solvers', icon: '🧵', title: 'Solvers — splats · string art · wire art',
+        id: 'solvers', icon: 'variable', title: 'Solvers — splats · string art · wire art',
         build: () => [this.splatsPanel(), this.solverPanel()],
       },
     ];
@@ -913,7 +921,7 @@ export class UI {
     // Blender-style vertical tab column beside the panel stack
     const strip = el('div', { class: 'props-tabs' });
     for (const t of tabs) {
-      strip.append(btn(t.icon, () => { this.propsTab = t.id; this.refresh(); },
+      strip.append(btn(icon(t.icon, 17), () => { this.propsTab = t.id; this.refresh(); },
         { cls: `props-tab${this.propsTab === t.id ? ' active' : ''}`, title: t.title }));
     }
     const content = el('div', { class: 'props-content' });
@@ -946,39 +954,58 @@ export class UI {
     };
 
     interface NodeDesc {
-      ref: ObjRef; icon: string; name: string; selected: boolean;
+      ref: ObjRef; icon: Node; name: string; selected: boolean;
       parent?: { kind: string; id: number } | null;
       onSelect: (e?: MouseEvent) => void; extras: Node[];
       rename: (v: string) => void; after?: Node[];
     }
     const nodes: NodeDesc[] = [];
 
+    /** Outliner eye/lock pair, Blender-style — shared across every kind so
+     *  they read consistently (view = renders, lock = blocks viewport
+     *  click/box-select but the row itself still selects). */
+    const viewLockBtns = (
+      hidden: boolean, onHide: (v: boolean) => void,
+      locked: boolean, onLock: (v: boolean) => void,
+    ): Node[] => [
+      btn(hidden ? icon('eyeOff') : icon('eye'), () => { onHide(!hidden); this.refresh(); },
+        { cls: 'icon-btn', title: hidden ? 'Hidden (click to show)' : 'Visible (click to hide)' }),
+      btn(locked ? icon('lockClosed') : icon('lockOpen'), () => { onLock(!locked); this.refresh(); },
+        { cls: 'icon-btn', title: locked ? 'Locked (click to unlock)' : 'Unlocked (click to lock — blocks viewport click-select)' }),
+    ];
+
     scene.objects.forEach((ob, i) => nodes.push({
-      ref: { kind: 'GP', id: ob.id }, icon: '✏️', name: ob.name, selected: !!ob.select,
+      ref: { kind: 'GP', id: ob.id }, icon: icon('pencil'), name: ob.name, selected: !!ob.select,
       parent: ob.parent,
       onSelect: (e) => {
         scene.activeObject = i;
         this.app.setLastPicked({ kind: 'GP', id: ob.id });
         toggleSel((v) => { ob.select = v; }, !!ob.select, !!e?.shiftKey);
       },
-      extras: [btn('⬇', () => this.app.exportActiveGP(), { cls: 'icon-btn', title: 'Export this GP object' })],
+      extras: [
+        btn(icon('arrowDownTray'), () => this.app.exportActiveGP(), { cls: 'icon-btn', title: 'Export this GP object' }),
+        ...viewLockBtns(
+          !!ob.hide, (v) => { ob.hide = v; ctx.requestRender(); },
+          !!ob.lock, (v) => { ob.lock = v; },
+        ),
+      ],
       rename: (v) => { ob.name = v; },
     }));
     for (const c of scene.canvases) nodes.push({
-      ref: { kind: 'CANVAS', id: c.id }, icon: '▦', name: c.name, selected: c.select,
+      ref: { kind: 'CANVAS', id: c.id }, icon: icon('square'), name: c.name, selected: c.select,
       parent: c.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'CANVAS', id: c.id });
         toggleSel((v) => { c.select = v; }, c.select, !!e?.shiftKey);
       },
       extras: [
-        btn(c.drawTarget ? '🖊' : '·', () => { c.drawTarget = !c.drawTarget; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
-        btn(c.visible ? '👁' : '🙈', () => { c.visible = !c.visible; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn' }),
+        btn(c.drawTarget ? icon('pencilSquare') : icon('dot'), () => { c.drawTarget = !c.drawTarget; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
+        btn(c.visible ? icon('eye') : icon('eyeOff'), () => { c.visible = !c.visible; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn' }),
       ],
       rename: (v) => { c.name = v; },
     });
     for (const m of scene.meshes) nodes.push({
-      ref: { kind: 'MESH', id: m.id }, icon: m.kind === 'MODEL' ? '🗿' : '⬢', name: m.name,
+      ref: { kind: 'MESH', id: m.id }, icon: m.kind === 'MODEL' ? icon('cubeModel') : icon('cube'), name: m.name,
       selected: m.select, parent: m.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'MESH', id: m.id });
@@ -986,9 +1013,12 @@ export class UI {
       },
       extras: [
         colorField('', [...m.color, 1], (rgb) => { m.color = rgb; }),
-        btn(m.drawTarget ? '🖊' : '·', () => { m.drawTarget = !m.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
-        btn(m.wireframe ? '◻' : '◼', () => { m.wireframe = !m.wireframe; this.refresh(); }, { cls: 'icon-btn', title: 'Wireframe (reference look)' }),
-        btn(m.visible ? '👁' : '🙈', () => { m.visible = !m.visible; this.refresh(); }, { cls: 'icon-btn' }),
+        btn(m.drawTarget ? icon('pencilSquare') : icon('dot'), () => { m.drawTarget = !m.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
+        btn(m.wireframe ? icon('wireframe') : icon('square'), () => { m.wireframe = !m.wireframe; this.refresh(); }, { cls: 'icon-btn', title: 'Wireframe (reference look)' }),
+        ...viewLockBtns(
+          !m.visible, (v) => { m.visible = !v; },
+          !!m.lock, (v) => { m.lock = v; },
+        ),
       ],
       rename: (v) => { m.name = v; },
       after: m.select ? [el('div', { class: 'row' },
@@ -996,29 +1026,36 @@ export class UI {
       )] : [],
     });
     for (const s of scene.splats) nodes.push({
-      ref: { kind: 'SPLAT', id: s.id }, icon: '✳', name: s.name, selected: s.select,
+      ref: { kind: 'SPLAT', id: s.id }, icon: icon('sparkles'), name: s.name, selected: s.select,
       parent: s.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'SPLAT', id: s.id });
         toggleSel((v) => { s.select = v; }, s.select, !!e?.shiftKey);
       },
       extras: [
-        btn(s.drawTarget ? '🖊' : '·', () => { s.drawTarget = !s.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target (GP surface placement raycasts the splat)' }),
+        btn(s.drawTarget ? icon('pencilSquare') : icon('dot'), () => { s.drawTarget = !s.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target (GP surface placement raycasts the splat)' }),
         btn('⬇.ply', () => this.app.exportSplatPly(s.id), { cls: 'icon-btn', title: 'Export as 3DGS PLY (PlayCanvas/SuperSplat compatible)' }),
-        btn(s.visible ? '👁' : '🙈', () => { s.visible = !s.visible; this.refresh(); }, { cls: 'icon-btn' }),
+        ...viewLockBtns(
+          !s.visible, (v) => { s.visible = !v; },
+          !!s.lock, (v) => { s.lock = v; },
+        ),
       ],
       rename: (v) => { s.name = v; },
     });
     for (const t of scene.score.triggers) nodes.push({
-      ref: { kind: 'TRIGGER', id: t.id }, icon: '◎', name: t.name, selected: !!t.select,
+      ref: { kind: 'TRIGGER', id: t.id }, icon: icon('boltCircle'), name: t.name, selected: !!t.select,
       parent: t.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'TRIGGER', id: t.id });
         toggleSel((v) => { t.select = v; }, !!t.select, !!e?.shiftKey);
       },
       extras: [
-        btn(t.zone ? '〰' : t.follow ? '🔗' : ctx.scene.mediamime.rigs.some((r) => r.target.kind === 'TRIGGER' && r.target.id === t.id) ? '🎥' : '·',
+        btn(t.zone ? icon('wave') : t.follow ? icon('link') : ctx.scene.mediamime.rigs.some((r) => r.target.kind === 'TRIGGER' && r.target.id === t.id) ? icon('camera') : icon('dot'),
           () => {}, { cls: 'icon-btn', title: t.zone ? 'Stroke zone' : t.follow ? 'Follows an object' : 'Static / MediaMime-rigged' }),
+        ...viewLockBtns(
+          !!t.hide, (v) => { t.hide = v; },
+          !!t.lock, (v) => { t.lock = v; },
+        ),
       ],
       rename: (v) => { t.name = v; },
     });
@@ -1090,7 +1127,7 @@ export class UI {
         nameSpan.replaceWith(input);
         input.focus(); input.select();
       };
-      item.append(el('span', { text: n.icon }), nameSpan, ...n.extras);
+      item.append(el('span', { class: 'row-icon' }, n.icon), nameSpan, ...n.extras);
 
       // drag-to-parent
       item.draggable = true;
@@ -1208,8 +1245,8 @@ export class UI {
         ),
         el('div', { class: 'row' },
           texFile,
-          btn(m.texture ? '🖼 replace texture…' : 'Load texture…', () => texFile.click()),
-          ...(m.texture ? [btn('✕ tex', () => { m.texture = null; this.refresh(); }, { cls: 'icon-btn', title: 'Clear texture' })] : []),
+          btn(m.texture ? iconLabel('photo', 'replace texture…') : 'Load texture…', () => texFile.click()),
+          ...(m.texture ? [btn(icon('xMark'), () => { m.texture = null; this.refresh(); }, { cls: 'icon-btn', title: 'Clear texture' })] : []),
         ),
         el('div', { class: 'row' },
           checkbox('Unlit', !!m.unlit, (v) => { m.unlit = v; }),
@@ -1308,9 +1345,9 @@ export class UI {
       };
       item.append(
         name,
-        btn(layer.hide ? '🙈' : '👁', () => { layer.hide = !layer.hide; ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn', title: 'Hide' }),
-        btn(layer.lock ? '🔒' : '🔓', () => { layer.lock = !layer.lock; this.refresh(); }, { cls: 'icon-btn', title: 'Lock' }),
-        btn(layer.useOnion ? '🧅' : '·', () => { layer.useOnion = !layer.useOnion; ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn', title: 'Onion skin' }),
+        btn(layer.hide ? icon('eyeOff') : icon('eye'), () => { layer.hide = !layer.hide; ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn', title: 'Hide' }),
+        btn(layer.lock ? icon('lockClosed') : icon('lockOpen'), () => { layer.lock = !layer.lock; this.refresh(); }, { cls: 'icon-btn', title: 'Lock' }),
+        btn(layer.useOnion ? icon('sparkles') : icon('dot'), () => { layer.useOnion = !layer.useOnion; ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn', title: 'Onion skin' }),
       );
       items.push(item);
     }
@@ -1358,8 +1395,8 @@ export class UI {
           ob.activeLayerId = copy.id;
           ctx.requestRender(); this.refresh();
         }, { title: 'Duplicate layer' }),
-        btn('▲', () => this.moveLayer(1), { title: 'Move up' }),
-        btn('▼', () => this.moveLayer(-1), { title: 'Move down' }),
+        btn(icon('chevronUp'), () => this.moveLayer(1), { title: 'Move up' }),
+        btn(icon('chevronDown'), () => this.moveLayer(-1), { title: 'Move down' }),
       ),
       ...items, ...props,
     );
@@ -1383,7 +1420,7 @@ export class UI {
     row.append(sel);
     for (const id of layer.maskLayerIds) {
       const l = ob.layers.find((x) => x.id === id);
-      row.append(btn(`${l?.name ?? id} ✕`, () => {
+      row.append(btn(el('span', { class: 'icon-label' }, `${l?.name ?? id} `, icon('xMark', 12)), () => {
         layer.maskLayerIds = layer.maskLayerIds.filter((x) => x !== id);
         ctx.requestRender(); this.refresh();
       }, { cls: 'icon-btn', title: 'Remove mask' }));
@@ -1475,7 +1512,7 @@ export class UI {
         el('div', { class: 'row' },
           checkbox('Visible', c.visible, (v) => { c.visible = v; this.app.syncCanvases(); }),
           checkbox('Draw target', c.drawTarget, (v) => { c.drawTarget = v; this.app.syncCanvases(); }),
-          btn('✕', () => this.app.removeCanvasPlane(c.id), { cls: 'icon-btn', title: 'Delete canvas' }),
+          btn(icon('xMark'), () => this.app.removeCanvasPlane(c.id), { cls: 'icon-btn', title: 'Delete canvas' }),
         ),
         el('div', { class: 'row' }, 'Pos',
           ...[0, 1, 2].map((i) => numField('', c.translation[i], (v) => { c.translation[i] = v; this.app.syncCanvases(); })),
@@ -1594,46 +1631,46 @@ export class UI {
     const ob = activeObject(ctx.scene);
     const layerSel = el('select') as HTMLSelectElement;
     for (const l of ob.layers) layerSel.append(el('option', { value: String(l.id), text: l.name }));
-    const iconBtn = (icon: string, title: string, fn: () => void) =>
-      btn(icon, fn, { cls: 'icon-btn', title });
+    const iconBtn = (iconName: IconName, title: string, fn: () => void) =>
+      btn(icon(iconName), fn, { cls: 'icon-btn', title });
     return panel('Stroke Ops',
       el('div', { class: 'row' },
-        iconBtn('▤', 'Subdivide', () => ops.subdivideSelected(ctx)),
-        iconBtn('╱', 'Simplify', () => ops.simplifySelected(ctx)),
-        iconBtn('◡', 'Smooth', () => ops.smoothSelected(ctx)),
+        iconBtn('squareTarget', 'Subdivide', () => ops.subdivideSelected(ctx)),
+        iconBtn('lineTool', 'Simplify', () => ops.simplifySelected(ctx)),
+        iconBtn('curveTool', 'Smooth', () => ops.smoothSelected(ctx)),
       ),
       el('div', { class: 'row' },
-        iconBtn('⋈', 'Join', () => ops.joinSelected(ctx)),
-        iconBtn('✂', 'Split', () => ops.splitSelected(ctx)),
-        iconBtn('◎', 'Merge by distance', () => ops.mergeByDistance(ctx)),
+        iconBtn('link', 'Join', () => ops.joinSelected(ctx)),
+        iconBtn('scissors', 'Split', () => ops.splitSelected(ctx)),
+        iconBtn('dot', 'Merge by distance', () => ops.mergeByDistance(ctx)),
       ),
       el('div', { class: 'row' },
-        iconBtn('◯', 'Toggle cyclic', () => ops.toggleCyclic(ctx)),
-        iconBtn('⇄', 'Reverse direction', () => ops.switchDirection(ctx)),
-        iconBtn('▶|', 'Set start point', () => ops.setStartPoint(ctx)),
+        iconBtn('circle', 'Toggle cyclic', () => ops.toggleCyclic(ctx)),
+        iconBtn('arrowsRightLeft', 'Reverse direction', () => ops.switchDirection(ctx)),
+        iconBtn('play', 'Set start point', () => ops.setStartPoint(ctx)),
       ),
       el('div', { class: 'row' },
-        iconBtn('▭', 'Normalize width', () => ops.normalizeThickness(ctx)),
-        iconBtn('◐', 'Normalize opacity', () => ops.normalizeOpacity(ctx)),
+        iconBtn('square', 'Normalize width', () => ops.normalizeThickness(ctx)),
+        iconBtn('adjustments', 'Normalize opacity', () => ops.normalizeOpacity(ctx)),
       ),
       el('div', { class: 'row' },
-        iconBtn('⤒', 'Bring to front', () => ops.arrangeSelected(ctx, 'TOP')),
-        iconBtn('↑', 'Move up', () => ops.arrangeSelected(ctx, 'UP')),
-        iconBtn('↓', 'Move down', () => ops.arrangeSelected(ctx, 'DOWN')),
-        iconBtn('⤓', 'Send to back', () => ops.arrangeSelected(ctx, 'BOTTOM')),
+        iconBtn('chevronUp', 'Bring to front', () => ops.arrangeSelected(ctx, 'TOP')),
+        iconBtn('arrowUp', 'Move up', () => ops.arrangeSelected(ctx, 'UP')),
+        iconBtn('arrowDown', 'Move down', () => ops.arrangeSelected(ctx, 'DOWN')),
+        iconBtn('chevronDown', 'Send to back', () => ops.arrangeSelected(ctx, 'BOTTOM')),
       ),
       el('div', { class: 'row' },
-        iconBtn('⌖→', 'Snap to 3D cursor', () => ops.snapToCursor(ctx)),
-        iconBtn('▦→', 'Snap to grid', () => ops.snapToGrid(ctx)),
+        iconBtn('target', 'Snap to 3D cursor', () => ops.snapToCursor(ctx)),
+        iconBtn('wireframe', 'Snap to grid', () => ops.snapToGrid(ctx)),
       ),
       el('div', { class: 'row' },
-        iconBtn('L', 'Select linked (L)', () => { selectLinked(ctx); ctx.requestRender(); }),
-        iconBtn('+', 'Select more', () => { selectMoreLess(ctx, true); ctx.requestRender(); }),
-        iconBtn('−', 'Select less', () => { selectMoreLess(ctx, false); ctx.requestRender(); }),
-        iconBtn('⇌', 'Invert selection', () => { selectAll(ctx, 'invert'); ctx.requestRender(); }),
+        iconBtn('link', 'Select linked (L)', () => { selectLinked(ctx); ctx.requestRender(); }),
+        iconBtn('plus', 'Select more', () => { selectMoreLess(ctx, true); ctx.requestRender(); }),
+        iconBtn('xMark', 'Select less', () => { selectMoreLess(ctx, false); ctx.requestRender(); }),
+        iconBtn('invert', 'Invert selection', () => { selectAll(ctx, 'invert'); ctx.requestRender(); }),
       ),
       el('div', { class: 'row' }, 'Move to layer:', layerSel,
-        iconBtn('→', 'Move selected strokes to this layer', () => ops.moveToLayer(ctx, Number(layerSel.value)))),
+        iconBtn('arrowRight', 'Move selected strokes to this layer', () => ops.moveToLayer(ctx, Number(layerSel.value)))),
     );
   }
 
@@ -1680,14 +1717,14 @@ export class UI {
       body.append(
         el('div', { class: 'row' },
           checkbox('On', mod.enabled, (v) => { mod.enabled = v; ctx.requestRender(); }),
-          btn('▲', () => { if (i > 0) { [ob.modifiers[i - 1], ob.modifiers[i]] = [ob.modifiers[i], ob.modifiers[i - 1]]; ctx.requestRender(); this.refresh(); } }, { cls: 'icon-btn' }),
-          btn('▼', () => { if (i < ob.modifiers.length - 1) { [ob.modifiers[i + 1], ob.modifiers[i]] = [ob.modifiers[i], ob.modifiers[i + 1]]; ctx.requestRender(); this.refresh(); } }, { cls: 'icon-btn' }),
-          btn('✓', () => {
+          btn(icon('chevronUp'), () => { if (i > 0) { [ob.modifiers[i - 1], ob.modifiers[i]] = [ob.modifiers[i], ob.modifiers[i - 1]]; ctx.requestRender(); this.refresh(); } }, { cls: 'icon-btn' }),
+          btn(icon('chevronDown'), () => { if (i < ob.modifiers.length - 1) { [ob.modifiers[i + 1], ob.modifiers[i]] = [ob.modifiers[i], ob.modifiers[i + 1]]; ctx.requestRender(); this.refresh(); } }, { cls: 'icon-btn' }),
+          btn(icon('check'), () => {
             ctx.pushUndo();
             if (applyModifierToData(ob, mod.id)) { ctx.requestRender(); this.refresh(); }
             else alert('Time modifiers cannot be baked into geometry');
           }, { cls: 'icon-btn', title: 'Apply: bake into keyframes and remove from the stack' }),
-          btn('✕', () => { ctx.pushUndo(); ob.modifiers.splice(i, 1); ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn' }),
+          btn(icon('xMark'), () => { ctx.pushUndo(); ob.modifiers.splice(i, 1); ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn' }),
         ),
         ...this.paramEditors(mod.params, () => ctx.requestRender()),
       );
@@ -1727,7 +1764,7 @@ export class UI {
       body.append(
         el('div', { class: 'row' },
           checkbox('On', fx.enabled, (v) => { fx.enabled = v; ctx.requestRender(); }),
-          btn('✕', () => { ctx.pushUndo(); ob.effects.splice(i, 1); ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn' }),
+          btn(icon('xMark'), () => { ctx.pushUndo(); ob.effects.splice(i, 1); ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn' }),
         ),
         ...this.paramEditors(fx.params, () => ctx.requestRender()),
       );
@@ -2027,7 +2064,7 @@ export class UI {
     const dialog = el('div', { id: 'settings-dialog' },
       el('div', { class: 'row spread' },
         el('h2', { text: 'Settings' }),
-        btn('✕', close, { cls: 'icon-btn' }),
+        btn(icon('xMark'), close, { cls: 'icon-btn' }),
       ),
       el('div', { class: 'panel' }, el('h3', { text: 'Preferences' }), prefs),
       el('div', { class: 'panel' }, el('h3', { text: 'Shortcuts (click a binding to change it)' }), shortcutRows),
@@ -2170,9 +2207,9 @@ export class UI {
     for (const cur of sc.cursors) {
       const body = el('div', { class: 'body' },
         el('div', { class: 'row' },
-          btn(cur.running ? '⏸' : '▶', () => { cur.running = !cur.running; this.refresh(); }, { cls: 'icon-btn', active: cur.running }),
+          btn(cur.running ? icon('pause') : icon('play'), () => { cur.running = !cur.running; this.refresh(); }, { cls: 'icon-btn', active: cur.running }),
           el('span', { class: 'grow', text: cur.name }),
-          btn('✕', () => { ctx.pushUndo(); sc.cursors.splice(sc.cursors.indexOf(cur), 1); this.refresh(); }, { cls: 'icon-btn' }),
+          btn(icon('xMark'), () => { ctx.pushUndo(); sc.cursors.splice(sc.cursors.indexOf(cur), 1); this.refresh(); }, { cls: 'icon-btn' }),
         ),
         el('div', { class: 'row' },
           numField('Speed', cur.speed, (v) => { cur.speed = v; }, 0.05),
@@ -2181,7 +2218,7 @@ export class UI {
         ),
         this.msgEditor(cur.messages),
       );
-      items.push(el('div', { class: 'panel' }, el('h3', { text: `🏃 Traveler: ${cur.name}` }), body));
+      items.push(el('div', { class: 'panel' }, el('h3', { text: `Traveler: ${cur.name}` }), body));
     }
 
     for (const trig of sc.triggers) {
@@ -2190,7 +2227,7 @@ export class UI {
           numField('Radius', trig.radius, (v) => { trig.radius = Math.max(0.01, v); }, 0.05),
           checkbox('Retrigger', trig.retrigger, (v) => { trig.retrigger = v; }),
           this.followField(() => trig.follow, (v) => { trig.follow = v; }),
-          btn('✕', () => { ctx.pushUndo(); sc.triggers.splice(sc.triggers.indexOf(trig), 1); this.refresh(); }, { cls: 'icon-btn' }),
+          btn(icon('xMark'), () => { ctx.pushUndo(); sc.triggers.splice(sc.triggers.indexOf(trig), 1); this.refresh(); }, { cls: 'icon-btn' }),
         ),
         this.msgEditor(trig.messages),
       );
@@ -2201,15 +2238,15 @@ export class UI {
     for (const at of sc.attachments) {
       const body = el('div', { class: 'body' },
         el('div', { class: 'row' },
-          btn(at.running ? '⏸' : '▶', () => { at.running = !at.running; this.refresh(); }, { cls: 'icon-btn', active: at.running }),
+          btn(at.running ? icon('pause') : icon('play'), () => { at.running = !at.running; this.refresh(); }, { cls: 'icon-btn', active: at.running }),
           numField('Speed', at.speed, (v) => { at.speed = v; }, 0.05),
           selectField('', at.loop, [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { at.loop = v as typeof at.loop; }),
           checkbox('Tangent', at.orient === 'TANGENT', (v) => { at.orient = v ? 'TANGENT' : 'NONE'; }),
-          btn('✕', () => { ctx.pushUndo(); sc.attachments.splice(sc.attachments.indexOf(at), 1); this.refresh(); }, { cls: 'icon-btn' }),
+          btn(icon('xMark'), () => { ctx.pushUndo(); sc.attachments.splice(sc.attachments.indexOf(at), 1); this.refresh(); }, { cls: 'icon-btn' }),
         ),
       );
       items.push(el('div', { class: 'panel' },
-        el('h3', { text: `🔗 ${at.target.kind === 'CANVAS' ? 'Canvas' : 'Camera'} → path` }), body));
+        el('h3', { text: `${at.target.kind === 'CANVAS' ? 'Canvas' : 'Camera'} → path` }), body));
     }
 
     const attachTarget = el('select') as HTMLSelectElement;
@@ -2286,7 +2323,7 @@ export class UI {
         el('div', { class: 'row' },
           checkbox('', s.visible, (v) => { s.visible = v; }),
           el('span', { class: 'grow', text: s.name }),
-          btn('✕', () => {
+          btn(icon('xMark'), () => {
             ctx.pushUndo();
             ctx.scene.splats.splice(ctx.scene.splats.indexOf(s), 1);
             this.refresh();
@@ -2300,10 +2337,10 @@ export class UI {
         ),
         el('div', { class: 'row' },
           numField('Scale', s.scale, (v) => { s.scale = Math.max(0.001, v); }, 0.1),
-          ...(err ? [el('span', { text: `⚠ ${err.slice(0, 60)}` })] : []),
+          ...(err ? [el('span', { text: `! ${err.slice(0, 60)}` })] : []),
         ),
       );
-      return el('div', { class: 'panel' }, el('h3', { text: `✳ ${s.name}` }), body);
+      return el('div', { class: 'panel' }, el('h3', { text: s.name }), body);
     });
 
     return panel('Gaussian Splats',
@@ -2344,7 +2381,7 @@ export class UI {
     const stringArt = el('div', { class: 'body' },
       fileInput,
       el('div', { class: 'row' },
-        btn(this.saTargetName ? `🖼 ${this.saTargetName}` : 'Load target image…',
+        btn(this.saTargetName ? iconLabel('photo', this.saTargetName) : 'Load target image…',
           () => fileInput.click()),
       ),
       el('div', { class: 'row' },
@@ -2381,8 +2418,8 @@ export class UI {
       numField('str', at.strength, (v) => { at.strength = v; }, 0.1),
       numField('rad', at.radius, (v) => { at.radius = Math.max(0.01, v); }, 0.1),
       this.followField(() => at.follow, (v) => { at.follow = v; }),
-      btn('⌖', () => { at.position = [...ctx.scene.cursor] as [number, number, number]; }, { cls: 'icon-btn', title: 'Move to 3D cursor' }),
-      btn('✕', () => {
+      btn(icon('target'), () => { at.position = [...ctx.scene.cursor] as [number, number, number]; }, { cls: 'icon-btn', title: 'Move to 3D cursor' }),
+      btn(icon('xMark'), () => {
         ctx.pushUndo();
         ctx.scene.attractors.splice(ctx.scene.attractors.indexOf(at), 1);
         this.refresh();
@@ -2408,11 +2445,11 @@ export class UI {
       return el('div', { class: 'row' },
         file,
         el('span', { class: 'grow', text: cam.name }),
-        btn(cam.target ? '🖼 set' : 'target…', () => file.click(),
+        btn(cam.target ? iconLabel('photo', 'set') : 'target…', () => file.click(),
           { active: !!cam.target, title: 'Target drawing seen from this camera' }),
         ...(cam.target ? [
           slider('', cam.targetOpacity ?? 0.35, 0, 1, 0.05, (v) => { cam.targetOpacity = v; }),
-          btn('✕', () => { delete cam.target; this.refresh(); }, { cls: 'icon-btn' }),
+          btn(icon('xMark'), () => { delete cam.target; this.refresh(); }, { cls: 'icon-btn' }),
         ] : []),
       );
     });
@@ -2486,7 +2523,7 @@ export class UI {
             routes.learningRouteId = learning ? null : route.id;
             this.refresh();
           }, { active: learning, title: 'Click, then move a controller / send an event' }),
-          btn('✕', () => { ctx.pushUndo(); ctx.scene.routes.splice(ctx.scene.routes.indexOf(route), 1); this.refresh(); }, { cls: 'icon-btn' }),
+          btn(icon('xMark'), () => { ctx.pushUndo(); ctx.scene.routes.splice(ctx.scene.routes.indexOf(route), 1); this.refresh(); }, { cls: 'icon-btn' }),
         ),
         el('div', { class: 'row' }, '→', target),
         el('div', { class: 'row' },
@@ -2577,9 +2614,9 @@ export class UI {
         el('div', { class: 'row' },
           checkbox('', c.enabled, (v) => { c.enabled = v; }),
           el('span', { class: 'grow', text: CONSTRAINT_DEFS[c.type].label }),
-          btn('▲', () => { if (i > 0) { [stack[i - 1], stack[i]] = [stack[i], stack[i - 1]]; this.refresh(); } }, { cls: 'icon-btn' }),
-          btn('▼', () => { if (i < stack.length - 1) { [stack[i + 1], stack[i]] = [stack[i], stack[i + 1]]; this.refresh(); } }, { cls: 'icon-btn' }),
-          btn('✕', () => { ctx.pushUndo(); stack.splice(i, 1); this.refresh(); }, { cls: 'icon-btn' }),
+          btn(icon('chevronUp'), () => { if (i > 0) { [stack[i - 1], stack[i]] = [stack[i], stack[i - 1]]; this.refresh(); } }, { cls: 'icon-btn' }),
+          btn(icon('chevronDown'), () => { if (i < stack.length - 1) { [stack[i + 1], stack[i]] = [stack[i], stack[i + 1]]; this.refresh(); } }, { cls: 'icon-btn' }),
+          btn(icon('xMark'), () => { ctx.pushUndo(); stack.splice(i, 1); this.refresh(); }, { cls: 'icon-btn' }),
         ),
       ];
       if (c.type === 'FOLLOW_PATH') {
@@ -2590,7 +2627,7 @@ export class UI {
               if (path) { c.path = path; this.refresh(); }
               else alert('Select a stroke first (EDIT mode), or draw one — the last stroke is used');
             }, { title: 'Bind to the selected (or last) GP stroke' }),
-            btn(c.running ? '⏸' : '▶', () => { c.running = !c.running; this.refresh(); }, { cls: 'icon-btn', active: c.running }),
+            btn(c.running ? icon('pause') : icon('play'), () => { c.running = !c.running; this.refresh(); }, { cls: 'icon-btn', active: c.running }),
           ),
           el('div', { class: 'row' },
             slider('Phase', c.phase ?? 0, 0, 1, 0.001, (v) => { c.phase = v; }),
@@ -2672,7 +2709,7 @@ export class UI {
       checkbox('', rig.enabled, (v) => { rig.enabled = v; }),
       el('span', { class: 'grow', text: rig.name }),
       numField('scale', rig.scale, (v) => { rig.scale = v; }, 0.05),
-      btn('✕', () => this.app.deleteMediaMimeRig(rig.id), { cls: 'icon-btn' }),
+      btn(icon('xMark'), () => this.app.deleteMediaMimeRig(rig.id), { cls: 'icon-btn' }),
     ));
 
     return panel('MediaMime — landmarks & rigs',
@@ -2726,7 +2763,7 @@ export class UI {
     return panel('Events / IO',
       wsRow, ...midiRows,
       el('div', { class: 'row' },
-        btn(this.monitorPaused ? '▶ monitor' : '⏸ monitor', () => { this.monitorPaused = !this.monitorPaused; this.refresh(); }),
+        btn(this.monitorPaused ? iconLabel('play', 'monitor') : iconLabel('pause', 'monitor'), () => { this.monitorPaused = !this.monitorPaused; this.refresh(); }),
         btn('test', () => bus.send('ui', '/ws/test', 1, 'hello'), { title: 'Emit a test event' }),
       ),
       monitor,
@@ -2785,9 +2822,9 @@ export class UI {
     const s = ctx.scene;
     const controls = $('tl-controls');
     controls.replaceChildren(
-      btn('⏮', () => { s.frame = s.frameStart; ctx.requestRender(); this.drawTimeline(); }, { title: 'Jump to start' }),
+      btn(icon('skipBack'), () => { s.frame = s.frameStart; ctx.requestRender(); this.drawTimeline(); }, { title: 'Jump to start' }),
       btn('◀◀', () => this.app.jumpKey(-1), { title: 'Previous keyframe (Down)' }),
-      btn(this.app.isPlaying() ? '⏸' : '▶', () => { this.app.playToggle(); this.refreshTimelineControls(); }, { title: 'Play (Space)' }),
+      btn(this.app.isPlaying() ? icon('pause') : icon('play'), () => { this.app.playToggle(); this.refreshTimelineControls(); }, { title: 'Play (Space)' }),
       btn('▶▶', () => this.app.jumpKey(1), { title: 'Next keyframe (Up)' }),
       el('span', { text: `Frame ${s.frame}` }),
       el('div', { class: 'sep' }),
@@ -2803,7 +2840,7 @@ export class UI {
       btn('Interpolate', () => { interpolateFrame(ctx, ctx.scene.frame, this.interpFactor(ctx)); this.drawTimeline(); }, { title: 'Insert breakdown at current frame' }),
       btn('Sequence', () => { interpolateSequence(ctx); this.drawTimeline(); }, { title: 'Interpolate all frames between keys' }),
       el('div', { class: 'sep' }),
-      btn('🎥', () => this.app.toggleCameraView(), { active: this.app.cameraView, title: 'Look through the active camera (0)' }),
+      btn(icon('camera'), () => this.app.toggleCameraView(), { active: this.app.cameraView, title: 'Look through the active camera (0)' }),
       this.cameraSelect(),
       btn('＋Cam', () => this.app.addCamera(), { title: 'Add a camera at the current view' }),
       btn('－Cam', () => this.app.removeCamera(), { title: 'Delete the active camera' }),
@@ -2811,7 +2848,7 @@ export class UI {
       btn('＋CamKey', () => this.app.addCameraKey(), { title: 'Keyframe the camera at the current frame' }),
       btn('－CamKey', () => this.app.removeCameraKeyAtFrame(), { title: 'Remove camera key at current frame' }),
       numField('FOV', activeCam(ctx.scene).fov, (v) => { activeCam(ctx.scene).fov = Math.min(140, Math.max(5, v)); }, 1),
-      btn('⚙', () => this.openSettings(), { title: 'Settings & shortcuts (,)' }),
+      btn(icon('gear'), () => this.openSettings(), { title: 'Settings & shortcuts (,)' }),
     );
   }
 

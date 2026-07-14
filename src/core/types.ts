@@ -162,6 +162,10 @@ export interface GPObject {
   name: string;
   constraints?: TGConstraint[];
   select?: boolean;        // object-mode selection
+  /** object-level visibility/lock (outliner eye/lock icons), independent
+   *  of any per-layer hide/lock — hides/locks every layer at once. */
+  hide?: boolean;
+  lock?: boolean;
   parent?: ParentRef | null;
   layers: GPLayer[];       // index 0 = bottom
   activeLayerId: number;
@@ -262,6 +266,8 @@ export interface TGTrigger {
   /** hierarchy/object-mode: triggers are selectable, transformable,
    *  parentable primitives (see tools/objects.ts ObjKind 'TRIGGER') */
   select?: boolean;
+  hide?: boolean;
+  lock?: boolean;
   parent?: ParentRef | null;
   constraints?: TGConstraint[];
 }
@@ -310,6 +316,7 @@ export interface TGSplat {
   scale: number;
   visible: boolean;
   select: boolean;
+  lock?: boolean;
   parent?: ParentRef | null;
   /** applied ("baked") transform, column-major 4x4 — composed after the
    *  live TRS so Apply Transform can reset TRS without moving the object */
@@ -331,6 +338,7 @@ export interface TGMesh {
   scale: Vec3;
   visible: boolean;
   select: boolean;
+  lock?: boolean;
   drawTarget: boolean;     // raycast target for Surface placement
   wireframe: boolean;      // reference look
   color: Vec3;

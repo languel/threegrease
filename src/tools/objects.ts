@@ -52,6 +52,13 @@ export function isObjectSelected(scene: GPScene, ref: ObjRef): boolean {
   return !!entityOf(scene, ref)?.select;
 }
 
+/** Outliner lock icon: blocks viewport click/box-select (still selectable
+ *  from the outliner row itself, Blender-style — lock guards against
+ *  accidental clicks, not against every path to selection). */
+export function isObjectLocked(scene: GPScene, ref: ObjRef): boolean {
+  return !!(entityOf(scene, ref) as { lock?: boolean } | undefined)?.lock;
+}
+
 export function objectName(scene: GPScene, ref: ObjRef): string {
   return entityOf(scene, ref)?.name ?? `${ref.kind} ${ref.id}`;
 }
@@ -294,6 +301,7 @@ export class ObjectSelectTool implements Tool {
       const max = new THREE.Vector2(Math.max(this.start.x, e.x), Math.max(this.start.y, e.y));
       if (!multi) deselectAllObjects(scene);
       for (const ref of allRefs(scene)) {
+        if (isObjectLocked(scene, ref)) continue;
         if (this.refInRect(ctx, ref, min, max)) {
           setObjectSelected(scene, ref, true);
           this.lastPicked = ref; // Blender: the last one touched becomes active/target
@@ -306,7 +314,7 @@ export class ObjectSelectTool implements Tool {
     } else {
       const hit = this.pick(ctx, e);
       if (!multi) deselectAllObjects(scene);
-      if (hit) {
+      if (hit && !isObjectLocked(scene, hit)) {
         setObjectSelected(scene, hit, multi ? !isObjectSelected(scene, hit) : true);
         this.lastPicked = hit;
         if (hit.kind === 'GP') {

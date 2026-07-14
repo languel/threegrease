@@ -92,6 +92,27 @@ input[type="color"] { padding: 0; width: 26px; height: 22px; }
 input[type="number"], input[type="text"] { width: 56px; cursor: text; }
 label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); white-space: nowrap; }
 
+/* Prettier checkbox: a flat rounded box instead of the OS-native control,
+   with a CSS-drawn checkmark (no icon font needed) so it stays crisp at
+   any zoom and themes off --accent automatically. */
+input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; margin: 0; padding: 0;
+  width: 15px; height: 15px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--panel2);
+  display: inline-block; position: relative; cursor: pointer; flex-shrink: 0;
+  transition: background 0.1s, border-color 0.1s;
+}
+input[type="checkbox"]:hover { border-color: var(--accent); }
+input[type="checkbox"]:checked {
+  background: var(--accent); border-color: var(--accent);
+}
+input[type="checkbox"]:checked::after {
+  content: ''; position: absolute; left: 4px; top: 1px;
+  width: 4px; height: 8px;
+  border: solid #fff; border-width: 0 2px 2px 0;
+  transform: rotate(40deg);
+}
+
 .panel { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; }
 .panel > h3 {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
@@ -107,8 +128,18 @@ label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); 
 .list-item:hover { background: #3a3a42; }
 .list-item.active { background: color-mix(in srgb, var(--accent) 55%, transparent); }
 .list-item .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.icon-btn { width: 22px; height: 22px; padding: 0; font-size: 11px; }
+.icon-btn { width: 22px; height: 22px; padding: 0; font-size: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .swatch { width: 16px; height: 16px; border-radius: 3px; border: 1px solid var(--border); }
+
+/* Heroicons-style outline SVGs (icons.ts): every icon shares one visual
+   language (24x24 grid, 1.6 stroke, round joins) so size/weight reads
+   consistently everywhere instead of mismatched emoji glyphs. */
+.hi { stroke: currentColor; flex-shrink: 0; display: block; }
+button .hi, .icon-btn .hi { opacity: 0.85; }
+button:hover .hi, .icon-btn:hover .hi, button.active .hi { opacity: 1; }
+.row-icon { display: flex; align-items: center; color: var(--dim); flex-shrink: 0; }
+.list-item.active .row-icon { color: #fff; }
+.icon-label { display: inline-flex; align-items: center; gap: 5px; }
 
 #timeline-strip {
   position: relative; height: 36px; background: var(--panel2);
