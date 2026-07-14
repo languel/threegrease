@@ -653,3 +653,23 @@ commit each; typecheck+build always, deep verification only when cheap.
   without deselecting the box, and the sphere (last-touched) picked up
   the bright active outline color while the box kept the dimmer
   selected color - read directly off the actual Box3Helper materials.
+
+
+## Stroke Ops right-click menu + Separate  **[SHIPPED 1a82d80]**
+- editops.ts separateSelected(): Blender GP Separate - moves the
+  selection into a new GP object (same world transform, cloned
+  materials so materialIndex stays valid, one new layer per source
+  layer). Point-mode partial selections split first (reuses splitRuns),
+  so only the selected run leaves.
+- P is context-dependent: globally bound to Presentation mode, shadowed
+  to Separate in Edit mode - same pattern as Emulate Numpad shadowing
+  digit keys. Y (Split) already existed.
+- ui.openStrokeOpsContextMenu(): RMB in Edit mode opens the full Stroke
+  Ops set (transform, duplicate/delete/dissolve, split/separate/join/
+  merge, subdivide/simplify/smooth, cyclic/direction/start-point,
+  Normalize/Arrange/Snap/Move-to-Layer submenus) with shortcut hints
+  auto-shown for every keymap-bound item.
+- Verified live: whole-stroke separate and partial-point separate both
+  correct (materials/positions checked exactly); P in Edit -> Separate,
+  P in Object -> Presentation; live menu rendered all 20 items with
+  correct shortcuts.
