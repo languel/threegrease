@@ -105,7 +105,7 @@ label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); 
   border-radius: 4px; cursor: pointer;
 }
 .list-item:hover { background: #3a3a42; }
-.list-item.active { background: #3d5a86; }
+.list-item.active { background: color-mix(in srgb, var(--accent) 55%, transparent); }
 .list-item .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .icon-btn { width: 22px; height: 22px; padding: 0; font-size: 11px; }
 .swatch { width: 16px; height: 16px; border-radius: 3px; border: 1px solid var(--border); }
