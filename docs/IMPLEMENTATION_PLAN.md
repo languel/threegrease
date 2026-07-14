@@ -705,3 +705,30 @@ commit each; typecheck+build always, deep verification only when cheap.
 - Verified live: 3 meshes at different Z, all selected, active shows
   its own Loc; typing Z=0 set all three to Z=0 exactly while X/Y per
   object stayed untouched.
+
+
+## UI cleanup: icon Snap, resizable sidebar, dropdown focus, F2 rename  **[SHIPPED e68986b]**
+- iconCheckbox() helper; magnet toggle is icon-only (tooltip carries the
+  label), matching the rest of the icon-first topbar.
+- #sidebar-resize drag handle, 200-640px clamp, persisted to
+  localStorage (threegrease.sidebarWidth), calls resize() during drag.
+- Root-caused a real bug, not just added a feature: App.onKey bails on
+  every keystroke when e.target is SELECT/INPUT/TEXTAREA, but a
+  <select> keeps focus after a pick or after Escape closes its native
+  popup - silently killing every shortcut until a manual click into the
+  viewport. Global change-listener blurs any SELECT after a pick;
+  capture-phase Escape listener blurs a focused SELECT too.
+- Root-caused "right-click rename does nothing": renameViaPrompt() used
+  window.prompt(), which is silently blocked/no-op in sandboxed embeds -
+  no error, no dialog, just nothing, which is exactly what was reported.
+  Replaced with renameObjectInline(), reusing the outliner's existing
+  working double-click-to-edit field (row located via a new data-ref
+  attribute); F2 is a new keymap action calling it on the active/last-
+  picked object from anywhere; the context-menu item now shares the
+  same path and hints "(F2)".
+- Verified live: icon-only checkbox render; sidebar drag 288->368px +
+  persisted; SELECT focus lost on both change and Escape (checked via
+  document.activeElement); F2 and right-click Rename both open the real
+  inline field and commit correctly (verified with a real blur
+  FocusEvent, since .blur() itself does not synchronously fire in this
+  headless harness).
