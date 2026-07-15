@@ -23,7 +23,7 @@ import {
 } from '../tools/objectops';
 
 type CtxItem =
-  | { label: string; action?: string; do?: () => void; items?: CtxItem[]; disabled?: boolean }
+  | { label: string; icon?: IconName; action?: string; do?: () => void; items?: CtxItem[]; disabled?: boolean }
   | { sep: true }
   | { header: string };
 import {
@@ -657,7 +657,10 @@ export class UI {
         if ('sep' in item) { pop.append(el('div', { class: 'menu-sep' })); continue; }
         if ('header' in item) { pop.append(el('div', { class: 'menu-header', text: item.header })); continue; }
         const row = el('div', { class: `menu-item${item.disabled ? ' menu-item-disabled' : ''}` },
-          el('span', { text: item.label }),
+          el('span', { class: 'menu-label' },
+            ...(item.icon ? [el('span', { class: 'menu-icon' }, icon(item.icon, 14))] : []),
+            item.label,
+          ),
           el('span', { class: 'menu-key', text: item.items ? '▶' : (item.action ? this.app.keymap.comboFor(item.action) : '') }),
         );
         if (item.disabled) { pop.append(row); continue; }

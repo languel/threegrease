@@ -1677,16 +1677,16 @@ class App implements AppHandle {
     const at: [number, number, number] = [world.x, world.y, world.z];
     this.ui.openContextMenu(clientX, clientY, [
       { header: strokeHit ? 'Add — on stroke' : 'Add — at pointer' },
-      { label: '🚶 Traveler here', do: () => this.addTravelerObjectAt(at, px.x, px.y), disabled: !strokeHit },
-      { label: '◎ Trigger here', do: () => this.addTriggerAt(at) },
+      { label: 'Traveler here', icon: 'cursorArrow', do: () => this.addTravelerObjectAt(at, px.x, px.y), disabled: !strokeHit },
+      { label: 'Trigger here', icon: 'boltCircle', do: () => this.addTriggerAt(at) },
       { sep: true },
-      { label: '✏️ Grease Pencil (blank)', do: () => this.addGPObject(at) },
-      { label: '⬛ Plane', do: () => this.addMeshObject('PLANE', undefined, at) },
-      { label: '⬛ Box', do: () => this.addMeshObject('BOX', undefined, at) },
-      { label: '⚪ Sphere', do: () => this.addMeshObject('SPHERE', undefined, at) },
-      { label: '⬭ Cylinder', do: () => this.addMeshObject('CYLINDER', undefined, at) },
+      { label: 'Grease Pencil (blank)', icon: 'pencil', do: () => this.addGPObject(at) },
+      { label: 'Plane', icon: 'square', do: () => this.addMeshObject('PLANE', undefined, at) },
+      { label: 'Box', icon: 'cube', do: () => this.addMeshObject('BOX', undefined, at) },
+      { label: 'Sphere', icon: 'circle', do: () => this.addMeshObject('SPHERE', undefined, at) },
+      { label: 'Cylinder', icon: 'cylinder', do: () => this.addMeshObject('CYLINDER', undefined, at) },
       { sep: true },
-      { label: '⌖ Move 3D cursor here', do: () => { ctx.scene.cursor = at; this.gp.markDirty(); } },
+      { label: 'Move 3D cursor here', icon: 'target', do: () => { ctx.scene.cursor = at; this.gp.markDirty(); } },
     ]);
   }
 

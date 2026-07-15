@@ -40,6 +40,9 @@ body {
 .menu-item:hover { background: var(--accent); color: #fff; }
 .menu-item:hover .menu-key { color: #dfe8ff; }
 .menu-key { color: var(--dim); font: 10px ui-monospace, monospace; }
+.menu-label { display: flex; align-items: center; gap: 7px; }
+.menu-icon { display: flex; align-items: center; color: var(--dim); flex-shrink: 0; }
+.menu-item:hover .menu-icon { color: inherit; }
 .menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 .menu-header {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;

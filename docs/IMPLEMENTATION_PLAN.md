@@ -964,3 +964,20 @@ commit each; typecheck+build always, deep verification only when cheap.
 - Verified live: hovering Play shows a "Play (Space)" tooltip rendered
   above the button; icon audit script confirms zero duplicate icon
   paths in the timeline row.
+
+
+## Icon-ify the Shift+A Add-at-pointer context menu
+- Missed in the earlier icon sweeps: the Shift+A "Add — at pointer/on
+  stroke" menu (main.ts openAddMenu()) still had emoji-prefixed labels
+  (🚶/◎/✏️/⬛/⚪/⬭/⌖). Added an optional `icon?: IconName` field to
+  CtxItem (ui.ts) and render it in openContextMenu()'s row builder
+  (`.menu-icon` span before the label) — a general mechanism any
+  context menu can now opt into, not just this one.
+- Mapped each item to a distinct icon: Traveler→cursorArrow,
+  Trigger→boltCircle (matches the outliner's trigger icon), Grease
+  Pencil→pencil, Plane/Box/Sphere→square/cube/circle, Cylinder→new
+  `cylinder` icon (added to icons.ts), Move 3D cursor here→target
+  (matches the actual 3D-cursor crosshair glyph in-viewport).
+- Verified live: opened the menu via `tg.openAddMenu()` — every row
+  shows a clean outline icon consistent with the rest of the app, no
+  emoji remaining.
