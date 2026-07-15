@@ -905,3 +905,25 @@ commit each; typecheck+build always, deep verification only when cheap.
   the box's actual rotated edges, not an axis-aligned box; a sphere
   selected alongside it still renders (falls back to bbox outline, no
   crash).
+
+
+## Timeline transport bar: icons, uniform sizing, frame label cleanup
+- Icon-ified the remaining timeline-control glyphs: prev/next keyframe
+  (◀◀/▶▶ → chevronsLeft/chevronsRight), +Key/+Dup/−Key/Interpolate/
+  Sequence/+Cam/−Cam/+CamKey/−CamKey now use iconLabel() (icon + short
+  text) instead of plain-text buttons with ASCII +/− glyphs. Added
+  chevronsLeft/chevronsRight/minus/key/duplicate to icons.ts.
+- New `.tl-transport` CSS class (28x26px, flex-centered) applied to the
+  four playback-scrubber buttons (jump-to-start, prev-keyframe, play/
+  pause, next-keyframe) so they're uniform size regardless of icon
+  shape — previously mixed icon-only and ASCII-text buttons of
+  different widths.
+- Removed the "Frame" text label before the frame-number readout (just
+  shows the number now); added a `title="Current frame"` hover tooltip
+  in its place.
+- Play/pause was already wired correctly (icon + title flip via
+  `isPlaying()` on every refreshTimelineControls() call, driven by the
+  render loop while playing) — verified explicitly since it was called
+  out: clicking Play starts playback and swaps to the pause icon/title
+  ("Pause (Space)"), frame counter advances live during playback,
+  clicking again stops it and swaps back to "Play (Space)".
