@@ -78,7 +78,7 @@ export class ObjectModalTransform {
     this.startPointer.set(pointer.x, pointer.y);
     this.lastPointer.copy(this.startPointer);
     this.pivotScreen.copy(this.worldToScreen(ctx, this.pivot));
-    this.startWorld.copy(this.viewPlaneHit(ctx, pointer.x, pointer.y) ?? this.pivot);
+    this.startWorld.copy(this.projectedHit(ctx, pointer.x, pointer.y) ?? this.pivot);
     this.active = true;
     ctx.canvas.style.cursor = CURSORS[kind];
     this.apply(ctx);
@@ -100,7 +100,7 @@ export class ObjectModalTransform {
     this.restore(ctx);
     this.base = this.refs.map((r) => getObjectTransform(ctx.scene, r)!);
     this.startPointer.copy(this.lastPointer);
-    this.startWorld.copy(this.viewPlaneHit(ctx, this.lastPointer.x, this.lastPointer.y) ?? this.pivot);
+    this.startWorld.copy(this.projectedHit(ctx, this.lastPointer.x, this.lastPointer.y) ?? this.pivot);
     this.numeric = '';
     ctx.canvas.style.cursor = CURSORS[this.kind];
     this.apply(ctx);
@@ -114,6 +114,12 @@ export class ObjectModalTransform {
       this.axis = axis;
       this.planeLock = plane;
     }
+    // re-anchor the gesture's start point using the NEW constraint's own
+    // projection (real constraint plane/line, not the old view-plane hit)
+    // — mixing anchors from two different projections is what made the
+    // object's motion feel "relative"/drifting instead of tracking the
+    // mouse once a lock engaged.
+    this.startWorld.copy(this.projectedHit(ctx, this.startPointer.x, this.startPointer.y) ?? this.pivot);
     this.apply(ctx);
   }
 
@@ -165,13 +171,9 @@ export class ObjectModalTransform {
       if (typed !== null && this.axis !== 'none' && !this.planeLock) {
         d.copy(AXES[this.axis]).multiplyScalar(typed);
       } else {
-        const hit = this.viewPlaneHit(ctx, this.lastPointer.x, this.lastPointer.y);
+        const hit = this.projectedHit(ctx, this.lastPointer.x, this.lastPointer.y);
         if (hit) d.copy(hit).sub(this.startWorld);
         if (this.mods.shift) d.multiplyScalar(0.1); // precision
-        if (this.axis !== 'none') {
-          if (this.planeLock) d.sub(AXES[this.axis].clone().multiplyScalar(d.dot(AXES[this.axis])));
-          else d = AXES[this.axis].clone().multiplyScalar(d.dot(AXES[this.axis]));
-        }
         if (snapOn) d = this.snapMoveDelta(ctx, d);
       }
       this.info = `Dx: ${d.x.toFixed(3)}  Dy: ${d.y.toFixed(3)}  Dz: ${d.z.toFixed(3)}  (${d.length().toFixed(3)})`;
@@ -285,15 +287,57 @@ export class ObjectModalTransform {
     return new THREE.Vector2((p.x * 0.5 + 0.5) * rect.width, (-p.y * 0.5 + 0.5) * rect.height);
   }
 
-  /** Pointer ray ∩ the view-aligned plane through the pivot. */
-  private viewPlaneHit(ctx: AppCtx, x: number, y: number): THREE.Vector3 | null {
+  private pointerRay(ctx: AppCtx, x: number, y: number): THREE.Ray {
     const rect = ctx.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, ctx.camera);
+    return ray.ray;
+  }
+
+  /** Pointer ray ∩ the view-aligned plane through the pivot. */
+  private viewPlaneHit(ctx: AppCtx, x: number, y: number): THREE.Vector3 | null {
     const n = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, this.pivot);
     const out = new THREE.Vector3();
-    return ray.ray.intersectPlane(plane, out) ? out : null;
+    return this.pointerRay(ctx, x, y).intersectPlane(plane, out) ? out : null;
+  }
+
+  /** Pointer ray ∩ the REAL plane through the pivot with the locked axis as
+   *  its normal (Shift+axis, e.g. Shift+Z = the XY plane through the
+   *  pivot) — the object tracks the mouse exactly at that ray/plane
+   *  intersection, unlike projecting a view-aligned-plane hit down onto
+   *  the axis (which drifts: the view plane and the constraint plane only
+   *  coincide when looking straight down the locked axis). */
+  private axisPlaneHit(ctx: AppCtx, axis: Exclude<AxisLock, 'none'>, x: number, y: number): THREE.Vector3 | null {
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(AXES[axis], this.pivot);
+    const out = new THREE.Vector3();
+    return this.pointerRay(ctx, x, y).intersectPlane(plane, out) ? out : null;
+  }
+
+  /** Closest point on the 3D line through the pivot along `axis` to the
+   *  pointer ray (standard skew-line closest-point solve) — single-axis
+   *  lock (X/Y/Z without Shift) tracks the mouse along that line instead
+   *  of a view-plane projection. */
+  private axisLineHit(ctx: AppCtx, axis: Exclude<AxisLock, 'none'>, x: number, y: number): THREE.Vector3 {
+    const ray = this.pointerRay(ctx, x, y);
+    const D = ray.direction, O = ray.origin;
+    const L = AXES[axis];
+    const r = new THREE.Vector3().subVectors(O, this.pivot);
+    const a = D.dot(D), b = D.dot(L), c = L.dot(L), d = D.dot(r), e = L.dot(r);
+    const denom = a * c - b * b;
+    if (Math.abs(denom) < 1e-8) return this.pivot.clone(); // ray parallel to the axis
+    const s = (a * e - b * d) / denom; // parameter along the line
+    return this.pivot.clone().addScaledVector(L, s);
+  }
+
+  /** Where the object should track the mouse under the current lock:
+   *  plane-locked -> real constraint plane, axis-locked -> the axis line,
+   *  unconstrained -> the view-aligned plane through the pivot. */
+  private projectedHit(ctx: AppCtx, x: number, y: number): THREE.Vector3 | null {
+    if (this.axis !== 'none') {
+      return this.planeLock ? this.axisPlaneHit(ctx, this.axis, x, y) : this.axisLineHit(ctx, this.axis, x, y);
+    }
+    return this.viewPlaneHit(ctx, x, y);
   }
 }

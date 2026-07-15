@@ -843,3 +843,33 @@ commit each; typecheck+build always, deep verification only when cheap.
 - Verified live: reloaded and screenshotted Draw/Object/Edit modes, the
   mode pie, and Data/Stroke-Ops panels — no emoji glyphs remain in any
   toolbar, mode switcher, tab strip, or icon-btn; tsc + vite build clean.
+
+
+## Fix G-modal axis/plane lock: object now tracks the actual constraint plane/line
+- Root cause: Shift+axis (plane lock) and plain axis lock both derived
+  their delta from `viewPlaneHit` — a ray intersected with a
+  VIEW-ALIGNED plane through the pivot — then post-filtered by
+  subtracting/keeping the locked axis's component. That view plane only
+  coincides with the real constraint plane when looking straight down
+  the locked axis; from any other angle the filtered point drifts away
+  from where the mouse ray actually meets the real plane/line, which is
+  what "the motion seems relative" was describing (Shift+Z should put
+  the object exactly under the cursor on the world XY plane).
+- Fix (src/tools/objectmodal.ts): two new projections — `axisPlaneHit`
+  (ray ∩ the REAL plane through the pivot, normal = locked axis, for
+  Shift+axis) and `axisLineHit` (closest point on the 3D line through
+  the pivot along the axis, standard skew-line closest-point solve, for
+  plain axis lock). `projectedHit()` picks the right one (or falls back
+  to the view plane when unconstrained). `setAxis()` now re-anchors
+  `startWorld` through the NEW projection at the gesture's start
+  pointer whenever the lock changes — mixing anchors from two different
+  projections (old bug) is what caused the drift; recomputing from a
+  single consistent projection removes it.
+- Verified live via `tg.objModal` directly (begin/setAxis/update):
+  Shift+Z keeps Dz exactly 0 and the result is PATH-INDEPENDENT (same
+  end pointer via a direct jump vs. 4 intermediate moves produces
+  bit-identical translation) — confirms it's a true absolute ray/plane
+  intersection, not an accumulating relative delta. Plain Z lock keeps
+  Dx/Dy exactly 0. Mid-drag lock toggle produces no NaN. HUD/viewport
+  screenshot confirms the box lands exactly on the ground plane under
+  the cursor's direction.
