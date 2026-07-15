@@ -945,3 +945,22 @@ commit each; typecheck+build always, deep verification only when cheap.
   Play / Next keyframe / Insert-Duplicate-Delete keyframe / Interpolate
   / Sequence / camera-view toggle / Add-Delete camera / camera keyframe
   add-remove / Settings).
+
+
+## Timeline: dedupe icons + reliable custom hover tooltips
+- De-duplicated the timeline transport bar's icons — Add/Delete Camera
+  and Add/Remove Camera-Key were reusing camera/key/trash from other
+  buttons in the same row. Remapped to plus/xMark (camera add/delete)
+  and pin/minus (camera-key add/remove) so all 15 buttons in the row
+  now use distinct icon paths (verified live: 0 duplicate `<path d>`
+  values across every #tl-controls button).
+- Native `title`-attribute tooltips are slow/inconsistent (especially
+  in embedded/preview contexts), which read as "no hover tips" on an
+  icon-only toolbar with no visible text to fall back on. Added a
+  CSS-only instant tooltip (`content: attr(title)` on `::after`) for
+  `.icon-btn`, `.tl-transport`, and `.props-tab` — reuses the existing
+  title attributes app-wide, no per-callsite changes, appears
+  immediately above the button on hover.
+- Verified live: hovering Play shows a "Play (Space)" tooltip rendered
+  above the button; icon audit script confirms zero duplicate icon
+  paths in the timeline row.

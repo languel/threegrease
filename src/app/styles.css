@@ -137,6 +137,20 @@ input[type="checkbox"]:checked::after {
 .hi { stroke: currentColor; flex-shrink: 0; display: block; }
 button .hi, .icon-btn .hi { opacity: 0.85; }
 button:hover .hi, .icon-btn:hover .hi, button.active .hi { opacity: 1; }
+
+/* Custom hover tooltip for icon-only buttons: native title-attribute
+   tooltips are slow/inconsistent (especially embedded), so icon-only
+   controls (no visible text of their own) get an instant CSS tooltip
+   sourced from the same title attribute. */
+.icon-btn[title], .tl-transport[title], .props-tab[title] { position: relative; }
+.icon-btn[title]:hover::after, .tl-transport[title]:hover::after, .props-tab[title]:hover::after {
+  content: attr(title);
+  position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+  margin-bottom: 6px; padding: 3px 7px; border-radius: 4px;
+  background: #131316; color: #f0f0f2; border: 1px solid var(--border);
+  font-size: 10.5px; line-height: 1.3; white-space: nowrap;
+  pointer-events: none; z-index: 999; box-shadow: 0 4px 10px rgba(0,0,0,0.45);
+}
 .row-icon { display: flex; align-items: center; color: var(--dim); flex-shrink: 0; }
 .list-item.active .row-icon { color: #fff; }
 .icon-label { display: inline-flex; align-items: center; gap: 5px; }
