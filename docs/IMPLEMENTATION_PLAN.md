@@ -927,3 +927,21 @@ commit each; typecheck+build always, deep verification only when cheap.
   out: clicking Play starts playback and swaps to the pause icon/title
   ("Pause (Space)"), frame counter advances live during playback,
   clicking again stops it and swaps back to "Play (Space)".
+
+
+## Timeline transport bar: icon-only (no text labels)
+- Dropped the icon+text (iconLabel) buttons added in the previous pass
+  in favor of icon-only, per feedback — e.g. the camera icon alone for
+  Add/Delete Camera instead of a "Cam" text label. Insert/Duplicate/
+  Delete Keyframe now use key/duplicate/trash icons; Interpolate/
+  Sequence use arrowsRightLeft/link; Camera Key add/remove reuse key/
+  trash (position + tooltip disambiguate from the stroke-keyframe
+  versions, matching how the rest of the icon-only toolbar already
+  works). Auto-key and Lock stay as labeled checkboxes (a toggle state
+  needs its label; there's no unambiguous single icon for either).
+- Verified live: timeline row renders as a compact icon-only strip;
+  read every button's title attribute via the DOM to confirm tooltips
+  still fully describe each action (Jump to start / Previous keyframe /
+  Play / Next keyframe / Insert-Duplicate-Delete keyframe / Interpolate
+  / Sequence / camera-view toggle / Add-Delete camera / camera keyframe
+  add-remove / Settings).
