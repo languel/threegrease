@@ -116,6 +116,23 @@ function meshLocalBounds(m: TGMesh): THREE.Box3 | null {
   return base.translate(off);
 }
 
+/** World-space AABB of a local-space box under a transform: transforms all
+ *  8 corners, not just min/max, so rotation is handled correctly — a
+ *  rotated box's world-lowest point is generally NOT the world-transform
+ *  of its local-min corner (that corner stops being the extremal one once
+ *  rotated). Used by originToGeometryBase so "Base" means the rotated
+ *  object's actual lowest point, not the unrotated local min. */
+function worldAABB(localBox: THREE.Box3, matrix: THREE.Matrix4): THREE.Box3 {
+  const { min, max } = localBox;
+  const corners = [
+    [min.x, min.y, min.z], [max.x, min.y, min.z], [min.x, max.y, min.z], [min.x, min.y, max.z],
+    [max.x, max.y, min.z], [max.x, min.y, max.z], [min.x, max.y, max.z], [max.x, max.y, max.z],
+  ];
+  const box = new THREE.Box3();
+  for (const [x, y, z] of corners) box.expandByPoint(new THREE.Vector3(x, y, z).applyMatrix4(matrix));
+  return box;
+}
+
 /** Move a mesh's translation to `worldPoint`, compensating with
  *  originOffset (baked into the primitive's geometry by MeshManager) so the
  *  geometry doesn't move in world space — the MESH-kind analog of GP's
@@ -181,14 +198,15 @@ export function originToGeometryBase(scene: GPScene, ref: ObjRef, upAxis: 'Y' | 
     if (!ob) return false;
     const box = localBoundsGP(ob);
     if (!box) return false;
-    const base = box.getCenter(new THREE.Vector3());
-    base.setComponent(axis, box.min.getComponent(axis));
-    const worldC = base.applyMatrix4(new THREE.Matrix4().compose(
+    const worldMat = new THREE.Matrix4().compose(
       new THREE.Vector3(...ob.translation),
       new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
       new THREE.Vector3(...ob.scale),
-    ));
-    const newT = worldC.applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
+    );
+    const wbox = worldAABB(box, worldMat);
+    const worldBase = wbox.getCenter(new THREE.Vector3());
+    worldBase.setComponent(axis, wbox.min.getComponent(axis));
+    const newT = worldBase.applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
     retargetOrigin(ob, [newT.x, newT.y, newT.z]);
     return true;
   }
@@ -197,9 +215,10 @@ export function originToGeometryBase(scene: GPScene, ref: ObjRef, upAxis: 'Y' | 
     if (!m) return false;
     const bounds = meshLocalBounds(m);
     if (!bounds) return false;
-    const base = bounds.getCenter(new THREE.Vector3());
-    base.setComponent(axis, bounds.min.getComponent(axis));
-    retargetMeshOrigin(scene, ref, m, base.applyMatrix4(meshWorldMatrix(m)));
+    const wbox = worldAABB(bounds, meshWorldMatrix(m));
+    const worldBase = wbox.getCenter(new THREE.Vector3());
+    worldBase.setComponent(axis, wbox.min.getComponent(axis));
+    retargetMeshOrigin(scene, ref, m, worldBase);
     return true;
   }
   return false;

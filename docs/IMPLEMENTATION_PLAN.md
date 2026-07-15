@@ -873,3 +873,35 @@ commit each; typecheck+build always, deep verification only when cheap.
   Dx/Dy exactly 0. Mid-drag lock toggle produces no NaN. HUD/viewport
   screenshot confirms the box lands exactly on the ground plane under
   the cursor's direction.
+
+
+## Fix Origin to Geometry (Base) for rotated objects + real edge-outline for box/plane
+- Root-caused "Base puts origin on the unrotated object's base, not the
+  rotated bounding box's": `originToGeometryBase` computed the LOCAL
+  bounds' min corner (a single point), then transformed just that one
+  point to world via the object's full matrix. Rotation doesn't commute
+  with "take the min corner then transform" — the local-min corner
+  generally stops being the world-space-lowest corner once rotated
+  (`localMin.applyMatrix4(rotated)` != `worldBox.min`). Fixed with a new
+  `worldAABB()` (objectops.ts) that transforms all 8 corners of the
+  local box and takes the AABB of the results, so "Base" now means the
+  rotated object's actual lowest world point, matching the rotated
+  bounding box shown in the second reference screenshot. Applies to
+  both GP (localBoundsGP) and primitive MESH (meshLocalBounds).
+- Added a real per-edge outline (Blender-style, matching the requested
+  reference image) for BOX/PLANE mesh objects: `meshEdgePositions()` in
+  main.ts builds a `THREE.EdgesGeometry` of the object's ACTUAL geometry
+  and transforms every edge point through the object's world matrix, so
+  a rotated box outlines its own rotated edges instead of an
+  axis-aligned bounding box. Scoped to flat-faced primitives only
+  (BOX/PLANE) — their edges genuinely ARE the visual silhouette from any
+  angle; SPHERE/CYLINDER/MODEL keep the bounding-box outline since a
+  literal wireframe of a curved/arbitrary mesh doesn't read as a
+  silhouette (true screen-space outline detection is a separate, bigger
+  feature, out of scope here).
+- Verified live: rotated a box (rotation [0.6, 0.4, 0.3]), ran Origin to
+  Geometry (Base) — origin dot lands exactly on the rotated box's lowest
+  world corner, touching the grid (screenshot); selection outline traces
+  the box's actual rotated edges, not an axis-aligned box; a sphere
+  selected alongside it still renders (falls back to bbox outline, no
+  crash).

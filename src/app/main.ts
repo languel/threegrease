@@ -44,6 +44,31 @@ function boxEdgePositions(box: THREE.Box3): number[] {
   for (const [a, b] of edges) out.push(...corners[a], ...corners[b]);
   return out;
 }
+
+/** Real per-edge silhouette (Blender-style) for flat-faced primitives:
+ *  the mesh's own geometry edges in WORLD space, so a rotated box/plane
+ *  outlines its actual rotated corners instead of an axis-aligned bounding
+ *  box. Scoped to BOX/PLANE (their edges ARE the visual silhouette from
+ *  any angle) — SPHERE/CYLINDER/MODEL fall back to the bounding box since
+ *  a literal wireframe of a curved/arbitrary mesh doesn't read as an
+ *  outline (true screen-space silhouette detection is a separate, bigger
+ *  feature, not attempted here). */
+function meshEdgePositions(root: THREE.Object3D, kind: string): number[] | null {
+  if (kind !== 'BOX' && kind !== 'PLANE') return null;
+  const mesh = root as THREE.Mesh;
+  if (!mesh.isMesh || !mesh.geometry) return null;
+  root.updateWorldMatrix(true, false);
+  const edges = new THREE.EdgesGeometry(mesh.geometry);
+  const pos = edges.getAttribute('position');
+  const out: number[] = new Array(pos.count * 3);
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(root.matrixWorld);
+    out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z;
+  }
+  edges.dispose();
+  return out;
+}
 import { ModalTransform } from '../tools/transform';
 import { SculptTool } from '../tools/sculpt';
 import { VertexPaintTool, WeightPaintTool } from '../tools/paint';
@@ -1997,7 +2022,9 @@ class App implements AppHandle {
       if (entry.box.isEmpty()) {
         entry.box.setFromCenterAndSize(root.position, new THREE.Vector3(1, 1, 1));
       }
-      entry.helper.geometry.setPositions(boxEdgePositions(entry.box));
+      const meshKind = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id)?.kind : undefined;
+      const realEdges = meshKind ? meshEdgePositions(root, meshKind) : null;
+      entry.helper.geometry.setPositions(realEdges ?? boxEdgePositions(entry.box));
       const isActive = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
       entry.helper.material.color.copy(this.highlightColor());
       entry.helper.material.linewidth = isActive ? 2.5 : 1.5;
