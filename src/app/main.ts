@@ -86,6 +86,10 @@ import { CommandRegistry } from './commands';
 import { BRUSH_PRESETS as BRUSH_PRESETS_CACHE } from '../core/brushes';
 import { listAssets, meshAssetPayload, saveAsset, splatAssetPayload, type TGAsset } from '../io/assets';
 import { mediamime } from '../io/mediamime';
+import { createStream, mmStreamEngine, streamStore } from '../mm/streams';
+import { mmCapture } from '../mm/capture';
+import { StreamPointsManager } from '../mm/points';
+import type { MMStream } from '../core/types';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
 import { defaultCursor, ScoreEngine, scoreId } from '../score/engine';
@@ -180,6 +184,10 @@ class App implements AppHandle {
   readonly sim = new StringSim();
   readonly splats = new SplatManager();
   readonly meshes = new MeshManager();
+  readonly mmPoints = new StreamPointsManager();
+  /** app-instance store handle — evals/automation must use THIS, not an
+   *  import('/src/mm/streams.ts') singleton (vite ?t= gives a second copy) */
+  readonly mmStore = streamStore;
   private widget!: TransformControls;
   private widgetProxy = new THREE.Object3D();
   private widgetBase: { refs: ObjRef[]; transforms: ObjTransform[]; proxy: ObjTransform } | null = null;
@@ -261,6 +269,8 @@ class App implements AppHandle {
     this.splats.init(this.glRenderer);
     this.scene3.add(this.splats.group);
     this.scene3.add(this.meshes.group);
+    this.scene3.add(this.mmPoints.group);
+    mmCapture.onStatus = () => this.ui?.refresh();
     // mesh objects use MeshStandardMaterial — GP shaders ignore lights
     this.scene3.add(new THREE.AmbientLight(0xffffff, 0.9));
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
@@ -1885,6 +1895,34 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  // ------------------------------------------- native MediaMime streams
+
+  /** Add streams (skipping CAMERA kinds that already exist — one webcam
+   *  feed per semantic channel). */
+  addMMStreams(kinds: MMStream['kind'][], source: MMStream['source'], busAddress?: string): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    for (const kind of kinds) {
+      if (source === 'CAMERA' && scene.mmStreams.some((s) => s.source === 'CAMERA' && s.kind === kind)) continue;
+      scene.mmStreams.push(createStream(scene, kind, source, this.ctx.settings.upAxis, busAddress));
+    }
+    this.ui.refresh();
+  }
+
+  deleteMMStream(id: number): void {
+    this.ctx.pushUndo();
+    this.ctx.scene.mmStreams = this.ctx.scene.mmStreams.filter((s) => s.id !== id);
+    streamStore.drop(id);
+    if (!this.ctx.scene.mmStreams.some((s) => s.source === 'CAMERA')) mmCapture.stop();
+    this.ui.refresh();
+  }
+
+  mmCaptureToggle(): void {
+    if (mmCapture.status === 'on' || mmCapture.status === 'starting') mmCapture.stop();
+    else void mmCapture.start(this.ctx.scene);
+    this.ui.refresh();
+  }
+
   exportActiveGP(): void {
     const ob = activeObject(this.ctx.scene);
     downloadText(serializeGPObject(ob), `${ob.name || 'gp'}.threegrease.json`);
@@ -2226,6 +2264,14 @@ class App implements AppHandle {
       followPos.setFromMatrixPosition(worldMatrixOf(ctx.scene, at.follow as ObjRef));
       at.position = [followPos.x, followPos.y, followPos.z];
     }
+
+    // native MediaMime: detect on new webcam frames, keep BUS streams
+    // subscribed, re-emit world landmarks, then GPU-sync the point sprites.
+    // Runs BEFORE mediamime.update so re-emitted events reach rigs this frame.
+    mmCapture.tick(ctx.scene);
+    mmStreamEngine.sync(ctx.scene);
+    mmStreamEngine.emit(ctx.scene);
+    this.mmPoints.sync(ctx.scene, this.glRenderer.domElement.height);
 
     // score engine: cursors/triggers/attachments run on their own clocks
     mediamime.setPrefix(ctx.scene.mediamime.prefix);

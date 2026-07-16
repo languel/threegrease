@@ -9,6 +9,8 @@ import { bus } from '../events/bus';
 import { defaultCursor, scoreId } from '../score/engine';
 import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
 import { mediamime } from '../io/mediamime';
+import { mmCapture } from '../mm/capture';
+import { streamStore } from '../mm/streams';
 import { deleteAsset, listAssets } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import type { ConstraintType, TGConstraint } from '../core/types';
@@ -85,6 +87,9 @@ export interface AppHandle {
   addMediaMimeTrigger(address: string, pos: [number, number, number]): void;
   addMediaMimeRig(address: string, target: import('../tools/objects').ObjRef): void;
   deleteMediaMimeRig(id: number): void;
+  addMMStreams(kinds: import('../core/types').MMStream['kind'][], source: 'CAMERA' | 'BUS', busAddress?: string): void;
+  deleteMMStream(id: number): void;
+  mmCaptureToggle(): void;
   importGPFile(file: File): void;
   exportSplatPly(id: number): void;
   run(action: string): void;
@@ -946,7 +951,7 @@ export class UI {
       },
       {
         id: 'mediamime', icon: 'camera', title: 'MediaMime — live landmarks & object rigging',
-        build: () => [this.mediamimePanel()],
+        build: () => [this.mmStreamsPanel(), this.mediamimePanel()],
       },
       {
         id: 'solvers', icon: 'variable', title: 'Solvers — splats · string art · wire art',
@@ -2711,6 +2716,61 @@ export class UI {
   }
 
   /** MediaMime (P11): live landmark addresses + the object-rigging table. */
+  /** Native MediaMime: in-app webcam capture -> landmark streams rendered
+   *  as confidence-encoded splat sprites. */
+  private mmStreamsPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const streams = ctx.scene.mmStreams;
+
+    const capLabel = mmCapture.status === 'on' ? 'Stop camera'
+      : mmCapture.status === 'starting' ? 'Starting…'
+      : mmCapture.status === 'error' ? 'Retry camera' : 'Start camera';
+    const capRow = el('div', { class: 'row' },
+      btn(iconLabel('camera', capLabel), () => this.app.mmCaptureToggle(),
+        { active: mmCapture.status === 'on', title: 'Webcam capture (MediaPipe, in-app — no bridge)' }),
+      btn('＋Pose', () => this.app.addMMStreams(['POSE'], 'CAMERA'), { title: 'Body stream (33 points)' }),
+      btn('＋Hands', () => this.app.addMMStreams(['HAND_LEFT', 'HAND_RIGHT'], 'CAMERA'), { title: 'Left + right hand streams (21 points each)' }),
+    );
+
+    const busInput = el('input', { type: 'text', placeholder: '/mm/pose', value: '' }) as HTMLInputElement;
+    const busRow = el('div', { class: 'row' },
+      busInput,
+      btn('＋Bus stream', () => {
+        const addr = busInput.value.trim();
+        if (addr) this.app.addMMStreams(['CUSTOM'], 'BUS', addr);
+      }, { title: 'Point stream fed from bus events <address>/<index> (x, y[, z[, confidence]])' }),
+    );
+
+    const rows: Node[] = streams.flatMap((st) => {
+      const frame = streamStore.get(st.id);
+      return [
+        el('div', { class: 'row' },
+          btn(st.visible ? icon('eye') : icon('eyeOff'), () => { st.visible = !st.visible; this.refresh(); }, { cls: 'icon-btn' }),
+          colorField('', [...st.color, 1], (rgb) => { st.color = rgb; }),
+          el('span', { class: 'grow', text: `${st.name}${st.source === 'BUS' ? ` ← ${st.busAddress}` : ''}` }),
+          el('span', { text: frame?.count ? `${frame.count} pts` : '—' }),
+          btn(icon('xMark'), () => this.app.deleteMMStream(st.id), { cls: 'icon-btn', title: 'Delete stream' }),
+        ),
+        el('div', { class: 'row' },
+          numField('size', st.pointSize, (v) => { st.pointSize = Math.max(0.001, v); }, 0.01),
+          checkbox('conf→α', st.confidenceAlpha, (v) => { st.confidenceAlpha = v; }),
+          checkbox('conf→size', st.confidenceSize, (v) => { st.confidenceSize = v; }),
+          checkbox('mirror', st.mirror, (v) => { st.mirror = v; }),
+          ...(st.source === 'CAMERA' ? [checkbox('emit bus', st.emitBus, (v) => { st.emitBus = v; })] : []),
+        ),
+      ];
+    });
+
+    return panel('Streams — native capture',
+      capRow,
+      ...(mmCapture.status === 'error' ? [el('div', { class: 'row', text: `! ${mmCapture.error.slice(0, 90)}` })] : []),
+      ...(mmCapture.status === 'on' || mmCapture.status === 'starting' ? [mmCapture.video] : []),
+      busRow,
+      ...(rows.length ? rows : [el('div', { class: 'row', text: 'no streams yet — add Pose/Hands then Start camera, or feed one from the bus' })]),
+      el('div', { class: 'row', text: 'camera streams re-emit world-space landmarks on the bus (prefix below), so rigs/routes/triggers can ride them' }),
+    );
+  }
+
   private mediamimePanel(): HTMLElement {
     const { ctx } = this.app;
     const mm = ctx.scene.mediamime;

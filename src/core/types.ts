@@ -272,6 +272,43 @@ export interface TGTrigger {
   constraints?: TGConstraint[];
 }
 
+/** Native MediaMime: a live landmark stream (pose/hands/face) captured
+ *  in-app (webcam + MediaPipe) or fed from event-bus addresses, represented
+ *  as a first-class 3D point cloud in the scene. Only the CONFIG persists —
+ *  live frames are runtime data (see src/mm/streams.ts StreamStore). */
+export interface MMStream {
+  id: number;
+  name: string;
+  /** semantic channel; CUSTOM = arbitrary bus-fed point set */
+  kind: 'POSE' | 'HAND_LEFT' | 'HAND_RIGHT' | 'FACE' | 'CUSTOM';
+  source: 'CAMERA' | 'BUS';
+  /** BUS source: address prefix whose numeric-suffixed children are point
+   *  indices, e.g. '/mm/pose' consumes '/mm/pose/0'..'/mm/pose/32' with
+   *  args x,y[,z[,confidence]] */
+  busAddress?: string;
+  visible: boolean;
+  select?: boolean;
+  lock?: boolean;
+  parent?: ParentRef | null;
+  translation: Vec3;
+  rotation: Vec3;
+  scale: Vec3;
+  /** flip X for webcam selfie view */
+  mirror: boolean;
+  // ---- splat look ----
+  /** world-space splat radius at scale 1 */
+  pointSize: number;
+  color: Vec3;
+  /** per-point confidence modulates splat opacity */
+  confidenceAlpha: boolean;
+  /** per-point confidence modulates splat size */
+  confidenceSize: boolean;
+  /** CAMERA streams: re-emit world-space landmarks onto the event bus
+   *  ('<prefix>/pose/0' …) so rigs/routes/triggers can consume them —
+   *  streams become pens/cursors/travelers via the existing machinery. */
+  emitBus: boolean;
+}
+
 /** MediaMime (P11): binds a live tracked-landmark address (x,y,z over the
  *  event bus, e.g. '/mm/pose/16') to any scene object's translation — the
  *  mapping/rigging system for attaching objects to MediaPipe markers. */
@@ -404,4 +441,6 @@ export interface GPScene {
   meshes: TGMesh[];
   attractors: TGAttractor[];
   mediamime: { prefix: string; rigs: MMRig[] };
+  /** native MediaMime landmark streams (config; frames are runtime-only) */
+  mmStreams: MMStream[];
 }

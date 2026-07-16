@@ -27,6 +27,13 @@ export function deserializeScene(json: string): GPScene {
   scene.routes ??= [];
   scene.attractors ??= [];
   scene.mediamime ??= { prefix: '/mm', rigs: [] };
+  scene.mmStreams ??= [];
+  for (const st of scene.mmStreams) {
+    st.mirror ??= true;
+    st.emitBus ??= true;
+    st.confidenceAlpha ??= true;
+    st.confidenceSize ??= false;
+  }
   for (const trig of scene.score.triggers) {
     trig.select ??= false;
     trig.hide ??= false;

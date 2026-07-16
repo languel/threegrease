@@ -1001,3 +1001,53 @@ commit each; typecheck+build always, deep verification only when cheap.
   both tooltips now render fully, floating over the viewport past the
   sidebar's own bounds, matching the reported crop exactly reproduced
   and fixed.
+
+
+## Native MediaMime milestone 1: landmark streams as scene point clouds (branch: mediamime)
+- New direction (branch `mediamime`): instead of bridging an external
+  mediamime app, landmark capture is NATIVE — in-app webcam + MediaPipe
+  tasks-vision (new dep, lazy-imported so the main bundle only pays for
+  it when capture starts; wasm served from node_modules in dev with a
+  pinned-CDN fallback, .task models from Google's model CDN).
+- Data model: `MMStream` (core/types.ts) + `scene.mmStreams` — a live
+  landmark stream (POSE 33 pts / HAND_LEFT / HAND_RIGHT 21 pts / FACE /
+  CUSTOM) as a first-class scene citizen with its own transform, mirror,
+  and splat look. Only CONFIG persists; live frames are runtime-only in
+  `StreamStore` (src/mm/streams.ts), packed [x,y,z,confidence] per point
+  in stream-local Y-up coords — the stream's transform places it in
+  world (default rotation stands figures upright in Z-up scenes, same
+  trick as createDefaultCamera).
+- Two sources for the same representation: CAMERA (src/mm/capture.ts,
+  MMCapture: getUserMedia + Pose/Hand landmarkers, per-landmark
+  visibility as confidence, handedness score for hands, empty-frame push
+  when a hand leaves) and BUS ('<address>/<index>' events x,y[,z[,conf]]
+  — the old bridge path now feeds the native representation, and is the
+  headless test path).
+- Visualization: src/mm/points.ts StreamPointsManager — one THREE.Points
+  per stream, custom soft-gaussian sprite shader ("splat" look),
+  CONFIDENCE EMBEDDED per point as a vertex attribute modulating sprite
+  alpha and/or size (per-stream toggles). Buffers update in place on a
+  store version bump — no scene rebuild for live data. Point size is
+  world-space, correct for persp AND ortho (projectionMatrix[1][1]/w).
+- Streams as pens/cursors/travelers, step 1: CAMERA streams re-emit
+  world-space landmarks onto the event bus ('<prefix>/pose/<i>' etc.,
+  emitBus toggle, 250ms freshness gate so a stopped camera doesn't
+  re-broadcast its last pose forever) — the EXISTING rig/route/trigger
+  machinery rides them today; deeper native bindings (stream landmark as
+  draw-pen, FOLLOW_STREAM constraint) are the next milestones.
+- UI: "Streams — native capture" panel (MediaMime tab): Start/Stop
+  camera with status + error row + live preview video, ＋Pose/＋Hands/
+  ＋Bus-stream, per-stream rows (eye, color, live point count, size,
+  conf→α, conf→size, mirror, emit bus, delete).
+- Gotcha reinforced twice during verification: after ANY mid-session
+  file edit, import('/src/...') in evals returns a DIFFERENT module
+  instance than the app's (vite ?t= timestamps) — singletons diverge
+  silently. App now exposes `__tg.mmStore` for automation; use __tg
+  surfaces, never fresh imports, for app-state singletons.
+- Verified live (headless, camera blocked in the embed): BUS stream
+  renders an 8-point ring with visible confidence fade; CAMERA-kind
+  stream fed via __tg.mmStore renders and re-emits; panel shows live
+  addresses in world coords; a GP object rigged to /mm/pose/0 lands at
+  the streamed head (0,0,1.8) and TRACKS a fresh frame (mirror math
+  confirmed: local +0.25 → world −0.5 at scale 2); camera-denied path
+  degrades to a "! Permission denied" row without killing the loop.
