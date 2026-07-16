@@ -48,6 +48,10 @@ export class MMCapture {
   error = '';
   /** what's currently (or last) driving capture, for the panel */
   sourceLabel = '';
+  /** playback speed for URL/file sources (video.playbackRate, or a divisor
+   *  on the animated-image frame delay) — lets slow/fast footage be
+   *  iterated on without re-encoding it. No effect on the live webcam. */
+  playbackRate = 1;
   /** exposed so the panel can show a live preview */
   readonly video: HTMLVideoElement;
   /** animated-image sources decode into this (also the preview then) */
@@ -86,6 +90,13 @@ export class MMCapture {
     this.status = s;
     this.error = err;
     this.onStatus?.();
+  }
+
+  /** Live-adjustable while running: applies to the <video> immediately;
+   *  the image-anim loop picks it up on its next scheduled frame. */
+  setPlaybackRate(rate: number): void {
+    this.playbackRate = Math.max(0.05, rate);
+    if (!this.usingCanvas) this.video.playbackRate = this.playbackRate;
   }
 
   /** Start capture: webcam when `source` is omitted, else URL/file video or
@@ -179,6 +190,7 @@ export class MMCapture {
     this.usingCanvas = false;
     this.video.srcObject = null;
     this.video.src = url;
+    this.video.playbackRate = this.playbackRate;
     await this.video.play();
   }
 
@@ -213,7 +225,7 @@ export class MMCapture {
         console.warn('mm image-anim decode:', err);
         index = (index + 1) % Math.max(1, frameCount);
       }
-      setTimeout(() => { void step(); }, Math.max(15, durMs));
+      setTimeout(() => { void step(); }, Math.max(15, durMs / this.playbackRate));
     };
     await step(); // first frame lands before status flips to 'on'
   }

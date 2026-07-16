@@ -91,6 +91,7 @@ export interface AppHandle {
   deleteMMStream(id: number): void;
   mmCaptureToggle(): void;
   mmCaptureStart(source?: { url?: string; file?: File }): void;
+  mmSetPlaybackRate(rate: number): void;
   importGPFile(file: File): void;
   exportSplatPly(id: number): void;
   run(action: string): void;
@@ -2786,10 +2787,28 @@ export class UI {
       ];
     });
 
+    // playback speed only makes sense for URL/file sources, not the live
+    // webcam — iterate on slow/fast footage without re-encoding it
+    const speedVal = el('span', { text: `${mmCapture.playbackRate.toFixed(2)}×` });
+    const speedInput = el('input', {
+      type: 'range', min: 0.1, max: 3, step: 0.05, value: mmCapture.playbackRate,
+    }) as HTMLInputElement;
+    speedInput.oninput = () => {
+      const rate = parseFloat(speedInput.value);
+      this.app.mmSetPlaybackRate(rate);
+      speedVal.textContent = `${rate.toFixed(2)}×`;
+    };
+    const speedRow = el('div', { class: 'row' },
+      el('span', { text: 'speed' }), speedInput, speedVal,
+      btn('1×', () => { speedInput.value = '1'; this.app.mmSetPlaybackRate(1); speedVal.textContent = '1.00×'; },
+        { cls: 'icon-btn', title: 'Reset to 1×' }),
+    );
+
     return panel('Streams — native capture',
       capRow,
       srcRow,
       ...(mmCapture.status === 'error' ? [el('div', { class: 'row', text: `! ${mmCapture.error.slice(0, 90)}` })] : []),
+      ...(running && mmCapture.sourceLabel !== 'camera' ? [speedRow] : []),
       ...(mmCapture.status === 'on' || mmCapture.status === 'starting' ? [mmCapture.sourceEl] : []),
       busRow,
       ...(rows.length ? rows : [el('div', { class: 'row', text: 'no streams yet — add Pose/Hands then Start camera, or feed one from the bus' })]),

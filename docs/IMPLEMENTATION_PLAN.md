@@ -1101,3 +1101,19 @@ commit each; typecheck+build always, deep verification only when cheap.
   intermittent on that footage (small/turning face) and the
   empty-frame push correctly hides the points between detections;
   /mm/iris/N live on the bus, zero console errors.
+
+
+## Playback speed control for URL/file capture sources
+- New `mmCapture.playbackRate` (0.1×–3×): applies to `video.playbackRate`
+  for video sources, and divides the animated-image frame delay
+  (webp/gif/apng) for the WebCodecs decode loop — one control covers
+  both source types transparently. No effect on the live webcam (not
+  offered in the UI for that case).
+- Panel: a "speed" slider + live ×-readout + 1× reset button, shown
+  whenever a non-webcam capture is running. `App.mmSetPlaybackRate()`
+  wired through so it's driveable from automation too.
+- Verified live on the giphy webp: store-frame throughput scales with
+  rate (7 frames/s at 0.25×, 31 at 1×, 58 at 3× — sub-linear at the top
+  end since detection cost + a 15ms frame floor cap it, but the
+  direction and rough magnitude track correctly); UI slider drives the
+  same `mmSetPlaybackRate` path the automation check used.

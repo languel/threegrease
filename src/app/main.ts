@@ -1930,6 +1930,10 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  mmSetPlaybackRate(rate: number): void {
+    mmCapture.setPlaybackRate(rate);
+  }
+
   exportActiveGP(): void {
     const ob = activeObject(this.ctx.scene);
     downloadText(serializeGPObject(ob), `${ob.name || 'gp'}.threegrease.json`);
