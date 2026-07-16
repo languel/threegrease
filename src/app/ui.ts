@@ -90,6 +90,7 @@ export interface AppHandle {
   addMMStreams(kinds: import('../core/types').MMStream['kind'][], source: 'CAMERA' | 'BUS', busAddress?: string): void;
   deleteMMStream(id: number): void;
   mmCaptureToggle(): void;
+  mmCaptureStart(source?: { url?: string; file?: File }): void;
   importGPFile(file: File): void;
   exportSplatPly(id: number): void;
   run(action: string): void;
@@ -2600,6 +2601,8 @@ export class UI {
   // ---------------------------------------------------------- events / IO
 
   private monitorPaused = false;
+  /** last capture-source URL typed in the Streams panel (survives refreshes) */
+  private mmUrl = '';
 
   /** Blender-style constraint stack for the selected object. */
   private constraintsPanel(): HTMLElement {
@@ -2722,14 +2725,34 @@ export class UI {
     const { ctx } = this.app;
     const streams = ctx.scene.mmStreams;
 
-    const capLabel = mmCapture.status === 'on' ? 'Stop camera'
+    const running = mmCapture.status === 'on' || mmCapture.status === 'starting';
+    const capLabel = mmCapture.status === 'on' ? `Stop (${mmCapture.sourceLabel})`
       : mmCapture.status === 'starting' ? 'Starting…'
-      : mmCapture.status === 'error' ? 'Retry camera' : 'Start camera';
+      : 'Camera';
     const capRow = el('div', { class: 'row' },
-      btn(iconLabel('camera', capLabel), () => this.app.mmCaptureToggle(),
-        { active: mmCapture.status === 'on', title: 'Webcam capture (MediaPipe, in-app — no bridge)' }),
+      btn(iconLabel('camera', capLabel),
+        () => { running ? this.app.mmCaptureToggle() : this.app.mmCaptureStart(); },
+        { active: mmCapture.status === 'on', title: running ? 'Stop capture' : 'Webcam capture (MediaPipe, in-app — no bridge)' }),
       btn('＋Pose', () => this.app.addMMStreams(['POSE'], 'CAMERA'), { title: 'Body stream (33 points)' }),
       btn('＋Hands', () => this.app.addMMStreams(['HAND_LEFT', 'HAND_RIGHT'], 'CAMERA'), { title: 'Left + right hand streams (21 points each)' }),
+    );
+
+    // URL / file sources stand in for the webcam (testing, found footage,
+    // environments where camera access is blocked)
+    const urlInput = el('input', { type: 'text', placeholder: 'video / gif / webp URL', value: this.mmUrl }) as HTMLInputElement;
+    urlInput.style.width = '150px';
+    urlInput.onchange = () => { this.mmUrl = urlInput.value.trim(); };
+    const srcFile = el('input', { type: 'file', accept: 'video/*,image/gif,image/webp,image/apng' }) as HTMLInputElement;
+    srcFile.style.display = 'none';
+    srcFile.onchange = () => { if (srcFile.files?.[0]) this.app.mmCaptureStart({ file: srcFile.files[0] }); };
+    const srcRow = el('div', { class: 'row' },
+      urlInput,
+      btn(icon('play'), () => {
+        this.mmUrl = urlInput.value.trim();
+        if (this.mmUrl) this.app.mmCaptureStart({ url: this.mmUrl });
+      }, { cls: 'icon-btn', title: 'Capture from this URL instead of the camera (video, or animated gif/webp)' }),
+      srcFile,
+      btn(iconLabel('folder', 'file…'), () => srcFile.click(), { title: 'Capture from a local video/gif/webp file' }),
     );
 
     const busInput = el('input', { type: 'text', placeholder: '/mm/pose', value: '' }) as HTMLInputElement;
@@ -2763,8 +2786,9 @@ export class UI {
 
     return panel('Streams — native capture',
       capRow,
+      srcRow,
       ...(mmCapture.status === 'error' ? [el('div', { class: 'row', text: `! ${mmCapture.error.slice(0, 90)}` })] : []),
-      ...(mmCapture.status === 'on' || mmCapture.status === 'starting' ? [mmCapture.video] : []),
+      ...(mmCapture.status === 'on' || mmCapture.status === 'starting' ? [mmCapture.sourceEl] : []),
       busRow,
       ...(rows.length ? rows : [el('div', { class: 'row', text: 'no streams yet — add Pose/Hands then Start camera, or feed one from the bus' })]),
       el('div', { class: 'row', text: 'camera streams re-emit world-space landmarks on the bus (prefix below), so rigs/routes/triggers can ride them' }),

@@ -1923,6 +1923,13 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** Start capture from a URL or file (video, or animated webp/gif) instead
+   *  of the webcam — test/iterate without camera access. */
+  mmCaptureStart(source?: { url?: string; file?: File }): void {
+    void mmCapture.start(this.ctx.scene, source);
+    this.ui.refresh();
+  }
+
   exportActiveGP(): void {
     const ob = activeObject(this.ctx.scene);
     downloadText(serializeGPObject(ob), `${ob.name || 'gp'}.threegrease.json`);

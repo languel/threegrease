@@ -1051,3 +1051,30 @@ commit each; typecheck+build always, deep verification only when cheap.
   the streamed head (0,0,1.8) and TRACKS a fresh frame (mirror math
   confirmed: local +0.25 → world −0.5 at scale 2); camera-denied path
   degrades to a "! Permission denied" row without killing the loop.
+
+
+## Capture from URL/file video or animated webp/gif (no camera needed)
+- The webcam can be replaced by a URL or local file as the capture
+  source (`mmCapture.start(scene, {url}|{file})`, panel: URL field +
+  play button + file… picker) — for testing/iterating in environments
+  where camera access is blocked (e.g. the embedded verification
+  browser), and for running detection over found footage.
+- URL handling: fetched ONCE with CORS (pixel reads require CORS
+  anyway, so failing early at fetch gives a clear error), then branched
+  on the real content-type, not the extension. video/* plays from a
+  blob URL (same-origin, so WebGL reads never taint); image/* (animated
+  webp/gif/apng — which <video> cannot play) decodes frame-by-frame via
+  the WebCodecs ImageDecoder onto a canvas, honoring each frame's own
+  duration and looping forever; the canvas is fed to detectForVideo as
+  the ImageSource. tick()'s new-frame check generalizes: video uses
+  currentTime, canvas uses a frame counter. The panel previews
+  whichever source element is live (video mirrored only for the actual
+  selfie camera).
+- Verified END-TO-END in the embedded browser (camera blocked there —
+  the whole point): capture from https://i.giphy.com/Ju7l5y9osyymQ.webp
+  → wasm loads from node_modules, pose model from Google CDN, 33-point
+  pose detected within the first poll, 37 detection frames in 1.2s, the
+  right-wrist landmark travels ~1.0 local units across 1.4s (he's
+  dancing), confidence fade visible on the out-of-frame leg landmarks,
+  zero console errors. First time the full native MediaPipe pipeline is
+  verifiable headlessly.
