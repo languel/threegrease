@@ -981,3 +981,23 @@ commit each; typecheck+build always, deep verification only when cheap.
 - Verified live: opened the menu via `tg.openAddMenu()` — every row
   shows a clean outline icon consistent with the rest of the app, no
   emoji remaining.
+
+
+## Fix sidebar hover-tip clipping: JS position:fixed tooltip
+- The CSS-only `::after` tooltip (previous entry) was clipped by any
+  ancestor with overflow:hidden/auto — the sidebar tab strip
+  (`.props-tabs { overflow-y: auto }`) cut it off exactly as reported
+  ("hover tips in the sidebar icons are getting cropped"). z-index
+  can't fix this: overflow clipping happens regardless of stacking
+  order for a descendant of the clipped box.
+- Replaced with a JS-driven tooltip (`UI.initHoverTips()`): on
+  mouseover of `.icon-btn/.tl-transport/.props-tab[title]`, spawns a
+  `position: fixed` div appended directly to `<body>` (not a descendant
+  of any clipped container), positioned from the hovered button's
+  `getBoundingClientRect()`, clamped to the viewport, flips below the
+  button if there's no room above. Single delegated listener on
+  `document.body`, no per-button wiring.
+- Verified live: hovered the Data tab (sidebar) and MediaMime tab —
+  both tooltips now render fully, floating over the viewport past the
+  sidebar's own bounds, matching the reported crop exactly reproduced
+  and fixed.

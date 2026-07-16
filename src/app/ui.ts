@@ -228,6 +228,7 @@ export class UI {
     this.app = app;
     this.tlCanvas = el('canvas');
     this.buildTimelineShell();
+    this.initHoverTips();
     this.refresh();
     // live values (camera position etc.) — skip while the user types in it
     setInterval(() => {
@@ -249,6 +250,38 @@ export class UI {
         this.buildMenubar();
       }
     }, true);
+  }
+
+  /** Icon-only buttons rely entirely on `title` for meaning, but a CSS-only
+   *  ::after tooltip anchored to the button gets clipped by any ancestor
+   *  with overflow:hidden/auto (the scrollable sidebar tab strip, panel
+   *  bodies, etc). Instead: on hover, spawn a position:fixed tooltip
+   *  appended directly to <body>, positioned from the button's own
+   *  getBoundingClientRect() — immune to ancestor clipping since it isn't
+   *  a descendant of the clipped container at all. */
+  private initHoverTips(): void {
+    const SEL = '.icon-btn[title], .tl-transport[title], .props-tab[title]';
+    let tip: HTMLElement | null = null;
+    const hide = () => { tip?.remove(); tip = null; };
+    document.body.addEventListener('mouseover', (e) => {
+      const target = (e.target as HTMLElement)?.closest?.(SEL) as HTMLElement | null;
+      if (!target) return;
+      const text = target.getAttribute('title');
+      if (!text) return;
+      hide();
+      tip = el('div', { class: 'hover-tip', text });
+      document.body.append(tip);
+      const r = target.getBoundingClientRect();
+      const tr = tip.getBoundingClientRect();
+      const left = Math.max(4, Math.min(r.left + r.width / 2 - tr.width / 2, window.innerWidth - tr.width - 4));
+      const above = r.top - tr.height - 6;
+      tip.style.left = `${left}px`;
+      tip.style.top = `${above >= 4 ? above : r.bottom + 6}px`;
+    });
+    document.body.addEventListener('mouseout', (e) => {
+      if ((e.target as HTMLElement)?.closest?.(SEL)) hide();
+    });
+    window.addEventListener('scroll', hide, true);
   }
 
   refresh(): void {
