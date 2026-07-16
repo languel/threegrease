@@ -17,13 +17,15 @@
 // serves project-root paths) with a pinned-CDN fallback; the .task models
 // come from Google's model CDN. Both need network on first use.
 import type { GPScene, MMStream } from '../core/types';
-import { streamStore, STREAM_POINT_COUNTS } from './streams';
+import { streamStore, STREAM_POINT_COUNTS, IRIS_INDICES } from './streams';
 
 // pinned to the installed @mediapipe/tasks-vision version
 const WASM_LOCAL = '/node_modules/@mediapipe/tasks-vision/wasm';
 const WASM_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
 const POSE_MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
 const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+// face_landmarker outputs 478 points INCLUDING the 10 iris landmarks
+const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 
 type Landmarker = {
   detectForVideo(source: HTMLVideoElement | HTMLCanvasElement, ts: number): unknown;
@@ -60,6 +62,7 @@ export class MMCapture {
   private lastFrameKey = -1;
   private pose: Landmarker | null = null;
   private hands: Landmarker | null = null;
+  private face: Landmarker | null = null;
   /** UI refresh hook (status changes happen async) */
   onStatus: (() => void) | null = null;
 
@@ -92,8 +95,9 @@ export class MMCapture {
     const kinds = new Set(scene.mmStreams.filter((s) => s.source === 'CAMERA').map((s) => s.kind));
     const wantPose = kinds.has('POSE');
     const wantHands = kinds.has('HAND_LEFT') || kinds.has('HAND_RIGHT');
-    if (!wantPose && !wantHands) {
-      this.setStatus('error', 'no camera streams in the scene — add Pose or Hands first');
+    const wantFace = kinds.has('FACE') || kinds.has('IRIS');
+    if (!wantPose && !wantHands && !wantFace) {
+      this.setStatus('error', 'no camera streams in the scene — add Pose/Hands/Face first');
       return;
     }
     this.setStatus('starting');
@@ -116,6 +120,12 @@ export class MMCapture {
         this.hands = await vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: HAND_MODEL, delegate: 'GPU' },
           runningMode: 'VIDEO', numHands: 2,
+        }) as unknown as Landmarker;
+      }
+      if (wantFace && !this.face) {
+        this.face = await vision.FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'GPU' },
+          runningMode: 'VIDEO', numFaces: 1,
         }) as unknown as Landmarker;
       }
       this.setStatus('on');
@@ -211,6 +221,7 @@ export class MMCapture {
   stop(): void {
     this.pose?.close(); this.pose = null;
     this.hands?.close(); this.hands = null;
+    this.face?.close(); this.face = null;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this.imgLoop++; // cancels the image-anim loop
@@ -264,6 +275,26 @@ export class MMCapture {
         const target = scene.mmStreams.find((s) => s.source === 'CAMERA' && s.kind === kind);
         if (target && streamStore.get(target.id)?.count) {
           streamStore.push(target.id, new Float32Array(0), 0);
+        }
+      }
+    }
+    if (this.face) {
+      const res = this.face.detectForVideo(src, now) as {
+        faceLandmarks: { x: number; y: number; z: number }[][];
+      };
+      const lms = res.faceLandmarks?.[0];
+      const faceT = scene.mmStreams.find((s) => s.source === 'CAMERA' && s.kind === 'FACE');
+      const irisT = scene.mmStreams.find((s) => s.source === 'CAMERA' && s.kind === 'IRIS');
+      if (lms) {
+        if (faceT) streamStore.push(faceT.id, this.pack(lms, aspect, 1), lms.length);
+        if (irisT) {
+          // the 10 iris points live inside the 478-point face output
+          const iris = IRIS_INDICES.map((i) => lms[i]).filter(Boolean);
+          if (iris.length) streamStore.push(irisT.id, this.pack(iris, aspect, 1), iris.length);
+        }
+      } else {
+        for (const target of [faceT, irisT]) {
+          if (target && streamStore.get(target.id)?.count) streamStore.push(target.id, new Float32Array(0), 0);
         }
       }
     }

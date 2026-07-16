@@ -17,8 +17,12 @@ import { bus } from '../events/bus';
 import { worldMatrixOf, type ObjRef } from '../tools/objects';
 
 export const STREAM_POINT_COUNTS: Record<MMStream['kind'], number> = {
-  POSE: 33, HAND_LEFT: 21, HAND_RIGHT: 21, FACE: 478, CUSTOM: 0,
+  POSE: 33, HAND_LEFT: 21, HAND_RIGHT: 21, FACE: 478, IRIS: 10, CUSTOM: 0,
 };
+
+/** iris landmark indices inside the 478-point face model
+ *  (left iris center+4, right iris center+4) */
+export const IRIS_INDICES = [468, 469, 470, 471, 472, 473, 474, 475, 476, 477];
 
 /** Packed landmark frame: [x,y,z,conf] * count, stream-local coords. */
 export interface MMFrame {
@@ -56,7 +60,11 @@ export function createStream(
   const maxId = scene.mmStreams.reduce((m, s) => Math.max(m, s.id), 0);
   nextStreamId = Math.max(nextStreamId, maxId + 1);
   const names: Record<MMStream['kind'], string> = {
-    POSE: 'Pose', HAND_LEFT: 'Hand L', HAND_RIGHT: 'Hand R', FACE: 'Face', CUSTOM: busAddress ?? 'Stream',
+    POSE: 'Pose', HAND_LEFT: 'Hand L', HAND_RIGHT: 'Hand R', FACE: 'Face', IRIS: 'Iris', CUSTOM: busAddress ?? 'Stream',
+  };
+  const colors: Record<MMStream['kind'], Vec3> = {
+    POSE: [0.35, 0.8, 1], HAND_LEFT: [0.55, 1, 0.5], HAND_RIGHT: [0.55, 1, 0.5],
+    FACE: [1, 0.8, 0.35], IRIS: [1, 0.35, 0.55], CUSTOM: [0.55, 1, 0.5],
   };
   return {
     id: nextStreamId++,
@@ -68,24 +76,30 @@ export function createStream(
     rotation: upAxis === 'Z' ? [Math.PI / 2, 0, 0] : [0, 0, 0],
     scale: [2, 2, 2],
     mirror: true,
-    pointSize: 0.04,
-    color: kind === 'POSE' ? [0.35, 0.8, 1] : kind === 'FACE' ? [1, 0.8, 0.35] : [0.55, 1, 0.5],
+    // pose z is hip-relative noise -> flat by default; hands/face/iris
+    // carry genuinely useful relative depth
+    depthScale: kind === 'POSE' ? 0 : 1,
+    // 478 face points at pose-size would blob together
+    pointSize: kind === 'FACE' ? 0.012 : kind === 'IRIS' ? 0.02 : 0.04,
+    color: colors[kind],
     confidenceAlpha: true,
     confidenceSize: false,
-    emitBus: true,
+    // 478 face points per frame would swamp the bus; opt in explicitly
+    emitBus: kind !== 'FACE',
   };
 }
 
-/** Stream -> world transform. Mirror (webcam selfie view) is baked in here
- *  so the rendered points, streamLandmarkWorld(), and the bus re-emit all
- *  agree on where a landmark is. */
+/** Stream -> world transform. Mirror (webcam selfie view) and depthScale
+ *  (flatten/scale landmark z) are baked in here so the rendered points,
+ *  streamLandmarkWorld(), and the bus re-emit all agree on where a
+ *  landmark is. */
 export function streamWorldMatrix(scene: GPScene, st: MMStream): THREE.Matrix4 {
   const local = new THREE.Matrix4().compose(
     new THREE.Vector3(...st.translation),
     new THREE.Quaternion().setFromEuler(new THREE.Euler(...st.rotation)),
     new THREE.Vector3(...st.scale),
   );
-  if (st.mirror) local.multiply(new THREE.Matrix4().makeScale(-1, 1, 1));
+  local.multiply(new THREE.Matrix4().makeScale(st.mirror ? -1 : 1, 1, st.depthScale ?? 1));
   if (!st.parent) return local;
   return worldMatrixOf(scene, st.parent as ObjRef).multiply(local);
 }
@@ -107,6 +121,7 @@ export function streamBusPath(kind: MMStream['kind']): string {
     case 'HAND_LEFT': return 'hand/l';
     case 'HAND_RIGHT': return 'hand/r';
     case 'FACE': return 'face';
+    case 'IRIS': return 'iris';
     default: return 'stream';
   }
 }

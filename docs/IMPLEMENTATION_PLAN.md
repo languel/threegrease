@@ -1078,3 +1078,26 @@ commit each; typecheck+build always, deep verification only when cheap.
   dancing), confidence fade visible on the out-of-frame leg landmarks,
   zero console errors. First time the full native MediaPipe pipeline is
   verifiable headlessly.
+
+
+## Face + iris streams, per-stream depth scale (flat pose by default)
+- Root cause of "weird depth" on pose: MediaPipe's normalized-landmark z
+  for POSE is hip-relative guesswork (and my aspect scaling amplified
+  it), while hands/face/iris z is genuinely useful relative depth. New
+  per-stream `depthScale` (numField in the panel) bakes into
+  streamWorldMatrix alongside mirror, so render / world-landmark / bus
+  emit all agree; POSE defaults to 0 (flat), everything else 1.
+- New kinds: FACE (478 points via FaceLandmarker — the tasks-vision
+  face model includes iris refinement, unlike HolisticLandmarker's face
+  output) and IRIS (the 10 iris landmarks extracted from the same
+  face result as their OWN stream, so an eye can drive a
+  cursor/pen/trigger). ＋Face button adds both. Face defaults:
+  pointSize 0.012 (478 pts at pose size would blob), emitBus OFF (478
+  bus events/frame would swamp listeners — opt-in); IRIS emits.
+- Verified live on the giphy webp: all three detectors run
+  simultaneously (33/478/10 points), pose world-depth spread is exactly
+  0 (flat), face spread ~0.57 world units when detected (real nose-to-
+  ear relief), iris ~0.03 (both eyes near one plane); face detection is
+  intermittent on that footage (small/turning face) and the
+  empty-frame push correctly hides the points between detections;
+  /mm/iris/N live on the bus, zero console errors.

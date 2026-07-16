@@ -279,8 +279,10 @@ export interface TGTrigger {
 export interface MMStream {
   id: number;
   name: string;
-  /** semantic channel; CUSTOM = arbitrary bus-fed point set */
-  kind: 'POSE' | 'HAND_LEFT' | 'HAND_RIGHT' | 'FACE' | 'CUSTOM';
+  /** semantic channel; IRIS = the 10 iris points of the face model
+   *  (their own stream so an eye can drive a cursor); CUSTOM = arbitrary
+   *  bus-fed point set */
+  kind: 'POSE' | 'HAND_LEFT' | 'HAND_RIGHT' | 'FACE' | 'IRIS' | 'CUSTOM';
   source: 'CAMERA' | 'BUS';
   /** BUS source: address prefix whose numeric-suffixed children are point
    *  indices, e.g. '/mm/pose' consumes '/mm/pose/0'..'/mm/pose/32' with
@@ -295,6 +297,10 @@ export interface MMStream {
   scale: Vec3;
   /** flip X for webcam selfie view */
   mirror: boolean;
+  /** scale on the landmark z axis: MediaPipe's normalized-space depth is
+   *  noisy for POSE (hip-relative guesses — default 0 = flat) but genuinely
+   *  useful relative depth for hands/face/iris (default 1) */
+  depthScale: number;
   // ---- splat look ----
   /** world-space splat radius at scale 1 */
   pointSize: number;

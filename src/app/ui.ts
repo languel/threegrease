@@ -2733,8 +2733,9 @@ export class UI {
       btn(iconLabel('camera', capLabel),
         () => { running ? this.app.mmCaptureToggle() : this.app.mmCaptureStart(); },
         { active: mmCapture.status === 'on', title: running ? 'Stop capture' : 'Webcam capture (MediaPipe, in-app — no bridge)' }),
-      btn('＋Pose', () => this.app.addMMStreams(['POSE'], 'CAMERA'), { title: 'Body stream (33 points)' }),
-      btn('＋Hands', () => this.app.addMMStreams(['HAND_LEFT', 'HAND_RIGHT'], 'CAMERA'), { title: 'Left + right hand streams (21 points each)' }),
+      btn('＋Pose', () => this.app.addMMStreams(['POSE'], 'CAMERA'), { title: 'Body stream (33 points, flat by default — pose depth is noisy)' }),
+      btn('＋Hands', () => this.app.addMMStreams(['HAND_LEFT', 'HAND_RIGHT'], 'CAMERA'), { title: 'Left + right hand streams (21 points each, with relative depth)' }),
+      btn('＋Face', () => this.app.addMMStreams(['FACE', 'IRIS'], 'CAMERA'), { title: 'Face mesh (478 points) + iris (10 points) streams, with relative depth' }),
     );
 
     // URL / file sources stand in for the webcam (testing, found footage,
@@ -2776,6 +2777,7 @@ export class UI {
         ),
         el('div', { class: 'row' },
           numField('size', st.pointSize, (v) => { st.pointSize = Math.max(0.001, v); }, 0.01),
+          numField('depth', st.depthScale, (v) => { st.depthScale = v; }, 0.1),
           checkbox('conf→α', st.confidenceAlpha, (v) => { st.confidenceAlpha = v; }),
           checkbox('conf→size', st.confidenceSize, (v) => { st.confidenceSize = v; }),
           checkbox('mirror', st.mirror, (v) => { st.mirror = v; }),
