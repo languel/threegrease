@@ -1338,3 +1338,22 @@ now alongside the grid work above.)
   (both clean) since this session's browser time went to the grid
   feature; recommend a follow-up live pass on flash timing and trim
   playback specifically.
+
+## Fix: MM stream outliner rows couldn't be unselected
+- Root cause: the outliner's `toggleSel()` helper clears every OTHER
+  kind's `.select` on a plain (non-shift) click, but the clear-all block
+  predated `scene.mmStreams` (added when streams became first-class
+  objects) and was never updated to include them. Streams could
+  accumulate selected state across clicks and a plain click on one
+  stream would never deselect the others — every click on a stream row
+  just added to the pile, and since `apply(true)` always sets true on a
+  non-shift click, there was no way to click a stream OFF either.
+- Fix: one missing line — `for (const st of scene.mmStreams) st.select
+  = false;` alongside the other four kinds already there.
+  `deselectAllObjects()` (tools/objects.ts, used for viewport clicks)
+  already included streams; this was a second, separate clear-loop
+  local to the outliner that got missed during that change.
+- Verified live: force-selected all 6 mmStream rows, clicked Pose's row
+  — only Pose remained selected (5 others cleared); clicked a GP
+  object's row — all stream selections cleared to 0, GP object
+  selected. Both previously-impossible transitions now work.

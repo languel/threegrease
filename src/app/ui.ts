@@ -1054,6 +1054,7 @@ export class UI {
         for (const s of scene.splats) s.select = false;
         for (const m of scene.meshes) m.select = false;
         for (const t of scene.score.triggers) t.select = false;
+        for (const st of scene.mmStreams) st.select = false;
       }
       apply(shift ? !cur : true);
       ctx.syncCanvases();
