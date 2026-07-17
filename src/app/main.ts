@@ -1309,11 +1309,19 @@ class App implements AppHandle {
     ]);
   }
 
+  /** Fixed 20-major-cell footprint; gridStep sets the major cell size (so
+   *  the grid always spans gridStep*20 world units) and gridSubdivisions
+   *  sets minor lines per major cell (visual density only — magnet
+   *  snapping always reads gridStep directly, not this line spacing). */
   private makeGrid(): THREE.GridHelper {
     const s = this.ctx.settings;
     const main = s.gridColor ? srgbColor(s.gridColor) : this.autoGridColor(s.background);
     const sub = main.clone().multiplyScalar(0.6);
-    const g = new THREE.GridHelper(20, 40, main, sub);
+    const majorCells = 20;
+    const size = s.gridStep * majorCells;
+    const subdiv = Math.max(1, Math.round(s.gridSubdivisions ?? 1));
+    const divisions = Math.min(400, Math.max(1, majorCells * subdiv));
+    const g = new THREE.GridHelper(size, divisions, main, sub);
     g.rotation.copy(this.grid?.rotation ?? g.rotation);
     g.position.copy(this.grid?.position ?? g.position);
     g.visible = this.grid?.visible ?? true;
@@ -1321,7 +1329,8 @@ class App implements AppHandle {
   }
 
   /** Rebuild the grid (its colors are baked into vertex data at
-   *  construction, so a color change means a new GridHelper). */
+   *  construction, so a size/color/subdivision change means a new
+   *  GridHelper). */
   rebuildGrid(): void {
     const old = this.grid;
     this.grid = this.makeGrid();

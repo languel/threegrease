@@ -1168,3 +1168,31 @@ commit each; typecheck+build always, deep verification only when cheap.
   mesh's position; edit-mode Snap submenu renders all 12 items (8 + 4
   GP), and `snapCursorToStrokeEnd(ctx,'start')` moved the cursor to the
   exact stroke-start coordinate.
+
+
+## New "Scene" sidebar tab (grid + background), grid step defaults to 1 + subdivisions
+- New sidebar tab "Scene" (globe icon), placed FIRST in the vertical tab
+  strip so it sits above Objects: Grid (Step, Subdivisions, Auto/manual
+  color) and Background (color) — settings that were previously buried
+  in the modal Settings dialog are now always one click away, Blender
+  Scene-properties style.
+- `gridStep` default changed 0.5 → 1; new `gridSubdivisions` setting
+  (default 10, persisted) controls minor-line density between major grid
+  lines. The visual grid was previously a hardcoded 20×40 GridHelper
+  completely decoupled from the `gridStep` setting (which only drove
+  magnet-snap increments) — real inconsistency fixed here: `makeGrid()`
+  now sizes the grid as `gridStep * 20` major cells and
+  `20 * gridSubdivisions` total divisions (clamped to 400 for perf), so
+  the visual grid and the snap increment finally agree, and changing
+  either setting calls the existing `rebuildGrid()` (GridHelper bakes
+  colors/geometry at construction, so a value change means a new one).
+- Removed the now-duplicate Grid step / Background / Auto-grid-color
+  rows from the Settings dialog's Preferences body, replaced with a
+  one-line pointer to the Scene tab; Theme (Accent/Highlight) and the
+  rest of Preferences are unchanged.
+- Verified live: fresh load (cleared localStorage prefs) shows
+  gridStep=1, gridSubdivisions=10; Scene tab renders as the first/top
+  tab with Step/Subdivisions/Auto-color/Background controls; changing
+  gridSubdivisions from 10→2 measurably changes the GridHelper's vertex
+  count (804 → 164) and rebuilding back to 10 restores it; Settings
+  dialog confirmed to no longer contain the removed rows.

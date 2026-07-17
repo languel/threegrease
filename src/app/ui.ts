@@ -941,6 +941,10 @@ export class UI {
 
     const tabs: { id: string; icon: IconName; title: string; build: () => HTMLElement[] }[] = [
       {
+        id: 'scene', icon: 'globe', title: 'Scene — grid · background',
+        build: () => [this.scenePanel()],
+      },
+      {
         id: 'object', icon: 'cube', title: 'Objects — outliner · transform · material',
         build: () => [this.objectsPanel(), this.objectPropsPanel()],
       },
@@ -991,6 +995,35 @@ export class UI {
     const active = tabs.find((t) => t.id === this.propsTab) ?? tabs[0];
     content.append(...active.build());
     side.append(strip, content);
+  }
+
+  /** Scene tab: grid + background — the environment settings that used to
+   *  live buried in the Settings dialog, now always visible above Objects. */
+  private scenePanel(): HTMLElement {
+    const { ctx } = this.app;
+    const s = ctx.settings;
+    const save = () => this.app.savePrefs();
+
+    return panel('Scene',
+      el('div', { class: 'menu-header', text: 'Grid' }),
+      el('div', { class: 'row' },
+        numField('Step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5),
+        numField('Subdivisions', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1),
+      ),
+      el('div', { class: 'row' },
+        checkbox('Auto color (matches Background)', !s.gridColor, (v) => {
+          s.gridColor = v ? null : [...s.background];
+          this.app.rebuildGrid(); save(); this.refresh();
+        }),
+        ...(s.gridColor ? [colorField('Color', [...s.gridColor, 1], (rgb) => {
+          s.gridColor = rgb; this.app.rebuildGrid(); save();
+        })] : []),
+      ),
+      el('div', { class: 'menu-header', text: 'Background' }),
+      el('div', { class: 'row' },
+        colorField('Color', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); }),
+      ),
+    );
   }
 
   /** N6: hierarchy outliner — tree by parent, drag-to-parent, dbl-click rename. */
@@ -2077,33 +2110,21 @@ export class UI {
         checkbox('Emulate 3-Button Mouse (Alt+LMB navigates)', s.emulate3Button, (v) => { s.emulate3Button = v; save(); }),
       ),
       el('div', { class: 'row' },
-        numField('Grid step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); save(); }),
         checkbox('Show transform gizmo', s.showGizmo, (v) => { s.showGizmo = v; this.app.refreshWidget(); save(); }),
+        checkbox('Auto-key', s.autoKey, (v) => { s.autoKey = v; }),
       ),
       el('div', { class: 'row' },
         selectField('Snap to stroke scope (vertex/edge)', s.snap.strokeScope ?? 'ANY', [
           ['ANY', 'Any GP object'], ['SELECTED', 'Selected strokes only'],
         ], (v) => { s.snap.strokeScope = v as 'ANY' | 'SELECTED'; save(); }),
       ),
-      el('div', { class: 'row' },
-        colorField('Background', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); }),
-        checkbox('Auto-key', s.autoKey, (v) => { s.autoKey = v; }),
-      ),
+      el('div', { class: 'row', text: 'Grid step/subdivisions and Background live in the Scene tab (sidebar).' }),
       el('div', { class: 'menu-header', text: 'Theme' }),
       el('div', { class: 'row' },
         colorField('Accent', [...s.uiAccent, 1], (rgb) => { s.uiAccent = rgb; this.app.applyThemeColors(); save(); }),
         colorField('Highlight', [...s.uiHighlight, 1], (rgb) => {
           s.uiHighlight = rgb; this.app.applyThemeColors(); this.app.refreshWidget(); save();
         }),
-      ),
-      el('div', { class: 'row' },
-        checkbox('Auto grid color (matches Background)', !s.gridColor, (v) => {
-          s.gridColor = v ? null : [...s.background];
-          this.app.rebuildGrid(); save(); this.refresh();
-        }),
-        ...(s.gridColor ? [colorField('Grid', [...s.gridColor, 1], (rgb) => {
-          s.gridColor = rgb; this.app.rebuildGrid(); save();
-        })] : []),
       ),
       el('div', { class: 'row', text: 'While Emulate Numpad is on, digit keys are view keys and mode shortcuts are shadowed (use the topbar or Tab).' }),
     );

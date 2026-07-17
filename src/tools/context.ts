@@ -53,6 +53,9 @@ export interface Settings {
   emulateNumpad: boolean;   // 1..9 become view keys instead of mode switching
   emulate3Button: boolean;  // Alt+LMB orbits (Shift pan, Ctrl zoom) for trackpads
   gridStep: number;
+  /** minor grid lines per major gridStep cell (visual density only —
+   *  magnet snapping always uses gridStep) */
+  gridSubdivisions: number;
   trackpadNav: boolean;     // two-finger orbit, shift pan, ctrl/pinch zoom
   invertTrackpadOrbit: boolean; // false = Blender direction (default)
   /** show the transform gizmo widget (hidden by default — G/R/S modal is
@@ -81,7 +84,7 @@ export interface Settings {
 
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
-  'emulateNumpad', 'emulate3Button', 'gridStep', 'showGizmo',
+  'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'background', 'snap',
   'uiAccent', 'uiHighlight', 'gridColor',
 ] as const;
@@ -156,7 +159,8 @@ export function defaultSettings(): Settings {
     background: [0.11, 0.11, 0.12],
     emulateNumpad: true,
     emulate3Button: true,
-    gridStep: 0.5,
+    gridStep: 1,
+    gridSubdivisions: 10,
     trackpadNav: true,
     invertTrackpadOrbit: false,
     showGizmo: false,
