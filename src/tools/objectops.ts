@@ -8,7 +8,7 @@ import type { GPObject, GPScene, GPStroke, TGMesh, Vec3 } from '../core/types';
 import { createFrame, createLayer, createObject, frameAt } from '../core/gpdata';
 import {
   applyObjectTransform, getObjectTransform, listSelected, parentWorldMatrixOf, setObjectTransform,
-  type ObjRef,
+  worldMatrixOf, type ObjRef,
 } from './objects';
 
 // ------------------------------------------------------------- mirror
@@ -35,19 +35,75 @@ export function clearObjectTransform(scene: GPScene, ref: ObjRef, which: ClearWh
 
 // -------------------------------------------------------------- snap
 
-export function snapSelectionToCursor(scene: GPScene): void {
+function worldPos(scene: GPScene, ref: ObjRef): THREE.Vector3 {
+  return new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
+}
+
+function setWorldPos(scene: GPScene, ref: ObjRef, world: THREE.Vector3): void {
+  const t = getObjectTransform(scene, ref);
+  if (!t) return;
+  const local = world.clone().applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
+  t.translation = [local.x, local.y, local.z];
+  setObjectTransform(scene, ref, t);
+}
+
+/** Blender "Selection to Cursor": every selected object collapses onto the
+ *  cursor. `keepOffset` moves the whole selection as a rigid group instead
+ *  (median lands on the cursor, relative offsets preserved). */
+export function snapSelectionToCursor(scene: GPScene, keepOffset = false): void {
   const cursor = new THREE.Vector3(...scene.cursor);
-  for (const ref of listSelected(scene)) {
-    const t = getObjectTransform(scene, ref);
-    if (!t) continue;
-    const local = cursor.clone().applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
-    t.translation = [local.x, local.y, local.z];
-    setObjectTransform(scene, ref, t);
+  const refs = listSelected(scene);
+  if (keepOffset) {
+    const pivot = selectionPivotOf(scene, refs);
+    if (!pivot) return;
+    const delta = cursor.clone().sub(pivot);
+    for (const ref of refs) setWorldPos(scene, ref, worldPos(scene, ref).add(delta));
+    return;
   }
+  for (const ref of refs) setWorldPos(scene, ref, cursor.clone());
+}
+
+export function snapSelectionToGrid(scene: GPScene, step: number): void {
+  for (const ref of listSelected(scene)) {
+    const w = worldPos(scene, ref);
+    w.set(Math.round(w.x / step) * step, Math.round(w.y / step) * step, Math.round(w.z / step) * step);
+    setWorldPos(scene, ref, w);
+  }
+}
+
+/** Every OTHER selected object collapses onto the active/target object. */
+export function snapSelectionToActive(scene: GPScene, active: ObjRef | null): void {
+  if (!active) return;
+  const target = worldPos(scene, active);
+  for (const ref of listSelected(scene)) {
+    if (ref.kind === active.kind && ref.id === active.id) continue;
+    setWorldPos(scene, ref, target.clone());
+  }
+}
+
+function selectionPivotOf(scene: GPScene, refs: ObjRef[]): THREE.Vector3 | null {
+  if (!refs.length) return null;
+  const pivot = new THREE.Vector3();
+  for (const ref of refs) pivot.add(worldPos(scene, ref));
+  return pivot.divideScalar(refs.length);
 }
 
 export function snapCursorToSelectionMedian(scene: GPScene, pivot: THREE.Vector3 | null): void {
   if (pivot) scene.cursor = [pivot.x, pivot.y, pivot.z];
+}
+
+export function snapCursorToWorldOrigin(scene: GPScene): void {
+  scene.cursor = [0, 0, 0];
+}
+
+export function snapCursorToGrid(scene: GPScene, step: number): void {
+  scene.cursor = scene.cursor.map((v) => Math.round(v / step) * step) as Vec3;
+}
+
+export function snapCursorToActive(scene: GPScene, active: ObjRef | null): void {
+  if (!active) return;
+  const w = worldPos(scene, active);
+  scene.cursor = [w.x, w.y, w.z];
 }
 
 // -------------------------------------------------------- GP origin ops

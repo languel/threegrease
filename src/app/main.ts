@@ -1672,31 +1672,33 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
-  /** Shift+A (Blender): Add menu anchored at the mouse. The spawn point
-   *  is the nearest stroke point under the pointer (within 60px) if any —
-   *  so adding a traveler/trigger while drawing a path lands ON the path —
-   *  else the pointer projected onto the drawing plane. */
+  /** Shift+A (Blender): Add menu anchored at the mouse. New objects spawn
+   *  at the 3D CURSOR by default (Blender parity) — Traveler/Trigger stay
+   *  pointer-relative ("...here") since a traveler must land ON the actual
+   *  stroke under the pointer to attach FOLLOW_PATH, and a trigger placed
+   *  "here" is a deliberately different action from placing one at the
+   *  cursor (already offered via the object Add submenu / cursor moves). */
   openAddMenu(): void {
     const ctx = this.ctx;
     const px = this.tools.lastPointer;
     const rect = ctx.canvas.getBoundingClientRect();
     const clientX = px.x + rect.left, clientY = px.y + rect.top;
     const strokeHit = nearestStrokePointAll(ctx, px.x, px.y, 60, 'ANY');
-    const world = strokeHit ?? screenToWorld(ctx, clientX, clientY);
-    if (!world) return;
-    const at: [number, number, number] = [world.x, world.y, world.z];
+    const pointerWorld = strokeHit ?? screenToWorld(ctx, clientX, clientY);
+    const cursorAt: [number, number, number] = [...ctx.scene.cursor];
+    const hereAt: [number, number, number] = pointerWorld ? [pointerWorld.x, pointerWorld.y, pointerWorld.z] : cursorAt;
     this.ui.openContextMenu(clientX, clientY, [
-      { header: strokeHit ? 'Add — on stroke' : 'Add — at pointer' },
-      { label: 'Traveler here', icon: 'cursorArrow', do: () => this.addTravelerObjectAt(at, px.x, px.y), disabled: !strokeHit },
-      { label: 'Trigger here', icon: 'boltCircle', do: () => this.addTriggerAt(at) },
+      { header: 'Add — at 3D cursor' },
+      { label: 'Grease Pencil (blank)', icon: 'pencil', do: () => this.addGPObject(cursorAt) },
+      { label: 'Plane', icon: 'square', do: () => this.addMeshObject('PLANE', undefined, cursorAt) },
+      { label: 'Box', icon: 'cube', do: () => this.addMeshObject('BOX', undefined, cursorAt) },
+      { label: 'Sphere', icon: 'circle', do: () => this.addMeshObject('SPHERE', undefined, cursorAt) },
+      { label: 'Cylinder', icon: 'cylinder', do: () => this.addMeshObject('CYLINDER', undefined, cursorAt) },
       { sep: true },
-      { label: 'Grease Pencil (blank)', icon: 'pencil', do: () => this.addGPObject(at) },
-      { label: 'Plane', icon: 'square', do: () => this.addMeshObject('PLANE', undefined, at) },
-      { label: 'Box', icon: 'cube', do: () => this.addMeshObject('BOX', undefined, at) },
-      { label: 'Sphere', icon: 'circle', do: () => this.addMeshObject('SPHERE', undefined, at) },
-      { label: 'Cylinder', icon: 'cylinder', do: () => this.addMeshObject('CYLINDER', undefined, at) },
+      { label: 'Traveler here', icon: 'cursorArrow', do: () => this.addTravelerObjectAt(hereAt, px.x, px.y), disabled: !strokeHit },
+      { label: 'Trigger here', icon: 'boltCircle', do: () => this.addTriggerAt(hereAt) },
       { sep: true },
-      { label: 'Move 3D cursor here', icon: 'target', do: () => { ctx.scene.cursor = at; this.gp.markDirty(); } },
+      { label: 'Move 3D cursor here', icon: 'target', do: () => { ctx.scene.cursor = hereAt; this.gp.markDirty(); } },
     ]);
   }
 

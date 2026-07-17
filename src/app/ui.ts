@@ -21,7 +21,8 @@ import {
 import {
   applyObjectTransformPartial, clearObjectTransform, geometryToOrigin, mirrorObject,
   originToCursor, originToFirstPoint, originToGeometry, originToGeometryBase, separateConnectedIntoObjects,
-  snapCursorToSelectionMedian, snapSelectionToCursor,
+  snapCursorToActive, snapCursorToGrid, snapCursorToSelectionMedian, snapCursorToWorldOrigin,
+  snapSelectionToActive, snapSelectionToCursor, snapSelectionToGrid,
 } from '../tools/objectops';
 
 type CtxItem =
@@ -776,8 +777,20 @@ export class UI {
       },
       {
         label: 'Snap', items: [
-          { label: 'Selection to Cursor', do: run(() => ops.snapToCursor(ctx)) },
-          { label: 'Selection to Grid', do: run(() => ops.snapToGrid(ctx, ctx.settings.gridStep)) },
+          { label: 'Selection to Cursor', icon: 'target', do: run(() => ops.snapToCursor(ctx)) },
+          { label: 'Selection to Grid', icon: 'wireframe', do: run(() => ops.snapToGrid(ctx, ctx.settings.gridStep)) },
+          { label: 'Selection to Cursor (Keep Offset)', icon: 'target', do: run(() => ops.snapToCursor(ctx, true)) },
+          { label: 'Selection to Active', icon: 'pin', do: run(() => ops.snapSelectionToActive(ctx)) },
+          { sep: true },
+          { label: 'Cursor to Selected', icon: 'cursorArrow', do: run(() => ops.snapCursorToSelection(ctx)) },
+          { label: 'Cursor to World Origin', icon: 'target', do: run(() => ops.snapCursorToWorldOrigin(ctx)) },
+          { label: 'Cursor to Grid', icon: 'wireframe', do: run(() => ops.snapCursorToGrid(ctx, ctx.settings.gridStep)) },
+          { label: 'Cursor to Active', icon: 'pin', do: run(() => ops.snapCursorToActive(ctx)) },
+          { sep: true },
+          { label: 'Selection to Stroke Start', icon: 'play', do: run(() => ops.snapSelectionToStrokeEnd(ctx, 'start')) },
+          { label: 'Selection to Stroke End', icon: 'play', do: run(() => ops.snapSelectionToStrokeEnd(ctx, 'end')) },
+          { label: 'Cursor to Stroke Start', icon: 'play', do: run(() => ops.snapCursorToStrokeEnd(ctx, 'start')) },
+          { label: 'Cursor to Stroke End', icon: 'play', do: run(() => ops.snapCursorToStrokeEnd(ctx, 'end')) },
         ],
       },
       {
@@ -850,8 +863,15 @@ export class UI {
       },
       {
         label: 'Snap', items: [
-          { label: 'Selection to Cursor', do: () => { ctx.pushUndo(); snapSelectionToCursor(ctx.scene); this.afterObjectOp(); } },
-          { label: 'Cursor to Selected', do: () => { ctx.pushUndo(); snapCursorToSelectionMedian(ctx.scene, selectionPivot(ctx.scene)); this.afterObjectOp(); } },
+          { label: 'Selection to Cursor', icon: 'target', do: () => { ctx.pushUndo(); snapSelectionToCursor(ctx.scene); this.afterObjectOp(); } },
+          { label: 'Selection to Grid', icon: 'wireframe', do: () => { ctx.pushUndo(); snapSelectionToGrid(ctx.scene, ctx.settings.gridStep); this.afterObjectOp(); } },
+          { label: 'Selection to Cursor (Keep Offset)', icon: 'target', do: () => { ctx.pushUndo(); snapSelectionToCursor(ctx.scene, true); this.afterObjectOp(); } },
+          { label: 'Selection to Active', icon: 'pin', do: () => { ctx.pushUndo(); snapSelectionToActive(ctx.scene, this.app.getLastPicked()); this.afterObjectOp(); } },
+          { sep: true },
+          { label: 'Cursor to Selected', icon: 'cursorArrow', do: () => { ctx.pushUndo(); snapCursorToSelectionMedian(ctx.scene, selectionPivot(ctx.scene)); this.afterObjectOp(); } },
+          { label: 'Cursor to World Origin', icon: 'target', do: () => { ctx.pushUndo(); snapCursorToWorldOrigin(ctx.scene); this.afterObjectOp(); } },
+          { label: 'Cursor to Grid', icon: 'wireframe', do: () => { ctx.pushUndo(); snapCursorToGrid(ctx.scene, ctx.settings.gridStep); this.afterObjectOp(); } },
+          { label: 'Cursor to Active', icon: 'pin', do: () => { ctx.pushUndo(); snapCursorToActive(ctx.scene, this.app.getLastPicked()); this.afterObjectOp(); } },
         ],
       },
       { sep: true },
@@ -1904,12 +1924,36 @@ export class UI {
         ctx.requestRender();
       }));
     }
-    body.push(el('h3', { text: `Object: ${ob.name}` }));
-    body.push(
-      this.vecRow('Loc', () => ob.translation.map((v) => +v.toFixed(3)), (i, v) => { ob.translation[i] = v; ctx.requestRender(); }),
-      this.vecRow('Rot', () => ob.rotation.map((v) => +v.toFixed(3)), (i, v) => { ob.rotation[i] = v; ctx.requestRender(); }),
-      this.vecRow('Scale', () => ob.scale.map((v) => +v.toFixed(3)), (i, v) => { ob.scale[i] = v; ctx.requestRender(); }, 0.05),
-    );
+    // OBJECT mode: show the actually-selected object (any kind), not just
+    // the active GP object — the N-panel used to always read GP1 even with
+    // a mesh/splat/trigger selected. Other modes edit one specific GP
+    // object regardless of object-mode selection, so keep showing that.
+    if (ctx.settings.mode === 'OBJECT') {
+      const refs = listSelectedObjects(ctx.scene);
+      const picked = this.app.getLastPicked();
+      const activeRef = (picked && refs.some((r) => r.kind === picked.kind && r.id === picked.id)) ? picked : refs[0];
+      if (activeRef) {
+        const t = getObjectTransform(ctx.scene, activeRef);
+        body.push(el('h3', { text: `Object: ${objectName(ctx.scene, activeRef)} (${activeRef.kind})${refs.length > 1 ? ` +${refs.length - 1}` : ''}` }));
+        if (t) {
+          body.push(
+            this.vecRow('Loc', () => t.translation.map((v) => +v.toFixed(3)), (i, v) => { t.translation[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }),
+            this.vecRow('Rot', () => t.rotation.map((v) => +v.toFixed(3)), (i, v) => { t.rotation[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }),
+            this.vecRow('Scale', () => t.scale.map((v) => +v.toFixed(3)), (i, v) => { t.scale[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }, 0.05),
+          );
+        }
+      } else {
+        body.push(el('h3', { text: 'Object' }));
+        body.push(el('div', { class: 'row', text: 'select one or more objects' }));
+      }
+    } else {
+      body.push(el('h3', { text: `Object: ${ob.name}` }));
+      body.push(
+        this.vecRow('Loc', () => ob.translation.map((v) => +v.toFixed(3)), (i, v) => { ob.translation[i] = v; ctx.requestRender(); }),
+        this.vecRow('Rot', () => ob.rotation.map((v) => +v.toFixed(3)), (i, v) => { ob.rotation[i] = v; ctx.requestRender(); }),
+        this.vecRow('Scale', () => ob.scale.map((v) => +v.toFixed(3)), (i, v) => { ob.scale[i] = v; ctx.requestRender(); }, 0.05),
+      );
+    }
 
     // --- View ---
     body.push(el('h3', { text: 'View' }));

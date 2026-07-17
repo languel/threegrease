@@ -8,7 +8,7 @@ import {
   simplifyStroke, smoothPoints, subdivideStroke, v3dist, strokeLength,
 } from '../core/mathutil';
 import type { AppCtx } from './context';
-import { forEachEditableStroke, deselectAll } from './select';
+import { forEachEditableStroke, deselectAll, selectedPoints } from './select';
 import { splitRuns } from './draw';
 
 const strokeSelected = (ctx: AppCtx, s: GPStroke) =>
@@ -306,18 +306,49 @@ export function assignMaterial(ctx: AppCtx, materialIndex: number): void {
   ctx.requestRender();
 }
 
-export function snapToCursor(ctx: AppCtx): void {
+function pointsMedian(pts: { s: GPStroke; index: number }[]): Vec3 {
+  const m: Vec3 = [0, 0, 0];
+  for (const { s, index } of pts) {
+    const c = s.points[index].co;
+    m[0] += c[0]; m[1] += c[1]; m[2] += c[2];
+  }
+  const n = pts.length || 1;
+  return [m[0] / n, m[1] / n, m[2] / n];
+}
+
+/** Last-touched selected point, for "Selection/Cursor to Active" — there's
+ *  no dedicated active-point tracking, so the last one iteration order
+ *  reaches stands in (matches how object-mode active/lastPicked degrades
+ *  to "the last one touched"). */
+function activePointCo(ctx: AppCtx): Vec3 | null {
+  const pts = selectedPoints(ctx);
+  if (!pts.length) return null;
+  const last = pts[pts.length - 1];
+  return last.s.points[last.index].co;
+}
+
+/** Blender "Selection to Cursor": every selected point collapses onto the
+ *  cursor. `keepOffset` moves each stroke's selection as a rigid group
+ *  instead (that stroke's selected-point median lands on the cursor,
+ *  relative offsets preserved) — this was this function's ONLY behavior
+ *  before the Blender-parity Snap submenu, now the explicit opt-in. */
+export function snapToCursor(ctx: AppCtx, keepOffset = false): void {
+  const pts = selectedPoints(ctx);
+  if (!pts.length) return;
   ctx.pushUndo();
   const cursor = ctx.scene.cursor;
-  forEachEditableStroke(ctx, (s) => {
-    if (!strokeSelected(ctx, s)) return;
-    // move stroke median to cursor
-    const med: Vec3 = [0, 0, 0];
-    for (const p of s.points) { med[0] += p.co[0]; med[1] += p.co[1]; med[2] += p.co[2]; }
-    med[0] /= s.points.length; med[1] /= s.points.length; med[2] /= s.points.length;
-    const d: Vec3 = [cursor[0] - med[0], cursor[1] - med[1], cursor[2] - med[2]];
-    for (const p of s.points) p.co = [p.co[0] + d[0], p.co[1] + d[1], p.co[2] + d[2]];
-  });
+  if (keepOffset) {
+    forEachEditableStroke(ctx, (s) => {
+      if (!strokeSelected(ctx, s)) return;
+      const med: Vec3 = [0, 0, 0];
+      for (const p of s.points) { med[0] += p.co[0]; med[1] += p.co[1]; med[2] += p.co[2]; }
+      med[0] /= s.points.length; med[1] /= s.points.length; med[2] /= s.points.length;
+      const d: Vec3 = [cursor[0] - med[0], cursor[1] - med[1], cursor[2] - med[2]];
+      for (const p of s.points) p.co = [p.co[0] + d[0], p.co[1] + d[1], p.co[2] + d[2]];
+    });
+  } else {
+    for (const { s, index } of pts) s.points[index].co = [...cursor] as Vec3;
+  }
   ctx.requestRender();
 }
 
@@ -329,5 +360,68 @@ export function snapToGrid(ctx: AppCtx, step = 0.1): void {
       p.co = p.co.map((v) => Math.round(v / step) * step) as Vec3;
     }
   });
+  ctx.requestRender();
+}
+
+/** Every OTHER selected point collapses onto the active (last-touched) point. */
+export function snapSelectionToActive(ctx: AppCtx): void {
+  const pts = selectedPoints(ctx);
+  const active = activePointCo(ctx);
+  if (!pts.length || !active) return;
+  ctx.pushUndo();
+  for (const { s, index } of pts) s.points[index].co = [...active] as Vec3;
+  ctx.requestRender();
+}
+
+export function snapCursorToSelection(ctx: AppCtx): void {
+  const pts = selectedPoints(ctx);
+  if (!pts.length) return;
+  ctx.scene.cursor = pointsMedian(pts);
+  ctx.requestRender();
+}
+
+export function snapCursorToWorldOrigin(ctx: AppCtx): void {
+  ctx.scene.cursor = [0, 0, 0];
+  ctx.requestRender();
+}
+
+export function snapCursorToGrid(ctx: AppCtx, step = 0.1): void {
+  ctx.scene.cursor = ctx.scene.cursor.map((v) => Math.round(v / step) * step) as Vec3;
+  ctx.requestRender();
+}
+
+export function snapCursorToActive(ctx: AppCtx): void {
+  const active = activePointCo(ctx);
+  if (!active) return;
+  ctx.scene.cursor = [...active] as Vec3;
+  ctx.requestRender();
+}
+
+/** GP-specific: snap the SELECTED points of each selected stroke to that
+ *  same stroke's own first/last point (per-stroke, so a multi-stroke
+ *  selection snaps each stroke to its own endpoint rather than one global
+ *  point). Whole-stroke (STROKE select mode) selections collapse entirely. */
+export function snapSelectionToStrokeEnd(ctx: AppCtx, which: 'start' | 'end'): void {
+  ctx.pushUndo();
+  let any = false;
+  forEachEditableStroke(ctx, (s) => {
+    if (!strokeSelected(ctx, s) || !s.points.length) return;
+    const target = which === 'start' ? s.points[0].co : s.points[s.points.length - 1].co;
+    for (const p of s.points) {
+      if (p.select || ctx.settings.selectMode === 'STROKE') { p.co = [...target] as Vec3; any = true; }
+    }
+  });
+  if (any) ctx.requestRender();
+}
+
+/** Cursor to the first selected stroke's start/end point. */
+export function snapCursorToStrokeEnd(ctx: AppCtx, which: 'start' | 'end'): void {
+  let target: Vec3 | null = null;
+  forEachEditableStroke(ctx, (s) => {
+    if (target || !strokeSelected(ctx, s) || !s.points.length) return;
+    target = which === 'start' ? s.points[0].co : s.points[s.points.length - 1].co;
+  });
+  if (!target) return;
+  ctx.scene.cursor = [...target] as Vec3;
   ctx.requestRender();
 }

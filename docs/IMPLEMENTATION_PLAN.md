@@ -1117,3 +1117,54 @@ commit each; typecheck+build always, deep verification only when cheap.
   end since detection cost + a 15ms frame floor cap it, but the
   direction and rough magnitude track correctly); UI slider drives the
   same `mmSetPlaybackRate` path the automation check used.
+
+
+## N-panel selected-object display, Shift+A adds at cursor, full Snap submenus
+- **N-panel fix**: the Item section always read `activeObject(scene)` (the
+  GP object), so selecting a mesh/splat/trigger in Object mode still
+  showed "Pencil1". Now OBJECT mode reads the actual object-mode
+  selection (`listSelectedObjects` + `getLastPicked()` as the active
+  ref, same pattern as the multi-object Object Properties panel) and
+  shows `Object: <name> (<KIND>)` with a live-editable transform for
+  ANY selected kind via `getObjectTransform`/`setObjectTransform`; other
+  modes still show the one active GP object being edited, unchanged.
+- **Shift+A now adds at the 3D cursor** (Blender parity) instead of the
+  mouse-pointer-projected position. Traveler/Trigger "here" stay
+  pointer-relative on purpose — a traveler must land ON the actual
+  stroke under the pointer to attach FOLLOW_PATH, and "Trigger here"
+  is deliberately a different action from adding one at the cursor.
+- **Full Blender-style Snap submenus**, both Object mode (RMB) and Edit
+  mode Stroke Ops (RMB): Selection to Cursor / Grid / Cursor (Keep
+  Offset) / Active, Cursor to Selected / World Origin / Grid / Active —
+  8 items each, all newly added except the 2 that existed before (whose
+  semantics were fixed in the process — see below). GP Edit mode gets 4
+  more: Selection/Cursor to Stroke Start/End.
+- **Real bug fixed while adding this, not just new features**: the
+  pre-existing "Selection to Cursor" (both point-level and object-level)
+  only ever implemented what Blender calls "Keep Offset" (the whole
+  selection moves as a rigid group). Blender's actual default collapses
+  every selected element individually onto the cursor. Fixed the default
+  to collapse (matching Blender and the newly-added menu item's name)
+  and moved the old rigid-group behavior to the new explicit "(Keep
+  Offset)" item — `ops.snapToCursor(ctx, keepOffset)` and
+  `snapSelectionToCursor(scene, keepOffset)` both default to `false`
+  (collapse). The Stroke Ops panel's existing "Snap to 3D cursor" icon
+  button keeps working (now correctly collapses, like Blender's
+  toolbar).
+- New ops: objectops.ts gained `snapSelectionToGrid/Active`,
+  `snapCursorToWorldOrigin/Grid/Active` (all via a shared `worldPos`/
+  `setWorldPos` pair so every ObjKind — GP/MESH/SPLAT/TRIGGER — works
+  identically). editops.ts gained the point-level equivalents plus
+  `snapSelectionToStrokeEnd`/`snapCursorToStrokeEnd` (per-stroke, so a
+  multi-stroke selection snaps each stroke to its OWN start/end rather
+  than one global point) — "active" for points is the last-touched
+  selected point (no dedicated active-point tracking exists, same
+  degradation object mode already uses for its own "active").
+- Verified live: Shift+A → Box with the pointer far from the cursor
+  spawned exactly at cursor coords, not the pointer; N-panel shows
+  "Object: box (MESH)" after selecting a mesh (previously always
+  "Pencil1"); object-mode Snap submenu renders all 8 items, and
+  `snapSelectionToActive` moved a follower mesh exactly onto the active
+  mesh's position; edit-mode Snap submenu renders all 12 items (8 + 4
+  GP), and `snapCursorToStrokeEnd(ctx,'start')` moved the cursor to the
+  exact stroke-start coordinate.
