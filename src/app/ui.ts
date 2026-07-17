@@ -93,6 +93,11 @@ export interface AppHandle {
   mmCaptureToggle(): void;
   mmCaptureStart(source?: { url?: string; file?: File }): void;
   mmSetPlaybackRate(rate: number): void;
+  mmRecordToggle(source: import('../mm/clips').RecordSource): void;
+  mmRecording(source?: import('../mm/clips').RecordSource): boolean;
+  mmPlayClip(clipId: number): void;
+  mmBakeClip(clipId: number, landmark?: number): void;
+  mmDeleteClip(clipId: number): void;
   importGPFile(file: File): void;
   exportSplatPly(id: number): void;
   run(action: string): void;
@@ -977,7 +982,7 @@ export class UI {
       },
       {
         id: 'mediamime', icon: 'camera', title: 'MediaMime — live landmarks & object rigging',
-        build: () => [this.mmStreamsPanel(), this.mediamimePanel()],
+        build: () => [this.mmStreamsPanel(), this.clipsPanel(), this.mediamimePanel()],
       },
       {
         id: 'solvers', icon: 'variable', title: 'Solvers — splats · string art · wire art',
@@ -1154,6 +1159,19 @@ export class UI {
         ),
       ],
       rename: (v) => { t.name = v; },
+    });
+    for (const st of scene.mmStreams) nodes.push({
+      ref: { kind: 'STREAM', id: st.id }, icon: icon('wave'), name: st.name, selected: !!st.select,
+      parent: st.parent,
+      onSelect: (e) => {
+        this.app.setLastPicked({ kind: 'STREAM', id: st.id });
+        toggleSel((v) => { st.select = v; }, !!st.select, !!e?.shiftKey);
+      },
+      extras: viewLockBtns(
+        !st.visible, (v) => { st.visible = !v; },
+        !!st.lock, (v) => { st.lock = v; },
+      ),
+      rename: (v) => { st.name = v; },
     });
 
     // parent → children tree (unknown parents render as roots)
@@ -2686,6 +2704,7 @@ export class UI {
       ref.kind === 'MESH' ? ctx.scene.meshes.find((m) => m.id === ref.id) :
       ref.kind === 'SPLAT' ? ctx.scene.splats.find((s) => s.id === ref.id) :
       ref.kind === 'TRIGGER' ? ctx.scene.score.triggers.find((t) => t.id === ref.id) :
+      ref.kind === 'STREAM' ? ctx.scene.mmStreams.find((st) => st.id === ref.id) :
       undefined
     ) as { constraints?: TGConstraint[] } | undefined;
     if (!entity) return panel('Constraints', el('div', { class: 'row', text: 'unsupported object' }));
@@ -2748,13 +2767,36 @@ export class UI {
             checkbox('Orient', !!c.orient, (v) => { c.orient = v; }),
           ),
         );
-      } else if (c.type === 'TRIGGER') {
+      } else if (c.type === 'FOLLOW_STREAM') {
+        const streamSel = el('select') as HTMLSelectElement;
+        streamSel.append(el('option', { value: '', text: '(pick stream)' }));
+        for (const st of ctx.scene.mmStreams) {
+          streamSel.append(el('option', { value: String(st.id), text: st.name }));
+        }
+        streamSel.value = c.streamId != null ? String(c.streamId) : '';
+        streamSel.onchange = () => { c.streamId = streamSel.value ? Number(streamSel.value) : null; };
         rows.push(
+          el('div', { class: 'row' }, 'Stream', streamSel,
+            numField('landmark', c.landmark ?? 0, (v) => { c.landmark = Math.max(0, Math.round(v)); }, 1)),
+          el('div', { class: 'row', text: 'pose: 0 nose · 15/16 wrists · hands: 8 index tip · iris: 0/5 eye centers' }),
+        );
+      } else if (c.type === 'TRIGGER') {
+        const shape = ref.kind === 'MESH'
+          ? (ctx.scene.meshes.find((m) => m.id === ref.id)?.kind ?? 'MODEL')
+          : null;
+        const shapeText = shape === 'PLANE' ? 'zone: PLANE — fires when a probe CROSSES it'
+          : shape && shape !== 'MODEL' ? `zone: ${shape} volume (its actual bounds)`
+          : 'zone: sphere of Radius at the origin';
+        rows.push(
+          el('div', { class: 'row', text: `${shapeText} · probes: travelers + stream landmarks` }),
           el('div', { class: 'row' },
             numField('Radius', c.radius ?? 0.25, (v) => { c.radius = Math.max(0.01, v); }, 0.05),
             checkbox('Retrigger', c.retrigger !== false, (v) => { c.retrigger = v; }),
           ),
+          el('div', { class: 'menu-header', text: 'On enter' }),
           this.msgEditor(c.messages ??= []),
+          el('div', { class: 'menu-header', text: 'On leave' }),
+          this.msgEditor(c.leaveMessages ??= []),
         );
       } else if (c.type === 'LIMIT_DISTANCE') {
         rows.push(targetField(c), el('div', { class: 'row' },
@@ -2833,12 +2875,18 @@ export class UI {
 
     const rows: Node[] = streams.flatMap((st) => {
       const frame = streamStore.get(st.id);
+      const recording = this.app.mmRecording({ kind: 'STREAM', id: st.id });
+      const clip = st.source === 'CLIP' ? ctx.scene.clips.find((c) => c.id === st.clipId) : null;
+      const recBtn = btn(icon('dot'), () => this.app.mmRecordToggle({ kind: 'STREAM', id: st.id }),
+        { cls: 'icon-btn rec-btn', active: recording, title: recording ? 'Stop recording (saves a clip)' : 'Record this stream into a clip' });
+      if (recording) recBtn.style.color = '#ff4444';
       return [
         el('div', { class: 'row' },
           btn(st.visible ? icon('eye') : icon('eyeOff'), () => { st.visible = !st.visible; this.refresh(); }, { cls: 'icon-btn' }),
           colorField('', [...st.color, 1], (rgb) => { st.color = rgb; }),
-          el('span', { class: 'grow', text: `${st.name}${st.source === 'BUS' ? ` ← ${st.busAddress}` : ''}` }),
+          el('span', { class: 'grow', text: `${st.name}${st.source === 'BUS' ? ` ← ${st.busAddress}` : st.source === 'CLIP' ? ` ⟲ ${clip?.name ?? '(clip gone)'}` : ''}` }),
           el('span', { text: frame?.count ? `${frame.count} pts` : '—' }),
+          ...(st.source !== 'CLIP' ? [recBtn] : []),
           btn(icon('xMark'), () => this.app.deleteMMStream(st.id), { cls: 'icon-btn', title: 'Delete stream' }),
         ),
         el('div', { class: 'row' },
@@ -2847,8 +2895,17 @@ export class UI {
           checkbox('conf→α', st.confidenceAlpha, (v) => { st.confidenceAlpha = v; }),
           checkbox('conf→size', st.confidenceSize, (v) => { st.confidenceSize = v; }),
           checkbox('mirror', st.mirror, (v) => { st.mirror = v; }),
-          ...(st.source === 'CAMERA' ? [checkbox('emit bus', st.emitBus, (v) => { st.emitBus = v; })] : []),
+          checkbox('probe', st.probeEvents !== false, (v) => { st.probeEvents = v; }),
+          checkbox('emit bus', !!st.emitBus, (v) => { st.emitBus = v; }),
         ),
+        // CLIP replays get a traveler-style transport
+        ...(st.source === 'CLIP' ? [el('div', { class: 'row' },
+          btn(st.playing ? icon('pause') : icon('play'), () => { st.playing = !st.playing; this.refresh(); },
+            { cls: 'icon-btn', active: !!st.playing }),
+          slider('', st.phase ?? 0, 0, 1, 0.001, (v) => { st.phase = v; }),
+          numField('speed', st.speed ?? 1, (v) => { st.speed = v; }, 0.1),
+          selectField('', st.loop ?? 'LOOP', [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { st.loop = v as typeof st.loop; }),
+        )] : []),
       ];
     });
 
@@ -2878,6 +2935,48 @@ export class UI {
       busRow,
       ...(rows.length ? rows : [el('div', { class: 'row', text: 'no streams yet — add Pose/Hands then Start camera, or feed one from the bus' })]),
       el('div', { class: 'row', text: 'camera streams re-emit world-space landmarks on the bus (prefix below), so rigs/routes/triggers can ride them' }),
+    );
+  }
+
+  /** Clip assets: recorded point-sets-over-time. Record from any stream
+   *  (● on its row above) or the selected object's trajectory; play back
+   *  as a stream; bake to GP strokes (confidence → pressure). */
+  private clipsPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const sel = listSelectedObjects(ctx.scene);
+    const selRef = sel.length === 1 ? sel[0] : null;
+    const objRecording = selRef && this.app.mmRecording({ kind: 'OBJECT', ref: selRef });
+    const anyObjRecording = this.app.mmRecording() && !ctx.scene.mmStreams.some(
+      (st) => this.app.mmRecording({ kind: 'STREAM', id: st.id }));
+
+    const recObjBtn = btn(
+      iconLabel('dot', objRecording ? 'Stop recording' : selRef ? `Record ${objectName(ctx.scene, selRef)}` : 'Record object…'),
+      () => { if (selRef) this.app.mmRecordToggle({ kind: 'OBJECT', ref: selRef }); },
+      {
+        active: !!objRecording,
+        title: selRef
+          ? 'Record this object\'s world trajectory into a clip (travelers, followers, anything)'
+          : 'Select exactly one object (object mode) to record its trajectory',
+      });
+    if (objRecording) recObjBtn.style.color = '#ff4444';
+
+    const rows: Node[] = ctx.scene.clips.flatMap((clip) => {
+      const nameInput = el('input', { type: 'text', value: clip.name }) as HTMLInputElement;
+      nameInput.style.width = '110px';
+      nameInput.onchange = () => { clip.name = nameInput.value.trim() || clip.name; };
+      return [el('div', { class: 'row' },
+        nameInput,
+        el('span', { class: 'grow', text: `${(clip.duration / 1000).toFixed(1)}s · ${clip.count} pt${clip.count === 1 ? '' : 's'} · ${clip.frames.length} f` }),
+        btn(icon('play'), () => this.app.mmPlayClip(clip.id), { cls: 'icon-btn', title: 'Play as a stream (same rendering/constraints/events as live data)' }),
+        btn(icon('pencil'), () => this.app.mmBakeClip(clip.id), { cls: 'icon-btn', title: 'Bake to GP strokes — one path per landmark, confidence becomes pressure' }),
+        btn(icon('xMark'), () => this.app.mmDeleteClip(clip.id), { cls: 'icon-btn', title: 'Delete clip' }),
+      )];
+    });
+
+    return panel('Clips',
+      el('div', { class: 'row' }, recObjBtn,
+        ...(anyObjRecording ? [el('span', { text: '● recording…' })] : [])),
+      ...(rows.length ? rows : [el('div', { class: 'row', text: 'no clips yet — ● on a stream row records its points over time; baked clips become paths travelers can ride' })]),
     );
   }
 

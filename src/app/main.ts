@@ -89,6 +89,7 @@ import { mediamime } from '../io/mediamime';
 import { createStream, mmStreamEngine, streamStore } from '../mm/streams';
 import { mmCapture } from '../mm/capture';
 import { StreamPointsManager } from '../mm/points';
+import { bakeClipToStrokes, clipRecorder, updateClipStreams, type RecordSource } from '../mm/clips';
 import type { MMStream } from '../core/types';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
@@ -188,6 +189,12 @@ class App implements AppHandle {
   /** app-instance store handle — evals/automation must use THIS, not an
    *  import('/src/mm/streams.ts') singleton (vite ?t= gives a second copy) */
   readonly mmStore = streamStore;
+  /** same deal: app-instance constraint engine, drivable manually from
+   *  headless tests (background tabs throttle rAF to ~0) */
+  readonly constraints = constraintEngine;
+  readonly mmRecorder = clipRecorder;
+  /** manual clip-playback step for headless tests */
+  mmClipTick(dt: number): void { updateClipStreams(this.ctx.scene, dt); }
   private widget!: TransformControls;
   private widgetProxy = new THREE.Object3D();
   private widgetBase: { refs: ObjRef[]; transforms: ObjTransform[]; proxy: ObjTransform } | null = null;
@@ -1945,6 +1952,51 @@ class App implements AppHandle {
     mmCapture.setPlaybackRate(rate);
   }
 
+  // ------------------------------------------------------------ clips
+
+  /** Toggle recording of a stream / object trajectory into a clip. */
+  mmRecordToggle(source: RecordSource): void {
+    if (clipRecorder.isRecording(source)) {
+      this.ctx.pushUndo();
+      clipRecorder.stop(this.ctx.scene);
+    } else {
+      if (clipRecorder.isRecording()) clipRecorder.stop(this.ctx.scene); // commit the other one
+      clipRecorder.start(this.ctx.scene, source);
+    }
+    this.ui.refresh();
+  }
+
+  mmRecording(source?: RecordSource): boolean { return clipRecorder.isRecording(source); }
+
+  /** Replay a clip as a CLIP-source stream (new stream object). */
+  mmPlayClip(clipId: number): void {
+    this.ctx.pushUndo();
+    this.ctx.scene.mmStreams.push(
+      createStream(this.ctx.scene, 'CUSTOM', 'CLIP', this.ctx.settings.upAxis, undefined, clipId));
+    this.ui.refresh();
+  }
+
+  /** Bake a clip's landmark trajectories into GP strokes (conf → pressure). */
+  mmBakeClip(clipId: number, landmark = -1): void {
+    const clip = this.ctx.scene.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    this.ctx.pushUndo();
+    bakeClipToStrokes(this.ctx.scene, clip, landmark);
+    this.ctx.scene.activeObject = this.ctx.scene.objects.length - 1;
+    this.gp.markDirty();
+    this.ui.refresh();
+  }
+
+  mmDeleteClip(clipId: number): void {
+    this.ctx.pushUndo();
+    this.ctx.scene.clips = this.ctx.scene.clips.filter((c) => c.id !== clipId);
+    // orphan any streams replaying it
+    for (const st of this.ctx.scene.mmStreams) {
+      if (st.source === 'CLIP' && st.clipId === clipId) { st.clipId = null; st.playing = false; }
+    }
+    this.ui.refresh();
+  }
+
   exportActiveGP(): void {
     const ob = activeObject(this.ctx.scene);
     downloadText(serializeGPObject(ob), `${ob.name || 'gp'}.threegrease.json`);
@@ -2055,6 +2107,7 @@ class App implements AppHandle {
         ref.kind === 'MESH' ? this.meshes.rootFor(ref.id) :
         ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) :
         ref.kind === 'TRIGGER' ? this.scoreGroup.children.find((c) => c.userData.triggerId === ref.id) ?? null :
+        ref.kind === 'STREAM' ? this.mmPoints.objectFor(ref.id) :
         null;
       if (!root) continue;
       wanted.add(key);
@@ -2080,7 +2133,10 @@ class App implements AppHandle {
       }
       entry.box.setFromObject(root);
       if (entry.box.isEmpty()) {
-        entry.box.setFromCenterAndSize(root.position, new THREE.Vector3(1, 1, 1));
+        // matrix-driven objects (streams) keep .position at 0 — use the
+        // data-model world matrix for the fallback box center instead
+        const center = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
+        entry.box.setFromCenterAndSize(center, new THREE.Vector3(1, 1, 1));
       }
       const meshKind = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id)?.kind : undefined;
       const realEdges = meshKind ? meshEdgePositions(root, meshKind) : null;
@@ -2288,10 +2344,13 @@ class App implements AppHandle {
     }
 
     // native MediaMime: detect on new webcam frames, keep BUS streams
-    // subscribed, re-emit world landmarks, then GPU-sync the point sprites.
-    // Runs BEFORE mediamime.update so re-emitted events reach rigs this frame.
+    // subscribed, replay CLIP streams, sample any active recording, re-emit
+    // world landmarks, then GPU-sync the point sprites. Runs BEFORE
+    // mediamime.update so re-emitted events reach rigs this frame.
     mmCapture.tick(ctx.scene);
     mmStreamEngine.sync(ctx.scene);
+    updateClipStreams(ctx.scene, dt);
+    clipRecorder.tick(ctx.scene);
     mmStreamEngine.emit(ctx.scene);
     this.mmPoints.sync(ctx.scene, this.glRenderer.domElement.height);
 
@@ -2311,6 +2370,16 @@ class App implements AppHandle {
       ...this.meshes.drawTargets(ctx.scene),
       ...this.splats.drawTargets(ctx.scene),
     ];
+    // constraint stacks (FOLLOW_PATH/FOLLOW_STREAM/TRIGGER/...) — after the
+    // score engine (trigger probes include this frame's cursors) and after
+    // surfaces (SHRINKWRAP raycasts them). NOTE: this call was documented
+    // but never actually wired until the mediamime branch — the engine
+    // existed and was imported, but nothing invoked it per frame.
+    try {
+      constraintEngine.update(ctx.scene, dt, this.score, ctx.surfaces);
+    } catch (err) {
+      console.error('constraint engine:', err);
+    }
     this.widget.camera = this.nav.active; // ortho/persp swaps
 
     if (ctx.scene.score.attachments.some((a) => a.running && a.target.kind === 'CANVAS')) {

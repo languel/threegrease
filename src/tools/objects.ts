@@ -9,7 +9,7 @@ import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso } from './draw';
 
-export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER';
+export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM';
 export interface ObjRef { kind: ObjKind; id: number }
 
 export function gpIndexOf(scene: GPScene, id: number): number {
@@ -23,6 +23,7 @@ export function listSelected(scene: GPScene): ObjRef[] {
   for (const s of scene.splats) if (s.select) out.push({ kind: 'SPLAT', id: s.id });
   for (const m of scene.meshes) if (m.select) out.push({ kind: 'MESH', id: m.id });
   for (const t of scene.score.triggers) if (t.select) out.push({ kind: 'TRIGGER', id: t.id });
+  for (const st of scene.mmStreams) if (st.select) out.push({ kind: 'STREAM', id: st.id });
   return out;
 }
 
@@ -32,6 +33,7 @@ export function deselectAllObjects(scene: GPScene): void {
   for (const s of scene.splats) s.select = false;
   for (const m of scene.meshes) m.select = false;
   for (const t of scene.score.triggers) t.select = false;
+  for (const st of scene.mmStreams) st.select = false;
 }
 
 function entityOf(scene: GPScene, ref: ObjRef):
@@ -40,6 +42,7 @@ function entityOf(scene: GPScene, ref: ObjRef):
   if (ref.kind === 'CANVAS') return scene.canvases.find((c) => c.id === ref.id);
   if (ref.kind === 'SPLAT') return scene.splats.find((s) => s.id === ref.id);
   if (ref.kind === 'TRIGGER') return scene.score.triggers.find((t) => t.id === ref.id);
+  if (ref.kind === 'STREAM') return scene.mmStreams.find((st) => st.id === ref.id);
   return scene.meshes.find((m) => m.id === ref.id);
 }
 
@@ -82,6 +85,10 @@ export function getObjectTransform(scene: GPScene, ref: ObjRef): ObjTransform | 
     const t = scene.score.triggers.find((x) => x.id === ref.id);
     return t ? { translation: [...t.position], rotation: [0, 0, 0], scale: [t.radius, t.radius, t.radius] } : null;
   }
+  if (ref.kind === 'STREAM') {
+    const st = scene.mmStreams.find((x) => x.id === ref.id);
+    return st ? { translation: [...st.translation], rotation: [...st.rotation], scale: [...st.scale] } : null;
+  }
   const m = scene.meshes.find((x) => x.id === ref.id);
   return m ? { translation: [...m.translation], rotation: [...m.rotation], scale: [...m.scale] } : null;
 }
@@ -110,6 +117,9 @@ export function setObjectTransform(scene: GPScene, ref: ObjRef, t: ObjTransform)
       tr.position = [...t.translation];
       tr.radius = Math.max(0.01, (Math.abs(t.scale[0]) + Math.abs(t.scale[1]) + Math.abs(t.scale[2])) / 3);
     }
+  } else if (ref.kind === 'STREAM') {
+    const st = scene.mmStreams.find((x) => x.id === ref.id);
+    if (st) { st.translation = [...t.translation]; st.rotation = [...t.rotation]; st.scale = [...t.scale]; }
   } else {
     const m = scene.meshes.find((x) => x.id === ref.id);
     if (m) { m.translation = [...t.translation]; m.rotation = [...t.rotation]; m.scale = [...t.scale]; }
@@ -134,6 +144,8 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     scene.splats = scene.splats.filter((s) => s.id !== ref.id);
   } else if (ref.kind === 'TRIGGER') {
     scene.score.triggers = scene.score.triggers.filter((t) => t.id !== ref.id);
+  } else if (ref.kind === 'STREAM') {
+    scene.mmStreams = scene.mmStreams.filter((st) => st.id !== ref.id);
   } else {
     scene.meshes = scene.meshes.filter((m) => m.id !== ref.id);
   }
@@ -146,6 +158,7 @@ export function allRefs(scene: GPScene): ObjRef[] {
     ...scene.splats.map((s) => ({ kind: 'SPLAT' as const, id: s.id })),
     ...scene.meshes.map((m) => ({ kind: 'MESH' as const, id: m.id })),
     ...scene.score.triggers.map((t) => ({ kind: 'TRIGGER' as const, id: t.id })),
+    ...scene.mmStreams.map((st) => ({ kind: 'STREAM' as const, id: st.id })),
   ];
 }
 
@@ -422,6 +435,11 @@ export class ObjectSelectTool implements Tool {
     for (const t of ctx.scene.score.triggers) {
       const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'TRIGGER', id: t.id }));
       if (p && Math.hypot(p.x - e.x, p.y - e.y) < 40) return { kind: 'TRIGGER', id: t.id };
+    }
+    for (const st of ctx.scene.mmStreams) {
+      if (!st.visible) continue;
+      const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'STREAM', id: st.id }));
+      if (p && Math.hypot(p.x - e.x, p.y - e.y) < 40) return { kind: 'STREAM', id: st.id };
     }
     const canvasHit = pickCanvas(ctx, e.x, e.y);
     if (canvasHit) return { kind: 'CANVAS', id: canvasHit.id };

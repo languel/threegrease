@@ -107,15 +107,25 @@ export class StreamPointsManager {
       }
       const pos = e.geo.getAttribute('position') as THREE.BufferAttribute;
       const conf = e.geo.getAttribute('aConf') as THREE.BufferAttribute;
+      const bb = (e.geo.boundingBox ??= new THREE.Box3());
+      bb.makeEmpty();
       for (let i = 0; i < frame.count; i++) {
         // mirror is baked into streamWorldMatrix, not the buffer
         pos.setXYZ(i, frame.data[i * 4], frame.data[i * 4 + 1], frame.data[i * 4 + 2]);
         conf.setX(i, frame.data[i * 4 + 3]);
+        bb.expandByPoint(new THREE.Vector3(frame.data[i * 4], frame.data[i * 4 + 1], frame.data[i * 4 + 2]));
       }
       pos.needsUpdate = true;
       conf.needsUpdate = true;
+      // keep bounds honest over drawRange only (stale capacity would inflate
+      // them) — selection glyphs Box3.setFromObject() this geometry
       e.geo.setDrawRange(0, frame.count);
     }
+  }
+
+  /** three.js object for a stream id (selection glyphs / picking roots). */
+  objectFor(id: number): THREE.Points | null {
+    return this.entries.get(id)?.points ?? null;
   }
 
   dispose(): void {

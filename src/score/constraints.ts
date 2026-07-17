@@ -13,6 +13,8 @@ import {
 import {
   advancePhase, fireMessages, samplePhase, type CursorState, type ScoreEngine,
 } from './engine';
+import { streamLandmarkWorld, streamStore, streamWorldMatrix } from '../mm/streams';
+import { meshLocalBounds } from '../tools/objectops';
 
 export function constraintsOf(scene: GPScene, ref: ObjRef): TGConstraint[] {
   const e =
@@ -20,6 +22,7 @@ export function constraintsOf(scene: GPScene, ref: ObjRef): TGConstraint[] {
     ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id) :
     ref.kind === 'SPLAT' ? scene.splats.find((s) => s.id === ref.id) :
     ref.kind === 'TRIGGER' ? scene.score.triggers.find((t) => t.id === ref.id) :
+    ref.kind === 'STREAM' ? scene.mmStreams.find((st) => st.id === ref.id) :
     undefined;
   return (e as { constraints?: TGConstraint[] } | undefined)?.constraints ?? [];
 }
@@ -35,7 +38,8 @@ function worldPos(scene: GPScene, ref: ObjRef): THREE.Vector3 {
 
 export const CONSTRAINT_DEFS: Record<ConstraintType, { label: string; group: string }> = {
   FOLLOW_PATH: { label: 'Follow Path (traveler)', group: 'Relationship' },
-  TRIGGER: { label: 'Trigger (proximity)', group: 'Relationship' },
+  FOLLOW_STREAM: { label: 'Follow Stream (mm landmark)', group: 'Relationship' },
+  TRIGGER: { label: 'Trigger (proximity/volume)', group: 'Relationship' },
   COPY_LOCATION: { label: 'Copy Location', group: 'Transform' },
   COPY_ROTATION: { label: 'Copy Rotation', group: 'Transform' },
   COPY_SCALE: { label: 'Copy Scale', group: 'Transform' },
@@ -56,6 +60,8 @@ export function createConstraint(type: ConstraintType): TGConstraint {
   switch (type) {
     case 'FOLLOW_PATH':
       return { ...base, path: null, phase: 0, speed: 0.2, loop: 'LOOP', running: true, orient: false };
+    case 'FOLLOW_STREAM':
+      return { ...base, streamId: null, landmark: 0 };
     case 'TRIGGER':
       return {
         ...base, radius: 0.25, retrigger: true,
@@ -79,11 +85,14 @@ export class ConstraintEngine {
   private velocities = new Map<string, THREE.Vector3>();
   private triggerInside = new Map<string, boolean>();
   private triggerFired = new Set<string>();
+  /** PLANE zones: last side (+1/-1) of each probe, for crossing detection */
+  private planeSide = new Map<string, number>();
 
   reset(): void {
     this.velocities.clear();
     this.triggerInside.clear();
     this.triggerFired.clear();
+    this.planeSide.clear();
   }
 
   /**
@@ -128,6 +137,17 @@ export class ConstraintEngine {
             }
             setObjectTransform(scene, ref, t);
             travelers.push({ key: `${ref.kind}:${ref.id}`, pos: tmp.position.clone() });
+          }
+        } else if (c.type === 'FOLLOW_STREAM' && c.streamId != null) {
+          const st = scene.mmStreams.find((s) => s.id === c.streamId);
+          const world = st ? streamLandmarkWorld(scene, st, c.landmark ?? 0) : null;
+          if (world) {
+            const local = worldToLocalTranslation(scene, ref, new THREE.Vector3(...world));
+            const cur = new THREE.Vector3(...t.translation);
+            cur.lerp(local, c.influence);
+            t.translation = [cur.x, cur.y, cur.z];
+            setObjectTransform(scene, ref, t);
+            travelers.push({ key: `${ref.kind}:${ref.id}`, pos: new THREE.Vector3(...world) });
           }
         } else if (c.type === 'COPY_LOCATION' && c.target) {
           const tp = worldPos(scene, c.target as ObjRef);
@@ -208,34 +228,84 @@ export class ConstraintEngine {
       }
     }
 
-    // pass 2: TRIGGER constraints — the object's origin is a trigger zone.
-    // Tested against every traveler: legacy score cursors + FOLLOW_PATH
-    // objects gathered above.
+    // pass 2: TRIGGER constraints — the CARRIER OBJECT is the trigger zone,
+    // and its kind defines the SHAPE: BOX/SPHERE/CYLINDER mesh primitives
+    // test their actual (local-bounds) volume, PLANE fires on side-crossing
+    // within its extent, everything else is a radius sphere at the origin.
+    // Probes: FOLLOW_PATH/FOLLOW_STREAM travelers, legacy score cursors,
+    // and every landmark of probe-enabled MM streams — so "right hand
+    // enters a virtual box" is just a box mesh with a TRIGGER constraint.
     const probes: { key: string; pos: THREE.Vector3 }[] = [...travelers];
     for (const [id, state] of score.states) {
       if (state.valid) probes.push({ key: `cursor:${id}`, pos: state.position });
     }
+    for (const st of scene.mmStreams) {
+      if (st.probeEvents === false || !st.visible) continue;
+      const frame = streamStore.get(st.id);
+      if (!frame?.count) continue;
+      const m = streamWorldMatrix(scene, st);
+      for (let i = 0; i < frame.count; i++) {
+        probes.push({
+          key: `mm:${st.id}:${i}`,
+          pos: new THREE.Vector3(
+            frame.data[i * 4], frame.data[i * 4 + 1], frame.data[i * 4 + 2],
+          ).applyMatrix4(m),
+        });
+      }
+    }
+
+    const local = new THREE.Vector3();
     for (const ref of allRefs(scene)) {
       if (ref.kind === 'CANVAS') continue;
       for (const c of constraintsOf(scene, ref)) {
         if (!c.enabled || c.type !== 'TRIGGER') continue;
-        const zone = worldPos(scene, ref);
+        const zoneCenter = worldPos(scene, ref);
         const radius = c.radius ?? 0.25;
+        // shape from the carrier: primitive mesh = volume/plane, else sphere
+        const mesh = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id) : undefined;
+        const bounds = mesh && mesh.kind !== 'MODEL' ? meshLocalBounds(mesh) : null;
+        const isPlane = mesh?.kind === 'PLANE';
+        const inv = bounds ? worldMatrixOf(scene, ref).invert() : null;
+
         for (const probe of probes) {
           if (probe.key === `${ref.kind}:${ref.id}`) continue; // not itself
           const key = `${ref.kind}:${ref.id}:${c.id}:${probe.key}`;
-          const inside = probe.pos.distanceTo(zone) < radius;
+          let inside: boolean;
+          if (bounds && inv) {
+            local.copy(probe.pos).applyMatrix4(inv);
+            if (isPlane) {
+              // crossing detector: sign of local z flips while inside the
+              // plane's XY extent ("body part crosses a defined plane")
+              const withinExtent = local.x >= bounds.min.x && local.x <= bounds.max.x
+                && local.y >= bounds.min.y && local.y <= bounds.max.y;
+              const side = local.z >= 0 ? 1 : -1;
+              const sideKey = `${key}:side`;
+              const lastSide = this.planeSide.get(sideKey);
+              inside = withinExtent && lastSide !== undefined && lastSide !== side;
+              if (withinExtent) this.planeSide.set(sideKey, side);
+              else this.planeSide.delete(sideKey);
+            } else {
+              inside = local.x >= bounds.min.x && local.x <= bounds.max.x
+                && local.y >= bounds.min.y && local.y <= bounds.max.y
+                && local.z >= bounds.min.z && local.z <= bounds.max.z;
+            }
+          } else {
+            inside = probe.pos.distanceTo(zoneCenter) < radius;
+          }
           const wasInside = this.triggerInside.get(key) ?? false;
+          const msgCtx = {
+            id: c.id, name: c.name, probe: probe.key,
+            x: +probe.pos.x.toFixed(4), y: +probe.pos.y.toFixed(4), z: +probe.pos.z.toFixed(4),
+            t: 0,
+          };
           if (inside && !wasInside) {
             const allowed = c.retrigger !== false || !this.triggerFired.has(key);
             if (allowed) {
               this.triggerFired.add(key);
-              fireMessages(`constraint:${c.id}`, c.messages ?? [], {
-                id: c.id, name: c.name, probe: probe.key,
-                x: +zone.x.toFixed(4), y: +zone.y.toFixed(4), z: +zone.z.toFixed(4),
-                t: 0,
-              });
+              fireMessages(`constraint:${c.id}`, c.messages ?? [], msgCtx);
             }
+          } else if (!inside && wasInside && c.leaveMessages?.length) {
+            fireMessages(`constraint:${c.id}`, c.leaveMessages, msgCtx);
           }
           this.triggerInside.set(key, inside);
         }

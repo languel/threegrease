@@ -96,6 +96,7 @@ export function createScene(): GPScene {
     meshes: [],
     mediamime: { prefix: '/mm', rigs: [] },
     mmStreams: [],
+    clips: [],
   };
 }
 

@@ -165,7 +165,8 @@ function primitiveLocalBounds(kind: TGMesh['kind']): THREE.Box3 | null {
   }
 }
 
-function meshLocalBounds(m: TGMesh): THREE.Box3 | null {
+/** Exported for the constraint engine's volume-trigger zones too. */
+export function meshLocalBounds(m: TGMesh): THREE.Box3 | null {
   const base = primitiveLocalBounds(m.kind);
   if (!base) return null;
   const off = new THREE.Vector3(...(m.originOffset ?? [0, 0, 0]));

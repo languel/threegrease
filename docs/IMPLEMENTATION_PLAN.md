@@ -1196,3 +1196,69 @@ commit each; typecheck+build always, deep verification only when cheap.
   gridSubdivisions from 10→2 measurably changes the GridHelper's vertex
   count (804 → 164) and rebuilding back to 10 restores it; Settings
   dialog confirmed to no longer contain the removed rows.
+
+
+## MM streams: objects, binding, spatial events, clips (the big consolidation)
+Design principle honored throughout: NO new parallel systems. Points are
+splats, curves are paths, binding is constraints, events are triggers —
+every new capability lands inside an existing concept.
+
+- **Streams are first-class objects** ('STREAM' ObjKind + ParentRef kind):
+  selectable (click/box-select/outliner, wave icon), transformable
+  (G/R/S, widget, N-panel — grab the BB and place a stream anywhere),
+  parentable, lockable, deletable, constraint-carrying. Selection glyph
+  bounds come from the LIVE frame data (StreamPointsManager maintains
+  geometry.boundingBox over the drawRange each buffer update; empty-box
+  fallback now centers on the data-model world matrix since
+  matrix-driven objects keep .position at 0).
+- **FOLLOW_STREAM constraint** — binding = the existing constraint
+  stack: streamId + landmark index drives the carrier to
+  streamLandmarkWorld() with influence lerp; composes with SPRING
+  (smoothed follow), TRACK_TO, LIMIT_DISTANCE etc. Constraint panel gets
+  a stream dropdown + landmark field with common-index hints. Driven
+  objects also register as trigger probes (like FOLLOW_PATH travelers).
+- **Spatial events = TRIGGER constraints with SHAPES**: the carrier
+  object's kind defines the zone — BOX/SPHERE/CYLINDER primitives test
+  their actual local-bounds volume (originOffset-aware via
+  meshLocalBounds), PLANE fires on side-CROSSING within its extent
+  (lastSide tracking), anything else keeps the radius sphere. Probes now
+  include every landmark of probe-enabled streams (per-stream `probe`
+  toggle, FACE off by default — 478 probes/frame). New `leaveMessages`
+  fire on exit. "RH enters a virtual box / body part crosses a plane" is
+  now literally: box or plane mesh + TRIGGER constraint.
+- **REAL BUG FOUND**: ConstraintEngine.update() was imported and
+  documented as running in the frame loop ("runs AFTER ScoreEngine" per
+  CLAUDE.md) but was NEVER actually called anywhere — constraints only
+  ever applied through side paths (widget drag re-projection etc). Now
+  wired into the loop after score.update + surfaces gathering, wrapped
+  in try/catch like gp.update (loop-killing exceptions gotcha).
+- **Clips** (`TGClip`, scene.clips): recorded point-sets-over-time in
+  WORLD space [x,y,z,confidence] — "splats × time". ClipRecorder
+  records a whole stream (sampled on store-version change = capture
+  rate) or ANY object's origin trajectory (~60Hz — travelers, followers,
+  anything). Playback reuses the stream concept: CLIP-source MMStream
+  replays frames through the same streamStore with a traveler-style
+  clock (play/pause, phase scrub, speed, LOOP/PINGPONG/ONCE via the
+  score engine's advancePhase), so replays render/constrain/probe/emit
+  exactly like live capture; the stream's own transform re-places the
+  replay anywhere. Bake = clip → GP strokes (one per landmark,
+  CONFIDENCE → PRESSURE) in a new GP object — recordings become paths
+  the whole traveler/trigger ecosystem rides.
+- **Clips panel** (MediaMime tab): ● record per stream row +
+  record-selected-object; clip rows with rename, duration/points/frames,
+  ▶ play-as-stream, bake-to-strokes, delete. CLIP stream rows grow the
+  transport (pause/phase/speed/loop).
+- Automation surfaces added to __tg (background-tab rAF throttle makes
+  wall-clock waits unreliable; drive engines manually): `constraints`
+  (engine), `mmRecorder`, `mmClipTick(dt)` alongside the existing
+  `mmStore`.
+- Verified headlessly, all through app-instance surfaces: STREAM
+  selection glyph + transform moves the rendered cloud (matrix x 0→3);
+  FOLLOW_STREAM sphere lands exactly on the landmark and tracks fresh
+  frames; box zone fired /zone/enter then /zone/leave as a stream point
+  passed through; plane zone fired /zone/cross on a z-sign flip within
+  extent; 14-frame circle recording → CLIP replay orbits the circle
+  under manual clip ticks → bake produced "clip: …" GP object, 14-point
+  stroke, pressure 1.0→0.7 from the recorded confidence ramp; screenshot
+  shows live point, replay point, transport UI, clips panel, and the
+  baked stroke with visible pressure taper.

@@ -118,12 +118,13 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
-export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER'; id: number }
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM'; id: number }
 
 // ---- object constraints (Blender-style stack, evaluated every frame) ----
 
 export type ConstraintType =
   | 'FOLLOW_PATH'      // traveler: ride a GP stroke on its own clock
+  | 'FOLLOW_STREAM'    // driver: ride a live MediaMime stream landmark
   | 'TRIGGER'          // proximity trigger: fires when a traveler enters
   | 'COPY_LOCATION' | 'COPY_ROTATION' | 'COPY_SCALE'
   | 'TRACK_TO'         // aim at a target object
@@ -146,10 +147,16 @@ export interface TGConstraint {
   loop?: LoopMode;
   running?: boolean;
   orient?: boolean;              // align to path tangent
-  // TRIGGER
+  // FOLLOW_STREAM
+  streamId?: number | null;
+  landmark?: number;
+  // TRIGGER — zone SHAPE comes from the carrier object: BOX/SPHERE/CYLINDER
+  // primitives test their actual volume, PLANE fires on crossing, everything
+  // else uses the radius sphere. leaveMessages fire when a probe exits.
   radius?: number;
   retrigger?: boolean;
   messages?: MsgTemplate[];
+  leaveMessages?: MsgTemplate[];
   // LIMIT_DISTANCE / SPRING / FLOOR / SHRINKWRAP
   distance?: number;
   stiffness?: number;
@@ -283,14 +290,26 @@ export interface MMStream {
    *  (their own stream so an eye can drive a cursor); CUSTOM = arbitrary
    *  bus-fed point set */
   kind: 'POSE' | 'HAND_LEFT' | 'HAND_RIGHT' | 'FACE' | 'IRIS' | 'CUSTOM';
-  source: 'CAMERA' | 'BUS';
+  /** CLIP = replays a recorded TGClip through the same live-frame store */
+  source: 'CAMERA' | 'BUS' | 'CLIP';
   /** BUS source: address prefix whose numeric-suffixed children are point
    *  indices, e.g. '/mm/pose' consumes '/mm/pose/0'..'/mm/pose/32' with
    *  args x,y[,z[,confidence]] */
   busAddress?: string;
+  // ---- CLIP source: traveler-style clock over the recorded frames ----
+  clipId?: number | null;
+  playing?: boolean;
+  loop?: LoopMode;
+  speed?: number;          // playback rate multiplier (1 = realtime)
+  phase?: number;          // 0..1 through the clip
   visible: boolean;
   select?: boolean;
   lock?: boolean;
+  /** streams are full scene objects: constraint stack + trigger probing */
+  constraints?: TGConstraint[];
+  /** landmarks act as probes for TRIGGER zones (default on; FACE off —
+   *  478 probes per frame is rarely what you want) */
+  probeEvents?: boolean;
   parent?: ParentRef | null;
   translation: Vec3;
   rotation: Vec3;
@@ -313,6 +332,24 @@ export interface MMStream {
    *  ('<prefix>/pose/0' …) so rigs/routes/triggers can consume them —
    *  streams become pens/cursors/travelers via the existing machinery. */
   emitBus: boolean;
+}
+
+/** A recorded point-set-over-time ("splats × time"): frames of packed
+ *  WORLD-space [x,y,z,confidence] samples. Sources: a whole MM stream, or
+ *  any object's origin (travelers, followers — count=1). Playback goes
+ *  through a CLIP-source MMStream (same rendering/constraints/events as
+ *  live data); bake turns a landmark's trajectory into a GP stroke with
+ *  confidence→pressure. */
+export interface TGClip {
+  id: number;
+  name: string;
+  /** provenance label, e.g. 'stream:Pose' or 'object:box' */
+  source: string;
+  /** points per frame (1 for object recordings) */
+  count: number;
+  /** total duration in ms (t of the last frame) */
+  duration: number;
+  frames: { t: number; data: number[] }[];
 }
 
 /** MediaMime (P11): binds a live tracked-landmark address (x,y,z over the
@@ -449,4 +486,6 @@ export interface GPScene {
   mediamime: { prefix: string; rigs: MMRig[] };
   /** native MediaMime landmark streams (config; frames are runtime-only) */
   mmStreams: MMStream[];
+  /** recorded point clips (mm streams / object trajectories) */
+  clips: TGClip[];
 }

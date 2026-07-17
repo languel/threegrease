@@ -34,7 +34,13 @@ export function deserializeScene(json: string): GPScene {
     st.confidenceAlpha ??= true;
     st.confidenceSize ??= false;
     st.depthScale ??= st.kind === 'POSE' ? 0 : 1;
+    st.select ??= false;
+    st.lock ??= false;
+    st.parent ??= null;
+    st.constraints ??= [];
+    st.probeEvents ??= st.kind !== 'FACE';
   }
+  scene.clips ??= [];
   for (const trig of scene.score.triggers) {
     trig.select ??= false;
     trig.hide ??= false;

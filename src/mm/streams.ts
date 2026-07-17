@@ -55,7 +55,7 @@ export const streamStore = new StreamStore();
 let nextStreamId = 1;
 export function createStream(
   scene: GPScene, kind: MMStream['kind'], source: MMStream['source'],
-  upAxis: 'Y' | 'Z', busAddress?: string,
+  upAxis: 'Y' | 'Z', busAddress?: string, clipId?: number,
 ): MMStream {
   const maxId = scene.mmStreams.reduce((m, s) => Math.max(m, s.id), 0);
   nextStreamId = Math.max(nextStreamId, maxId + 1);
@@ -66,26 +66,34 @@ export function createStream(
     POSE: [0.35, 0.8, 1], HAND_LEFT: [0.55, 1, 0.5], HAND_RIGHT: [0.55, 1, 0.5],
     FACE: [1, 0.8, 0.35], IRIS: [1, 0.35, 0.55], CUSTOM: [0.55, 1, 0.5],
   };
+  const isClip = source === 'CLIP';
   return {
     id: nextStreamId++,
-    name: names[kind],
+    name: isClip ? (scene.clips.find((c) => c.id === clipId)?.name ?? 'Clip') : names[kind],
     kind, source, busAddress,
-    visible: true, select: false, parent: null,
-    translation: [0, 0, upAxis === 'Z' ? 1 : 0],
+    ...(isClip ? { clipId, playing: true, loop: 'LOOP' as const, speed: 1, phase: 0 } : {}),
+    visible: true, select: false, lock: false, parent: null, constraints: [],
+    probeEvents: kind !== 'FACE',
+    // clip frames are recorded in WORLD space — replay at identity so the
+    // playback lands exactly where it was captured; the stream transform
+    // then re-places it anywhere
+    translation: isClip ? [0, 0, 0] : [0, 0, upAxis === 'Z' ? 1 : 0],
     // local frames are Y-up; stand the figure upright in Z-up worlds
-    rotation: upAxis === 'Z' ? [Math.PI / 2, 0, 0] : [0, 0, 0],
-    scale: [2, 2, 2],
-    mirror: true,
+    rotation: isClip || upAxis !== 'Z' ? [0, 0, 0] : [Math.PI / 2, 0, 0],
+    scale: isClip ? [1, 1, 1] : [2, 2, 2],
+    mirror: !isClip,
     // pose z is hip-relative noise -> flat by default; hands/face/iris
     // carry genuinely useful relative depth
-    depthScale: kind === 'POSE' ? 0 : 1,
+    depthScale: isClip || kind !== 'POSE' ? 1 : 0,
     // 478 face points at pose-size would blob together
     pointSize: kind === 'FACE' ? 0.012 : kind === 'IRIS' ? 0.02 : 0.04,
-    color: colors[kind],
+    color: isClip ? [0.8, 0.55, 1] : colors[kind],
     confidenceAlpha: true,
     confidenceSize: false,
-    // 478 face points per frame would swamp the bus; opt in explicitly
-    emitBus: kind !== 'FACE',
+    // 478 face points per frame would swamp the bus; opt in explicitly.
+    // clip replays default OFF too — turn on deliberately when a replay
+    // should drive rigs/routes like live data
+    emitBus: !isClip && kind !== 'FACE',
   };
 }
 
@@ -161,15 +169,21 @@ export class MMStreamEngine {
       const st = scene.mmStreams.find((s) => s.id === id);
       if (!st || st.source !== 'BUS') { sub.unsub(); this.subs.delete(id); streamStore.drop(id); }
     }
+    // and stale frames for streams deleted through object mode
+    for (const id of [...streamStore.version.keys()]) {
+      if (!scene.mmStreams.some((s) => s.id === id)) streamStore.drop(id);
+    }
   }
 
-  /** Re-emit CAMERA-stream landmarks in WORLD space so existing rigs/routes/
-   *  trigger zones can bind to them exactly like external mediamime data. */
+  /** Re-emit CAMERA/CLIP-stream landmarks in WORLD space so existing rigs/
+   *  routes/trigger zones can bind to them exactly like external mediamime
+   *  data (clip replays drive rigs like live capture). BUS streams never
+   *  re-emit — they CAME from the bus. */
   emit(scene: GPScene): void {
     const prefix = scene.mediamime.prefix || '/mm';
     const now = performance.now();
     for (const st of scene.mmStreams) {
-      if (st.source !== 'CAMERA' || !st.emitBus) continue;
+      if (st.source === 'BUS' || !st.emitBus) continue;
       const frame = streamStore.get(st.id);
       // only fresh frames — a stopped camera must not re-broadcast its last
       // pose onto the bus forever
