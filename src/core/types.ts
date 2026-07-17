@@ -310,6 +310,10 @@ export interface MMStream {
   /** landmarks act as probes for TRIGGER zones (default on; FACE off —
    *  478 probes per frame is rarely what you want) */
   probeEvents?: boolean;
+  /** live pen: one landmark draws strokes into the active GP object while
+   *  armed — confidence gates pen-down (below minConf = pen up, stroke
+   *  ends) and becomes pressure, like baked clips */
+  pen?: { active: boolean; landmark: number; minConf: number };
   parent?: ParentRef | null;
   translation: Vec3;
   rotation: Vec3;
@@ -349,6 +353,10 @@ export interface TGClip {
   count: number;
   /** total duration in ms (t of the last frame) */
   duration: number;
+  /** non-destructive trim window, 0..1 of duration — playback and bake
+   *  honor it; "crop" makes it permanent */
+  trimStart?: number;
+  trimEnd?: number;
   frames: { t: number; data: number[] }[];
 }
 

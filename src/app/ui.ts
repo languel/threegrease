@@ -1,4 +1,4 @@
-import type { AppCtx, EraserMode, GuideType, PaintBrush, PlacementMode, PlaneMode, SculptBrush, StrokeTarget } from '../tools/context';
+import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
@@ -11,6 +11,7 @@ import { createRoute, routes, TARGET_SUGGESTIONS } from '../events/routes';
 import { mediamime } from '../io/mediamime';
 import { mmCapture } from '../mm/capture';
 import { streamStore } from '../mm/streams';
+import { penLandmarkHint } from '../mm/pen';
 import { deleteAsset, listAssets } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import type { ConstraintType, TGConstraint } from '../core/types';
@@ -97,6 +98,7 @@ export interface AppHandle {
   mmRecording(source?: import('../mm/clips').RecordSource): boolean;
   mmPlayClip(clipId: number): void;
   mmBakeClip(clipId: number, landmark?: number): void;
+  mmCropClip(clipId: number): void;
   mmDeleteClip(clipId: number): void;
   importGPFile(file: File): void;
   exportSplatPly(id: number): void;
@@ -783,13 +785,13 @@ export class UI {
       {
         label: 'Snap', items: [
           { label: 'Selection to Cursor', icon: 'target', do: run(() => ops.snapToCursor(ctx)) },
-          { label: 'Selection to Grid', icon: 'wireframe', do: run(() => ops.snapToGrid(ctx, ctx.settings.gridStep)) },
+          { label: 'Selection to Grid', icon: 'wireframe', do: run(() => ops.snapToGrid(ctx, snapIncrement(ctx.settings))) },
           { label: 'Selection to Cursor (Keep Offset)', icon: 'target', do: run(() => ops.snapToCursor(ctx, true)) },
           { label: 'Selection to Active', icon: 'pin', do: run(() => ops.snapSelectionToActive(ctx)) },
           { sep: true },
           { label: 'Cursor to Selected', icon: 'cursorArrow', do: run(() => ops.snapCursorToSelection(ctx)) },
           { label: 'Cursor to World Origin', icon: 'target', do: run(() => ops.snapCursorToWorldOrigin(ctx)) },
-          { label: 'Cursor to Grid', icon: 'wireframe', do: run(() => ops.snapCursorToGrid(ctx, ctx.settings.gridStep)) },
+          { label: 'Cursor to Grid', icon: 'wireframe', do: run(() => ops.snapCursorToGrid(ctx, snapIncrement(ctx.settings))) },
           { label: 'Cursor to Active', icon: 'pin', do: run(() => ops.snapCursorToActive(ctx)) },
           { sep: true },
           { label: 'Selection to Stroke Start', icon: 'play', do: run(() => ops.snapSelectionToStrokeEnd(ctx, 'start')) },
@@ -869,13 +871,13 @@ export class UI {
       {
         label: 'Snap', items: [
           { label: 'Selection to Cursor', icon: 'target', do: () => { ctx.pushUndo(); snapSelectionToCursor(ctx.scene); this.afterObjectOp(); } },
-          { label: 'Selection to Grid', icon: 'wireframe', do: () => { ctx.pushUndo(); snapSelectionToGrid(ctx.scene, ctx.settings.gridStep); this.afterObjectOp(); } },
+          { label: 'Selection to Grid', icon: 'wireframe', do: () => { ctx.pushUndo(); snapSelectionToGrid(ctx.scene, snapIncrement(ctx.settings)); this.afterObjectOp(); } },
           { label: 'Selection to Cursor (Keep Offset)', icon: 'target', do: () => { ctx.pushUndo(); snapSelectionToCursor(ctx.scene, true); this.afterObjectOp(); } },
           { label: 'Selection to Active', icon: 'pin', do: () => { ctx.pushUndo(); snapSelectionToActive(ctx.scene, this.app.getLastPicked()); this.afterObjectOp(); } },
           { sep: true },
           { label: 'Cursor to Selected', icon: 'cursorArrow', do: () => { ctx.pushUndo(); snapCursorToSelectionMedian(ctx.scene, selectionPivot(ctx.scene)); this.afterObjectOp(); } },
           { label: 'Cursor to World Origin', icon: 'target', do: () => { ctx.pushUndo(); snapCursorToWorldOrigin(ctx.scene); this.afterObjectOp(); } },
-          { label: 'Cursor to Grid', icon: 'wireframe', do: () => { ctx.pushUndo(); snapCursorToGrid(ctx.scene, ctx.settings.gridStep); this.afterObjectOp(); } },
+          { label: 'Cursor to Grid', icon: 'wireframe', do: () => { ctx.pushUndo(); snapCursorToGrid(ctx.scene, snapIncrement(ctx.settings)); this.afterObjectOp(); } },
           { label: 'Cursor to Active', icon: 'pin', do: () => { ctx.pushUndo(); snapCursorToActive(ctx.scene, this.app.getLastPicked()); this.afterObjectOp(); } },
         ],
       },
@@ -1015,6 +1017,12 @@ export class UI {
         numField('Step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5),
         numField('Subdivisions', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1),
       ),
+      el('div', { class: 'row' },
+        selectField('Subdivision style', s.gridSubdivStyle, [
+          ['dashed', 'Dashed'], ['solid', 'Solid'],
+        ], (v) => { s.gridSubdivStyle = v as 'dashed' | 'solid'; this.app.rebuildGrid(); save(); }),
+      ),
+      el('div', { class: 'row', text: 'Magnet INCREMENT snaps to the subdivision lines (Step ÷ Subdivisions).' }),
       el('div', { class: 'row' },
         checkbox('Auto color (matches Background)', !s.gridColor, (v) => {
           s.gridColor = v ? null : [...s.background];
@@ -2906,6 +2914,19 @@ export class UI {
           numField('speed', st.speed ?? 1, (v) => { st.speed = v; }, 0.1),
           selectField('', st.loop ?? 'LOOP', [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { st.loop = v as typeof st.loop; }),
         )] : []),
+        // live pen: one landmark draws into the active GP object
+        el('div', { class: 'row' },
+          checkbox('pen', !!st.pen?.active, (v) => {
+            st.pen ??= { active: false, landmark: 0, minConf: 0.5 };
+            st.pen.active = v;
+            this.refresh();
+          }),
+          ...(st.pen?.active ? [
+            numField('landmark', st.pen.landmark, (v) => { st.pen!.landmark = Math.max(0, Math.round(v)); }, 1),
+            numField('min conf', st.pen.minConf, (v) => { st.pen!.minConf = Math.max(0, Math.min(1, v)); }, 0.05),
+          ] : []),
+        ),
+        ...(st.pen?.active ? [el('div', { class: 'row', text: `draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up` })] : []),
       ];
     });
 
@@ -2964,13 +2985,23 @@ export class UI {
       const nameInput = el('input', { type: 'text', value: clip.name }) as HTMLInputElement;
       nameInput.style.width = '110px';
       nameInput.onchange = () => { clip.name = nameInput.value.trim() || clip.name; };
-      return [el('div', { class: 'row' },
-        nameInput,
-        el('span', { class: 'grow', text: `${(clip.duration / 1000).toFixed(1)}s · ${clip.count} pt${clip.count === 1 ? '' : 's'} · ${clip.frames.length} f` }),
-        btn(icon('play'), () => this.app.mmPlayClip(clip.id), { cls: 'icon-btn', title: 'Play as a stream (same rendering/constraints/events as live data)' }),
-        btn(icon('pencil'), () => this.app.mmBakeClip(clip.id), { cls: 'icon-btn', title: 'Bake to GP strokes — one path per landmark, confidence becomes pressure' }),
-        btn(icon('xMark'), () => this.app.mmDeleteClip(clip.id), { cls: 'icon-btn', title: 'Delete clip' }),
-      )];
+      const trimmed = ((clip.trimEnd ?? 1) - (clip.trimStart ?? 0)) * clip.duration;
+      const hasTrim = (clip.trimStart ?? 0) > 0 || (clip.trimEnd ?? 1) < 1;
+      return [
+        el('div', { class: 'row' },
+          nameInput,
+          el('span', { class: 'grow', text: `${(trimmed / 1000).toFixed(1)}s · ${clip.count} pt${clip.count === 1 ? '' : 's'} · ${clip.frames.length} f` }),
+          btn(icon('play'), () => this.app.mmPlayClip(clip.id), { cls: 'icon-btn', title: 'Play as a stream (same rendering/constraints/events as live data)' }),
+          btn(icon('pencil'), () => this.app.mmBakeClip(clip.id), { cls: 'icon-btn', title: 'Bake to GP strokes — one path per landmark, confidence becomes pressure' }),
+          btn(icon('xMark'), () => this.app.mmDeleteClip(clip.id), { cls: 'icon-btn', title: 'Delete clip' }),
+        ),
+        // non-destructive trim window — playback + bake honor it
+        el('div', { class: 'row' },
+          slider('in', clip.trimStart ?? 0, 0, 1, 0.01, (v) => { clip.trimStart = Math.min(v, clip.trimEnd ?? 1); }),
+          slider('out', clip.trimEnd ?? 1, 0, 1, 0.01, (v) => { clip.trimEnd = Math.max(v, clip.trimStart ?? 0); }),
+          ...(hasTrim ? [btn(icon('scissors'), () => this.app.mmCropClip(clip.id), { cls: 'icon-btn', title: 'Crop: make the trim permanent (drops outside frames)' })] : []),
+        ),
+      ];
     });
 
     return panel('Clips',

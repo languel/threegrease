@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { CanvasPlane, GPPoint, Vec3 } from '../core/types';
 import { falloff } from '../core/mathutil';
-import type { AppCtx } from './context';
+import { snapIncrement, type AppCtx } from './context';
 import { forEachEditableStroke, selectedPoints } from './select';
 import { nearestStrokeEdgeAll, nearestStrokePointAll, objectToScreen, objectToWorld, pickCanvas, raycastSurfaces, screenToWorld, worldToObject } from './projection';
 import { allRefs, worldMatrixOf } from './objects';
@@ -154,7 +154,7 @@ export class ModalTransform {
     ];
     let target: Vec3 | null = null;
     if (snap.mode === 'INCREMENT') {
-      const g = ctx.settings.gridStep;
+      const g = snapIncrement(ctx.settings);
       target = moved.map((v) => Math.round(v / g) * g) as Vec3;
     } else if (snap.mode === 'POINT') {
       const world = nearestStrokePointAll(ctx, pointer.x, pointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');

@@ -126,14 +126,18 @@ export function updateClipStreams(scene: GPScene, dt: number): void {
     if (st.source !== 'CLIP' || st.clipId == null) continue;
     const clip = scene.clips.find((c) => c.id === st.clipId);
     if (!clip || !clip.frames.length) continue;
-    const durationS = Math.max(0.001, clip.duration / 1000);
+    // phase runs over the TRIM WINDOW (non-destructive crop): speed 1 =
+    // the window's real duration
+    const w0 = (clip.trimStart ?? 0) * clip.duration;
+    const w1 = Math.max(w0, (clip.trimEnd ?? 1) * clip.duration);
+    const durationS = Math.max(0.001, (w1 - w0) / 1000);
     const prevPhase = st.phase ?? 0;
     if (st.playing) {
       const [p, running] = advancePhase(prevPhase, (st.speed ?? 1) / durationS, dt, st.loop ?? 'LOOP');
       st.phase = p;
       if (!running) st.playing = false;
     }
-    const t = samplePhase(st.phase ?? 0, (st.loop ?? 'LOOP') as LoopMode) * clip.duration;
+    const t = w0 + samplePhase(st.phase ?? 0, (st.loop ?? 'LOOP') as LoopMode) * (w1 - w0);
     // bracketing frames + lerp
     let i = 0;
     while (i < clip.frames.length - 1 && clip.frames[i + 1].t < t) i++;
@@ -148,6 +152,17 @@ export function updateClipStreams(scene: GPScene, dt: number): void {
   }
 }
 
+/** Make the trim window permanent: drop outside frames, retime to 0. */
+export function cropClip(clip: TGClip): void {
+  const w0 = (clip.trimStart ?? 0) * clip.duration;
+  const w1 = Math.max(w0, (clip.trimEnd ?? 1) * clip.duration);
+  clip.frames = clip.frames.filter((f) => f.t >= w0 && f.t <= w1)
+    .map((f) => ({ t: f.t - w0, data: f.data }));
+  clip.duration = clip.frames.length ? clip.frames[clip.frames.length - 1].t : 0;
+  clip.trimStart = 0;
+  clip.trimEnd = 1;
+}
+
 /** Bake a clip into GP strokes (one per landmark, confidence → pressure)
  *  inside a NEW GP object at identity — clips become paths the existing
  *  traveler/trigger system rides. Returns the new object's id. */
@@ -156,11 +171,14 @@ export function bakeClipToStrokes(scene: GPScene, clip: TGClip, landmark = -1): 
   const layer = ob.layers[0];
   const frame = createFrame(scene.frame);
   layer.frames.push(frame);
+  const w0 = (clip.trimStart ?? 0) * clip.duration;
+  const w1 = Math.max(w0, (clip.trimEnd ?? 1) * clip.duration);
+  const frames = clip.frames.filter((f) => f.t >= w0 && f.t <= w1);
   const indices = landmark >= 0 ? [landmark] : Array.from({ length: clip.count }, (_, i) => i);
   for (const li of indices) {
     if (li >= clip.count) continue;
     const stroke = createStroke(0, 3);
-    for (const f of clip.frames) {
+    for (const f of frames) {
       const x = f.data[li * 4], y = f.data[li * 4 + 1], z = f.data[li * 4 + 2];
       const conf = f.data[li * 4 + 3] ?? 1;
       const p = createPoint([x, y, z] as Vec3, Math.max(0.05, conf), Math.max(0.05, conf));

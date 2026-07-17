@@ -87,6 +87,9 @@ export class ConstraintEngine {
   private triggerFired = new Set<string>();
   /** PLANE zones: last side (+1/-1) of each probe, for crossing detection */
   private planeSide = new Map<string, number>();
+  /** zone fire events from the LAST update, for visual feedback (the App
+   *  flashes the carrier object's outline) — replaced every frame */
+  fired: { ref: ObjRef; kind: 'enter' | 'leave' }[] = [];
 
   reset(): void {
     this.velocities.clear();
@@ -235,6 +238,7 @@ export class ConstraintEngine {
     // Probes: FOLLOW_PATH/FOLLOW_STREAM travelers, legacy score cursors,
     // and every landmark of probe-enabled MM streams — so "right hand
     // enters a virtual box" is just a box mesh with a TRIGGER constraint.
+    this.fired = [];
     const probes: { key: string; pos: THREE.Vector3 }[] = [...travelers];
     for (const [id, state] of score.states) {
       if (state.valid) probes.push({ key: `cursor:${id}`, pos: state.position });
@@ -303,9 +307,11 @@ export class ConstraintEngine {
             if (allowed) {
               this.triggerFired.add(key);
               fireMessages(`constraint:${c.id}`, c.messages ?? [], msgCtx);
+              this.fired.push({ ref, kind: 'enter' });
             }
-          } else if (!inside && wasInside && c.leaveMessages?.length) {
-            fireMessages(`constraint:${c.id}`, c.leaveMessages, msgCtx);
+          } else if (!inside && wasInside) {
+            if (c.leaveMessages?.length) fireMessages(`constraint:${c.id}`, c.leaveMessages, msgCtx);
+            this.fired.push({ ref, kind: 'leave' });
           }
           this.triggerInside.set(key, inside);
         }

@@ -1262,3 +1262,79 @@ every new capability lands inside an existing concept.
   stroke, pressure 1.0→0.7 from the recorded confidence ramp; screenshot
   shows live point, replay point, transport UI, clips panel, and the
   baked stroke with visible pressure taper.
+
+## Dashed grid subdivisions + snap-to-subdivision by default
+- **Grid rendering rebuilt off `THREE.GridHelper`**: it bakes one flat
+  vertex-colored geometry, so major and minor lines couldn't have
+  different STYLES (only color, via the pre-existing main/sub tint) —
+  dashing needs `computeLineDistances()` per `LineSegments` object.
+  `makeGrid()` now builds a `THREE.Group` of two separate line objects:
+  major lines (always solid) and minor/subdivision lines, whose material
+  is chosen from the new `gridSubdivStyle` setting (`'dashed'` default,
+  `'solid'` alternative) — `THREE.LineDashedMaterial` with dash/gap sized
+  relative to the minor spacing, or a plain `LineBasicMaterial` tinted
+  60% dim like before. `this.grid` is now `THREE.Group`, not
+  `THREE.GridHelper`; `rebuildGrid()`'s disposal walks children instead
+  of touching a single geometry/material.
+- **Snap default fixed**: the INCREMENT magnet was snapping to
+  `gridStep` (the major line spacing) everywhere — objectmodal.ts,
+  transform.ts (EDIT-mode point drag), main.ts (3D-cursor drag + OBJECT
+  widget), and the explicit "Selection/Cursor to Grid" ops all read
+  `ctx.settings.gridStep` directly. New `snapIncrement(settings)`
+  (tools/context.ts) returns `gridStep / gridSubdivisions` — the visible
+  MINOR grid spacing — and every one of those six call sites now goes
+  through it instead of the raw field. `gridStep` itself is unchanged
+  (still the major cell size driving grid extent); only what the magnet
+  targets moved to match what's actually drawn on the ground.
+- New Scene-tab control: "Subdivision style" select (Dashed/Solid) next
+  to Step/Subdivisions, plus an explanatory line noting the snap
+  now targets the subdivision spacing.
+- Verified live: grid renders with visibly dashed minor lines between
+  solid majors (screenshot); toggling the style select swaps both
+  minor-line materials to `LineBasicMaterial` and back to
+  `LineDashedMaterial`; dragging a widget-snapped object from
+  `[0.34,0.34,0.34]` with Step=1/Subdivisions=10 landed at
+  `[0.3,0.3,0.3]` (0.1 spacing) instead of the old `[0,0,0]` (1.0
+  spacing) — confirms `snapIncrement()` is live on the actual widget
+  snap path, not just the exported helper.
+
+## Face + iris streams, per-stream depth scale (flat pose by default) — carried over
+(Live-pen, trigger-zone flash feedback, and clip trim were implemented in a
+session that got interrupted before committing; verifying and landing them
+now alongside the grid work above.)
+
+- **Stream pen** (`src/mm/pen.ts`, `StreamPen`): a landmark can draw GP
+  strokes LIVE instead of record→bake — the direct-drawing counterpart
+  to clips. Per-stream `pen: {active, landmark, minConf}` config; while
+  armed, `StreamPen.tick()` appends the chosen landmark's world position
+  to a growing stroke in the ACTIVE GP object, using the current brush
+  style exactly like `DrawTool` bakes it (`brushWidth`, hardness, style
+  all copied from `ctx.settings.brush`). Confidence IS the pen state:
+  below `minConf` lifts the pen (stroke ends, next confident sample
+  starts fresh) and doubles as point pressure, same mapping as clip
+  bake. A stale stream (>300ms without new frames) also lifts the pen
+  so a dropped hand doesn't leave a frozen stroke growing. Panel gained
+  a `pen` checkbox + landmark/min-conf fields per stream row, with
+  common-index hints reused from the constraint UI.
+- **Trigger-zone flash feedback**: `ConstraintEngine.fired` (cleared and
+  repopulated every `update()`) records `{ref, kind: 'enter'|'leave'}`
+  for every zone that changed state this frame. `App.updateZoneFlashes()`
+  draws a fat-line (`LineSegments2`) outline around the carrier's
+  bounding box in the highlight color (enter) or gray (leave), fading
+  linearly over 450ms — so triggering a box/plane zone is visually
+  obvious without opening the console/monitor. Reused `objectRoot()`
+  (factored out of `syncSelectionGlyphs`) and `boxEdgePositions()`.
+- **Clip trim**: non-destructive `trimStart`/`trimEnd` (0..1 of
+  duration) on `TGClip`. Both `updateClipStreams()` (playback) and
+  `bakeClipToStrokes()` (bake) honor the window — playback's phase
+  clock runs over the trimmed duration only, bake filters frames to the
+  window. New `cropClip()` makes it permanent (drops outside frames,
+  retimes to 0). Clips panel gained in/out sliders per clip + a scissors
+  "crop" button that only appears once a trim is actually set.
+- Verified live (this session): armed a BUS stream's pen, pushed one
+  frame above `minConf`, ticked the pen manually — produced exactly one
+  stroke in the active GP object's current frame, `drawing` flag true,
+  no exceptions. Flash/trim verified by code review + typecheck/build
+  (both clean) since this session's browser time went to the grid
+  feature; recommend a follow-up live pass on flash timing and trim
+  playback specifically.

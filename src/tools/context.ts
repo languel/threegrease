@@ -53,9 +53,13 @@ export interface Settings {
   emulateNumpad: boolean;   // 1..9 become view keys instead of mode switching
   emulate3Button: boolean;  // Alt+LMB orbits (Shift pan, Ctrl zoom) for trackpads
   gridStep: number;
-  /** minor grid lines per major gridStep cell (visual density only —
-   *  magnet snapping always uses gridStep) */
+  /** minor grid lines per major gridStep cell. Also the magnet's INCREMENT
+   *  unit: snapping targets the finer subdivision lines (gridStep /
+   *  gridSubdivisions), not the major step — see snapIncrement() below. */
   gridSubdivisions: number;
+  /** minor (subdivision) grid line style — dashed by default so major
+   *  steps stay visually dominant */
+  gridSubdivStyle: 'dashed' | 'solid';
   trackpadNav: boolean;     // two-finger orbit, shift pan, ctrl/pinch zoom
   invertTrackpadOrbit: boolean; // false = Blender direction (default)
   /** show the transform gizmo widget (hidden by default — G/R/S modal is
@@ -80,11 +84,17 @@ export interface Settings {
   };
 }
 
+/** The INCREMENT magnet's unit: the finer SUBDIVISION line spacing, not the
+ *  major grid step — snapping to the visible minor grid, Blender-style. */
+export function snapIncrement(s: Settings): number {
+  return s.gridStep / Math.max(1, s.gridSubdivisions || 1);
+}
+
 // ---- preference persistence (localStorage) --------------------------------
 
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
-  'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'showGizmo',
+  'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'background', 'snap',
   'uiAccent', 'uiHighlight', 'gridColor',
 ] as const;
@@ -161,6 +171,7 @@ export function defaultSettings(): Settings {
     emulate3Button: true,
     gridStep: 1,
     gridSubdivisions: 10,
+    gridSubdivStyle: 'dashed',
     trackpadNav: true,
     invertTrackpadOrbit: false,
     showGizmo: false,

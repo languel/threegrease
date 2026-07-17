@@ -8,7 +8,7 @@ import { History } from '../core/history';
 import type { GPScene } from '../core/types';
 import { GPSceneRenderer, type EditorMode } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
-import { defaultSettings, loadPrefs, savePrefs, type AppCtx } from '../tools/context';
+import { defaultSettings, loadPrefs, savePrefs, snapIncrement, type AppCtx } from '../tools/context';
 import { ToolManager, type ToolEvent } from '../tools/toolsys';
 import { DrawTool, EraseTool, TintTool, CutterTool, EyedropperTool } from '../tools/draw';
 import { FillTool } from '../tools/fill';
@@ -89,7 +89,8 @@ import { mediamime } from '../io/mediamime';
 import { createStream, mmStreamEngine, streamStore } from '../mm/streams';
 import { mmCapture } from '../mm/capture';
 import { StreamPointsManager } from '../mm/points';
-import { bakeClipToStrokes, clipRecorder, updateClipStreams, type RecordSource } from '../mm/clips';
+import { bakeClipToStrokes, clipRecorder, cropClip, updateClipStreams, type RecordSource } from '../mm/clips';
+import { streamPen } from '../mm/pen';
 import type { MMStream } from '../core/types';
 import { midi } from '../events/midi';
 import { wsLink } from '../events/ws';
@@ -167,7 +168,7 @@ class App implements AppHandle {
   private navDrag: { mode: 'orbit' | 'pan' | 'dolly'; x: number; y: number } | null = null;
   private canvasGroup = new THREE.Group();
   private lastTime = performance.now();
-  private grid!: THREE.GridHelper;
+  private grid!: THREE.Group;
   private axes!: THREE.Group;
   private gizmoDrag: { x: number; y: number; startX: number; startY: number; dragged: boolean } | null = null;
   private rmbDown: { x: number; y: number } | null = null;
@@ -193,8 +194,11 @@ class App implements AppHandle {
    *  headless tests (background tabs throttle rAF to ~0) */
   readonly constraints = constraintEngine;
   readonly mmRecorder = clipRecorder;
+  readonly mmPen = streamPen;
   /** manual clip-playback step for headless tests */
   mmClipTick(dt: number): void { updateClipStreams(this.ctx.scene, dt); }
+  /** trigger-zone flash glyphs, keyed by ref, fading over FLASH_MS */
+  private zoneFlashes = new Map<string, { line: LineSegments2; t0: number; enter: boolean }>();
   private widget!: TransformControls;
   private widgetProxy = new THREE.Object3D();
   private widgetBase: { refs: ObjRef[]; transforms: ObjTransform[]; proxy: ObjTransform } | null = null;
@@ -518,7 +522,7 @@ class App implements AppHandle {
     const world = screenToWorld(ctx, clientX, clientY);
     if (!world) return;
     if (snap.enabled && snap.mode === 'INCREMENT') {
-      const g = ctx.settings.gridStep;
+      const g = snapIncrement(ctx.settings);
       // Blender semantics: grid = the visible world floor grid, not a
       // lattice on the current drawing plane. Raycast the ground plane
       // and round the two in-plane world coordinates.
@@ -1318,34 +1322,72 @@ class App implements AppHandle {
 
   /** Fixed 20-major-cell footprint; gridStep sets the major cell size (so
    *  the grid always spans gridStep*20 world units) and gridSubdivisions
-   *  sets minor lines per major cell (visual density only — magnet
-   *  snapping always reads gridStep directly, not this line spacing). */
-  private makeGrid(): THREE.GridHelper {
+   *  sets minor lines per major cell. Major lines are always solid; minor
+   *  (subdivision) lines get their own style (dashed by default) so the
+   *  major step stays visually dominant — two separate LineSegments
+   *  objects (dashing needs per-segment computeLineDistances(), which a
+   *  single baked GridHelper geometry can't do per-line). Magnet snapping
+   *  targets the minor spacing (gridStep/gridSubdivisions) — see
+   *  snapIncrement() in tools/context.ts — not this rendering. */
+  private makeGrid(): THREE.Group {
     const s = this.ctx.settings;
     const main = s.gridColor ? srgbColor(s.gridColor) : this.autoGridColor(s.background);
     const sub = main.clone().multiplyScalar(0.6);
     const majorCells = 20;
-    const size = s.gridStep * majorCells;
-    const subdiv = Math.max(1, Math.round(s.gridSubdivisions ?? 1));
-    const divisions = Math.min(400, Math.max(1, majorCells * subdiv));
-    const g = new THREE.GridHelper(size, divisions, main, sub);
-    g.rotation.copy(this.grid?.rotation ?? g.rotation);
-    g.position.copy(this.grid?.position ?? g.position);
-    g.visible = this.grid?.visible ?? true;
-    return g;
+    const step = s.gridStep;
+    const subdiv = Math.max(1, Math.min(20, Math.round(s.gridSubdivisions ?? 1)));
+    const half = (majorCells * step) / 2;
+    const minorStep = step / subdiv;
+    const totalLines = majorCells * subdiv;
+
+    const majorPos: number[] = [];
+    const minorPos: number[] = [];
+    for (let i = 0; i <= totalLines; i++) {
+      const p = -half + i * minorStep;
+      const arr = i % subdiv === 0 ? majorPos : minorPos;
+      arr.push(-half, 0, p, half, 0, p); // line along X at Z=p
+      arr.push(p, 0, -half, p, 0, half); // line along Z at X=p
+    }
+
+    const group = new THREE.Group();
+    const majorGeo = new THREE.BufferGeometry();
+    majorGeo.setAttribute('position', new THREE.Float32BufferAttribute(majorPos, 3));
+    group.add(new THREE.LineSegments(majorGeo, new THREE.LineBasicMaterial({ color: main, transparent: true })));
+
+    if (minorPos.length) {
+      const minorGeo = new THREE.BufferGeometry();
+      minorGeo.setAttribute('position', new THREE.Float32BufferAttribute(minorPos, 3));
+      if (s.gridSubdivStyle === 'dashed') {
+        const dashMat = new THREE.LineDashedMaterial({
+          color: sub, transparent: true, dashSize: minorStep * 0.35, gapSize: minorStep * 0.35,
+        });
+        const minorLines = new THREE.LineSegments(minorGeo, dashMat);
+        minorLines.computeLineDistances(); // required per-object for dashing
+        group.add(minorLines);
+      } else {
+        group.add(new THREE.LineSegments(minorGeo, new THREE.LineBasicMaterial({ color: sub, transparent: true })));
+      }
+    }
+
+    group.rotation.copy(this.grid?.rotation ?? group.rotation);
+    group.position.copy(this.grid?.position ?? group.position);
+    group.visible = this.grid?.visible ?? true;
+    return group;
   }
 
-  /** Rebuild the grid (its colors are baked into vertex data at
-   *  construction, so a size/color/subdivision change means a new
-   *  GridHelper). */
+  /** Rebuild the grid (colors/dash state are baked at construction, so any
+   *  change means new geometry/materials). */
   rebuildGrid(): void {
     const old = this.grid;
     this.grid = this.makeGrid();
     this.scene3.add(this.grid);
     if (old) {
       this.scene3.remove(old);
-      old.geometry.dispose();
-      (old.material as THREE.Material).dispose();
+      old.traverse((o) => {
+        const line = o as THREE.LineSegments;
+        line.geometry?.dispose?.();
+        (line.material as THREE.Material)?.dispose?.();
+      });
     }
   }
 
@@ -1419,7 +1461,7 @@ class App implements AppHandle {
     if (!snap.enabled || this.widget.mode !== 'translate') return;
     const p = this.widgetProxy.position;
     if (snap.mode === 'INCREMENT') {
-      const g = this.ctx.settings.gridStep;
+      const g = snapIncrement(this.ctx.settings);
       p.set(Math.round(p.x / g) * g, Math.round(p.y / g) * g, Math.round(p.z / g) * g);
     } else if (snap.mode === 'OBJECT') {
       const dragging = new Set(this.widgetBase?.refs.map((r) => `${r.kind}:${r.id}`));
@@ -1987,6 +2029,14 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  mmCropClip(clipId: number): void {
+    const clip = this.ctx.scene.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    this.ctx.pushUndo();
+    cropClip(clip);
+    this.ui.refresh();
+  }
+
   mmDeleteClip(clipId: number): void {
     this.ctx.pushUndo();
     this.ctx.scene.clips = this.ctx.scene.clips.filter((c) => c.id !== clipId);
@@ -2087,6 +2137,63 @@ class App implements AppHandle {
 
   /** Cursor/trigger glyphs: rebuilt when the score roster changes, posed every frame. */
   /** Orange selection outlines + origin dots (Blender look), object mode only. */
+  /** three.js root for any ObjRef (selection glyphs, zone flashes). */
+  private objectRoot(ref: ObjRef): THREE.Object3D | null {
+    const scene = this.ctx.scene;
+    return ref.kind === 'GP' ? this.gp.objectGroups[gpIndexOf(scene, ref.id)] ?? null :
+      ref.kind === 'MESH' ? this.meshes.rootFor(ref.id) :
+      ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) :
+      ref.kind === 'TRIGGER' ? this.scoreGroup.children.find((c) => c.userData.triggerId === ref.id) ?? null :
+      ref.kind === 'STREAM' ? this.mmPoints.objectFor(ref.id) :
+      null;
+  }
+
+  /** Visual feedback for TRIGGER zones: on enter (highlight color) or
+   *  leave (gray) the carrier's outline flashes and fades over ~450ms. */
+  private updateZoneFlashes(now: number): void {
+    const FLASH_MS = 450;
+    for (const f of constraintEngine.fired) {
+      const key = `${f.ref.kind}:${f.ref.id}`;
+      const root = this.objectRoot(f.ref);
+      if (!root) continue;
+      const box = new THREE.Box3().setFromObject(root);
+      if (box.isEmpty()) {
+        box.setFromCenterAndSize(
+          new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(this.ctx.scene, f.ref)),
+          new THREE.Vector3(0.5, 0.5, 0.5));
+      }
+      let entry = this.zoneFlashes.get(key);
+      if (!entry) {
+        const vp = document.getElementById('viewport');
+        const mat = new LineMaterial({
+          color: 0xffffff, linewidth: 3, depthTest: false, transparent: true,
+          resolution: new THREE.Vector2(vp?.clientWidth || 1, vp?.clientHeight || 1),
+        });
+        const line = new LineSegments2(new LineSegmentsGeometry(), mat);
+        line.renderOrder = 998;
+        this.scene3.add(line);
+        entry = { line, t0: now, enter: f.kind === 'enter' };
+        this.zoneFlashes.set(key, entry);
+      }
+      entry.t0 = now;
+      entry.enter = f.kind === 'enter';
+      entry.line.geometry.setPositions(boxEdgePositions(box));
+      (entry.line.material as LineMaterial).color.copy(
+        f.kind === 'enter' ? this.highlightColor() : srgbColor([0.6, 0.6, 0.65]));
+    }
+    for (const [key, entry] of this.zoneFlashes) {
+      const age = now - entry.t0;
+      if (age > FLASH_MS) {
+        this.scene3.remove(entry.line);
+        entry.line.geometry.dispose();
+        (entry.line.material as THREE.Material).dispose();
+        this.zoneFlashes.delete(key);
+      } else {
+        (entry.line.material as LineMaterial).opacity = 1 - age / FLASH_MS;
+      }
+    }
+  }
+
   private syncSelectionGlyphs(): void {
     const scene = this.ctx.scene;
     const active = this.ctx.settings.mode === 'OBJECT' && !this.presentation;
@@ -2102,13 +2209,7 @@ class App implements AppHandle {
       ?? (scene.objects[scene.activeObject] ? { kind: 'GP' as const, id: scene.objects[scene.activeObject].id } : null);
     for (const ref of refs) {
       const key = `${ref.kind}:${ref.id}`;
-      const root =
-        ref.kind === 'GP' ? this.gp.objectGroups[gpIndexOf(scene, ref.id)] :
-        ref.kind === 'MESH' ? this.meshes.rootFor(ref.id) :
-        ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) :
-        ref.kind === 'TRIGGER' ? this.scoreGroup.children.find((c) => c.userData.triggerId === ref.id) ?? null :
-        ref.kind === 'STREAM' ? this.mmPoints.objectFor(ref.id) :
-        null;
+      const root = this.objectRoot(ref);
       if (!root) continue;
       wanted.add(key);
       let entry = this.selHelpers.get(key);
@@ -2351,6 +2452,7 @@ class App implements AppHandle {
     mmStreamEngine.sync(ctx.scene);
     updateClipStreams(ctx.scene, dt);
     clipRecorder.tick(ctx.scene);
+    streamPen.tick(ctx);
     mmStreamEngine.emit(ctx.scene);
     this.mmPoints.sync(ctx.scene, this.glRenderer.domElement.height);
 
@@ -2377,6 +2479,7 @@ class App implements AppHandle {
     // existed and was imported, but nothing invoked it per frame.
     try {
       constraintEngine.update(ctx.scene, dt, this.score, ctx.surfaces);
+      this.updateZoneFlashes(now);
     } catch (err) {
       console.error('constraint engine:', err);
     }
