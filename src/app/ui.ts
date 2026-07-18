@@ -3039,6 +3039,12 @@ export class UI {
     );
   }
 
+  /** Rig mapper state: which body-part path + landmark index is currently
+   *  "loaded" for Attach, persisted across refreshes (not per-scene —
+   *  it's a UI pick, not data). */
+  private mmRigKind = 'pose';
+  private mmRigLandmark = 0;
+
   private mediamimePanel(): HTMLElement {
     const { ctx } = this.app;
     const mm = ctx.scene.mediamime;
@@ -3054,20 +3060,45 @@ export class UI {
     ];
 
     const live = mediamime.list();
-    const liveRows: Node[] = live.length
-      ? live.map((l) => {
-          const targetSel = el('select') as HTMLSelectElement;
-          rigTargets.forEach((t, i) => targetSel.append(el('option', { value: String(i), text: t.label })));
-          return el('div', { class: 'row' },
-            el('span', { class: 'grow', text: `${l.address}  (${l.pos.map((n) => n.toFixed(2)).join(', ')})` }),
-            btn('＋Trigger', () => this.app.addMediaMimeTrigger(l.address, l.pos), { cls: 'icon-btn', title: 'Spawn a trigger primitive rigged to this address' }),
-            ...(rigTargets.length ? [
-              targetSel,
-              btn('Attach', () => this.app.addMediaMimeRig(l.address, rigTargets[Number(targetSel.value)].ref), { cls: 'icon-btn', title: 'Rig the selected object to this address' }),
-            ] : []),
-          );
-        })
-      : [el('div', { class: 'row', text: 'no landmarks seen yet — connect the WS bridge below and point mediamime (or any sender) at this prefix' })];
+    const liveByAddress = new Map(live.map((l) => [l.address, l]));
+
+    // Rig mapper: click/pick the SOURCE landmark on the body map (or a
+    // numeric field for kinds without a visual picker yet), pick the
+    // TARGET object, hit Attach — replaces the old one-row-per-live-
+    // address list, which didn't scale past a handful of points.
+    const kindSel = el('select') as HTMLSelectElement;
+    for (const [v, label] of [['pose', 'Pose'], ['hand/l', 'Hand L'], ['hand/r', 'Hand R'], ['face', 'Face'], ['iris', 'Iris']] as [string, string][]) {
+      kindSel.append(el('option', { value: v, text: label }));
+    }
+    kindSel.value = this.mmRigKind;
+    kindSel.onchange = () => { this.mmRigKind = kindSel.value; this.mmRigLandmark = 0; this.refresh(); };
+
+    const address = `${mm.prefix || '/mm'}/${this.mmRigKind}/${this.mmRigLandmark}`;
+    const liveInfo = liveByAddress.get(address);
+
+    const targetSel = el('select') as HTMLSelectElement;
+    rigTargets.forEach((t, i) => targetSel.append(el('option', { value: String(i), text: t.label })));
+
+    const rigMapperRows: Node[] = [
+      el('div', { class: 'row' }, 'Source', kindSel),
+      this.mmRigKind === 'pose'
+        ? poseMapPicker(this.mmRigLandmark, (v) => { this.mmRigLandmark = v; this.refresh(); })
+        : el('div', { class: 'row' },
+            numField('landmark', this.mmRigLandmark, (v) => { this.mmRigLandmark = Math.max(0, Math.round(v)); this.refresh(); }, 1)),
+      el('div', {
+        class: 'row',
+        text: liveInfo
+          ? `${address}  (${liveInfo.pos.map((n) => n.toFixed(2)).join(', ')})`
+          : `${address}  · not seen yet — connect the WS bridge below and point a sender at this prefix`,
+      }),
+      ...(rigTargets.length ? [el('div', { class: 'row' },
+        targetSel,
+        btn('Attach', () => this.app.addMediaMimeRig(address, rigTargets[Number(targetSel.value)].ref),
+          { cls: 'icon-btn', title: 'Rig the selected object to this address' }),
+        btn('＋Trigger', () => this.app.addMediaMimeTrigger(address, liveInfo?.pos ?? [0, 0, 0]),
+          { cls: 'icon-btn', title: 'Spawn a trigger primitive rigged to this address' }),
+      )] : []),
+    ];
 
     const rigRows: Node[] = mm.rigs.map((rig) => el('div', { class: 'row' },
       checkbox('', rig.enabled, (v) => { rig.enabled = v; }),
@@ -3079,8 +3110,8 @@ export class UI {
     return panel('MediaMime — landmarks & rigs',
       el('div', { class: 'row' }, 'Address prefix', prefixInput,
         el('span', { class: 'row', text: '· uses the WS bridge below (IO panel)' })),
-      el('div', { class: 'menu-header', text: 'Live addresses' }),
-      ...liveRows,
+      el('div', { class: 'menu-header', text: `Rig mapper · ${live.length} live address${live.length === 1 ? '' : 'es'}` }),
+      ...rigMapperRows,
       el('div', { class: 'menu-header', text: 'Rigs (object ← address)' }),
       ...(rigRows.length ? rigRows : [el('div', { class: 'row', text: 'none yet' })]),
     );

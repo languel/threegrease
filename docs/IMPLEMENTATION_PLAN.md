@@ -1511,3 +1511,33 @@ now alongside the grid work above.)
   highlight; hover `<title>` text correct (`"15: left wrist"` etc.); a
   HAND_LEFT stream added alongside still uses the plain numeric field
   (kind gate confirmed). `npx tsc --noEmit` and `npx vite build` clean.
+
+## Body map as the MediaMime rig mapper (replaces the live-address list)
+- Follow-up to the body-map picker above: its actual intended use is
+  rigging any scene object to a MediaPipe landmark address, not drawing —
+  `mediamimePanel()` (ui.ts) previously listed one row per currently-live
+  `/mm/...` address (could be dozens once a POSE stream is running,
+  screenshotted by the user as impractical), each with its own inline
+  target dropdown + Attach button.
+- Replaced with a single **rig mapper**: a `Source` kind dropdown (Pose/
+  Hand L/Hand R/Face/Iris), the body map (or a numeric field for kinds
+  without a visual picker yet — same POSE-only gate as the other two
+  pickers) to pick the landmark, a line showing the resolved address
+  (`${prefix}/${kind}/${landmark}`) plus its live position if currently
+  seen on the bus, one target dropdown, and one Attach button (+ a
+  Trigger button, carried over from the old per-row version) — click a
+  point, pick a target, hit Attach. Picking a landmark on the map now
+  triggers a full `this.refresh()` (rather than just updating its own
+  DOM in place, unlike the other two call sites) since the address text
+  and the Attach closure both need to follow the newly-picked landmark.
+  Picker state (`mmRigKind`/`mmRigLandmark`) is a UI-only field on the
+  `UI` class, not scene data — it's what's currently "loaded" for
+  Attach, not something to serialize.
+- The existing "Rigs (object ← address)" list (enable/scale/delete per
+  already-created rig) is unchanged below the mapper.
+- Verified live: added a mesh object, opened the MediaMime tab — mapper
+  renders with the body map and "0 live addresses" (screenshot, matches
+  the requested layout); clicking landmark 15 on the map resolved the
+  address to `/mm/pose/15`, picking the mesh from the target dropdown
+  and clicking Attach created rig `"/mm/pose/15 → mesh"` in
+  `scene.mediamime.rigs`. `npx tsc --noEmit` and `npx vite build` clean.
