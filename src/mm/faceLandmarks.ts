@@ -8,10 +8,7 @@
 // authored ellipses in loop order) — not a pixel-accurate face template,
 // just readable at a glance, same spirit as poseLandmarks.ts.
 
-export const FACE_VIEWBOX = '0 0 240 224';
-/** Dots here are much denser than pose/hand, so the picker draws them
- *  smaller — see poseMap.ts's per-set dotRadius. */
-export const FACE_DOT_RADIUS = 3;
+export const FACE_VIEWBOX = '0 0 300 330';
 
 // Ordered contour loops (MediaPipe's real index sequence per feature).
 const FACE_OVAL: number[] = [
@@ -40,19 +37,22 @@ function ellipseRing(cx: number, cy: number, rx: number, ry: number, n: number, 
   return out;
 }
 
-// Radii are sized so each loop's point-to-point spacing clears 2x the
-// (small) dot radius the picker draws these with — the previous, more
-// cramped layout put dots so close together within each feature that
-// they visually merged into a blob (screenshotted by the user).
-const OVAL_CENTER: [number, number] = [120, 112];
-const OVAL_R: [number, number] = [92, 88];
-const RIGHT_EYE_CENTER: [number, number] = [83, 88];
-const LEFT_EYE_CENTER: [number, number] = [157, 88];
-const EYE_R: [number, number] = [24, 14];
-const LIPS_CENTER: [number, number] = [120, 152];
-const LIPS_OUTER_R: [number, number] = [34, 15];
-const LIPS_INNER_R: [number, number] = [28, 11];
-const IRIS_R = 6;
+// Radii are sized so each loop's point-to-point spacing (checked
+// numerically, not by the circumference/n average — an ellipse's real
+// point spacing varies with curvature and the average badly
+// underestimates the tightest gap) clears 2x the picker's dot radius (a
+// fixed 6 units, same as pose/hand — every dot in the combined map is
+// the same size now, so this layout carries the whole non-overlap
+// requirement on its own instead of leaning on smaller dots there).
+const OVAL_CENTER: [number, number] = [150, 165];
+const OVAL_R: [number, number] = [140, 155];
+const RIGHT_EYE_CENTER: [number, number] = [85, 125];
+const LEFT_EYE_CENTER: [number, number] = [215, 125];
+const EYE_R: [number, number] = [55, 45];
+const LIPS_CENTER: [number, number] = [150, 235];
+const LIPS_OUTER_R: [number, number] = [105, 60];
+const LIPS_INNER_R: [number, number] = [80, 42];
+const IRIS_R = 18;
 
 const posMap = new Map<number, [number, number]>();
 const nameMap = new Map<number, string>();

@@ -280,10 +280,7 @@ button.props-tab.active { background: var(--panel); border-color: var(--border);
 .pose-map-svg { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; }
 .pose-map-edge { stroke: var(--dim); stroke-width: 2.5; }
 .pose-map-dot { fill: var(--accent2); stroke: var(--bg); stroke-width: 1.5; }
-.pose-map-dot:hover { fill: var(--accent); r: 10; }
-.pose-map-dot.picked { fill: #ff4444; r: 10; }
-.pose-map-dot-sm { stroke-width: 0.75; }
-.pose-map-dot-sm:hover { r: 5; }
-.pose-map-dot-sm.picked { r: 5; }
+.pose-map-dot:hover { fill: var(--accent); r: 8; }
+.pose-map-dot.picked { fill: #ff4444; r: 8; }
 .pose-map select { width: 100%; max-width: 220px; }
 .pose-map-label { font-size: 11px; color: var(--dim); }

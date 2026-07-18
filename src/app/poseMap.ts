@@ -8,7 +8,7 @@
 // single picking surface, since a point there can come from any kind.
 import { POSE_LANDMARK_EDGES, POSE_LANDMARK_NAMES, POSE_LANDMARK_POS, POSE_VIEWBOX } from '../mm/poseLandmarks';
 import { HAND_LANDMARK_EDGES, HAND_LANDMARK_NAMES, HAND_LANDMARK_POS, HAND_VIEWBOX } from '../mm/handLandmarks';
-import { FACE_DOT_RADIUS, FACE_LANDMARK_EDGES, FACE_LANDMARK_IDS, FACE_LANDMARK_NAMES, FACE_LANDMARK_POS, FACE_VIEWBOX } from '../mm/faceLandmarks';
+import { FACE_LANDMARK_EDGES, FACE_LANDMARK_IDS, FACE_LANDMARK_NAMES, FACE_LANDMARK_POS, FACE_VIEWBOX } from '../mm/faceLandmarks';
 import type { MMStream } from '../core/types';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -16,6 +16,9 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
  *  drop target (e.g. a constraint/binding row) can read this to bind
  *  directly without going through the dropdown. */
 export const POSE_LANDMARK_DRAG_MIME = 'application/x-tg-pose-landmark';
+/** Every dot everywhere is this size — pose/hand/face layouts are all
+ *  authored so their own point spacing clears 2x this radius. */
+const DOT_R = 6;
 
 function svgEl<K extends keyof SVGElementTagNameMap>(
   tag: K, attrs: Record<string, string | number> = {},
@@ -31,9 +34,6 @@ interface LandmarkSet {
   name: (id: number) => string;
   edges: [number, number][];
   viewBox: string;
-  /** dots are sized to leave a clear gap between neighbors given each
-   *  set's own point spacing — dense sets (face) need smaller dots. */
-  dotRadius?: number;
 }
 
 function poseSet(idFilter?: (id: number) => boolean): LandmarkSet {
@@ -65,7 +65,6 @@ function faceSet(): LandmarkSet {
     name: (id) => FACE_LANDMARK_NAMES.get(id) ?? '?',
     edges: FACE_LANDMARK_EDGES,
     viewBox: FACE_VIEWBOX,
-    dotRadius: FACE_DOT_RADIUS,
   };
 }
 
@@ -79,10 +78,9 @@ function addLandmarks(svg: SVGSVGElement, set: LandmarkSet, onPick: (id: number)
     svg.append(svgEl('line', { x1: ax, y1: ay, x2: bx, y2: by, class: 'pose-map-edge' }));
   }
   const dots = new Map<number, SVGCircleElement>();
-  const r = set.dotRadius ?? 8;
   for (const id of set.ids) {
     const [x, y] = set.pos(id);
-    const dot = svgEl('circle', { cx: x, cy: y, r, class: `pose-map-dot${r < 6 ? ' pose-map-dot-sm' : ''}` });
+    const dot = svgEl('circle', { cx: x, cy: y, r: DOT_R, class: 'pose-map-dot' });
     dot.append(svgEl('title'));
     (dot.firstChild as SVGTitleElement).textContent = `${id}: ${set.name(id)}`;
     dot.style.cursor = 'pointer';
@@ -153,7 +151,7 @@ export function handMapPicker(value: number, onChange: (v: number) => void): HTM
 }
 
 export function faceMapPicker(value: number, onChange: (v: number) => void): HTMLElement {
-  return singleKindPicker(faceSet(), value, onChange, 160, 190);
+  return singleKindPicker(faceSet(), value, onChange, 190, 209);
 }
 
 /** Rig-mapper kind: matches MMStream['kind'] for POSE/HAND_LEFT/
@@ -169,14 +167,14 @@ export type RigMapKind = 'POSE' | 'HAND_LEFT' | 'HAND_RIGHT' | 'FACE';
 // detailed face/hand diagrams cover that ground instead, so keeping
 // both would just be redundant clutter sitting on top of each other.
 const VITRUVIAN_POSE_POS: Record<number, [number, number]> = {
-  11: [330, 400], 12: [570, 400],   // shoulders
-  13: [230, 390], 14: [670, 390],   // elbows
-  15: [130, 420], 16: [770, 420],   // wrists
-  23: [390, 540], 24: [510, 540],   // hips
-  25: [370, 660], 26: [530, 660],   // knees
-  27: [355, 780], 28: [545, 780],   // ankles
-  29: [330, 800], 30: [570, 800],   // heels
-  31: [395, 805], 32: [505, 805],   // foot index
+  11: [505, 786], 12: [865, 786],   // shoulders
+  13: [355, 771], 14: [1015, 771],  // elbows
+  15: [205, 816], 16: [1165, 816],  // wrists
+  23: [595, 996], 24: [775, 996],   // hips
+  25: [565, 1176], 26: [805, 1176], // knees
+  27: [543, 1356], 28: [827, 1356], // ankles
+  29: [505, 1386], 30: [865, 1386], // heels
+  31: [603, 1393], 32: [767, 1393], // foot index
 };
 
 /** Combined picker for the MediaMime rig mapper: pose + a hand attached
@@ -188,7 +186,7 @@ export function combinedBodyMapPicker(
   const wrap = document.createElement('div');
   wrap.className = 'pose-map';
 
-  const svg = svgEl('svg', { viewBox: '0 0 900 840', width: 300, height: 280 });
+  const svg = svgEl('svg', { viewBox: '0 0 1400 1430', width: 270, height: 276 });
   svg.classList.add('pose-map-svg');
 
   const label = document.createElement('div');
@@ -208,7 +206,7 @@ export function combinedBodyMapPicker(
   // sides, like palms-forward vitruvian arms.
   const [lwx, lwy] = VITRUVIAN_POSE_POS[15];
   const [rwx, rwy] = VITRUVIAN_POSE_POS[16];
-  const handScale = 1;
+  const handScale = 2;
   const leftHandG = svgEl('g', {
     transform: `translate(${lwx + 100 * handScale} ${lwy - 210 * handScale}) scale(${-handScale} ${handScale})`,
   });
@@ -217,11 +215,11 @@ export function combinedBodyMapPicker(
   });
   svg.append(leftHandG, rightHandG);
 
-  // face: own viewBox is 240x224 — top-center, with clear air between
+  // face: own viewBox is 300x300 — top-center, with clear air between
   // its bottom edge and the shoulder line, and between its sides and
   // the raised hands
-  const faceScale = 1.4;
-  const faceG = svgEl('g', { transform: `translate(282 10) scale(${faceScale})` });
+  const faceScale = 2.2;
+  const faceG = svgEl('g', { transform: `translate(355 18) scale(${faceScale})` });
   svg.append(faceG);
 
   const allDots = new Map<string, SVGCircleElement>();

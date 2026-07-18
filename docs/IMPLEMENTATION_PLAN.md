@@ -1641,3 +1641,43 @@ now alongside the grid work above.)
   thumb faces the body on both sides. Verified programmatically (thumb-
   tip x vs pinky-tip x, per side, transform-resolved): `thumbTowardBody:
   true` for both hands; clicking a thumb tip picks `HAND_LEFT 4`.
+
+## Combined map: uniform dot size, another 2x on head/hands, +50% wide
+- Third pass. Two asks: every dot the same size (previously face used a
+  smaller radius than pose/hand to dodge overlap — see the vitruvian-
+  layout entry above), and hands/head another 2x bigger with the whole
+  diagram 50% wider.
+- Unifying dot size meant the face layout could no longer lean on a
+  smaller radius to avoid overlap — it had to carry that entirely on its
+  own point spacing, at a size where the same `r=6` used for pose/hand
+  actually fits. Recomputing that layout by hand (average circumference/
+  point-count) turned out to be the wrong tool: an ellipse's real
+  point-to-point spacing varies with local curvature and the average
+  significantly overestimates the tightest gap, which is why the first
+  attempt at this (screenshotted by the user) still had eye/lips points
+  overlapping despite passing the earlier napkin math. Recomputed
+  everything numerically instead — evaluated `ellipseRing()` in the
+  browser console for candidate radii and took the actual minimum
+  adjacent-point distance (and, for the two concentric lip loops, the
+  actual minimum point-to-point distance ACROSS loops, not just within
+  each) until every pair cleared `2×r` with margin. Final face constants
+  (`faceLandmarks.ts`): oval (140,155), eyes (55,45, more circular than
+  before — an elongated eye shape doesn't have room at this dot size),
+  lips outer/inner (105,60)/(80,42), iris ring radius 18 (was 10 — the
+  iris CENTER point sits exactly at that radius from every ring point,
+  so it has the same `>2r` constraint as anything else, which the first
+  pass's `IRIS_R=10 < 2×6` violated outright).
+- `combinedBodyMapPicker` (poseMap.ts): `handScale` 1→2, `faceScale`
+  2.2 (from 1.4 in the prior pass — this task's "2x bigger" is on top of
+  that pass's sizing, not the original), viewBox widened and the
+  vitruvian pose pushed down further to keep clear of the now-taller
+  face. `DOT_R` is a single module constant (6) used everywhere;
+  `LandmarkSet.dotRadius` and the `.pose-map-dot-sm` CSS variant it drove
+  are gone.
+- Verified live: rebuilt the SAME transform-resolving overlap check used
+  in the prior pass against the live-rendered combined map (176 dots) —
+  only the two intentional wrist-anchor coincidences remain, zero other
+  pairs closer than `2×r`. Screenshot confirms the face reads as
+  distinct oval/eyes/iris-rings/lips at the larger size, hands are
+  clearly bigger and well clear of the torso, and clicking a thumb tip
+  still correctly picks `HAND_LEFT 4`.
