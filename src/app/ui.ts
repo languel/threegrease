@@ -429,6 +429,29 @@ function panel(title: string, ...children: (Node | string)[]): HTMLElement {
   return root;
 }
 
+/** Blender-style property row: label OUTSIDE on the left (right-justified,
+ *  via CSS grid so every row in the panel lines up in one label column),
+ *  control(s) filling the right column. One parameter per row is the norm
+ *  — pass a single control. Pass an ARRAY only for sub-fields that are
+ *  truly one logical parameter split into parts (e.g. a min/max range);
+ *  they render as a connected, gapless `.field-group` the way Blender
+ *  joins Color Depth's 8/16 toggle or a vector's X/Y/Z boxes, so it never
+ *  reads as "two unrelated fields fighting for a row". Genuinely
+ *  independent parameters must each get their own fieldRow — do not pass
+ *  them together as an array. Pass '' as label when the control (e.g. a
+ *  checkbox with its own text) already carries its own label.
+ *  `full: true` skips the label column entirely (toolbars, button rows). */
+function fieldRow(label: string, control: Node | Node[], opts: { full?: boolean } = {}): HTMLElement {
+  const controlNode = Array.isArray(control)
+    ? el('div', { class: 'field-group' }, ...control)
+    : control;
+  if (opts.full || !label) {
+    return el('div', { class: 'field-row full' }, controlNode);
+  }
+  return el('div', { class: 'field-row' },
+    el('span', { class: 'field-row-label', text: label }), controlNode);
+}
+
 // ---------------------------------------------------------------------------
 
 const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
@@ -1253,29 +1276,21 @@ export class UI {
 
     return panel('Scene',
       el('div', { class: 'menu-header', text: 'Grid' }),
-      el('div', { class: 'row' },
-        numField('Step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5, { def: 1, min: 0.01 }),
-        numField('Subdivisions', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1, { def: 10, min: 1 }),
-      ),
-      el('div', { class: 'row' },
-        selectField('Subdivision style', s.gridSubdivStyle, [
-          ['dashed', 'Dashed'], ['solid', 'Solid'],
-        ], (v) => { s.gridSubdivStyle = v as 'dashed' | 'solid'; this.app.rebuildGrid(); save(); }),
-      ),
+      fieldRow('Step', numField('', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5, { def: 1, min: 0.01 })),
+      fieldRow('Subdivisions', numField('', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1, { def: 10, min: 1 })),
+      fieldRow('Subdivision style', selectField('', s.gridSubdivStyle, [
+        ['dashed', 'Dashed'], ['solid', 'Solid'],
+      ], (v) => { s.gridSubdivStyle = v as 'dashed' | 'solid'; this.app.rebuildGrid(); save(); })),
       el('div', { class: 'row', text: 'Magnet Increment/Grid snap unit = the subdivision lines (Step ÷ Subdivisions).' }),
-      el('div', { class: 'row' },
-        checkbox('Auto color', !s.gridColor, (v) => {
-          s.gridColor = v ? null : [...s.background];
-          this.app.rebuildGrid(); save(); this.refresh();
-        }, 'grid color matches the background'),
-        ...(s.gridColor ? [colorField('Color', [...s.gridColor, 1], (rgb) => {
-          s.gridColor = rgb; this.app.rebuildGrid(); save();
-        })] : []),
-      ),
+      fieldRow('', checkbox('Auto color', !s.gridColor, (v) => {
+        s.gridColor = v ? null : [...s.background];
+        this.app.rebuildGrid(); save(); this.refresh();
+      }, 'grid color matches the background')),
+      ...(s.gridColor ? [fieldRow('Color', colorField('', [...s.gridColor, 1], (rgb) => {
+        s.gridColor = rgb; this.app.rebuildGrid(); save();
+      }))] : []),
       el('div', { class: 'menu-header', text: 'Background' }),
-      el('div', { class: 'row' },
-        colorField('Color', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); }),
-      ),
+      fieldRow('Color', colorField('', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); })),
     );
   }
 
@@ -1665,29 +1680,21 @@ export class UI {
     const b = ctx.settings.brush;
     const st = b.style;
     return panel('Brush — Advanced',
-      el('div', { class: 'row' },
-        selectField('Size unit', st.unit, [['VIEW', 'View (px)'], ['SCENE', 'Scene (world)']],
-          (v) => { st.unit = v as 'VIEW' | 'SCENE'; }),
-        checkbox('Stamp', st.stamp, (v) => { st.stamp = v; }),
-      ),
-      slider('Hardness', b.hardness, 0.05, 1, 0.01, (v) => { b.hardness = v; }, { def: 1, route: 'brush.hardness' }),
-      slider('Spacing', st.spacing, 0.03, 1, 0.01, (v) => { st.spacing = v; }, { def: 0.12 }),
-      slider('Angle', st.angle, -Math.PI, Math.PI, 0.05, (v) => { st.angle = v; }, { def: 0 }),
-      slider('Aspect', st.aspect, 0.1, 1, 0.01, (v) => { st.aspect = v; }, { def: 1 }),
-      slider('Jitter', st.jitter, 0, 1, 0.01, (v) => { st.jitter = v; }, { def: 0, route: 'brush.style.jitter' }),
-      slider('Grain', st.grain, 0, 1, 0.01, (v) => { st.grain = v; }, { def: 0, route: 'brush.style.grain' }),
-      slider('Grain scale', st.grainScale, 1, 30, 0.5, (v) => { st.grainScale = v; }, { def: 6 }),
-      el('div', { class: 'row' },
-        slider('Active smooth', b.activeSmooth, 0, 0.8, 0.02, (v) => { b.activeSmooth = v; }, { def: 0.2 }),
-      ),
-      el('div', { class: 'row' },
-        slider('Post smooth', b.postSmooth, 0, 1, 0.02, (v) => { b.postSmooth = v; }, { def: 0.3 }),
-        numField('Simplify', b.simplify, (v) => { b.simplify = Math.max(0, v); }, 0.001, { def: 0.002 }),
-      ),
-      el('div', { class: 'row' },
-        checkbox('Stabilize', b.stabilize, (v) => { b.stabilize = v; }),
-        slider('Radius', b.stabilizeRadius, 5, 120, 1, (v) => { b.stabilizeRadius = v; }, { def: 30 }),
-      ),
+      fieldRow('Size unit', selectField('', st.unit, [['VIEW', 'View (px)'], ['SCENE', 'Scene (world)']],
+        (v) => { st.unit = v as 'VIEW' | 'SCENE'; })),
+      fieldRow('', checkbox('Stamp', st.stamp, (v) => { st.stamp = v; })),
+      fieldRow('Hardness', slider('', b.hardness, 0.05, 1, 0.01, (v) => { b.hardness = v; }, { def: 1, route: 'brush.hardness' })),
+      fieldRow('Spacing', slider('', st.spacing, 0.03, 1, 0.01, (v) => { st.spacing = v; }, { def: 0.12 })),
+      fieldRow('Angle', slider('', st.angle, -Math.PI, Math.PI, 0.05, (v) => { st.angle = v; }, { def: 0 })),
+      fieldRow('Aspect', slider('', st.aspect, 0.1, 1, 0.01, (v) => { st.aspect = v; }, { def: 1 })),
+      fieldRow('Jitter', slider('', st.jitter, 0, 1, 0.01, (v) => { st.jitter = v; }, { def: 0, route: 'brush.style.jitter' })),
+      fieldRow('Grain', slider('', st.grain, 0, 1, 0.01, (v) => { st.grain = v; }, { def: 0, route: 'brush.style.grain' })),
+      fieldRow('Grain scale', slider('', st.grainScale, 1, 30, 0.5, (v) => { st.grainScale = v; }, { def: 6 })),
+      fieldRow('Active smooth', slider('', b.activeSmooth, 0, 0.8, 0.02, (v) => { b.activeSmooth = v; }, { def: 0.2 })),
+      fieldRow('Post smooth', slider('', b.postSmooth, 0, 1, 0.02, (v) => { b.postSmooth = v; }, { def: 0.3 })),
+      fieldRow('Simplify', numField('', b.simplify, (v) => { b.simplify = Math.max(0, v); }, 0.001, { def: 0.002 })),
+      fieldRow('', checkbox('Stabilize', b.stabilize, (v) => { b.stabilize = v; this.refresh(); })),
+      ...(b.stabilize ? [fieldRow('Radius', slider('', b.stabilizeRadius, 5, 120, 1, (v) => { b.stabilizeRadius = v; }, { def: 30 }))] : []),
     );
   }
 
@@ -2145,19 +2152,13 @@ export class UI {
     const ob = activeObject(ctx.scene);
     const o = ob.onion;
     return panel('Onion Skinning',
-      el('div', { class: 'row' },
-        checkbox('Enabled', o.enabled, (v) => { o.enabled = v; ctx.requestRender(); }),
-        selectField('Mode', o.mode, [['KEYFRAMES', 'Keyframes'], ['FRAMES', 'Frames']], (v) => { o.mode = v; ctx.requestRender(); }),
-      ),
-      el('div', { class: 'row' },
-        numField('Before', o.before, (v) => { o.before = Math.max(0, Math.round(v)); ctx.requestRender(); }, 1),
-        numField('After', o.after, (v) => { o.after = Math.max(0, Math.round(v)); ctx.requestRender(); }, 1),
-      ),
-      el('div', { class: 'row' },
-        colorField('Before', [...o.colorBefore, 1], (rgb) => { o.colorBefore = rgb; ctx.requestRender(); }),
-        colorField('After', [...o.colorAfter, 1], (rgb) => { o.colorAfter = rgb; ctx.requestRender(); }),
-      ),
-      slider('Opacity', o.opacity, 0, 1, 0.01, (v) => { o.opacity = v; ctx.requestRender(); }),
+      fieldRow('', checkbox('Enabled', o.enabled, (v) => { o.enabled = v; ctx.requestRender(); })),
+      fieldRow('Mode', selectField('', o.mode, [['KEYFRAMES', 'Keyframes'], ['FRAMES', 'Frames']], (v) => { o.mode = v; ctx.requestRender(); })),
+      fieldRow('Before', numField('', o.before, (v) => { o.before = Math.max(0, Math.round(v)); ctx.requestRender(); }, 1)),
+      fieldRow('After', numField('', o.after, (v) => { o.after = Math.max(0, Math.round(v)); ctx.requestRender(); }, 1)),
+      fieldRow('Before color', colorField('', [...o.colorBefore, 1], (rgb) => { o.colorBefore = rgb; ctx.requestRender(); })),
+      fieldRow('After color', colorField('', [...o.colorAfter, 1], (rgb) => { o.colorAfter = rgb; ctx.requestRender(); })),
+      fieldRow('Opacity', slider('', o.opacity, 0, 1, 0.01, (v) => { o.opacity = v; ctx.requestRender(); })),
     );
   }
 
@@ -2763,11 +2764,9 @@ export class UI {
         btn(this.saTargetName ? iconLabel('photo', this.saTargetName) : 'Load target image…',
           () => fileInput.click()),
       ),
-      el('div', { class: 'row' },
-        numField('Pins', this.saOpts.pinCount, (v) => { this.saOpts.pinCount = Math.max(8, Math.round(v)); }, 1),
-        numField('Chords', this.saOpts.maxChords, (v) => { this.saOpts.maxChords = Math.max(10, Math.round(v)); }, 10),
-        numField('Opacity', this.saOpts.opacity, (v) => { this.saOpts.opacity = Math.min(1, Math.max(0.02, v)); }, 0.01),
-      ),
+      fieldRow('Pins', numField('', this.saOpts.pinCount, (v) => { this.saOpts.pinCount = Math.max(8, Math.round(v)); }, 1)),
+      fieldRow('Chords', numField('', this.saOpts.maxChords, (v) => { this.saOpts.maxChords = Math.max(10, Math.round(v)); }, 10)),
+      fieldRow('Opacity', numField('', this.saOpts.opacity, (v) => { this.saOpts.opacity = Math.min(1, Math.max(0.02, v)); }, 0.01)),
       el('div', { class: 'row' },
         this.saRun
           ? btn('Cancel', () => { this.saRun?.cancel(); this.saRun = null; this.refresh(); })
@@ -2868,10 +2867,8 @@ export class UI {
           checkbox('Simulate strings', sim.enabled, (v) => { sim.enabled = v; if (v) sim.reset(); }),
         ),
         ...attractorItems,
-        el('div', { class: 'row' },
-          slider('Damping', sim.damping, 0.8, 0.999, 0.001, (v) => { sim.damping = v; }),
-          slider('Stiffness', sim.stiffness, 0, 0.2, 0.005, (v) => { sim.stiffness = v; }),
-        ),
+        fieldRow('Damping', slider('', sim.damping, 0.8, 0.999, 0.001, (v) => { sim.damping = v; })),
+        fieldRow('Stiffness', slider('', sim.stiffness, 0, 0.2, 0.005, (v) => { sim.stiffness = v; })),
       ),
     );
   }
@@ -3011,14 +3008,10 @@ export class UI {
             }, { title: 'Bind to the selected (or last) GP stroke' }),
             btn(c.running ? icon('pause') : icon('play'), () => { c.running = !c.running; this.refresh(); }, { cls: 'icon-btn', active: c.running }),
           ),
-          el('div', { class: 'row' },
-            slider('Phase', c.phase ?? 0, 0, 1, 0.001, (v) => { c.phase = v; }, { def: 0 }),
-          ),
-          el('div', { class: 'row' },
-            numField('Speed', c.speed ?? 0.2, (v) => { c.speed = v; }, 0.05, { def: 0.2 }),
-            selectField('', c.loop ?? 'LOOP', [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { c.loop = v as typeof c.loop; }),
-            checkbox('Orient', !!c.orient, (v) => { c.orient = v; }),
-          ),
+          fieldRow('Phase', slider('', c.phase ?? 0, 0, 1, 0.001, (v) => { c.phase = v; }, { def: 0 })),
+          fieldRow('Speed', numField('', c.speed ?? 0.2, (v) => { c.speed = v; }, 0.05, { def: 0.2 })),
+          fieldRow('Loop', selectField('', c.loop ?? 'LOOP', [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { c.loop = v as typeof c.loop; })),
+          fieldRow('', checkbox('Orient', !!c.orient, (v) => { c.orient = v; })),
         );
       } else if (c.type === 'FOLLOW_STREAM') {
         const streamSel = el('select') as HTMLSelectElement;
@@ -3034,9 +3027,8 @@ export class UI {
         const targetStream = ctx.scene.mmStreams.find((s) => s.id === c.streamId);
         const landmarkMap = targetStream ? landmarkMapForKind(targetStream.kind, c.landmark ?? 0, (v) => { c.landmark = v; }) : null;
         rows.push(
-          el('div', { class: 'row' }, 'Stream', streamSel),
-          landmarkMap ?? el('div', { class: 'row' },
-            numField('landmark', c.landmark ?? 0, (v) => { c.landmark = Math.max(0, Math.round(v)); }, 1)),
+          fieldRow('Stream', streamSel),
+          landmarkMap ?? fieldRow('Landmark', numField('', c.landmark ?? 0, (v) => { c.landmark = Math.max(0, Math.round(v)); }, 1)),
           el('div', {
             class: 'row',
             text: landmarkMap ? 'click, pick, or drag a point above'
@@ -3052,25 +3044,21 @@ export class UI {
           : 'zone: sphere of Radius at the origin';
         rows.push(
           el('div', { class: 'row', text: `${shapeText} · probes: travelers + stream landmarks` }),
-          el('div', { class: 'row' },
-            numField('Radius', c.radius ?? 0.25, (v) => { c.radius = Math.max(0.01, v); }, 0.05, { def: 0.25, min: 0.01 }),
-            checkbox('Retrigger', c.retrigger !== false, (v) => { c.retrigger = v; }),
-          ),
+          fieldRow('Radius', numField('', c.radius ?? 0.25, (v) => { c.radius = Math.max(0.01, v); }, 0.05, { def: 0.25, min: 0.01 })),
+          fieldRow('', checkbox('Retrigger', c.retrigger !== false, (v) => { c.retrigger = v; })),
           el('div', { class: 'menu-header', text: 'On enter' }),
           this.msgEditor(c.messages ??= []),
           el('div', { class: 'menu-header', text: 'On leave' }),
           this.msgEditor(c.leaveMessages ??= []),
         );
       } else if (c.type === 'LIMIT_DISTANCE') {
-        rows.push(targetField(c), el('div', { class: 'row' },
-          numField('Distance', c.distance ?? 1, (v) => { c.distance = Math.max(0.001, v); }, 0.1)));
+        rows.push(targetField(c), fieldRow('Distance', numField('', c.distance ?? 1, (v) => { c.distance = Math.max(0.001, v); }, 0.1)));
       } else if (c.type === 'SPRING') {
-        rows.push(targetField(c), el('div', { class: 'row' },
-          numField('Stiffness', c.stiffness ?? 12, (v) => { c.stiffness = Math.max(0, v); }, 1),
-          numField('Damping', c.damping ?? 4, (v) => { c.damping = Math.max(0, v); }, 0.5)));
+        rows.push(targetField(c),
+          fieldRow('Stiffness', numField('', c.stiffness ?? 12, (v) => { c.stiffness = Math.max(0, v); }, 1)),
+          fieldRow('Damping', numField('', c.damping ?? 4, (v) => { c.damping = Math.max(0, v); }, 0.5)));
       } else if (c.type === 'SHRINKWRAP' || c.type === 'FLOOR') {
-        rows.push(el('div', { class: 'row' },
-          numField('Offset', c.offset ?? 0, (v) => { c.offset = v; }, 0.05)));
+        rows.push(fieldRow('Offset', numField('', c.offset ?? 0, (v) => { c.offset = v; }, 0.05)));
       } else {
         rows.push(targetField(c));
       }
