@@ -2093,3 +2093,27 @@ now alongside the grid work above.)
   long and grid-aligned; drew a stroke to confirm the draw path still
   works (2 points, no NaN). `npx tsc --noEmit` and `npx vite build`
   both clean.
+
+## Defaults + route targets across the number fields (follow-up pass)
+
+Small committed steps (one commit each) spreading the new widget's `def`
+(Backspace/context-menu reset) and `route` (Add Route → routional)
+options across the UI:
+- Mode toolbars: eraser/sculpt/paint/weight radii + strengths get
+  factory defaults; Brush-advanced panel fully covered (Hardness/
+  Spacing/Angle/Aspect/Jitter/Grain/Grain scale/smoothing/Simplify/
+  Stabilize radius), with routes on Hardness (`brush.hardness`),
+  Jitter (`brush.style.jitter`), Grain (`brush.style.grain`).
+- Scene grid Step/Subdivisions (defs 1/10, min-clamped), FOV fields
+  (def 50, clamp 5–140, route `camera.0.fov`), timeline FPS (def 24).
+- Layer opacity routes to `layer.<id>.opacity`; `paramEditors()` gained
+  a `routePrefix` so EVERY numeric modifier/effect param offers Add
+  Route (`modifier.<id>.<param>` / `effect.<id>.<param>`).
+- Legacy score entities: traveler speed (`cursor.<id>.speed`), trigger
+  radius (`trigger.<id>.radius`), attractor strength
+  (`attractor.<id>.strength`).
+- Constraint travelers/triggers (phase/speed/radius defaults), stream
+  rows (per-kind point-size defaults, depth default, clip transport
+  phase/speed, pen min conf).
+Typecheck clean at every step; per user direction, no browser
+verification this pass — committed in six standalone commits.
