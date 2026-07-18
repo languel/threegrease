@@ -85,7 +85,20 @@ export function comboFromEvent(e: KeyboardEvent): string {
   if (e.ctrlKey || e.metaKey) parts.push('ctrl');
   if (e.altKey) parts.push('alt');
   if (e.shiftKey) parts.push('shift');
+  // Mac remaps e.key under Option to whatever character the OS keyboard
+  // layout produces (Option+Z -> 'Ω', Option+Space -> a non-breaking
+  // space, etc). e.code is the physical key and isn't remapped, so use
+  // it to recover the base key whenever Alt is held.
   let key = e.key.toLowerCase();
+  if (e.altKey && e.code) {
+    const code = e.code;
+    if (code.startsWith('Key')) key = code.slice(3).toLowerCase();
+    else if (code.startsWith('Digit')) key = code.slice(5);
+    else if (code === 'Space') key = ' ';
+    else if (code === 'Backquote') key = '`';
+    else if (code === 'Minus') key = '-';
+    else if (code === 'Equal') key = '=';
+  }
   if (key === ' ') key = 'space';
   if (['control', 'meta', 'alt', 'shift'].includes(key)) return ''; // modifier alone
   // shifted symbols ('~', '+', '?') already encode shift in the character
