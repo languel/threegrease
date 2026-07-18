@@ -1991,3 +1991,50 @@ now alongside the grid work above.)
   confirms the reordered panel layout (Rig mapper → Rigs header →
   Address prefix → rig rows) and a visible white ring. `npx tsc
   --noEmit` and `npx vite build` both clean.
+
+## Multi-landmark live pen + iris picker + humunculus stream colors
+
+- **Pen toggle moved before record, label → hover tip**: the Streams
+  panel's per-stream pen checkbox now sits in the top row, between the
+  stream name and the record button (was its own row below, with a
+  visible "pen" label). Same treatment as the other Streams checkboxes:
+  empty label, full description in the tooltip.
+- **Live pen now supports multiple landmarks per stream**: `MMStream.pen`
+  changed from `{ landmark: number }` to `{ landmarks: number[] }`
+  (`src/core/types.ts`); `src/io/serialize.ts` migrates old saved
+  scenes (`pen.landmark` → `pen.landmarks: [landmark]`). `StreamPen`
+  (`src/mm/pen.ts`) now keys its per-landmark state by
+  `` `${streamId}:${landmarkId}` `` instead of by stream alone, so each
+  selected landmark draws its own independent stroke concurrently.
+  Recording already baked all landmarks by default
+  (`bakeClipToStrokes(..., landmark = -1)`), so no changes were needed
+  there — "pen and record all of them" was already true for record,
+  and is now true for the live pen too.
+- **New multi-select landmark picker** (`multiLandmarkMapForKind` in
+  `src/app/poseMap.ts`): clicking a dot toggles its membership in the
+  selection (vs. the existing single-select pickers, which replace the
+  one picked value). No dropdown — a "`N` selected" label replaces it.
+  Reuses a new `kindConfig(kind)` helper so the single- and multi-select
+  pickers can't drift out of sync on set/color/size per kind.
+- **New IRIS visual picker**: `src/mm/irisLandmarks.ts` defines the
+  standalone IRIS stream's own 10-point local index space (0-9, right
+  eye then left eye — distinct from the iris points embedded in FACE's
+  478-point index space) as a small two-eye SVG diagram.
+  `irisMapPicker`/`irisSet`/`irisColorClass` added to `poseMap.ts`
+  (mirrors the existing `faceMapPicker` pattern); `hasLandmarkMap` and
+  `landmarkMapForKind` now include `'IRIS'`.
+- **Stream default colors now match the combined body-map picker**:
+  `createStream()` in `src/mm/streams.ts` — POSE `#7ab4ff`, HAND_LEFT
+  `#7aff99`, HAND_RIGHT `#ff7ab1`, FACE `#fffb7a` — so a stream's point
+  color always agrees with its landmark picker's dot color.
+- Verified live: created POSE + IRIS streams, confirmed their default
+  colors (`#7ab4ff`, `#ff598c`) match the new `createStream()` map;
+  armed the POSE pen with landmarks `[0, 15]` — the map rendered both
+  nose and left-wrist dots highlighted red with a "2 selected" label;
+  armed the IRIS pen and confirmed the new two-eye picker renders and
+  highlights the selected landmark; clicked a second iris dot and
+  confirmed the click toggled it into the selection (`pen.landmarks`
+  went from `[0]` to `[0, 5]`); inspected the DOM and confirmed the pen
+  checkbox is the 5th child of the top row — after the name, before the
+  record button — with an empty label and the full description as its
+  tooltip. `npx tsc --noEmit` and `npx vite build` both clean.

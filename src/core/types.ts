@@ -313,7 +313,7 @@ export interface MMStream {
   /** live pen: one landmark draws strokes into the active GP object while
    *  armed — confidence gates pen-down (below minConf = pen up, stroke
    *  ends) and becomes pressure, like baked clips */
-  pen?: { active: boolean; landmark: number; minConf: number };
+  pen?: { active: boolean; landmarks: number[]; minConf: number };
   parent?: ParentRef | null;
   translation: Vec3;
   rotation: Vec3;

@@ -9,6 +9,7 @@
 import { POSE_LANDMARK_EDGES, POSE_LANDMARK_NAMES, POSE_LANDMARK_POS, POSE_VIEWBOX } from '../mm/poseLandmarks';
 import { HAND_LANDMARK_EDGES, HAND_LANDMARK_NAMES, HAND_LANDMARK_POS, HAND_VIEWBOX } from '../mm/handLandmarks';
 import { FACE_LANDMARK_EDGES, FACE_LANDMARK_IDS, FACE_LANDMARK_NAMES, FACE_LANDMARK_POS, FACE_LEFT_EYE_IDS, FACE_RIGHT_EYE_IDS, FACE_VIEWBOX } from '../mm/faceLandmarks';
+import { IRIS_LANDMARK_EDGES, IRIS_LANDMARK_NAMES, IRIS_LANDMARK_POS, IRIS_LEFT_IDS, IRIS_VIEWBOX } from '../mm/irisLandmarks';
 import type { MMStream } from '../core/types';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -68,6 +69,16 @@ function faceSet(): LandmarkSet {
   };
 }
 
+function irisSet(): LandmarkSet {
+  return {
+    ids: IRIS_LANDMARK_POS.map((_, i) => i),
+    pos: (id) => IRIS_LANDMARK_POS[id],
+    name: (id) => IRIS_LANDMARK_NAMES[id] ?? '?',
+    edges: IRIS_LANDMARK_EDGES,
+    viewBox: IRIS_VIEWBOX,
+  };
+}
+
 const FACE_LEFT_EYE_SET = new Set(FACE_LEFT_EYE_IDS);
 const FACE_RIGHT_EYE_SET = new Set(FACE_RIGHT_EYE_IDS);
 /** Per-point face color: each eye (ring + its iris) gets its own color,
@@ -76,6 +87,13 @@ function faceColorClass(id: number): string {
   if (FACE_LEFT_EYE_SET.has(id)) return 'pose-map-dot-leye';
   if (FACE_RIGHT_EYE_SET.has(id)) return 'pose-map-dot-reye';
   return 'pose-map-dot-face';
+}
+
+const IRIS_LEFT_SET = new Set(IRIS_LEFT_IDS);
+/** Same leye/reye split as the face diagram's eyes — this stream is
+ *  just the 10 iris points on their own. */
+function irisColorClass(id: number): string {
+  return IRIS_LEFT_SET.has(id) ? 'pose-map-dot-leye' : 'pose-map-dot-reye';
 }
 
 /** One picker's worth of dots + drag/click wiring, appended into a
@@ -174,6 +192,65 @@ export function handMapPicker(value: number, onChange: (v: number) => void, side
 
 export function faceMapPicker(value: number, onChange: (v: number) => void): HTMLElement {
   return singleKindPicker(faceSet(), value, onChange, 190, 209, faceColorClass);
+}
+
+export function irisMapPicker(value: number, onChange: (v: number) => void): HTMLElement {
+  return singleKindPicker(irisSet(), value, onChange, 190, 105, irisColorClass);
+}
+
+/** Shared per-kind config for both the single-select pickers above and
+ *  the multi-select picker below, so they can't drift out of sync with
+ *  each other (same set/color/size per kind, one place). */
+function kindConfig(kind: MMStream['kind']): { set: LandmarkSet; colorClass: string | ((id: number) => string | undefined); w: number; h: number } | null {
+  switch (kind) {
+    case 'POSE': return { set: poseSet(), colorClass: 'pose-map-dot-pose', w: 150, h: 280 };
+    case 'HAND_LEFT': return { set: handSet(), colorClass: 'pose-map-dot-handL', w: 140, h: 160 };
+    case 'HAND_RIGHT': return { set: handSet(), colorClass: 'pose-map-dot-handR', w: 140, h: 160 };
+    case 'FACE': return { set: faceSet(), colorClass: faceColorClass, w: 190, h: 209 };
+    case 'IRIS': return { set: irisSet(), colorClass: irisColorClass, w: 190, h: 105 };
+    default: return null;
+  }
+}
+
+/** Multi-select picker: clicking a dot toggles its membership in the
+ *  selected set instead of replacing a single value — for features that
+ *  can watch/draw/record more than one landmark at once (the live pen).
+ *  No dropdown (doesn't map cleanly to multi-select); the label instead
+ *  shows how many are picked. */
+export function multiLandmarkMapForKind(kind: MMStream['kind'], selected: number[], onChange: (ids: number[]) => void): HTMLElement | null {
+  const cfg = kindConfig(kind);
+  if (!cfg) return null;
+  const { set, colorClass, w, h } = cfg;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'pose-map';
+  const svg = svgEl('svg', { viewBox: set.viewBox, width: w, height: h });
+  svg.classList.add('pose-map-svg');
+  const label = document.createElement('div');
+  label.className = 'pose-map-label';
+
+  const selSet = new Set(selected);
+  const setLabel = () => { label.textContent = selSet.size ? `${selSet.size} selected` : 'none selected'; };
+
+  const toggle = (id: number) => {
+    if (selSet.has(id)) selSet.delete(id); else selSet.add(id);
+    dots.get(id)?.classList.toggle('picked', selSet.has(id));
+    setLabel();
+    onChange([...selSet].sort((a, b) => a - b));
+  };
+  const dots = addLandmarks(svg, set, toggle, undefined, { colorClass });
+  for (const id of selSet) dots.get(id)?.classList.add('picked');
+
+  wrap.ondragover = (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
+  wrap.ondrop = (e) => {
+    e.preventDefault();
+    const v = Number(e.dataTransfer?.getData(POSE_LANDMARK_DRAG_MIME) || e.dataTransfer?.getData('text/plain'));
+    if (dots.has(v)) toggle(v);
+  };
+
+  setLabel();
+  wrap.append(svg, label);
+  return wrap;
 }
 
 /** Rig-mapper kind: matches MMStream['kind'] for POSE/HAND_LEFT/
@@ -379,10 +456,10 @@ export function combinedBodyMapPicker(
   return wrap;
 }
 
-/** Does this stream kind have a visual picker? (POSE/HAND/FACE — not
- *  IRIS/CUSTOM, which stay numeric-only for now.) */
+/** Does this stream kind have a visual picker? (POSE/HAND/FACE/IRIS — not
+ *  CUSTOM, which stays numeric-only.) */
 export function hasLandmarkMap(kind: MMStream['kind']): boolean {
-  return kind === 'POSE' || kind === 'HAND_LEFT' || kind === 'HAND_RIGHT' || kind === 'FACE';
+  return kind === 'POSE' || kind === 'HAND_LEFT' || kind === 'HAND_RIGHT' || kind === 'FACE' || kind === 'IRIS';
 }
 
 /** Single-kind picker matching a specific stream's kind, or null if that
@@ -393,6 +470,7 @@ export function landmarkMapForKind(kind: MMStream['kind'], value: number, onChan
     case 'HAND_LEFT': return handMapPicker(value, onChange, 'left');
     case 'HAND_RIGHT': return handMapPicker(value, onChange, 'right');
     case 'FACE': return faceMapPicker(value, onChange);
+    case 'IRIS': return irisMapPicker(value, onChange);
     default: return null;
   }
 }

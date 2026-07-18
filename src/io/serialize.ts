@@ -39,7 +39,10 @@ export function deserializeScene(json: string): GPScene {
     st.parent ??= null;
     st.constraints ??= [];
     st.probeEvents ??= st.kind !== 'FACE';
-    st.pen ??= { active: false, landmark: 0, minConf: 0.5 };
+    st.pen ??= { active: false, landmarks: [0], minConf: 0.5 };
+    const legacyPen = st.pen as unknown as { landmark?: number; landmarks?: number[] };
+    if (!legacyPen.landmarks) legacyPen.landmarks = legacyPen.landmark !== undefined ? [legacyPen.landmark] : [0];
+    delete legacyPen.landmark;
   }
   scene.clips ??= [];
   for (const c of scene.clips) {

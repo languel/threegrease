@@ -12,7 +12,7 @@ import { mediamime } from '../io/mediamime';
 import { mmCapture } from '../mm/capture';
 import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
-import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, RIG_KIND_PATH, type RigMapKind } from './poseMap';
+import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, multiLandmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
 import { deleteAsset, listAssets } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import type { ConstraintType, TGConstraint } from '../core/types';
@@ -2916,12 +2916,18 @@ export class UI {
       const recBtn = btn(icon('dot'), () => this.app.mmRecordToggle({ kind: 'STREAM', id: st.id }),
         { cls: 'icon-btn rec-btn', active: recording, title: recording ? 'Stop recording (saves a clip)' : 'Record this stream into a clip' });
       if (recording) recBtn.style.color = '#ff4444';
+      const penBtn = checkbox('', !!st.pen?.active, (v) => {
+        st.pen ??= { active: false, landmarks: [0], minConf: 0.5 };
+        st.pen.active = v;
+        this.refresh();
+      }, `pen: draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up`);
       return [
         el('div', { class: 'row' },
           btn(st.visible ? icon('eye') : icon('eyeOff'), () => { st.visible = !st.visible; this.refresh(); }, { cls: 'icon-btn' }),
           colorField('', [...st.color, 1], (rgb) => { st.color = rgb; }),
           el('span', { class: 'grow', text: `${st.name}${st.source === 'BUS' ? ` ← ${st.busAddress}` : st.source === 'CLIP' ? ` ⟲ ${clip?.name ?? '(clip gone)'}` : ''}` }),
           el('span', { text: frame?.count ? `${frame.count} pts` : '—' }),
+          penBtn,
           ...(st.source !== 'CLIP' ? [recBtn] : []),
           btn(icon('xMark'), () => this.app.deleteMMStream(st.id), { cls: 'icon-btn', title: 'Delete stream' }),
         ),
@@ -2942,21 +2948,16 @@ export class UI {
           numField('speed', st.speed ?? 1, (v) => { st.speed = v; }, 0.1),
           selectField('', st.loop ?? 'LOOP', [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { st.loop = v as typeof st.loop; }),
         )] : []),
-        // live pen: one landmark draws into the active GP object
-        el('div', { class: 'row' },
-          checkbox('pen', !!st.pen?.active, (v) => {
-            st.pen ??= { active: false, landmark: 0, minConf: 0.5 };
-            st.pen.active = v;
-            this.refresh();
-          }, `draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up`),
-          ...(st.pen?.active && !hasLandmarkMap(st.kind) ? [
-            numField('landmark', st.pen.landmark, (v) => { st.pen!.landmark = Math.max(0, Math.round(v)); }, 1),
-          ] : []),
-          ...(st.pen?.active ? [
+        // live pen: selected landmarks draw into the active GP object
+        ...(st.pen?.active ? [
+          el('div', { class: 'row' },
+            ...(!hasLandmarkMap(st.kind) ? [
+              numField('landmarks', st.pen.landmarks[0] ?? 0, (v) => { st.pen!.landmarks = [Math.max(0, Math.round(v))]; }, 1),
+            ] : []),
             numField('min conf', st.pen.minConf, (v) => { st.pen!.minConf = Math.max(0, Math.min(1, v)); }, 0.05),
-          ] : []),
-        ),
-        ...(st.pen?.active ? [landmarkMapForKind(st.kind, st.pen.landmark, (v) => { st.pen!.landmark = v; })].filter((n): n is HTMLElement => !!n) : []),
+          ),
+          ...[multiLandmarkMapForKind(st.kind, st.pen.landmarks, (ids) => { st.pen!.landmarks = ids; })].filter((n): n is HTMLElement => !!n),
+        ] : []),
       ];
     });
 

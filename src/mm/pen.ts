@@ -21,8 +21,13 @@ interface PenState {
   lastSampleT: number;
 }
 
+/** States are keyed `${streamId}:${landmarkId}` — one independent stroke
+ *  per selected landmark, so a multi-landmark pen draws that many strokes
+ *  at once. */
+function stateKey(streamId: number, landmark: number): string { return `${streamId}:${landmark}`; }
+
 export class StreamPen {
-  private states = new Map<number, PenState>();
+  private states = new Map<string, PenState>();
 
   /** true while any armed pen has an open stroke (status display) */
   drawing = false;
@@ -32,67 +37,78 @@ export class StreamPen {
     this.drawing = false;
     for (const st of scene.mmStreams) {
       const pen = st.pen;
-      if (!pen?.active) { this.endStroke(st.id); continue; }
-      let state = this.states.get(st.id);
-      if (!state) {
-        state = { stroke: null, layerId: null, lastVersion: -1, lastSampleT: 0 };
-        this.states.set(st.id, state);
-      }
+      if (!pen?.active) { this.endStreamStrokes(st.id); continue; }
       const frame = streamStore.get(st.id);
       const ver = streamStore.version.get(st.id) ?? -1;
       const now = performance.now();
-      // stale stream = pen up
-      if (!frame || (state.stroke && now - state.lastSampleT > 300)) {
-        if (!frame) { this.endStroke(st.id); continue; }
-      }
-      if (ver === state.lastVersion) {
-        if (state.stroke && now - state.lastSampleT > 300) this.endStroke(st.id);
-        else if (state.stroke) this.drawing = true;
-        continue;
-      }
-      state.lastVersion = ver;
-      const li = Math.min(pen.landmark, Math.max(0, frame.count - 1));
-      if (frame.count === 0) { this.endStroke(st.id); continue; }
-      const conf = frame.data[li * 4 + 3];
-      if (conf < pen.minConf) { this.endStroke(st.id); continue; }
+      if (!frame) { this.endStreamStrokes(st.id); continue; }
 
-      // landmark world position -> active GP object local
-      const world = new THREE.Vector3(
-        frame.data[li * 4], frame.data[li * 4 + 1], frame.data[li * 4 + 2],
-      ).applyMatrix4(streamWorldMatrix(scene, st));
-      const ob = activeObject(scene);
-      const layer = activeLayer(ob);
-      if (!layer || layer.hide || layer.lock) { this.endStroke(st.id); continue; }
-      world.applyMatrix4(worldMatrixOf(scene, { kind: 'GP', id: ob.id }).invert());
+      for (const landmark of pen.landmarks) {
+        const key = stateKey(st.id, landmark);
+        let state = this.states.get(key);
+        if (!state) {
+          state = { stroke: null, layerId: null, lastVersion: -1, lastSampleT: 0 };
+          this.states.set(key, state);
+        }
+        if (ver === state.lastVersion) {
+          if (state.stroke && now - state.lastSampleT > 300) this.endStroke(key);
+          else if (state.stroke) this.drawing = true;
+          continue;
+        }
+        state.lastVersion = ver;
+        if (frame.count === 0) { this.endStroke(key); continue; }
+        const li = Math.min(landmark, Math.max(0, frame.count - 1));
+        const conf = frame.data[li * 4 + 3];
+        if (conf < pen.minConf) { this.endStroke(key); continue; }
 
-      if (!state.stroke) {
-        // stroke start = one undo step, current brush baked like DrawTool
-        ctx.pushUndo();
-        const b = ctx.settings.brush;
-        const s = createStroke(ob.activeMaterial, brushWidth(b));
-        s.hardness = b.hardness;
-        s.style = { ...b.style };
-        const gpFrame = ensureFrame(layer, scene.frame, ctx.settings.autoKey);
-        gpFrame.strokes.push(s);
-        state.stroke = s;
-        state.layerId = layer.id;
+        // landmark world position -> active GP object local
+        const world = new THREE.Vector3(
+          frame.data[li * 4], frame.data[li * 4 + 1], frame.data[li * 4 + 2],
+        ).applyMatrix4(streamWorldMatrix(scene, st));
+        const ob = activeObject(scene);
+        const layer = activeLayer(ob);
+        if (!layer || layer.hide || layer.lock) { this.endStroke(key); continue; }
+        world.applyMatrix4(worldMatrixOf(scene, { kind: 'GP', id: ob.id }).invert());
+
+        if (!state.stroke) {
+          // stroke start = one undo step, current brush baked like DrawTool
+          ctx.pushUndo();
+          const b = ctx.settings.brush;
+          const s = createStroke(ob.activeMaterial, brushWidth(b));
+          s.hardness = b.hardness;
+          s.style = { ...b.style };
+          const gpFrame = ensureFrame(layer, scene.frame, ctx.settings.autoKey);
+          gpFrame.strokes.push(s);
+          state.stroke = s;
+          state.layerId = layer.id;
+        }
+        const p = createPoint([world.x, world.y, world.z] as Vec3, Math.max(0.05, conf), Math.max(0.05, conf));
+        state.stroke.points.push(p);
+        state.lastSampleT = now;
+        this.drawing = true;
+        ctx.requestRender(state.layerId ?? undefined);
       }
-      const p = createPoint([world.x, world.y, world.z] as Vec3, Math.max(0.05, conf), Math.max(0.05, conf));
-      state.stroke.points.push(p);
-      state.lastSampleT = now;
-      this.drawing = true;
-      ctx.requestRender(state.layerId ?? undefined);
     }
-    // cleanup states for deleted streams
-    for (const id of this.states.keys()) {
-      if (!ctx.scene.mmStreams.some((s) => s.id === id)) this.states.delete(id);
+    // cleanup states for deleted streams/deselected landmarks
+    for (const key of this.states.keys()) {
+      const [streamId, landmark] = key.split(':').map(Number);
+      const st = ctx.scene.mmStreams.find((s) => s.id === streamId);
+      if (!st || !st.pen?.active || !st.pen.landmarks.includes(landmark)) this.states.delete(key);
     }
   }
 
-  /** Lift the pen for one stream (stroke stays; next sample starts fresh). */
-  endStroke(streamId: number): void {
-    const state = this.states.get(streamId);
+  /** Lift the pen for one (stream, landmark) pair (stroke stays; next
+   *  sample starts fresh). */
+  endStroke(key: string): void {
+    const state = this.states.get(key);
     if (state) { state.stroke = null; state.layerId = null; }
+  }
+
+  /** Lift the pen for every landmark currently tracked on a stream. */
+  endStreamStrokes(streamId: number): void {
+    for (const key of this.states.keys()) {
+      if (key.startsWith(`${streamId}:`)) this.endStroke(key);
+    }
   }
 }
 

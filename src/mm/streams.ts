@@ -62,9 +62,15 @@ export function createStream(
   const names: Record<MMStream['kind'], string> = {
     POSE: 'Pose', HAND_LEFT: 'Hand L', HAND_RIGHT: 'Hand R', FACE: 'Face', IRIS: 'Iris', CUSTOM: busAddress ?? 'Stream',
   };
+  // matches the combined body-map picker's kind colors (poseMap.ts
+  // KIND_COLOR_CLASS / styles.css) so a stream's point color always
+  // agrees with its landmark picker's dot color
   const colors: Record<MMStream['kind'], Vec3> = {
-    POSE: [0.35, 0.8, 1], HAND_LEFT: [0.55, 1, 0.5], HAND_RIGHT: [0.55, 1, 0.5],
-    FACE: [1, 0.8, 0.35], IRIS: [1, 0.35, 0.55], CUSTOM: [0.55, 1, 0.5],
+    POSE: [0.478, 0.706, 1],      // #7ab4ff
+    HAND_LEFT: [0.478, 1, 0.6],   // #7aff99
+    HAND_RIGHT: [1, 0.478, 0.694], // #ff7ab1
+    FACE: [1, 0.984, 0.478],      // #fffb7a
+    IRIS: [1, 0.35, 0.55], CUSTOM: [0.55, 1, 0.5],
   };
   const isClip = source === 'CLIP';
   return {
