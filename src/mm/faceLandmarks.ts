@@ -57,7 +57,10 @@ const LIPS_CENTER: [number, number] = [150, 235];
 // radius on both loops and between them — the previous size read as
 // crowding the oval edge
 const LIPS_OUTER_R: [number, number] = [70, 56];
-const LIPS_INNER_R: [number, number] = [43, 42];
+// more elongated than a circle (an inner-mouth opening reads as an oval,
+// not a ring) — this is close to the most eccentric shape 20 points can
+// take at this dot size before they'd start crowding each other
+const LIPS_INNER_R: [number, number] = [56, 40];
 const IRIS_R = 18;
 
 const posMap = new Map<number, [number, number]>();

@@ -189,7 +189,10 @@ export function combinedBodyMapPicker(
   const wrap = document.createElement('div');
   wrap.className = 'pose-map';
 
-  const svg = svgEl('svg', { viewBox: '0 0 1400 1430', width: 270, height: 276 });
+  // The rotated hands (see below) reach further out horizontally than
+  // the old fingers-up layout did — viewBox widened (and shifted left)
+  // so both are fully inside it instead of clipped at the edges.
+  const svg = svgEl('svg', { viewBox: '-220 0 1810 1430', width: 350, height: 276 });
   svg.classList.add('pose-map-svg');
 
   const label = document.createElement('div');

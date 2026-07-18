@@ -1730,3 +1730,30 @@ now alongside the grid work above.)
   less cramped. Clicking a hand dot after the rotation change still
   correctly resolves to the right `(kind, landmark)` pair (`HAND_LEFT 4`
   for a thumb tip, `HAND_LEFT 10` for a middle-finger PIP).
+
+## Combined map: hands were clipped; more oval inner mouth; re-exported SVGs
+- Rotating the hands outward (prior entry) changed their reach without
+  anyone widening the viewBox to match — the fingers-up layout's
+  horizontal footprint was `200×handScale`, but rotated 90° the "long"
+  axis (finger length, ~`230×handScale`) now points sideways instead,
+  and the old `viewBox="0 0 1400 1430"` clipped both hands at the edges
+  (screenshotted by the user). Measured the actual on-screen bounding
+  box of all 176 dots live (transform-and-rotation-resolved, same
+  technique as the overlap checks) — content spans x -205..1575 — and
+  widened/shifted the viewBox to `-220 0 1810 1430` so it's fully
+  contained with margin.
+- Inner mouth was nearly circular (43×42, ratio 1.02) — grid-searched
+  for the most elongated `LIPS_INNER_R` that still keeps all 20 points
+  (and their distance to the outer lip loop) past `2×dotRadius`; more
+  eccentric shapes compress point spacing at the ellipse's flat ends, so
+  this is close to the practical ceiling at this dot count/size, not an
+  arbitrary pick — landed on 56×40 (ratio 1.4), a real visible
+  improvement over 1.02 without reopening the overlap bug two passes
+  ago.
+- Regenerated both reference SVGs (`docs/assets/mediamime-body-map.svg`,
+  `docs/assets/mediamime-body-map-large.svg`) against the current live
+  layout — they were a snapshot of an older pass and had drifted.
+  Verified live: full-dot-set overlap check still clean (only the two
+  wrist-anchor coincidences); opened the regenerated large SVG directly
+  in the browser and confirmed both hands render complete (no clipping)
+  and the inner mouth reads as a clear oval.
