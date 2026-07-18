@@ -8,7 +8,10 @@
 // authored ellipses in loop order) — not a pixel-accurate face template,
 // just readable at a glance, same spirit as poseLandmarks.ts.
 
-export const FACE_VIEWBOX = '0 0 220 260';
+export const FACE_VIEWBOX = '0 0 240 224';
+/** Dots here are much denser than pose/hand, so the picker draws them
+ *  smaller — see poseMap.ts's per-set dotRadius. */
+export const FACE_DOT_RADIUS = 3;
 
 // Ordered contour loops (MediaPipe's real index sequence per feature).
 const FACE_OVAL: number[] = [
@@ -37,15 +40,19 @@ function ellipseRing(cx: number, cy: number, rx: number, ry: number, n: number, 
   return out;
 }
 
-const OVAL_CENTER: [number, number] = [110, 130];
-const OVAL_R: [number, number] = [95, 115];
-const RIGHT_EYE_CENTER: [number, number] = [75, 110];
-const LEFT_EYE_CENTER: [number, number] = [145, 110];
-const EYE_R: [number, number] = [22, 12];
-const LIPS_CENTER: [number, number] = [110, 195];
-const LIPS_OUTER_R: [number, number] = [38, 16];
-const LIPS_INNER_R: [number, number] = [26, 9];
-const IRIS_R = 5;
+// Radii are sized so each loop's point-to-point spacing clears 2x the
+// (small) dot radius the picker draws these with — the previous, more
+// cramped layout put dots so close together within each feature that
+// they visually merged into a blob (screenshotted by the user).
+const OVAL_CENTER: [number, number] = [120, 112];
+const OVAL_R: [number, number] = [92, 88];
+const RIGHT_EYE_CENTER: [number, number] = [83, 88];
+const LEFT_EYE_CENTER: [number, number] = [157, 88];
+const EYE_R: [number, number] = [24, 14];
+const LIPS_CENTER: [number, number] = [120, 152];
+const LIPS_OUTER_R: [number, number] = [34, 15];
+const LIPS_INNER_R: [number, number] = [28, 11];
+const IRIS_R = 6;
 
 const posMap = new Map<number, [number, number]>();
 const nameMap = new Map<number, string>();

@@ -1590,3 +1590,44 @@ now alongside the grid work above.)
   21-point hand picker alongside the mediamime panel's combined map with
   no interference between the two. `npx tsc --noEmit` and
   `npx vite build` clean.
+
+## Combined body map: fix overlaps (vitruvian layout)
+- Follow-up to the combined map above: the face's eyes/lips were dense
+  enough to visually merge into a blob (screenshotted by the user), and
+  the full hand diagrams overlapped the pose's own crude hand-cluster
+  points (17-22) sitting at the same spot.
+- Root cause for the face: `addLandmarks` drew every dot at a fixed
+  `r=8` regardless of a feature's own point spacing — fine for pose/hand
+  (generous spacing) but the eye/lips loops' point-to-point distance was
+  well under `2*r`, so neighboring dots literally overlapped. Added a
+  per-`LandmarkSet` `dotRadius` (`faceLandmarks.ts` now also exports
+  `FACE_DOT_RADIUS = 3`) and reworked the face layout's ellipse radii
+  (`faceLandmarks.ts`) so every loop's spacing clears `2× dotRadius` with
+  margin — oval/eyes/lips/iris now read as distinct rings instead of
+  blobs. CSS gained `.pose-map-dot-sm` so hover/picked enlargement scales
+  down proportionally for these smaller dots too (`styles.css`).
+- Root cause for the hands: the combined pose sub-diagram still drew its
+  own ids 0-10 (crude face cluster) and 17-22 (crude hand cluster) right
+  where the detailed face/hand diagrams now sit — pure redundant clutter
+  once those exist. `combinedBodyMapPicker` (poseMap.ts) now uses a
+  dedicated `VITRUVIAN_POSE_POS` override (only ids 11-16, 23-32 —
+  shoulders/elbows/wrists/hips/knees/ankles/heels/foot-index) with arms
+  spread wide and legs apart, vitruvian-man style, instead of the
+  standalone picker's more compact hanging-arm layout — gives the
+  attached hands room to sit clear of the torso. `poseSet()` gained an
+  optional id filter (and now filters its edge list to match) so this
+  reduced point set doesn't drag in edges to now-absent points; the
+  standalone `poseMapPicker` (constraint/pen fields) is untouched and
+  still shows the full 33-point layout.
+- The pose wrist dot and the attached hand's own wrist dot (id 0) are
+  still placed exactly on top of each other by design — that's the same
+  anatomical point, not a layout bug.
+- Verified live: combined map now renders 176 dots (16 pose + 21×2 hands
+  + 118 face, screenshot confirms clean vitruvian-style separation — face
+  above with distinct oval/eyes/iris/lips, arms spread with hands clearly
+  past the elbows). Programmatic check (JS in the browser, resolving each
+  dot's transform-composed position and radius) found only two
+  intentional wrist coincidences and a handful of sub-2-unit touches
+  where the inner/outer lip loops naturally pinch at the mouth corners —
+  no other pair anywhere in the 176-dot set overlaps. `npx tsc --noEmit`
+  and `npx vite build` clean.
