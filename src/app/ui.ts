@@ -12,6 +12,7 @@ import { mediamime } from '../io/mediamime';
 import { mmCapture } from '../mm/capture';
 import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
+import { poseMapPicker } from './poseMap';
 import { deleteAsset, listAssets } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import type { ConstraintType, TGConstraint } from '../core/types';
@@ -2796,11 +2797,21 @@ export class UI {
           streamSel.append(el('option', { value: String(st.id), text: st.name }));
         }
         streamSel.value = c.streamId != null ? String(c.streamId) : '';
-        streamSel.onchange = () => { c.streamId = streamSel.value ? Number(streamSel.value) : null; };
+        // the landmark picker depends on the target stream's kind (body
+        // map only applies to POSE), so a stream change needs a rebuild
+        streamSel.onchange = () => { c.streamId = streamSel.value ? Number(streamSel.value) : null; this.refresh(); };
+        const targetStream = ctx.scene.mmStreams.find((s) => s.id === c.streamId);
         rows.push(
-          el('div', { class: 'row' }, 'Stream', streamSel,
-            numField('landmark', c.landmark ?? 0, (v) => { c.landmark = Math.max(0, Math.round(v)); }, 1)),
-          el('div', { class: 'row', text: 'pose: 0 nose · 15/16 wrists · hands: 8 index tip · iris: 0/5 eye centers' }),
+          el('div', { class: 'row' }, 'Stream', streamSel),
+          targetStream?.kind === 'POSE'
+            ? poseMapPicker(c.landmark ?? 0, (v) => { c.landmark = v; })
+            : el('div', { class: 'row' },
+                numField('landmark', c.landmark ?? 0, (v) => { c.landmark = Math.max(0, Math.round(v)); }, 1)),
+          el('div', {
+            class: 'row',
+            text: targetStream?.kind === 'POSE' ? 'click, pick, or drag a point on the body map'
+              : 'hands: 8 index tip · 4 thumb tip · 0 wrist · iris: 0/5 eye centers',
+          }),
         );
       } else if (c.type === 'TRIGGER') {
         const shape = ref.kind === 'MESH'
@@ -2935,11 +2946,14 @@ export class UI {
             st.pen.active = v;
             this.refresh();
           }),
-          ...(st.pen?.active ? [
+          ...(st.pen?.active && st.kind !== 'POSE' ? [
             numField('landmark', st.pen.landmark, (v) => { st.pen!.landmark = Math.max(0, Math.round(v)); }, 1),
+          ] : []),
+          ...(st.pen?.active ? [
             numField('min conf', st.pen.minConf, (v) => { st.pen!.minConf = Math.max(0, Math.min(1, v)); }, 0.05),
           ] : []),
         ),
+        ...(st.pen?.active && st.kind === 'POSE' ? [poseMapPicker(st.pen.landmark, (v) => { st.pen!.landmark = v; })] : []),
         ...(st.pen?.active ? [el('div', { class: 'row', text: `draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up` })] : []),
       ];
     });

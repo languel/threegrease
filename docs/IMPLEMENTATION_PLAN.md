@@ -1469,3 +1469,45 @@ now alongside the grid work above.)
   on Escape; a focused number field blurred; a fully-selected object
   deselected when nothing else was open/focused. `npx tsc --noEmit` and
   `npx vite build` both clean.
+
+## Visual body-map picker for MediaPipe Pose landmarks
+- Every landmark picker in the app was previously a bare
+  `numField('landmark', ...)` (raw 0-32 number input) next to a static
+  hint string — no name lookup, no visual reference. Replaced with a
+  clickable humanoid body-map for POSE-kind streams specifically (hands/
+  face keep the numeric field for now — noted as explicit follow-up work,
+  same shape once this is proven out).
+- `src/mm/poseLandmarks.ts`: the MediaPipe Pose 33-landmark topology as
+  data — `POSE_LANDMARK_NAMES` (index → readable name), `POSE_LANDMARK_POS`
+  (hand-authored humanoid layout in a fixed SVG viewBox — not a pixel
+  match to any particular capture, just reads as a body at a glance), and
+  `POSE_LANDMARK_EDGES` (MediaPipe's own `POSE_CONNECTIONS` pairs, so the
+  skeleton lines are topologically correct: face chains, arm/hand
+  triangles, torso, leg/foot triangles).
+- `src/app/poseMap.ts`: `poseMapPicker(value, onChange)` — inline SVG
+  (matches this codebase's icon-drawing convention in `icons.ts` over a
+  canvas approach, since this is a fixed diagram with real per-point DOM
+  nodes rather than something redrawn every frame). Three interchangeable
+  ways to pick, per the request: (1) click a dot, (2) pick from a `<select>`
+  of names below the map, (3) drag a dot and drop it back onto the widget.
+  Hover tooltip is a native SVG `<title>` child (matches the app's
+  existing native-`title`-attribute tooltip convention, no custom popover
+  component). Picked point highlighted in red; drag payload carries a
+  custom MIME (`POSE_LANDMARK_DRAG_MIME`, exported) alongside `text/plain`
+  so a future drop target elsewhere (e.g. a constraint/binding row) can
+  bind directly from a drag without touching the dropdown — scaffolding
+  for the requested "drag it where it needs to connect" once other rows
+  become drop targets too.
+- Wired into both existing landmark pickers, gated on the target
+  stream's `kind === 'POSE'` (falls back to the old numeric field
+  otherwise): the FOLLOW_STREAM constraint editor (`ui.ts` — the stream
+  `<select>` there now also triggers a refresh on change, since which
+  picker to show depends on the newly-selected stream's kind) and the
+  per-stream live "pen" landmark field.
+- Verified live: added a POSE stream, armed its pen — body map rendered
+  with all 33 dots and correct skeleton edges (screenshot); clicking a
+  dot, picking from the dropdown, and a simulated HTML5 drag-drop onto
+  the widget all correctly updated `st.pen.landmark` and the picked-dot
+  highlight; hover `<title>` text correct (`"15: left wrist"` etc.); a
+  HAND_LEFT stream added alongside still uses the plain numeric field
+  (kind gate confirmed). `npx tsc --noEmit` and `npx vite build` clean.
