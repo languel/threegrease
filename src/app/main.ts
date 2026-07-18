@@ -2291,10 +2291,15 @@ class App implements AppHandle {
       }
       entry.box.setFromObject(root);
       if (entry.box.isEmpty()) {
-        // matrix-driven objects (streams) keep .position at 0 — use the
-        // data-model world matrix for the fallback box center instead
+        // matrix-driven objects (streams/triggers) keep .position at 0 —
+        // use the data-model world matrix for the fallback box center
+        // instead. A full unit cube reads fine for those (no geometry of
+        // their own to size against) but is oversized for a genuinely
+        // empty GP object (no strokes yet) — use a small marker instead,
+        // matching Blender's "empty" display size.
         const center = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
-        entry.box.setFromCenterAndSize(center, new THREE.Vector3(1, 1, 1));
+        const size = ref.kind === 'GP' ? 0.15 : 1;
+        entry.box.setFromCenterAndSize(center, new THREE.Vector3(size, size, size));
       }
       const meshKind = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id)?.kind : undefined;
       const realEdges = meshKind ? meshEdgePositions(root, meshKind) : null;

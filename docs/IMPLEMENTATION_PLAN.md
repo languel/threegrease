@@ -1425,3 +1425,12 @@ now alongside the grid work above.)
   the `#app` class — with no regression on the pre-existing
   `alt+a`/`alt+p`/`alt+tab` bindings.
   `npx tsc --noEmit` and `npx vite build` both clean.
+- Follow-up: an empty GP object's selection outline (`syncSelectionGlyphs`,
+  main.ts) fell back to a hardcoded 1×1×1 box when `Box3.setFromObject`
+  found no geometry — sized right for matrix-driven objects with no mesh
+  of their own (streams/triggers), but a full unit cube towering over a
+  brand-new empty Pencil1 was clearly wrong. GP now gets a 0.15-unit
+  marker in that fallback instead, matching Blender's "empty" object
+  display size; streams/triggers keep the 1-unit box. Verified live
+  (screenshot): selecting a fresh strokeless Pencil1 now shows a small
+  compact outline instead of a room-sized cube.
