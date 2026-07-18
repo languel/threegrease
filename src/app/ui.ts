@@ -12,7 +12,7 @@ import { mediamime } from '../io/mediamime';
 import { mmCapture } from '../mm/capture';
 import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
-import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
+import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, RIG_KIND_PATH, type RigMapKind } from './poseMap';
 import { deleteAsset, listAssets } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import type { ConstraintType, TGConstraint } from '../core/types';
@@ -3114,6 +3114,22 @@ export class UI {
     const manualInput = el('input', { type: 'text', value: this.mmRigManualAddress, placeholder: `${mm.prefix || '/mp'}/iris/0` }) as HTMLInputElement;
     manualInput.onchange = () => { this.mmRigManualAddress = manualInput.value; this.refresh(); };
 
+    // dropdown alternative to clicking the body map — same (kind, id)
+    // space it draws dots for, so picking here or on the map keeps both
+    // in sync (both funnel through the same mmRigKind/mmRigLandmark
+    // state, and combinedBodyMapPicker's own ring highlight follows it)
+    const landmarkOptions = listRigLandmarks();
+    const landmarkSel = el('select') as HTMLSelectElement;
+    for (const [i, opt] of landmarkOptions.entries()) {
+      landmarkSel.append(el('option', { value: String(i), text: `${opt.kind} ${opt.id} · ${opt.name}` }));
+    }
+    const curLandmarkIdx = landmarkOptions.findIndex((o) => o.kind === this.mmRigKind && o.id === this.mmRigLandmark);
+    landmarkSel.value = curLandmarkIdx >= 0 ? String(curLandmarkIdx) : '';
+    landmarkSel.onchange = () => {
+      const opt = landmarkOptions[Number(landmarkSel.value)];
+      if (opt) { this.mmRigKind = opt.kind; this.mmRigLandmark = opt.id; this.refresh(); }
+    };
+
     const rigMapperRows: Node[] = [
       el('div', { class: 'row' },
         checkbox('manual address', this.mmRigManual, (v) => { this.mmRigManual = v; this.refresh(); },
@@ -3129,6 +3145,7 @@ export class UI {
       }),
       ...(rigTargets.length ? [el('div', { class: 'row' },
         eyedrop, targetSel,
+        ...(this.mmRigManual ? [] : [landmarkSel]),
         btn(icon('plus'), () => this.app.addMediaMimeTrigger(address, liveInfo?.pos ?? [0, 0, 0]),
           { cls: 'icon-btn', title: 'Trigger — spawn a trigger primitive rigged to this address' }),
       ), el('div', { class: 'row' },

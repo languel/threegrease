@@ -1907,3 +1907,36 @@ now alongside the grid work above.)
   canvas at the test mesh's screen position correctly attached it
   (`rigs: ["/mp/pose/0"]`) and exited picking mode automatically.
   `npx tsc --noEmit` and `npx vite build` both clean.
+
+## Landmark dropdown alongside the object picker, orange ring highlight
+- **Landmark dropdown, next to the object eyedropper/dropdown**:
+  `listRigLandmarks()` (poseMap.ts) exports every `(kind, id, name)` the
+  combined map covers — 176 entries: 16 pose + 21 per hand (including
+  each hand's own wrist, which has no dot of its own but is still a
+  distinct valid address) + 118 face. `mediamimePanel()`'s new
+  `landmarkSel` reads/writes the SAME `mmRigKind`/`mmRigLandmark` state
+  the body map itself is driven by, so picking on the map or from the
+  dropdown always agree — clicking a dot rebuilds the panel with that
+  option selected, picking from the dropdown rebuilds the panel with
+  the map's ring on that dot. No separate sync logic needed since both
+  paths write the same two fields and `this.refresh()` does the rest.
+  Hidden while `manual address` is checked (no body map to correspond
+  to in that mode).
+- **Orange ring instead of recoloring the dot**: previously "picked" on
+  the combined map reused the shared `.picked` CSS class (recolors the
+  dot red), which would have hidden the kind color the last few passes
+  specifically added. Replaced with a separate `<circle class="pose-map-
+  ring">` (stroke `#ff8c3b`, no fill, `r` = dot radius + 6) — one ring
+  per sub-diagram group (pose/handL/handR/face), living in that group's
+  own coordinate space so it's automatically transform-correct, shown/
+  hidden/repositioned by copying the target dot's own `cx`/`cy` rather
+  than recomputing position. The hand-wrist special case (no dot exists
+  for id 0) redirects the ring to the corresponding pose wrist dot,
+  matching where that address visually sits.
+- Verified live: clicking a map dot (left elbow) correctly set
+  `mmRigKind/mmRigLandmark` AND updated the dropdown's selected option
+  text to `"POSE 13 · left elbow"`; picking `"HAND_RIGHT 8 · index tip"`
+  from the dropdown moved the ring to `cx=50, cy=20`, exactly matching
+  that dot's own position; computed style confirmed the ring renders
+  `stroke: rgb(255,140,59)` (`#ff8c3b`), `fill: none`, `r: 18` vs. the
+  dot's `r: 12`. `npx tsc --noEmit` and `npx vite build` both clean.

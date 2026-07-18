@@ -188,6 +188,25 @@ export const RIG_KIND_PATH: Record<RigMapKind, string> = {
   POSE: 'pose', HAND_LEFT: 'hand/l', HAND_RIGHT: 'hand/r', FACE: 'face',
 };
 
+export interface RigLandmarkOption { kind: RigMapKind; id: number; name: string; }
+
+/** Every landmark selectable on the combined body map, for a companion
+ *  dropdown alongside it — same (kind, id) space `combinedBodyMapPicker`
+ *  draws dots for, including each hand's own wrist (id 0), which has no
+ *  dot of its own (it sits exactly on the pose wrist) but is still a
+ *  distinct, valid address. */
+export function listRigLandmarks(): RigLandmarkOption[] {
+  const out: RigLandmarkOption[] = [];
+  for (const id of Object.keys(VITRUVIAN_POSE_POS).map(Number).sort((a, b) => a - b)) {
+    out.push({ kind: 'POSE', id, name: POSE_LANDMARK_NAMES[id] ?? '?' });
+  }
+  for (const kind of ['HAND_LEFT', 'HAND_RIGHT'] as const) {
+    for (let id = 0; id < HAND_LANDMARK_POS.length; id++) out.push({ kind, id, name: HAND_LANDMARK_NAMES[id] ?? '?' });
+  }
+  for (const id of FACE_LANDMARK_IDS) out.push({ kind: 'FACE', id, name: FACE_LANDMARK_NAMES.get(id) ?? '?' });
+  return out;
+}
+
 /** CSS class per rig-map kind (styles.css), matching the reference SVGs
  *  in docs/assets/: left hand green, right hand pink, body blue, head
  *  yellow. A class (not an inline fill) so :hover/.picked in the same
@@ -279,9 +298,37 @@ export function combinedBodyMapPicker(
   const allDots = new Map<string, SVGCircleElement>();
   const key = (k: RigMapKind, id: number) => `${k}:${id}`;
 
+  // Highlight ring: a larger orange circle FRAMING the picked dot, rather
+  // than recoloring the dot itself (which would hide its kind color) —
+  // one ring per group, living in that group's own coordinate space so
+  // it tracks the group's transform, shown/hidden/repositioned on pick.
+  const groupScaleOf: Record<RigMapKind, number> = { POSE: 1, HAND_LEFT: handScale, HAND_RIGHT: handScale, FACE: faceScale };
+  const groupOf: Record<RigMapKind, SVGGElement> = { POSE: poseG, HAND_LEFT: leftHandG, HAND_RIGHT: rightHandG, FACE: faceG };
+  const ringOf: Record<RigMapKind, SVGCircleElement> = {} as Record<RigMapKind, SVGCircleElement>;
+  for (const k of ['POSE', 'HAND_LEFT', 'HAND_RIGHT', 'FACE'] as const) {
+    const ring = svgEl('circle', { r: (ON_SCREEN_DOT_R + 6) / groupScaleOf[k], class: 'pose-map-ring' });
+    ring.style.display = 'none';
+    groupOf[k].append(ring);
+    ringOf[k] = ring;
+  }
+  const showRing = (k: RigMapKind, id: number) => {
+    for (const rk of ['POSE', 'HAND_LEFT', 'HAND_RIGHT', 'FACE'] as const) ringOf[rk].style.display = 'none';
+    // a hand's own wrist (id 0) has no dot of its own — it sits exactly
+    // on the pose wrist, so frame that dot instead
+    const dot = (k === 'HAND_LEFT' && id === 0) ? allDots.get(key('POSE', 15))
+      : (k === 'HAND_RIGHT' && id === 0) ? allDots.get(key('POSE', 16))
+      : allDots.get(key(k, id));
+    if (!dot) return;
+    const ringKind = (k === 'HAND_LEFT' || k === 'HAND_RIGHT') && id === 0 ? 'POSE' : k;
+    const ring = ringOf[ringKind];
+    ring.setAttribute('cx', dot.getAttribute('cx')!);
+    ring.setAttribute('cy', dot.getAttribute('cy')!);
+    ring.style.display = '';
+  };
+
   const pick = (k: RigMapKind, id: number) => {
     onChange(k, id);
-    allDots.forEach((d, dk) => d.classList.toggle('picked', dk === key(k, id)));
+    showRing(k, id);
     label.textContent = `${k} ${id}`;
   };
 
@@ -304,7 +351,7 @@ export function combinedBodyMapPicker(
   wire(rightHandG, handSet(), 'HAND_RIGHT', handScale, (id) => id === 0);
   wire(faceG, faceSet(), 'FACE', faceScale, undefined, faceColorClass);
 
-  allDots.get(key(kind, landmark))?.classList.add('picked');
+  showRing(kind, landmark);
   label.textContent = `${kind} ${landmark}`;
 
   wrap.ondragover = (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
