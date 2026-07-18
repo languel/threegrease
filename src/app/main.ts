@@ -79,7 +79,7 @@ import {
   downloadScene, downloadText, importGPObjects, openSceneFile,
   remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
-import { drawingPlane, nearestStrokeEdgeAll, nearestStrokePointAll, objectToScreen, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
+import { drawingPlane, nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, objectToScreen, perpendicularFoot, raycastFaceTriangle, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
@@ -511,12 +511,28 @@ class App implements AppHandle {
       }
       // no stroke nearby: fall through to plane placement
     }
-    if (snap.enabled && snap.mode === 'EDGE') {
+    if (snap.enabled && (snap.mode === 'EDGE' || snap.mode === 'EDGE_CENTER' || snap.mode === 'EDGE_PERP')) {
       // continuous along the path — this is how the cursor rides a stroke
-      // freely instead of jumping vertex to vertex
-      const hit = nearestStrokeEdgeAll(ctx, clientX - rect.left, clientY - rect.top, 60, ctx.settings.snap.strokeScope ?? 'ANY');
-      if (hit) {
+      // freely instead of jumping vertex to vertex. CENTER locks to segment
+      // midpoints; PERP drops the foot of the perpendicular from where the
+      // cursor currently sits (its pre-move position).
+      const seg = nearestStrokeSegmentAll(ctx, clientX - rect.left, clientY - rect.top, 60, ctx.settings.snap.strokeScope ?? 'ANY');
+      if (seg) {
+        const hit = snap.mode === 'EDGE_CENTER' ? seg.a.clone().lerp(seg.b, 0.5)
+          : snap.mode === 'EDGE_PERP' ? perpendicularFoot(seg.a, seg.b, new THREE.Vector3(...ctx.scene.cursor))
+          : seg.a.clone().lerp(seg.b, seg.t);
         ctx.scene.cursor = [hit.x, hit.y, hit.z];
+        this.gp.markDirty();
+        return;
+      }
+    }
+    if (snap.enabled && (snap.mode === 'FACE_CENTER' || snap.mode === 'FACE_NEAREST')) {
+      const hit = raycastFaceTriangle(ctx, clientX, clientY);
+      if (hit) {
+        const p = new THREE.Vector3();
+        if (snap.mode === 'FACE_CENTER') hit.tri.getMidpoint(p);
+        else hit.tri.closestPointToPoint(new THREE.Vector3(...ctx.scene.cursor), p);
+        ctx.scene.cursor = [p.x, p.y, p.z];
         this.gp.markDirty();
         return;
       }
@@ -552,7 +568,10 @@ class App implements AppHandle {
     }
     const world = screenToWorld(ctx, clientX, clientY);
     if (!world) return;
-    if (snap.enabled && snap.mode === 'INCREMENT') {
+    // for a cursor CLICK there is no meaningful "relative increment", so
+    // INCREMENT and GRID both land on the absolute lattice (Blender does
+    // the same for cursor snapping)
+    if (snap.enabled && (snap.mode === 'INCREMENT' || snap.mode === 'GRID')) {
       const g = snapIncrement(ctx.settings);
       // Blender semantics: grid = the visible world floor grid, not a
       // lattice on the current drawing plane. Raycast the ground plane
@@ -1443,8 +1462,12 @@ class App implements AppHandle {
       const minorGeo = new THREE.BufferGeometry();
       minorGeo.setAttribute('position', new THREE.Float32BufferAttribute(minorPos, 3));
       if (s.gridSubdivStyle === 'dashed') {
+        // dash pattern scales with the MAJOR step (the grid unit), not the
+        // subdivision spacing: dash = gap = step/4, so the step/2 period
+        // tiles each major cell exactly twice and the dashes stay aligned
+        // with the grid at any subdivision count
         const dashMat = new THREE.LineDashedMaterial({
-          color: sub, transparent: true, dashSize: minorStep * 0.35, gapSize: minorStep * 0.35,
+          color: sub, transparent: true, dashSize: step / 4, gapSize: step / 4,
         });
         const minorLines = new THREE.LineSegments(minorGeo, dashMat);
         minorLines.computeLineDistances(); // required per-object for dashing
@@ -1545,9 +1568,18 @@ class App implements AppHandle {
     const snap = this.ctx.settings.snap;
     if (!snap.enabled || this.widget.mode !== 'translate') return;
     const p = this.widgetProxy.position;
-    if (snap.mode === 'INCREMENT') {
+    if (snap.mode === 'GRID') {
       const g = snapIncrement(this.ctx.settings);
       p.set(Math.round(p.x / g) * g, Math.round(p.y / g) * g, Math.round(p.z / g) * g);
+    } else if (snap.mode === 'INCREMENT') {
+      // relative: the DELTA from the drag start moves in step multiples
+      const g = snapIncrement(this.ctx.settings);
+      const base = this.widgetBase ? new THREE.Vector3(...this.widgetBase.proxy.translation) : new THREE.Vector3();
+      p.set(
+        base.x + Math.round((p.x - base.x) / g) * g,
+        base.y + Math.round((p.y - base.y) / g) * g,
+        base.z + Math.round((p.z - base.z) / g) * g,
+      );
     } else if (snap.mode === 'OBJECT') {
       const dragging = new Set(this.widgetBase?.refs.map((r) => `${r.kind}:${r.id}`));
       let best: THREE.Vector3 | null = null;

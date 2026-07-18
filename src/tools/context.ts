@@ -76,10 +76,18 @@ export interface Settings {
   showAxes: boolean;
   /** Blender-style magnet: one snap setting for transforms AND the 3D
    *  cursor (Shift+RMB drag). 'CANVAS' is a legacy alias for 'SURFACE'.
-   *  strokeScope limits POINT snapping to selected strokes only. */
+   *  strokeScope limits POINT snapping to selected strokes only.
+   *  Blender-parity targets: INCREMENT rounds transform DELTAS to step
+   *  multiples (relative); GRID snaps to the absolute grid lattice;
+   *  EDGE_CENTER = segment midpoints; EDGE_PERP = foot of perpendicular
+   *  from the pre-move position onto the nearest segment; SURFACE = Face
+   *  Project (along the view ray); FACE_CENTER = hit triangle centroid;
+   *  FACE_NEAREST = closest point on the hit face to the pre-move
+   *  position. */
   snap: {
     enabled: boolean;
-    mode: 'INCREMENT' | 'POINT' | 'EDGE' | 'CANVAS' | 'OBJECT' | 'SURFACE';
+    mode: 'INCREMENT' | 'GRID' | 'POINT' | 'EDGE' | 'EDGE_CENTER' | 'EDGE_PERP'
+      | 'CANVAS' | 'OBJECT' | 'SURFACE' | 'FACE_CENTER' | 'FACE_NEAREST';
     strokeScope?: 'ANY' | 'SELECTED';
   };
 }

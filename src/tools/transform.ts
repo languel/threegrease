@@ -3,7 +3,7 @@ import type { CanvasPlane, GPPoint, Vec3 } from '../core/types';
 import { falloff } from '../core/mathutil';
 import { snapIncrement, type AppCtx } from './context';
 import { forEachEditableStroke, selectedPoints } from './select';
-import { nearestStrokeEdgeAll, nearestStrokePointAll, objectToScreen, objectToWorld, pickCanvas, raycastSurfaces, screenToWorld, worldToObject } from './projection';
+import { nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, objectToScreen, objectToWorld, perpendicularFoot, pickCanvas, raycastFaceTriangle, raycastSurfaces, screenToWorld, worldToObject } from './projection';
 import { allRefs, worldMatrixOf } from './objects';
 
 type TransformKind = 'move' | 'rotate' | 'scale' | 'shear';
@@ -154,14 +154,32 @@ export class ModalTransform {
     ];
     let target: Vec3 | null = null;
     if (snap.mode === 'INCREMENT') {
+      // relative: the delta itself moves in step multiples
+      const g = snapIncrement(ctx.settings);
+      return delta.map((v) => Math.round(v / g) * g) as Vec3;
+    } else if (snap.mode === 'GRID') {
       const g = snapIncrement(ctx.settings);
       target = moved.map((v) => Math.round(v / g) * g) as Vec3;
     } else if (snap.mode === 'POINT') {
       const world = nearestStrokePointAll(ctx, pointer.x, pointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
       if (world) target = worldToObject(ctx, world);
-    } else if (snap.mode === 'EDGE') {
-      const world = nearestStrokeEdgeAll(ctx, pointer.x, pointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
-      if (world) target = worldToObject(ctx, world);
+    } else if (snap.mode === 'EDGE' || snap.mode === 'EDGE_CENTER' || snap.mode === 'EDGE_PERP') {
+      const seg = nearestStrokeSegmentAll(ctx, pointer.x, pointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
+      if (seg) {
+        const world = snap.mode === 'EDGE_CENTER' ? seg.a.clone().lerp(seg.b, 0.5)
+          : snap.mode === 'EDGE_PERP' ? perpendicularFoot(seg.a, seg.b, objectToWorld(ctx, this.centerLocal))
+          : seg.a.clone().lerp(seg.b, seg.t);
+        target = worldToObject(ctx, world);
+      }
+    } else if (snap.mode === 'FACE_CENTER' || snap.mode === 'FACE_NEAREST') {
+      const rect = ctx.canvas.getBoundingClientRect();
+      const hit = raycastFaceTriangle(ctx, pointer.x + rect.left, pointer.y + rect.top);
+      if (hit) {
+        const p = new THREE.Vector3();
+        if (snap.mode === 'FACE_CENTER') hit.tri.getMidpoint(p);
+        else hit.tri.closestPointToPoint(objectToWorld(ctx, this.centerLocal), p);
+        target = worldToObject(ctx, p);
+      }
     } else if (snap.mode === 'SURFACE' || snap.mode === 'CANVAS') {
       const rect = ctx.canvas.getBoundingClientRect();
       const hit = raycastSurfaces(ctx, pointer.x + rect.left, pointer.y + rect.top)

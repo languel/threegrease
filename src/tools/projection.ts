@@ -204,9 +204,21 @@ export function nearestStrokeEdgeAll(
   ctx: AppCtx, screenX: number, screenY: number, radius = 40,
   scope: 'ANY' | 'SELECTED' = 'ANY',
 ): THREE.Vector3 | null {
+  const seg = nearestStrokeSegmentAll(ctx, screenX, screenY, radius, scope);
+  return seg ? seg.a.clone().lerp(seg.b, seg.t) : null;
+}
+
+/** Like nearestStrokeEdgeAll, but returns the winning SEGMENT (world-space
+ *  endpoints + the parametric t of the nearest point) so callers can derive
+ *  midpoints (Edge Center snap) or perpendicular feet (Edge Perpendicular
+ *  snap) instead of just the nearest point. */
+export function nearestStrokeSegmentAll(
+  ctx: AppCtx, screenX: number, screenY: number, radius = 40,
+  scope: 'ANY' | 'SELECTED' = 'ANY',
+): { a: THREE.Vector3; b: THREE.Vector3; t: number } | null {
   const rect = ctx.canvas.getBoundingClientRect();
   const projected = new THREE.Vector3();
-  let best: { d: number; world: THREE.Vector3 } | null = null;
+  let best: { d: number; a: THREE.Vector3; b: THREE.Vector3; t: number } | null = null;
   for (const ob of ctx.scene.objects) {
     const matrix = new THREE.Matrix4().compose(
       new THREE.Vector3(...ob.translation),
@@ -237,13 +249,23 @@ export function nearestStrokeEdgeAll(
           const sx = a.sx + abx * t, sy = a.sy + aby * t;
           const d = Math.hypot(sx - screenX, sy - screenY);
           if (d < radius && (!best || d < best.d)) {
-            best = { d, world: a.world.clone().lerp(b.world, t) };
+            best = { d, a: a.world, b: b.world, t };
           }
         }
       }
     }
   }
-  return best?.world ?? null;
+  return best ? { a: best.a, b: best.b, t: best.t } : null;
+}
+
+/** Foot of the perpendicular from `from` onto the segment [a,b] (clamped) —
+ *  the Edge Perpendicular snap target: the landing point depends on where
+ *  the element STARTED, not where the pointer is. */
+export function perpendicularFoot(a: THREE.Vector3, b: THREE.Vector3, from: THREE.Vector3): THREE.Vector3 {
+  const ab = b.clone().sub(a);
+  const len2 = ab.lengthSq();
+  const t = len2 < 1e-12 ? 0 : THREE.MathUtils.clamp(from.clone().sub(a).dot(ab) / len2, 0, 1);
+  return a.clone().addScaledVector(ab, t);
 }
 
 /**
@@ -317,6 +339,30 @@ export function raycastSurfaces(ctx: AppCtx, x: number, y: number): THREE.Vector
   raycaster.setFromCamera(ndc, ctx.camera);
   const hits = raycaster.intersectObjects(ctx.surfaces, true);
   return hits.length ? hits[0].point.clone() : null;
+}
+
+/** Screen px -> the mesh TRIANGLE under the pointer (world-space), for the
+ *  Face Center / Face Nearest snap targets. Falls back to null when the hit
+ *  has no face (splats, points). */
+export function raycastFaceTriangle(ctx: AppCtx, x: number, y: number): { point: THREE.Vector3; tri: THREE.Triangle } | null {
+  if (!ctx.surfaces.length) return null;
+  const rect = ctx.canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(
+    ((x - rect.left) / rect.width) * 2 - 1,
+    -((y - rect.top) / rect.height) * 2 + 1,
+  );
+  raycaster.setFromCamera(ndc, ctx.camera);
+  for (const h of raycaster.intersectObjects(ctx.surfaces, true)) {
+    const mesh = h.object as THREE.Mesh;
+    if (!h.face || !(mesh as { isMesh?: boolean }).isMesh) continue;
+    const pos = mesh.geometry.getAttribute('position');
+    if (!pos) continue;
+    const va = new THREE.Vector3().fromBufferAttribute(pos, h.face.a).applyMatrix4(mesh.matrixWorld);
+    const vb = new THREE.Vector3().fromBufferAttribute(pos, h.face.b).applyMatrix4(mesh.matrixWorld);
+    const vc = new THREE.Vector3().fromBufferAttribute(pos, h.face.c).applyMatrix4(mesh.matrixWorld);
+    return { point: h.point.clone(), tri: new THREE.Triangle(va, vb, vc) };
+  }
+  return null;
 }
 
 /** Screen px -> point on drawing plane (or surface), in world space. */

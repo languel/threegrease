@@ -114,8 +114,71 @@ input[type="checkbox"]:checked {
 .panel > h3 {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--dim); padding: 6px 8px; cursor: pointer;
+  display: flex; align-items: center; gap: 5px; user-select: none;
 }
+.panel-caret {
+  display: inline-block; font-size: 10px; transition: transform 0.1s;
+  transform: rotate(90deg); /* open */
+}
+.panel.collapsed .panel-caret { transform: rotate(0deg); }
+.panel.collapsed > .body { display: none; }
 .panel > .body { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 5px; }
+
+/* ---- Blender-style drag-number widget ---- */
+.numdrag {
+  position: relative; display: inline-flex; align-items: stretch;
+  min-width: 64px; height: 21px; border-radius: 4px; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--border);
+  color: var(--text); font-size: 11px; user-select: none;
+  cursor: ew-resize; touch-action: none;
+}
+.numdrag.fill { width: 116px; }
+.numdrag:hover { background: #383840; border-color: #4a4a52; }
+.numdrag.dragging { background: #383840; }
+.numdrag-fillbar {
+  position: absolute; inset: 0 auto 0 0; background: var(--accent);
+  opacity: 0.32; pointer-events: none;
+}
+.numdrag:hover .numdrag-fillbar { opacity: 0.42; }
+.numdrag-center {
+  position: relative; flex: 1; min-width: 0; display: flex; align-items: center;
+  justify-content: space-between; gap: 6px; padding: 0 3px; overflow: hidden;
+}
+.numdrag.nolabel .numdrag-center { justify-content: center; }
+.numdrag-label {
+  color: var(--dim); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; pointer-events: none;
+}
+.numdrag-value { position: relative; white-space: nowrap; pointer-events: none; }
+.numdrag-arrow {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 0; opacity: 0; color: var(--dim); font-size: 13px; line-height: 1;
+  transition: opacity 0.08s; flex-shrink: 0; cursor: pointer;
+}
+.numdrag:hover .numdrag-arrow { width: 12px; opacity: 1; }
+.numdrag-arrow:hover { color: var(--text); background: #45454e; }
+.numdrag.editing .numdrag-arrow, .numdrag.editing .numdrag-center { visibility: hidden; }
+.numdrag-input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  background: var(--panel); color: var(--text); border: none; outline: none;
+  border-radius: 3px; padding: 0 4px; font: inherit; text-align: center;
+  cursor: text;
+}
+
+/* ---- floating context menu (number fields) ---- */
+.ctxmenu {
+  position: fixed; z-index: 1000; min-width: 180px;
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); font-size: 12px;
+}
+.ctxmenu-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 4px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap;
+}
+.ctxmenu-item:hover { background: var(--accent); color: #fff; }
+.ctxmenu-item:hover .ctxmenu-hint { color: #dce7ff; }
+.ctxmenu-hint { color: var(--dim); font-size: 10px; }
+.ctxmenu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 .row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .row.spread { justify-content: space-between; }
 .list-item {

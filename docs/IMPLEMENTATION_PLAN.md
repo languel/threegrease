@@ -2038,3 +2038,58 @@ now alongside the grid work above.)
   checkbox is the 5th child of the top row — after the name, before the
   record button — with an empty label and the full description as its
   tooltip. `npx tsc --noEmit` and `npx vite build` both clean.
+
+## UI aesthetic pass: Blender-style number fields, expanded snap targets, grid dashes
+
+- **Blender-style drag-number widget replaces every numeric input**
+  (`dragNumber()` in `src/app/ui.ts`; `slider()` and `numField()` are now
+  thin wrappers over it, so all ~90 call sites converted without
+  signature changes — no `<input type=range>` sliders remain). Label
+  left / value right in one flat box, Blender-justified. Hover changes
+  the background and reveals ‹ › nudge arrows; click-drag scrubs
+  (2px/step, quantized to step; Shift = ×0.1 fine); plain click opens
+  type-in editing (Enter commits, Esc cancels, blur commits);
+  Backspace while hovering resets to the default (when the call site
+  provides one via the new `def` option); right-click opens a context
+  menu: Reset to Default Value (Backspace hint), Copy Value, and — when
+  the call site passes a routional dot-path via the new `route` option —
+  Add Route, which creates a `TGRoute` bound to that path and jumps to
+  the Bindings tab (`numAddRouteHook`, set by the UI constructor).
+  Sliders keep min/max as an accent fill bar. The N-panel inspector's
+  300ms auto-rebuild now also pauses while a widget is being scrubbed
+  (`numDragActive`) so periodic rebuilds can't kill a pointer-captured
+  drag. Topbar brush Size/Strength carry `def` + `route`
+  (`brush.size`/`brush.strength`); the capture playback-rate raw range
+  input became a slider with `def: 1`.
+- **Collapsible panel subsections persist**: `panel()` headers gained a
+  rotating caret and store collapsed state per title in localStorage
+  (`threegrease.panels`), surviving refreshes and sessions.
+- **Blender-parity snap targets**: `settings.snap.mode` extended with
+  `GRID`, `EDGE_CENTER`, `EDGE_PERP`, `FACE_CENTER`, `FACE_NEAREST`.
+  INCREMENT is now RELATIVE (transform deltas move in step multiples,
+  Blender semantics) while GRID snaps to the absolute lattice — for a
+  cursor click both land on the lattice. New projection.ts helpers:
+  `nearestStrokeSegmentAll` (returns the winning segment so callers
+  derive midpoints/perpendicular feet; `nearestStrokeEdgeAll` is now a
+  wrapper), `perpendicularFoot`, and `raycastFaceTriangle` (world-space
+  hit triangle for Face Center = centroid / Face Nearest = closest
+  point on the hit face to the pre-move position). Wired into all four
+  consumers: 3D-cursor placement (`App.placeCursor`), edit-mode point
+  transforms (`transform.ts snapDelta`), object-modal G moves
+  (`objectmodal.ts snapMoveDelta`), and the translate widget
+  (`App.snapWidgetPosition`, INCREMENT/GRID). Topbar dropdown lists all
+  ten targets with Blender names (SURFACE relabeled "Face Project");
+  the stroke-scope sub-select now also shows for the new edge modes.
+- **Grid subdivision dashes scale with the grid unit**: dash = gap =
+  gridStep/4 (was 0.35 × the subdivision spacing), so the step/2 period
+  tiles each major cell exactly twice and dashes stay aligned with the
+  grid at any subdivision count.
+- Verified live: topbar Size box scrubbed 8→33 (quantized to step 1),
+  Backspace-on-hover reset it to 8, click-type "12.5" committed on
+  blur, right-click menu rendered all three items and Add Route created
+  a `brush.size` route + switched to the Bindings tab; snap dropdown
+  enumerates all 10 modes; Routes panel collapsed state survived a
+  `ui.refresh()` and was stored in localStorage; grid dashes render
+  long and grid-aligned; drew a stroke to confirm the draw path still
+  works (2 points, no NaN). `npx tsc --noEmit` and `npx vite build`
+  both clean.

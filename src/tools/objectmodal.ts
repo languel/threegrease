@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { snapIncrement, type AppCtx } from './context';
 import { getObjectTransform, listSelected, selectionPivot, setObjectTransform, type ObjRef, type ObjTransform } from './objects';
-import { nearestStrokeEdgeAll, nearestStrokePointAll, raycastSurfaces } from './projection';
+import { nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, perpendicularFoot, raycastFaceTriangle, raycastSurfaces } from './projection';
 import { allRefs, worldMatrixOf } from './objects';
 
 export type ObjModalKind = 'move' | 'rotate' | 'scale';
@@ -237,13 +237,31 @@ export class ObjectModalTransform {
     const moved = this.pivot.clone().add(d);
     let target: THREE.Vector3 | null = null;
     if (mode === 'INCREMENT') {
+      // relative: the delta moves in step multiples
+      const g = snapIncrement(ctx.settings);
+      return new THREE.Vector3(
+        Math.round(d.x / g) * g, Math.round(d.y / g) * g, Math.round(d.z / g) * g);
+    } else if (mode === 'GRID') {
       const g = snapIncrement(ctx.settings);
       target = new THREE.Vector3(
         Math.round(moved.x / g) * g, Math.round(moved.y / g) * g, Math.round(moved.z / g) * g);
     } else if (mode === 'POINT') {
       target = nearestStrokePointAll(ctx, this.lastPointer.x, this.lastPointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
-    } else if (mode === 'EDGE') {
-      target = nearestStrokeEdgeAll(ctx, this.lastPointer.x, this.lastPointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
+    } else if (mode === 'EDGE' || mode === 'EDGE_CENTER' || mode === 'EDGE_PERP') {
+      const seg = nearestStrokeSegmentAll(ctx, this.lastPointer.x, this.lastPointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
+      if (seg) {
+        target = mode === 'EDGE_CENTER' ? seg.a.clone().lerp(seg.b, 0.5)
+          : mode === 'EDGE_PERP' ? perpendicularFoot(seg.a, seg.b, this.pivot)
+          : seg.a.clone().lerp(seg.b, seg.t);
+      }
+    } else if (mode === 'FACE_CENTER' || mode === 'FACE_NEAREST') {
+      const rect = ctx.canvas.getBoundingClientRect();
+      const hit = raycastFaceTriangle(ctx, this.lastPointer.x + rect.left, this.lastPointer.y + rect.top);
+      if (hit) {
+        target = new THREE.Vector3();
+        if (mode === 'FACE_CENTER') hit.tri.getMidpoint(target);
+        else hit.tri.closestPointToPoint(this.pivot, target);
+      }
     } else if (mode === 'SURFACE' || mode === 'CANVAS') {
       const rect = ctx.canvas.getBoundingClientRect();
       target = raycastSurfaces(ctx, this.lastPointer.x + rect.left, this.lastPointer.y + rect.top);

@@ -146,18 +146,209 @@ function btn(label: string | Node, onclick: () => void, opts: { active?: boolean
   return b;
 }
 
-function slider(
-  label: string, value: number, min: number, max: number, step: number, onInput: (v: number) => void,
-): HTMLElement {
-  const input = el('input', { type: 'range', min, max, step, value }) as HTMLInputElement;
-  input.oninput = () => onInput(parseFloat(input.value));
-  return el('label', { class: 'inline' }, label, input);
+// ---- Blender-style drag-number widget -------------------------------------
+// One widget for every numeric input: label left / value right in a flat
+// box; hover reveals ‹ › nudge arrows; click-drag scrubs (Shift = fine),
+// plain click types; Backspace while hovering resets to default; right-
+// click opens a context menu (reset / copy / route to routional).
+
+interface NumOpts {
+  step?: number;
+  min?: number;
+  max?: number;
+  /** reset target for Backspace-on-hover and the context menu */
+  def?: number;
+  /** draw a range fill bar (the slider look) — needs min+max */
+  fill?: boolean;
+  /** routional dot-path (e.g. 'brush.size') → "Add Route" in the menu */
+  route?: string;
+  title?: string;
 }
 
-function numField(label: string, value: number, onChange: (v: number) => void, step = 0.1): HTMLElement {
-  const input = el('input', { type: 'number', value: Math.round(value * 1000) / 1000, step }) as HTMLInputElement;
-  input.onchange = () => onChange(parseFloat(input.value) || 0);
-  return el('label', { class: 'inline' }, label, input);
+/** reset action of the widget currently under the pointer (Backspace) */
+let hoveredNumReset: (() => void) | null = null;
+let numKeysBound = false;
+/** true while any drag-number widget is being scrubbed — periodic DOM
+ *  rebuilds (the N-panel inspector refresh) must not run mid-drag or
+ *  they'd remove the pointer-captured element out from under the user */
+let numDragActive = false;
+
+function isTextEditable(t: EventTarget | null): boolean {
+  const e = t as HTMLElement | null;
+  return !!e && (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.tagName === 'SELECT' || e.isContentEditable);
+}
+
+/** Minimal floating context menu; closes on outside pointer / Esc. */
+function popupMenu(x: number, y: number, items: { label: string; hint?: string; do?: () => void }[]): void {
+  const menu = el('div', { class: 'ctxmenu' });
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('pointerdown', onDoc, true);
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onDoc = (e: PointerEvent) => { if (!menu.contains(e.target as Node)) close(); };
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  for (const it of items) {
+    if (!it.do) { menu.append(el('div', { class: 'ctxmenu-sep' })); continue; }
+    const row = el('div', { class: 'ctxmenu-item' },
+      el('span', { text: it.label }),
+      ...(it.hint ? [el('span', { class: 'ctxmenu-hint', text: it.hint })] : []));
+    row.onclick = () => { close(); it.do!(); };
+    menu.append(row);
+  }
+  document.body.append(menu);
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.min(x, window.innerWidth - r.width - 4)}px`;
+  menu.style.top = `${Math.min(y, window.innerHeight - r.height - 4)}px`;
+  document.addEventListener('pointerdown', onDoc, true);
+  document.addEventListener('keydown', onKey, true);
+}
+
+/** Set by the UI instance so number widgets can create routional routes. */
+let numAddRouteHook: ((target: string) => void) | null = null;
+
+function dragNumber(label: string, value: number, onChange: (v: number) => void, opts: NumOpts = {}): HTMLElement {
+  const step = opts.step ?? 0.1;
+  const decimals = Math.min(4, Math.max(0, Math.ceil(-Math.log10(step) - 1e-9)));
+  const clamp = (v: number) => Math.min(opts.max ?? Infinity, Math.max(opts.min ?? -Infinity, v));
+  const fmt = (v: number) => v.toFixed(decimals);
+  let cur = clamp(value);
+
+  const hasFill = !!opts.fill && opts.min !== undefined && opts.max !== undefined;
+  const wrap = el('div', { class: `numdrag${hasFill ? ' fill' : ''}${label ? '' : ' nolabel'}` });
+  if (opts.title) wrap.title = opts.title;
+  const fillBar = hasFill ? el('div', { class: 'numdrag-fillbar' }) : null;
+  const valEl = el('span', { class: 'numdrag-value', text: fmt(cur) });
+  const center = el('span', { class: 'numdrag-center' },
+    ...(label ? [el('span', { class: 'numdrag-label', text: label })] : []), valEl);
+  const arrowL = el('span', { class: 'numdrag-arrow', text: '‹' });
+  const arrowR = el('span', { class: 'numdrag-arrow', text: '›' });
+  if (fillBar) wrap.append(fillBar);
+  wrap.append(arrowL, center, arrowR);
+
+  const syncFill = () => {
+    if (fillBar) fillBar.style.width = `${((cur - opts.min!) / (opts.max! - opts.min!)) * 100}%`;
+  };
+  syncFill();
+  const set = (v: number) => {
+    if (!Number.isFinite(v)) return;
+    cur = clamp(Math.round(v * 1e6) / 1e6);
+    valEl.textContent = fmt(cur);
+    syncFill();
+    onChange(cur);
+  };
+
+  // -- type-in editing --
+  const beginEdit = () => {
+    if (wrap.querySelector('.numdrag-input')) return;
+    wrap.classList.add('editing');
+    const input = el('input', { type: 'text', class: 'numdrag-input', value: String(cur) }) as HTMLInputElement;
+    let cancelled = false;
+    input.onblur = () => {
+      if (!cancelled) {
+        const v = parseFloat(input.value);
+        if (Number.isFinite(v)) set(v);
+      }
+      input.remove();
+      wrap.classList.remove('editing');
+    };
+    input.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') input.blur();
+      else if (e.key === 'Escape') { cancelled = true; input.blur(); }
+    };
+    wrap.append(input);
+    input.focus();
+    input.select();
+  };
+
+  // -- scrub drag / click / arrow nudge --
+  let startX = 0, startVal = 0, dragging = false, pid = -1;
+  wrap.onpointerdown = (e) => {
+    if (e.button !== 0 || isTextEditable(e.target)) return;
+    e.preventDefault();
+    pid = e.pointerId;
+    startX = e.clientX;
+    startVal = cur;
+    dragging = false;
+    numDragActive = true;
+    wrap.setPointerCapture(pid);
+  };
+  wrap.onpointercancel = (e) => {
+    if (pid !== e.pointerId) return;
+    pid = -1;
+    dragging = false;
+    numDragActive = false;
+    wrap.classList.remove('dragging');
+  };
+  wrap.onpointermove = (e) => {
+    if (pid !== e.pointerId || e.buttons === 0) return;
+    const dx = e.clientX - startX;
+    if (!dragging && Math.abs(dx) > 3) { dragging = true; wrap.classList.add('dragging'); }
+    if (!dragging) return;
+    const fine = e.shiftKey ? 0.1 : 1;
+    if (hasFill) {
+      const raw = startVal + (dx / Math.max(40, wrap.clientWidth)) * (opts.max! - opts.min!) * fine;
+      set(Math.round(raw / step) * step); // quantize to step, Blender-style
+    } else {
+      set(startVal + Math.round(dx / 2) * step * fine);
+    }
+  };
+  wrap.onpointerup = (e) => {
+    if (pid !== e.pointerId) return;
+    wrap.releasePointerCapture(pid);
+    pid = -1;
+    numDragActive = false;
+    if (dragging) { dragging = false; wrap.classList.remove('dragging'); return; }
+    const nudge = (dir: number) => set(cur + dir * step * (e.shiftKey ? 0.1 : 1));
+    if (e.target === arrowL) nudge(-1);
+    else if (e.target === arrowR) nudge(1);
+    else beginEdit();
+  };
+
+  // -- Backspace-on-hover reset (Blender semantics) --
+  const reset = opts.def !== undefined ? () => set(opts.def!) : null;
+  wrap.onpointerenter = () => { hoveredNumReset = reset; };
+  wrap.onpointerleave = () => { if (hoveredNumReset === reset) hoveredNumReset = null; };
+  if (!numKeysBound) {
+    numKeysBound = true;
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && hoveredNumReset && !isTextEditable(e.target)) {
+        e.preventDefault();
+        hoveredNumReset();
+      }
+    });
+  }
+
+  // -- right-click context menu --
+  wrap.oncontextmenu = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const items: { label: string; hint?: string; do?: () => void }[] = [];
+    if (reset) items.push({ label: 'Reset to Default Value', hint: 'Backspace', do: reset });
+    items.push({ label: 'Copy Value', do: () => { void navigator.clipboard?.writeText(String(cur)); } });
+    if (opts.route && numAddRouteHook) {
+      items.push({ label: '' }); // separator
+      items.push({ label: 'Add Route', hint: 'routional', do: () => numAddRouteHook!(opts.route!) });
+    }
+    popupMenu(e.clientX, e.clientY, items);
+  };
+
+  return wrap;
+}
+
+function slider(
+  label: string, value: number, min: number, max: number, step: number, onInput: (v: number) => void,
+  opts: Pick<NumOpts, 'def' | 'route' | 'title'> = {},
+): HTMLElement {
+  return dragNumber(label, value, onInput, { step, min, max, fill: true, ...opts });
+}
+
+function numField(
+  label: string, value: number, onChange: (v: number) => void, step = 0.1,
+  opts: Omit<NumOpts, 'step'> = {},
+): HTMLElement {
+  return dragNumber(label, value, onChange, { step, ...opts });
 }
 
 function checkbox(label: string, value: boolean, onChange: (v: boolean) => void, title?: string): HTMLElement {
@@ -210,11 +401,26 @@ function iconLabel(iconName: IconName, text: string): HTMLElement {
   return el('span', { class: 'icon-label' }, icon(iconName, 14), text);
 }
 
+/** Collapsed-state store for panel subsections (keyed by title), so a
+ *  minimized section stays minimized across refreshes and sessions. */
+const PANEL_STATE_KEY = 'threegrease.panels';
+function panelCollapsed(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(PANEL_STATE_KEY) ?? '{}') as Record<string, boolean>; }
+  catch { return {}; }
+}
+
 function panel(title: string, ...children: (Node | string)[]): HTMLElement {
   const body = el('div', { class: 'body' }, ...children);
-  const h = el('h3', { text: title });
-  h.onclick = () => { body.style.display = body.style.display === 'none' ? '' : 'none'; };
-  return el('div', { class: 'panel' }, h, body);
+  const h = el('h3', {}, el('span', { class: 'panel-caret', text: '▸' }), title);
+  const root = el('div', { class: `panel${panelCollapsed()[title] ? ' collapsed' : ''}` }, h, body);
+  h.onclick = () => {
+    root.classList.toggle('collapsed');
+    const state = panelCollapsed();
+    if (root.classList.contains('collapsed')) state[title] = true;
+    else delete state[title];
+    localStorage.setItem(PANEL_STATE_KEY, JSON.stringify(state));
+  };
+  return root;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,12 +455,22 @@ export class UI {
   constructor(app: AppHandle) {
     this.app = app;
     this.tlCanvas = el('canvas');
+    // number-widget context menu "Add Route": create a routional route
+    // bound to the field's dot-path and jump to the Bindings tab
+    numAddRouteHook = (target) => {
+      const ctx = this.app.ctx;
+      ctx.pushUndo();
+      const r = createRoute(scoreId(ctx.scene));
+      r.target = target;
+      ctx.scene.routes.push(r);
+      this.openTab('bindings');
+    };
     this.buildTimelineShell();
     this.initHoverTips();
     this.refresh();
     // live values (camera position etc.) — skip while the user types in it
     setInterval(() => {
-      if (this.inspectorOpen && !this.inspectorEl?.contains(document.activeElement)) {
+      if (this.inspectorOpen && !numDragActive && !this.inspectorEl?.contains(document.activeElement)) {
         this.rebuildInspector();
       }
       this.refreshMonitor();
@@ -531,8 +747,8 @@ export class UI {
             s.brush.style = { ...p.style };
             this.refresh();
           }),
-        slider('Size', s.brush.size, 1, 80, 1, (v) => { s.brush.size = v; }),
-        slider('Strength', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }),
+        slider('Size', s.brush.size, 1, 80, 1, (v) => { s.brush.size = v; }, { def: 8, route: 'brush.size' }),
+        slider('Strength', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }, { def: 1, route: 'brush.strength' }),
         selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['STROKE', 'Stroke']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
         ...(s.placement === 'SURFACE' ? [
           numField('Offset', s.surfaceOffset, (v) => { s.surfaceOffset = v; }, 0.01),
@@ -591,10 +807,12 @@ export class UI {
     bar.append(
       iconCheckbox(icon('magnet'), 'Magnet snapping', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
       selectField('', s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode, [
-        ['INCREMENT', 'Grid'], ['POINT', 'Vertex'], ['EDGE', 'Edge (along path)'],
-        ['OBJECT', 'Object origin'], ['SURFACE', 'Surface (mesh/3DGS)'],
+        ['INCREMENT', 'Increment'], ['GRID', 'Grid'], ['POINT', 'Vertex'],
+        ['EDGE', 'Edge'], ['EDGE_CENTER', 'Edge Center'], ['EDGE_PERP', 'Edge Perpendicular'],
+        ['SURFACE', 'Face Project'], ['FACE_CENTER', 'Face Center'], ['FACE_NEAREST', 'Face Nearest'],
+        ['OBJECT', 'Object Origin'],
       ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); }),
-      ...(s.snap.mode === 'POINT' || s.snap.mode === 'EDGE' ? [
+      ...(['POINT', 'EDGE', 'EDGE_CENTER', 'EDGE_PERP'].includes(s.snap.mode) ? [
         selectField('', s.snap.strokeScope ?? 'ANY', [
           ['ANY', 'Any GP'], ['SELECTED', 'Selected only'],
         ], (v) => { s.snap.strokeScope = v as 'ANY' | 'SELECTED'; this.app.savePrefs(); },
@@ -1038,7 +1256,7 @@ export class UI {
           ['dashed', 'Dashed'], ['solid', 'Solid'],
         ], (v) => { s.gridSubdivStyle = v as 'dashed' | 'solid'; this.app.rebuildGrid(); save(); }),
       ),
-      el('div', { class: 'row', text: 'Magnet INCREMENT snaps to the subdivision lines (Step ÷ Subdivisions).' }),
+      el('div', { class: 'row', text: 'Magnet Increment/Grid snap unit = the subdivision lines (Step ÷ Subdivisions).' }),
       el('div', { class: 'row' },
         checkbox('Auto color', !s.gridColor, (v) => {
           s.gridColor = v ? null : [...s.background];
@@ -2963,19 +3181,10 @@ export class UI {
 
     // playback speed only makes sense for URL/file sources, not the live
     // webcam — iterate on slow/fast footage without re-encoding it
-    const speedVal = el('span', { text: `${mmCapture.playbackRate.toFixed(2)}×` });
-    const speedInput = el('input', {
-      type: 'range', min: 0.1, max: 3, step: 0.05, value: mmCapture.playbackRate,
-    }) as HTMLInputElement;
-    speedInput.oninput = () => {
-      const rate = parseFloat(speedInput.value);
-      this.app.mmSetPlaybackRate(rate);
-      speedVal.textContent = `${rate.toFixed(2)}×`;
-    };
     const speedRow = el('div', { class: 'row' },
-      el('span', { text: 'speed' }), speedInput, speedVal,
-      btn('1×', () => { speedInput.value = '1'; this.app.mmSetPlaybackRate(1); speedVal.textContent = '1.00×'; },
-        { cls: 'icon-btn', title: 'Reset to 1×' }),
+      slider('speed', mmCapture.playbackRate, 0.1, 3, 0.05,
+        (v) => this.app.mmSetPlaybackRate(v),
+        { def: 1, title: 'URL/file capture playback rate (Backspace resets to 1×)' }),
     );
 
     const streamsPanel = panel('Streams — native capture',
