@@ -12,7 +12,7 @@ import { mediamime } from '../io/mediamime';
 import { mmCapture } from '../mm/capture';
 import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
-import { poseMapPicker } from './poseMap';
+import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, type RigMapKind } from './poseMap';
 import { deleteAsset, listAssets } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import type { ConstraintType, TGConstraint } from '../core/types';
@@ -2797,20 +2797,20 @@ export class UI {
           streamSel.append(el('option', { value: String(st.id), text: st.name }));
         }
         streamSel.value = c.streamId != null ? String(c.streamId) : '';
-        // the landmark picker depends on the target stream's kind (body
-        // map only applies to POSE), so a stream change needs a rebuild
+        // the landmark picker depends on the target stream's kind (the
+        // body map only covers POSE/HAND/FACE), so a stream change needs
+        // a rebuild
         streamSel.onchange = () => { c.streamId = streamSel.value ? Number(streamSel.value) : null; this.refresh(); };
         const targetStream = ctx.scene.mmStreams.find((s) => s.id === c.streamId);
+        const landmarkMap = targetStream ? landmarkMapForKind(targetStream.kind, c.landmark ?? 0, (v) => { c.landmark = v; }) : null;
         rows.push(
           el('div', { class: 'row' }, 'Stream', streamSel),
-          targetStream?.kind === 'POSE'
-            ? poseMapPicker(c.landmark ?? 0, (v) => { c.landmark = v; })
-            : el('div', { class: 'row' },
-                numField('landmark', c.landmark ?? 0, (v) => { c.landmark = Math.max(0, Math.round(v)); }, 1)),
+          landmarkMap ?? el('div', { class: 'row' },
+            numField('landmark', c.landmark ?? 0, (v) => { c.landmark = Math.max(0, Math.round(v)); }, 1)),
           el('div', {
             class: 'row',
-            text: targetStream?.kind === 'POSE' ? 'click, pick, or drag a point on the body map'
-              : 'hands: 8 index tip · 4 thumb tip · 0 wrist · iris: 0/5 eye centers',
+            text: landmarkMap ? 'click, pick, or drag a point above'
+              : 'iris: 0/5 eye centers',
           }),
         );
       } else if (c.type === 'TRIGGER') {
@@ -2946,14 +2946,14 @@ export class UI {
             st.pen.active = v;
             this.refresh();
           }),
-          ...(st.pen?.active && st.kind !== 'POSE' ? [
+          ...(st.pen?.active && !hasLandmarkMap(st.kind) ? [
             numField('landmark', st.pen.landmark, (v) => { st.pen!.landmark = Math.max(0, Math.round(v)); }, 1),
           ] : []),
           ...(st.pen?.active ? [
             numField('min conf', st.pen.minConf, (v) => { st.pen!.minConf = Math.max(0, Math.min(1, v)); }, 0.05),
           ] : []),
         ),
-        ...(st.pen?.active && st.kind === 'POSE' ? [poseMapPicker(st.pen.landmark, (v) => { st.pen!.landmark = v; })] : []),
+        ...(st.pen?.active ? [landmarkMapForKind(st.kind, st.pen.landmark, (v) => { st.pen!.landmark = v; })].filter((n): n is HTMLElement => !!n) : []),
         ...(st.pen?.active ? [el('div', { class: 'row', text: `draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up` })] : []),
       ];
     });
@@ -3039,11 +3039,13 @@ export class UI {
     );
   }
 
-  /** Rig mapper state: which body-part path + landmark index is currently
+  /** Rig mapper state: which body-part kind + landmark index is currently
    *  "loaded" for Attach, persisted across refreshes (not per-scene —
    *  it's a UI pick, not data). */
-  private mmRigKind = 'pose';
+  private mmRigKind: RigMapKind = 'POSE';
   private mmRigLandmark = 0;
+  private mmRigManual = false;
+  private mmRigManualAddress = '';
 
   private mediamimePanel(): HTMLElement {
     const { ctx } = this.app;
@@ -3062,29 +3064,31 @@ export class UI {
     const live = mediamime.list();
     const liveByAddress = new Map(live.map((l) => [l.address, l]));
 
-    // Rig mapper: click/pick the SOURCE landmark on the body map (or a
-    // numeric field for kinds without a visual picker yet), pick the
-    // TARGET object, hit Attach — replaces the old one-row-per-live-
-    // address list, which didn't scale past a handful of points.
-    const kindSel = el('select') as HTMLSelectElement;
-    for (const [v, label] of [['pose', 'Pose'], ['hand/l', 'Hand L'], ['hand/r', 'Hand R'], ['face', 'Face'], ['iris', 'Iris']] as [string, string][]) {
-      kindSel.append(el('option', { value: v, text: label }));
-    }
-    kindSel.value = this.mmRigKind;
-    kindSel.onchange = () => { this.mmRigKind = kindSel.value; this.mmRigLandmark = 0; this.refresh(); };
-
-    const address = `${mm.prefix || '/mm'}/${this.mmRigKind}/${this.mmRigLandmark}`;
+    // Rig mapper: click/pick the SOURCE landmark on the combined body
+    // map (pose + a hand at each wrist + face above the head — one
+    // diagram, since a point here can come from any of those four
+    // kinds), pick the TARGET object, hit Attach — replaces the old
+    // one-row-per-live-address list, which didn't scale past a handful
+    // of points. Iris/custom addresses aren't on the diagram yet, so a
+    // manual-address toggle covers them.
+    const rigKindPath: Record<RigMapKind, string> = { POSE: 'pose', HAND_LEFT: 'hand/l', HAND_RIGHT: 'hand/r', FACE: 'face' };
+    const address = this.mmRigManual
+      ? (this.mmRigManualAddress.trim() || `${mm.prefix || '/mm'}/iris/0`)
+      : `${mm.prefix || '/mm'}/${rigKindPath[this.mmRigKind]}/${this.mmRigLandmark}`;
     const liveInfo = liveByAddress.get(address);
 
     const targetSel = el('select') as HTMLSelectElement;
     rigTargets.forEach((t, i) => targetSel.append(el('option', { value: String(i), text: t.label })));
 
+    const manualInput = el('input', { type: 'text', value: this.mmRigManualAddress, placeholder: `${mm.prefix || '/mm'}/iris/0` }) as HTMLInputElement;
+    manualInput.onchange = () => { this.mmRigManualAddress = manualInput.value; this.refresh(); };
+
     const rigMapperRows: Node[] = [
-      el('div', { class: 'row' }, 'Source', kindSel),
-      this.mmRigKind === 'pose'
-        ? poseMapPicker(this.mmRigLandmark, (v) => { this.mmRigLandmark = v; this.refresh(); })
-        : el('div', { class: 'row' },
-            numField('landmark', this.mmRigLandmark, (v) => { this.mmRigLandmark = Math.max(0, Math.round(v)); this.refresh(); }, 1)),
+      el('div', { class: 'row' },
+        checkbox('manual address (iris, custom senders, ...)', this.mmRigManual, (v) => { this.mmRigManual = v; this.refresh(); })),
+      this.mmRigManual
+        ? el('div', { class: 'row' }, 'Address', manualInput)
+        : combinedBodyMapPicker(this.mmRigKind, this.mmRigLandmark, (k, v) => { this.mmRigKind = k; this.mmRigLandmark = v; this.refresh(); }),
       el('div', {
         class: 'row',
         text: liveInfo

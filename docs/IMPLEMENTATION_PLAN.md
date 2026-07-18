@@ -1541,3 +1541,52 @@ now alongside the grid work above.)
   address to `/mm/pose/15`, picking the mesh from the target dropdown
   and clicking Attach created rig `"/mm/pose/15 → mesh"` in
   `scene.mediamime.rigs`. `npx tsc --noEmit` and `npx vite build` clean.
+
+## Hand + face landmark maps; combined body map for the rig mapper
+- `src/mm/handLandmarks.ts`: MediaPipe Hand's 21-landmark topology (names,
+  a layout matching the standard reference figure — wrist at bottom,
+  fingers spread upward — and the official `HAND_CONNECTIONS` edges).
+  Same shape for HAND_LEFT/HAND_RIGHT streams; the picker mirrors the
+  layout horizontally for the right hand.
+- `src/mm/faceLandmarks.ts`: a curated ~118-point subset of MediaPipe's
+  478-point face mesh — face oval (36), both eyes (16 each), both irises
+  (5 each: center + 4-point ring, indices 468-477 — the same indices
+  `IRIS_INDICES` in `mm/streams.ts` already uses to pull iris points out
+  of the FACE stream's packed frame), and the lips (20 outer + 20 inner).
+  Positions are generated (points evenly spaced around authored ellipses
+  in each feature's real MediaPipe contour order) rather than hand-typed
+  per-point — the full 468 mesh is far too dense to click, so this
+  intentionally shows only what the user asked for: eyes, iris, lips,
+  face oval.
+- `src/app/poseMap.ts` reworked around one core (`addLandmarks`) so pose/
+  hand/face share the same click/hover/drag/dropdown machinery instead of
+  three copies of it. New exports: `handMapPicker`, `faceMapPicker`
+  (single-kind, same shape as `poseMapPicker`), `hasLandmarkMap(kind)` and
+  `landmarkMapForKind(kind, value, onChange)` (kind-gated dispatch used
+  by the two per-stream call sites — constraint editor, live-pen field —
+  extending their previous POSE-only coverage to also cover HAND_LEFT/
+  HAND_RIGHT/FACE; IRIS/CUSTOM still fall back to the numeric field).
+- New `combinedBodyMapPicker(kind, landmark, onChange)`: pose + a hand
+  attached at each wrist (translated/mirrored via an SVG group transform
+  onto the pose's own wrist coordinates, scaled down) + the face attached
+  above the head, all as ONE diagram in one `<svg>` — matches the user's
+  literal ask ("add hands on each side of the pose drawing... add face
+  above"). Every dot across all four sub-diagrams is tagged with its own
+  `(kind, id)`, so a click anywhere returns both instead of just an
+  index. This replaces the mediamime rig mapper's previous Source-
+  dropdown + single-map-at-a-time design — Pose/Hand L/Hand R/Face are
+  now all reachable by clicking the relevant part of one figure. Iris/
+  custom addresses aren't on the diagram (no visual picker for the
+  standalone 10-point IRIS stream yet), so a "manual address" checkbox
+  swaps the diagram for a plain address text field when needed.
+- Verified live: combined map renders 193 dots total (33 pose + 21×2
+  hands + 118 face — screenshot showing the face oval/eyes/lips above
+  the head and a hand flanking each side of the torso, matching the
+  requested layout); clicking the right-iris-center dot (id 468, inside
+  the face sub-diagram) correctly set both kind (`FACE`) and landmark
+  (`468`), resolved to address `/mm/face/468`, and Attach created that
+  rig; the manual-address toggle correctly swaps in a text field; a
+  HAND_LEFT stream's live-pen field independently rendered its own
+  21-point hand picker alongside the mediamime panel's combined map with
+  no interference between the two. `npx tsc --noEmit` and
+  `npx vite build` clean.
