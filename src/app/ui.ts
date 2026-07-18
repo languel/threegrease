@@ -215,16 +215,22 @@ function dragNumber(label: string, value: number, onChange: (v: number) => void,
   let cur = clamp(value);
 
   const hasFill = !!opts.fill && opts.min !== undefined && opts.max !== undefined;
-  const wrap = el('div', { class: `numdrag${hasFill ? ' fill' : ''}${label ? '' : ' nolabel'}` });
-  if (opts.title) wrap.title = opts.title;
+  // outer row: label OUTSIDE the box (right-justified, immediately left of
+  // it) + a fixed-width box. The box itself never resizes — not on hover
+  // (arrows sit INSIDE its edges, overlapping the value) and not while
+  // editing (the input overlays the same box, absolutely positioned).
+  const row = el('div', { class: `numdrag-row${hasFill ? ' fill' : ''}` });
+  if (opts.title) row.title = opts.title;
+  const box = el('div', { class: 'numdrag' });
   const fillBar = hasFill ? el('div', { class: 'numdrag-fillbar' }) : null;
   const valEl = el('span', { class: 'numdrag-value', text: fmt(cur) });
-  const center = el('span', { class: 'numdrag-center' },
-    ...(label ? [el('span', { class: 'numdrag-label', text: label })] : []), valEl);
-  const arrowL = el('span', { class: 'numdrag-arrow', text: '‹' });
-  const arrowR = el('span', { class: 'numdrag-arrow', text: '›' });
-  if (fillBar) wrap.append(fillBar);
-  wrap.append(arrowL, center, arrowR);
+  const arrowL = el('span', { class: 'numdrag-arrow left', text: '‹' });
+  const arrowR = el('span', { class: 'numdrag-arrow right', text: '›' });
+  if (fillBar) box.append(fillBar);
+  box.append(arrowL, valEl, arrowR);
+  if (label) row.append(el('span', { class: 'numdrag-label', text: label }));
+  row.append(box);
+  const wrap = box; // all interaction/event wiring below targets the box
 
   const syncFill = () => {
     if (fillBar) fillBar.style.width = `${((cur - opts.min!) / (opts.max! - opts.min!)) * 100}%`;
@@ -334,7 +340,7 @@ function dragNumber(label: string, value: number, onChange: (v: number) => void,
     popupMenu(e.clientX, e.clientY, items);
   };
 
-  return wrap;
+  return row;
 }
 
 function slider(
