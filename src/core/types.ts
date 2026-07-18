@@ -371,6 +371,11 @@ export interface MMRig {
   offset: Vec3;
   scale: number;
   enabled: boolean;
+  /** Every frame, force rotation to 0 and scale to 1 on the target
+   *  instead of preserving whatever it's currently at — keeps the rig
+   *  driving from a clean base so it can't drift. Defaults true
+   *  (including for scenes serialized before this field existed). */
+  resetTransform?: boolean;
 }
 
 /** A scene object riding a path on its own clock. */

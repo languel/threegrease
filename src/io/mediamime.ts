@@ -52,15 +52,21 @@ export class MediaMimeEngine {
       const ref = rig.target as ObjRef;
       const cur = getObjectTransform(scene, ref);
       if (!cur) continue;
-      const world = new THREE.Vector3(
-        p[0] * rig.scale + rig.offset[0],
-        p[1] * rig.scale + rig.offset[1],
-        p[2] * rig.scale + rig.offset[2],
-      );
-      // world position → parent-local, so rigged children of a moving
-      // parent still land at the marker in world space
-      world.applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
-      setObjectTransform(scene, ref, { ...cur, translation: [world.x, world.y, world.z] });
+      // offset in world space, then convert to the target's parent-local
+      // frame (so a rigged child of a moving parent still lands on the
+      // marker in world space), THEN apply scale — scale acts on the
+      // resulting local offset rather than the raw landmark position, so
+      // it scales the rig's motion around the parent instead of
+      // distorting where the raw landmark data itself sits.
+      const local = new THREE.Vector3(p[0] + rig.offset[0], p[1] + rig.offset[1], p[2] + rig.offset[2]);
+      local.applyMatrix4(parentWorldMatrixOf(scene, ref).invert());
+      local.multiplyScalar(rig.scale);
+      const resetTransform = rig.resetTransform !== false;
+      setObjectTransform(scene, ref, {
+        translation: [local.x, local.y, local.z],
+        rotation: resetTransform ? [0, 0, 0] : cur.rotation,
+        scale: resetTransform ? [1, 1, 1] : cur.scale,
+      });
     }
   }
 }

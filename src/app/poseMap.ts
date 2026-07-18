@@ -354,6 +354,16 @@ export function combinedBodyMapPicker(
   showRing(kind, landmark);
   label.textContent = `${kind} ${landmark}`;
 
+  // clicking empty space (not a dot/edge) clears the ring — a purely
+  // visual deselect, doesn't touch mmRigKind/mmRigLandmark (there's
+  // always a last-picked address to attach; this just stops pointing at
+  // one on the diagram)
+  svg.addEventListener('click', (e) => {
+    if (e.target !== svg) return;
+    for (const rk of ['POSE', 'HAND_LEFT', 'HAND_RIGHT', 'FACE'] as const) ringOf[rk].style.display = 'none';
+    label.textContent = '';
+  });
+
   wrap.ondragover = (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
   wrap.ondrop = (e) => {
     e.preventDefault();

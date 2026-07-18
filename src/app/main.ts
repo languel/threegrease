@@ -2029,7 +2029,7 @@ class App implements AppHandle {
     this.ctx.pushUndo();
     scene.mediamime.rigs.push({
       id: scoreId(scene), name: `${address} → ${target.kind.toLowerCase()}`, address,
-      target, offset: [0, 0, 0], scale: 1, enabled: true,
+      target, offset: [0, 0, 0], scale: 1, enabled: true, resetTransform: true,
     });
     this.ui.refresh();
   }

@@ -2928,11 +2928,11 @@ export class UI {
         el('div', { class: 'row' },
           numField('size', st.pointSize, (v) => { st.pointSize = Math.max(0.001, v); }, 0.01),
           numField('depth', st.depthScale, (v) => { st.depthScale = v; }, 0.1),
-          checkbox('conf→α', st.confidenceAlpha, (v) => { st.confidenceAlpha = v; }),
-          checkbox('conf→size', st.confidenceSize, (v) => { st.confidenceSize = v; }),
-          checkbox('mirror', st.mirror, (v) => { st.mirror = v; }),
-          checkbox('probe', st.probeEvents !== false, (v) => { st.probeEvents = v; }),
-          checkbox('emit bus', !!st.emitBus, (v) => { st.emitBus = v; }),
+          checkbox('', st.confidenceAlpha, (v) => { st.confidenceAlpha = v; }, 'confidence → opacity'),
+          checkbox('', st.confidenceSize, (v) => { st.confidenceSize = v; }, 'confidence → point size'),
+          checkbox('', st.mirror, (v) => { st.mirror = v; }, 'mirror'),
+          checkbox('', st.probeEvents !== false, (v) => { st.probeEvents = v; }, 'probe: participates in trigger-zone events'),
+          checkbox('', !!st.emitBus, (v) => { st.emitBus = v; }, 'emit bus: re-broadcast landmarks at the address prefix so rigs/routes/triggers can ride them'),
         ),
         // CLIP replays get a traveler-style transport
         ...(st.source === 'CLIP' ? [el('div', { class: 'row' },
@@ -3050,11 +3050,6 @@ export class UI {
   private mmRigLandmark = 0;
   private mmRigManual = false;
   private mmRigManualAddress = '';
-  /** Reset the target's translation/rotation/scale to identity when
-   *  attaching a rig — on by default, since a rig usually wants to drive
-   *  the object from a clean base rather than compound with wherever it
-   *  happened to be left. */
-  private mmRigResetTransform = true;
 
   private mediamimePanel(): HTMLElement {
     const { ctx } = this.app;
@@ -3087,11 +3082,12 @@ export class UI {
 
     // eyedropper + dropdown both funnel through the same attach action —
     // pick a target either way, immediately rig it (no separate Attach
-    // button; see the dropdown's own onchange below)
+    // button; see the dropdown's own onchange below). Every new rig
+    // starts from a clean transform; whether it KEEPS resetting rotation/
+    // scale every frame after that is a per-rig checkbox in the Rigs list
+    // below (rig.resetTransform), not a setting here.
     const attachTarget = (target: ObjRef) => {
-      if (this.mmRigResetTransform) {
-        setObjectTransform(ctx.scene, target, { translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
-      }
+      setObjectTransform(ctx.scene, target, { translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
       this.app.addMediaMimeRig(address, target);
       this.refresh();
     };
@@ -3148,24 +3144,25 @@ export class UI {
         ...(this.mmRigManual ? [] : [landmarkSel]),
         btn(icon('plus'), () => this.app.addMediaMimeTrigger(address, liveInfo?.pos ?? [0, 0, 0]),
           { cls: 'icon-btn', title: 'Trigger — spawn a trigger primitive rigged to this address' }),
-      ), el('div', { class: 'row' },
-        checkbox('reset transform', this.mmRigResetTransform, (v) => { this.mmRigResetTransform = v; },
-          'zero translation/rotation and scale to 1 on the target when attaching a rig'),
       )] : []),
     ];
 
+    // reset-transform is per rig, not a global setting — one plain
+    // checkbox (no label) between scale and delete on each row
     const rigRows: Node[] = mm.rigs.map((rig) => el('div', { class: 'row', title: rig.address },
       checkbox('', rig.enabled, (v) => { rig.enabled = v; }),
       el('span', { class: 'grow', text: rig.name }),
       numField('scale', rig.scale, (v) => { rig.scale = v; }, 0.05),
+      checkbox('', rig.resetTransform !== false, (v) => { rig.resetTransform = v; },
+        'reset rotation to 0 and scale to 1 on the target every frame (unchecked: drive translation only, leave rotation/scale alone)'),
       btn(icon('xMark'), () => this.app.deleteMediaMimeRig(rig.id), { cls: 'icon-btn' }),
     ));
 
     return panel('Capture — landmarks & rigs',
-      el('div', { class: 'row' }, 'Address prefix', prefixInput),
       el('div', { class: 'menu-header', text: `Rig mapper · ${live.length} live address${live.length === 1 ? '' : 'es'}` }),
       ...rigMapperRows,
       el('div', { class: 'menu-header', text: 'Rigs (object ← address)' }),
+      el('div', { class: 'row' }, 'Address prefix', prefixInput),
       ...(rigRows.length ? rigRows : [el('div', { class: 'row', text: 'none yet' })]),
     );
   }

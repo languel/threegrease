@@ -1940,3 +1940,54 @@ now alongside the grid work above.)
   that dot's own position; computed style confirmed the ring renders
   `stroke: rgb(255,140,59)` (`#ff8c3b`), `fill: none`, `r: 18` vs. the
   dot's `r: 12`. `npx tsc --noEmit` and `npx vite build` both clean.
+
+## Ring tweaks, deselect, per-rig reset transform, scale ordering, more labels-to-tooltips
+- **Ring: white, thicker**: `.pose-map-ring` stroke `#ff8c3b`→`#ffffff`,
+  `stroke-width` 2.5→4 (styles.css).
+- **Click-away deselect**: the combined map's `<svg>` gained a click
+  listener that only fires when `e.target === svg` (i.e. the literal
+  background, not a dot or edge line bubbling up) — hides every ring.
+  Purely visual: doesn't touch `mmRigKind`/`mmRigLandmark`, so there's
+  always a last-picked address ready to attach even with nothing
+  highlighted on the diagram.
+- **`reset transform` moved from a global mapper setting to a per-rig
+  field**: `MMRig` gains `resetTransform?: boolean` (types.ts, default
+  `true`, including for scenes serialized before the field existed —
+  read as `rig.resetTransform !== false`). Every new rig still starts
+  from a zeroed transform at attach time (now unconditional — no more
+  pre-attach toggle to gate it), but whether it KEEPS forcing
+  rotation/scale to identity every subsequent frame is now this
+  checkbox — genuinely live, not just a one-shot action, since
+  `MediaMimeEngine.update()` (io/mediamime.ts) now checks it each frame:
+  when true, rotation/scale are forced to `[0,0,0]`/`[1,1,1]` every
+  update (prevents drift from anything else touching the object);
+  when false, they're left alone (preserved from `getObjectTransform`),
+  matching the old behavior. UI: the global checkbox+row is gone; each
+  row in "Rigs (object ← address)" gained a second, label-less
+  checkbox between the scale field and the delete button.
+- **Rig scale now applies after the parent-local transform, not
+  before**: previously `p * rig.scale + offset` happened entirely in
+  world space before converting to the target's parent-local frame.
+  Reordered to `((p + offset) → parent-local) * rig.scale` — scale now
+  acts on the resulting local offset from the parent rather than
+  distorting the raw landmark position itself, so it scales how far the
+  rig moves relative to its parent instead of fighting the parent's own
+  scale.
+- **More checkboxes → hover tips**: the Streams panel's `conf→α`,
+  `conf→size`, `mirror`, `probe`, `emit bus` checkboxes lost their
+  visible labels (same treatment as the rig mapper's controls two
+  passes ago) — tooltips read "confidence → opacity", "confidence →
+  point size", "mirror", "probe: participates in trigger-zone events",
+  "emit bus: re-broadcast landmarks at the address prefix so rigs/
+  routes/triggers can ride them".
+- **Address prefix moved under "Rigs (object ← address)"**: was above
+  the rig mapper section; now sits directly under that header, above
+  the rig rows it's the prefix for.
+- Verified live: clicking a dot then attaching to the test mesh
+  produced a rig row with exactly 2 checkboxes (enabled, reset-
+  transform — confirmed via its tooltip text); clicking the map's
+  background hid the ring; the Streams panel's five checkboxes render
+  with empty label text and correct per-checkbox tooltips; screenshot
+  confirms the reordered panel layout (Rig mapper → Rigs header →
+  Address prefix → rig rows) and a visible white ring. `npx tsc
+  --noEmit` and `npx vite build` both clean.

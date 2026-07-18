@@ -285,8 +285,8 @@ button.props-tab.active { background: var(--panel); border-color: var(--border);
 .pose-map-dot-reye { fill: #FF0D12; }
 .pose-map-dot:hover { fill: var(--accent); r: 8; }
 .pose-map-dot.picked { fill: #ff4444; r: 8; }
-/* combined body map's picked-landmark ring: frames the dot in orange
+/* combined body map's picked-landmark ring: frames the dot in white
    rather than recoloring it, so the dot's own kind color stays visible */
-.pose-map-ring { fill: none; stroke: #ff8c3b; stroke-width: 2.5; pointer-events: none; }
+.pose-map-ring { fill: none; stroke: #ffffff; stroke-width: 4; pointer-events: none; }
 .pose-map select { width: 100%; max-width: 220px; }
 .pose-map-label { font-size: 11px; color: var(--dim); }
