@@ -1357,3 +1357,55 @@ now alongside the grid work above.)
   — only Pose remained selected (5 others cleared); clicked a GP
   object's row — all stream selections cleared to 0, GP object
   selected. Both previously-impossible transitions now work.
+
+## Delete last GP object, Object-mode lasso/circle select, three new shortcuts
+- **Delete last GP object**: `deleteObject()` (tools/objects.ts) previously
+  had no guard against removing the last remaining `GP` entry, but nothing
+  downstream tolerates `scene.objects` being empty — `activeObject(scene)`
+  and everything built on it (draw tool, materials/layers panels, ...)
+  assumes it always resolves. Rather than special-case "no active GP
+  object" everywhere, the GP branch now pushes a fresh `createObject
+  ('Pencil1')` when the splice would leave the array empty, and re-clamps
+  `scene.activeObject`. The original object is genuinely gone (new id);
+  a blank default just always exists to land on.
+- **Object mode lasso/circle select**: `ObjectSelectTool` (tools/objects.ts)
+  generalized from box-only to a `kind: 'BOX'|'LASSO'|'CIRCLE'` family,
+  mirroring EDIT mode's `SelectTool` (tools/select.ts) — same Ctrl-drag =
+  lasso and `C` = circle-mode conventions on the box variant, same `[`/`]`
+  circle-radius resize. Box/lasso region hit-testing is unified behind one
+  predicate-based `refMatches`/`selectByRegion` (GP: any sampled stroke
+  point matches; everything else: projected origin). Registered as three
+  tool ids (`object-select`, `object-select-lasso`, `object-select-circle`)
+  in `App` (main.ts) and the Object-mode toolbar row (ui.ts). The lasso/
+  circle instances mirror their `lastPicked` into the canonical box
+  instance's `onSelectionChange` so Ctrl+P parenting-target and the active-
+  object outline don't lose track when the user switches select variant
+  mid-workflow.
+- **Three new Blender-parity shortcuts** (keymap.ts `ACTIONS` +
+  `App.runAction()`, main.ts):
+  - `Alt+Shift+Z` — `toggleInfoOverlay()`: hides the floor grid
+    (`this.grid.visible`) and the bottom-left `#status` info overlay.
+  - `` Ctrl+` `` — `toggleGizmoNav()`: locks the transform gizmo
+    (`settings.showGizmo`, remembered and restored) and all mouse-driven
+    camera navigation. `this.controls.enabled` alone isn't durable — the
+    `cameraView` block reassigns it every frame regardless — so `loop()`
+    gained `if (this.navLocked) this.controls.enabled = false;` after that
+    block. The "Emulate 3-Button Mouse" alt-drag path and the nav-gizmo
+    click-drag path both bypass OrbitControls entirely (handled directly
+    in the canvas `pointerdown` listener), so both gained an explicit
+    `!this.navLocked` guard at their entry point.
+  - `Ctrl+Alt+Space` — `toggleMaximize` dispatches to the existing
+    `togglePresentation()` (already hides panels/timeline/menus via the
+    `#app.presentation` CSS rules in styles.css) rather than building new
+    hide/show logic.
+- Verified live via `__tg` + dynamic `import()` of `tools/objects.ts` and
+  `keymap.ts` in the browser console (no test suite in this repo):
+  deleting the sole GP object replaced its id (4 → 6) and left exactly one
+  object in the scene; the Object-mode toolbar renders all three select
+  tools (`Box select (Ctrl lasso, C circle)`, `Lasso select`, `Circle
+  select ([ ] size)`); all three new actions round-tripped correctly
+  through `runAction()` (`toggleInfoOverlay` hid the grid + `#status`,
+  `toggleGizmoNav` flipped `navLocked`/`controls.enabled`, `toggleMaximize`
+  set `presentation` + the `#app` class), and `ACTIONS` carries the
+  expected `alt+shift+z` / `` ctrl+` `` / `ctrl+alt+space` combos.
+  `npx tsc --noEmit` and `npx vite build` both clean.

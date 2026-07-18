@@ -18,6 +18,9 @@ export const ACTIONS: ActionDef[] = [
   { id: 'palette', label: 'Command palette', combo: 'f3', category: 'General' },
   { id: 'inspector', label: 'Toggle inspector panel', combo: 'n', category: 'General' },
   { id: 'presentation', label: 'Presentation mode', combo: 'p', category: 'General' },
+  { id: 'toggleInfoOverlay', label: 'Toggle grid + info overlay', combo: 'alt+shift+z', category: 'General' },
+  { id: 'toggleGizmoNav', label: 'Toggle gizmo + camera nav lock', combo: 'ctrl+`', category: 'General' },
+  { id: 'toggleMaximize', label: 'Toggle maximize window (hide UI)', combo: 'ctrl+alt+space', category: 'General' },
   // Modes
   { id: 'toggleEdit', label: 'Toggle last two modes', combo: 'tab', category: 'Modes' },
   { id: 'modeObject', label: 'Object mode', combo: '', category: 'Modes' },

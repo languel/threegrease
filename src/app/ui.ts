@@ -217,7 +217,11 @@ function panel(title: string, ...children: (Node | string)[]): HTMLElement {
 // ---------------------------------------------------------------------------
 
 const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
-  OBJECT: [['object-select', 'cursorArrow', 'Select objects (Shift extends)']],
+  OBJECT: [
+    ['object-select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
+    ['object-select-lasso', 'lasso', 'Lasso select'],
+    ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
+  ],
   DRAW: [
     ['draw', 'pencil', 'Draw (D)'], ['erase', 'eraser', 'Erase (E)'], ['fill', 'swatch', 'Fill (F)'],
     ['tint', 'brush', 'Tint'], ['cutter', 'scissors', 'Cutter'], ['eyedropper', 'droplet', 'Eyedropper'],

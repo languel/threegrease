@@ -179,6 +179,13 @@ class App implements AppHandle {
   presentation = false;
   cameraView = false;
   lockCamToView = true;
+  /** Alt+Shift+Z: hide the floor grid + the bottom-left status/info overlay */
+  private infoOverlayHidden = false;
+  /** Ctrl+`: transform widget + all mouse-driven camera navigation locked
+   *  (orbit/pan/dolly, the emulate-3-button drag, the nav gizmo) — a
+   *  "don't let me bump the view" toggle for live performance. */
+  private navLocked = false;
+  private prevShowGizmo = false;
   private camHelper!: THREE.Group; // root: one frustum child per scene camera
   readonly keymap = new Keymap();
   readonly commands = new CommandRegistry();
@@ -203,7 +210,9 @@ class App implements AppHandle {
   private widgetProxy = new THREE.Object3D();
   private widgetBase: { refs: ObjRef[]; transforms: ObjTransform[]; proxy: ObjTransform } | null = null;
   private canvasSurfaces: THREE.Object3D[] = [];
-  private objectPick = new ObjectSelectTool();
+  private objectPick = new ObjectSelectTool('object-select', 'BOX');
+  private objectPickLasso = new ObjectSelectTool('object-select-lasso', 'LASSO');
+  private objectPickCircle = new ObjectSelectTool('object-select-circle', 'CIRCLE');
   private scoreGroup = new THREE.Group(); // cursor + trigger + attractor glyphs
   private scoreGlyphKey = '';
 
@@ -301,6 +310,17 @@ class App implements AppHandle {
     this.widget.addEventListener('objectChange', () => this.applyWidgetDrag());
     this.widget.enabled = false;
     this.objectPick.onSelectionChange = () => this.refreshWidget();
+    // lasso/circle object-select variants share the box variant's
+    // lastPicked (Ctrl+P target, "active" selection-outline highlight)
+    // so switching select tools mid-workflow doesn't lose the active object
+    this.objectPickLasso.onSelectionChange = () => {
+      this.objectPick.lastPicked = this.objectPickLasso.lastPicked;
+      this.refreshWidget();
+    };
+    this.objectPickCircle.onSelectionChange = () => {
+      this.objectPick.lastPicked = this.objectPickCircle.lastPicked;
+      this.refreshWidget();
+    };
     this.objModal.onDelta = (deltaM) =>
       this.applyWorldDelta(this.objModal.refs, this.objModal.base, deltaM);
     this.axes = this.makeAxes();
@@ -318,7 +338,8 @@ class App implements AppHandle {
       new PrimitiveTool('circle'), this.interpTool,
       new SelectTool('select', 'BOX'), new SelectTool('select-lasso', 'LASSO'),
       new SelectTool('select-circle', 'CIRCLE'), new SculptTool(),
-      new VertexPaintTool(), new WeightPaintTool(), this.objectPick,
+      new VertexPaintTool(), new WeightPaintTool(),
+      this.objectPick, this.objectPickLasso, this.objectPickCircle,
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
 
@@ -708,13 +729,13 @@ class App implements AppHandle {
         return;
       }
       const te0 = this.toolEvent(e);
-      if (e.button === 0 && !this.presentation && this.nav.inGizmo(te0.x, te0.y)) {
+      if (e.button === 0 && !this.presentation && !this.navLocked && this.nav.inGizmo(te0.x, te0.y)) {
         // click a ball snaps; dragging the disc orbits like a trackball
         this.gizmoDrag = { x: te0.x, y: te0.y, startX: te0.x, startY: te0.y, dragged: false };
         this.capture(e);
         return;
       }
-      if (e.button === 0 && e.altKey && this.ctx.settings.emulate3Button) {
+      if (e.button === 0 && e.altKey && this.ctx.settings.emulate3Button && !this.navLocked) {
         // Blender "Emulate 3 Button Mouse": Alt = orbit, +Shift pan, +Ctrl zoom
         this.navDrag = {
           mode: e.shiftKey ? 'pan' : (e.ctrlKey || e.metaKey) ? 'dolly' : 'orbit',
@@ -968,6 +989,9 @@ class App implements AppHandle {
       case 'addTravelerNearestStroke': this.addTravelerNearestStroke(); break;
       case 'inspector': this.ui.toggleInspector(); break;
       case 'presentation': this.togglePresentation(); break;
+      case 'toggleInfoOverlay': this.toggleInfoOverlay(); break;
+      case 'toggleGizmoNav': this.toggleGizmoNav(); break;
+      case 'toggleMaximize': this.togglePresentation(); break;
       case 'toggleEdit': this.toggleLastMode(); break;
       case 'modeObject': this.setMode('OBJECT'); break;
       case 'modePie': this.ui.openModePie(this.tools.lastPointer); break;
@@ -1296,6 +1320,28 @@ class App implements AppHandle {
     this.axes.visible = this.ctx.settings.showAxes && !this.presentation;
     this.gp.markDirty();
     this.resize();
+  }
+
+  /** Alt+Shift+Z: floor grid + bottom-left status/info overlay. */
+  toggleInfoOverlay(): void {
+    this.infoOverlayHidden = !this.infoOverlayHidden;
+    this.grid.visible = !this.infoOverlayHidden && !this.presentation;
+    const status = document.getElementById('status');
+    if (status) status.style.display = this.infoOverlayHidden ? 'none' : '';
+  }
+
+  /** Ctrl+`: transform widget + all mouse-driven camera navigation. */
+  toggleGizmoNav(): void {
+    this.navLocked = !this.navLocked;
+    if (this.navLocked) {
+      this.prevShowGizmo = this.ctx.settings.showGizmo;
+      this.ctx.settings.showGizmo = false;
+    } else {
+      this.ctx.settings.showGizmo = this.prevShowGizmo;
+    }
+    this.controls.enabled = !this.navLocked;
+    this.refreshWidget();
+    this.ui.refresh();
   }
 
   setBackground(rgb: [number, number, number]): void {
@@ -2430,6 +2476,7 @@ class App implements AppHandle {
       }
       this.controls.enabled = this.lockCamToView && !this.player.playing && !this.nav.flying;
     }
+    if (this.navLocked) this.controls.enabled = false;
     this.syncCameraHelpers();
     if (!this.nav.flying) this.controls.update();
 

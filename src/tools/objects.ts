@@ -4,10 +4,10 @@
 import * as THREE from 'three';
 import type { AppCtx } from './context';
 import type { GPScene, ParentRef, Vec3 } from '../core/types';
-import { frameAt } from '../core/gpdata';
+import { createObject, frameAt } from '../core/gpdata';
 import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
-import { drawLasso } from './draw';
+import { drawLasso, pointInPolygon } from './draw';
 
 export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM';
 export interface ObjRef { kind: ObjKind; id: number }
@@ -134,8 +134,13 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
   }
   if (ref.kind === 'GP') {
     const i = gpIndexOf(scene, ref.id);
-    if (i >= 0 && scene.objects.length > 1) {
+    if (i >= 0) {
       scene.objects.splice(i, 1);
+      // the rest of the app (draw tool, materials/layers panels, ...)
+      // assumes activeObject(scene) always resolves — replace a deleted
+      // LAST GP object with a fresh blank one rather than special-casing
+      // "no active GP object" everywhere
+      if (scene.objects.length === 0) scene.objects.push(createObject('Pencil1'));
       scene.activeObject = Math.min(scene.activeObject, scene.objects.length - 1);
     }
   } else if (ref.kind === 'CANVAS') {
@@ -276,54 +281,88 @@ export function selectionPivot(scene: GPScene): THREE.Vector3 | null {
 
 // ------------------------------------------------------------- pick tool
 
+export type ObjectSelectKind = 'BOX' | 'LASSO' | 'CIRCLE';
+
 /**
- * Object-mode select: click picks (mesh/canvas raycast, GP stroke
- * proximity, splat centers; Shift toggles), drag = box select.
+ * Object-mode select (Blender-style family, mirrors tools/select.ts's
+ * EDIT-mode SelectTool): click picks (mesh/canvas raycast, GP stroke
+ * proximity, splat centers; Shift toggles). Drag behavior depends on the
+ * variant: box, lasso, or circle brush. The box variant keeps Ctrl-drag =
+ * lasso and C = toggle circle mode as shortcuts, same as EDIT mode.
  */
 export class ObjectSelectTool implements Tool {
-  id = 'object-select';
+  id: string;
   cursor = 'default';
   onSelectionChange: ((ctx: AppCtx) => void) | null = null;
   /** most recently picked object = the "active" object for Ctrl+P */
   lastPicked: ObjRef | null = null;
+  private kind: ObjectSelectKind;
+  private mode: 'none' | 'box' | 'lasso' | 'circle' = 'none';
   private start = new THREE.Vector2();
   private cur = new THREE.Vector2();
+  private lasso: THREE.Vector2[] = [];
+  private circleMode = false;
+  private circleRadius = 40;
   private dragging = false;
   private down = false;
 
-  onDown(_ctx: AppCtx, e: ToolEvent): void {
+  constructor(id = 'object-select', kind: ObjectSelectKind = 'BOX') {
+    this.id = id;
+    this.kind = kind;
+    this.circleMode = kind === 'CIRCLE';
+  }
+
+  onKey(_ctx: AppCtx, key: string): boolean {
+    if (this.kind === 'BOX' && (key === 'c' || key === 'C')) {
+      this.circleMode = !this.circleMode;
+      return true;
+    }
+    if (this.circleMode && (key === '[' || key === ']')) {
+      this.circleRadius = Math.max(8, this.circleRadius + (key === ']' ? 8 : -8));
+      return true;
+    }
+    return false;
+  }
+
+  onDown(ctx: AppCtx, e: ToolEvent): void {
     this.start.set(e.x, e.y);
     this.cur.set(e.x, e.y);
     this.down = true;
     this.dragging = false;
+    if (this.circleMode) {
+      this.mode = 'circle';
+      this.circleSelectAt(ctx, e);
+    } else if (this.kind === 'LASSO' || e.ctrl) {
+      this.mode = 'lasso';
+      this.lasso = [new THREE.Vector2(e.x, e.y)];
+    } else {
+      this.mode = 'box';
+    }
   }
 
-  onMove(_ctx: AppCtx, e: ToolEvent): void {
+  onMove(ctx: AppCtx, e: ToolEvent): void {
     if (!this.down) return;
     this.cur.set(e.x, e.y);
     if (this.cur.distanceTo(this.start) > 5) this.dragging = true;
+    if (this.mode === 'lasso') this.lasso.push(new THREE.Vector2(e.x, e.y));
+    if (this.mode === 'circle') this.circleSelectAt(ctx, e);
+    ctx.requestRender();
   }
 
   onUp(ctx: AppCtx, e: ToolEvent): void {
     this.down = false;
+    const mode = this.mode;
+    this.mode = 'none';
+    if (mode === 'circle') { this.dragging = false; ctx.refreshUI(); return; }
     const scene = ctx.scene;
     ctx.pushUndo();
     const multi = e.shift || e.ctrl; // Shift or Cmd/Ctrl adds to the selection
-    if (this.dragging) {
+    if (this.dragging && mode === 'box') {
       const min = new THREE.Vector2(Math.min(this.start.x, e.x), Math.min(this.start.y, e.y));
       const max = new THREE.Vector2(Math.max(this.start.x, e.x), Math.max(this.start.y, e.y));
-      if (!multi) deselectAllObjects(scene);
-      for (const ref of allRefs(scene)) {
-        if (isObjectLocked(scene, ref)) continue;
-        if (this.refInRect(ctx, ref, min, max)) {
-          setObjectSelected(scene, ref, true);
-          this.lastPicked = ref; // Blender: the last one touched becomes active/target
-          if (ref.kind === 'GP') {
-            const i = gpIndexOf(scene, ref.id);
-            if (i >= 0) scene.activeObject = i;
-          }
-        }
-      }
+      this.selectByRegion(ctx, multi, (p) => p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y);
+    } else if (this.dragging && mode === 'lasso' && this.lasso.length > 2) {
+      this.selectByRegion(ctx, multi, (p) => pointInPolygon(p, this.lasso));
     } else {
       const hit = this.pick(ctx, e);
       if (!multi) deselectAllObjects(scene);
@@ -337,21 +376,29 @@ export class ObjectSelectTool implements Tool {
       }
     }
     this.dragging = false;
+    this.lasso = [];
     ctx.syncCanvases();
     ctx.requestRender();
     ctx.refreshUI();
     this.onSelectionChange?.(ctx);
   }
 
-  onCancel(): void { this.down = false; this.dragging = false; }
+  onCancel(): void { this.down = false; this.dragging = false; this.mode = 'none'; this.lasso = []; }
 
   drawHud(_ctx: AppCtx, hud: CanvasRenderingContext2D): void {
-    if (!this.dragging) return;
-    hud.strokeStyle = 'rgba(255,255,255,0.8)';
-    hud.setLineDash([4, 4]);
-    hud.strokeRect(this.start.x, this.start.y, this.cur.x - this.start.x, this.cur.y - this.start.y);
-    hud.setLineDash([]);
-    void drawLasso; // (lasso variant reserved)
+    if (this.mode === 'lasso') drawLasso(hud, this.lasso);
+    if (this.mode === 'box' && this.dragging) {
+      hud.strokeStyle = 'rgba(255,255,255,0.8)';
+      hud.setLineDash([4, 4]);
+      hud.strokeRect(this.start.x, this.start.y, this.cur.x - this.start.x, this.cur.y - this.start.y);
+      hud.setLineDash([]);
+    }
+    if (this.circleMode) {
+      hud.beginPath();
+      hud.arc(this.cur.x, this.cur.y, this.circleRadius, 0, Math.PI * 2);
+      hud.strokeStyle = 'rgba(255,255,255,0.6)';
+      hud.stroke();
+    }
   }
 
   private projectWorld(ctx: AppCtx, m: THREE.Matrix4): THREE.Vector2 | null {
@@ -361,9 +408,27 @@ export class ObjectSelectTool implements Tool {
     return new THREE.Vector2((pos.x * 0.5 + 0.5) * rect.width, (-pos.y * 0.5 + 0.5) * rect.height);
   }
 
-  private refInRect(ctx: AppCtx, ref: ObjRef, min: THREE.Vector2, max: THREE.Vector2): boolean {
+  /** Shared box/lasso region test — any sampled GP stroke point, or the
+   *  projected origin for everything else, satisfying `test`. */
+  private selectByRegion(ctx: AppCtx, multi: boolean, test: (p: THREE.Vector2) => boolean): void {
+    const scene = ctx.scene;
+    if (!multi) deselectAllObjects(scene);
+    for (const ref of allRefs(scene)) {
+      if (isObjectLocked(scene, ref)) continue;
+      if (this.refMatches(ctx, ref, test)) {
+        setObjectSelected(scene, ref, true);
+        this.lastPicked = ref; // Blender: the last one touched becomes active/target
+        if (ref.kind === 'GP') {
+          const i = gpIndexOf(scene, ref.id);
+          if (i >= 0) scene.activeObject = i;
+        }
+      }
+    }
+  }
+
+  private refMatches(ctx: AppCtx, ref: ObjRef, test: (p: THREE.Vector2) => boolean): boolean {
     if (ref.kind === 'GP') {
-      // any sampled stroke point inside the rect
+      // any sampled stroke point matches
       const i = gpIndexOf(ctx.scene, ref.id);
       if (i < 0) return false;
       const ob = ctx.scene.objects[i];
@@ -376,8 +441,7 @@ export class ObjectSelectTool implements Tool {
           if (!f) continue;
           for (const s of f.strokes) {
             for (let k = 0; k < s.points.length; k += 3) {
-              const p = objectToScreen(ctx, s.points[k].co);
-              if (p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y) return true;
+              if (test(objectToScreen(ctx, s.points[k].co))) return true;
             }
           }
         }
@@ -387,7 +451,28 @@ export class ObjectSelectTool implements Tool {
       return false;
     }
     const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, ref));
-    return !!p && p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y;
+    return !!p && test(p);
+  }
+
+  private circleSelectAt(ctx: AppCtx, e: ToolEvent): void {
+    const scene = ctx.scene;
+    const cursor = new THREE.Vector2(e.x, e.y);
+    const deselect = e.ctrl;
+    const test = (p: THREE.Vector2) => p.distanceTo(cursor) < this.circleRadius;
+    for (const ref of allRefs(scene)) {
+      if (isObjectLocked(scene, ref)) continue;
+      if (this.refMatches(ctx, ref, test)) {
+        setObjectSelected(scene, ref, !deselect);
+        if (!deselect) {
+          this.lastPicked = ref;
+          if (ref.kind === 'GP') {
+            const i = gpIndexOf(scene, ref.id);
+            if (i >= 0) scene.activeObject = i;
+          }
+        }
+      }
+    }
+    ctx.requestRender();
   }
 
   pick(ctx: AppCtx, e: ToolEvent): ObjRef | null {
