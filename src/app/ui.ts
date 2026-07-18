@@ -1248,8 +1248,8 @@ export class UI {
     return panel('Scene',
       el('div', { class: 'menu-header', text: 'Grid' }),
       el('div', { class: 'row' },
-        numField('Step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5),
-        numField('Subdivisions', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1),
+        numField('Step', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5, { def: 1, min: 0.01 }),
+        numField('Subdivisions', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1, { def: 10, min: 1 }),
       ),
       el('div', { class: 'row' },
         selectField('Subdivision style', s.gridSubdivStyle, [
@@ -2258,7 +2258,7 @@ export class UI {
       this.vecRow('Loc', () => cam.translation.map((v) => +v.toFixed(3)), (i, v) => { cam.translation[i] = v; ctx.requestRender(); }),
       this.vecRow('Rot', () => cam.rotation.map((v) => +v.toFixed(3)), (i, v) => { cam.rotation[i] = v; ctx.requestRender(); }),
       el('div', { class: 'row' },
-        numField('FOV', +cam.fov.toFixed(1), (v) => { cam.fov = Math.min(140, Math.max(5, v)); ctx.requestRender(); }, 1),
+        numField('FOV', +cam.fov.toFixed(1), (v) => { cam.fov = Math.min(140, Math.max(5, v)); ctx.requestRender(); }, 1, { def: 50, min: 5, max: 140, route: 'camera.0.fov' }),
       ),
     );
 
@@ -3486,7 +3486,7 @@ export class UI {
       el('div', { class: 'sep' }),
       numField('Start', s.frameStart, (v) => { s.frameStart = Math.round(v); this.drawTimeline(); }, 1),
       numField('End', s.frameEnd, (v) => { s.frameEnd = Math.round(v); this.drawTimeline(); }, 1),
-      numField('FPS', s.fps, (v) => { s.fps = Math.max(1, Math.round(v)); }, 1),
+      numField('FPS', s.fps, (v) => { s.fps = Math.max(1, Math.round(v)); }, 1, { def: 24, min: 1 }),
       el('div', { class: 'sep' }),
       btn(icon('key'), () => this.app.addKeyframe(false), { cls: 'icon-btn', title: 'Insert blank keyframe (I)' }),
       btn(icon('duplicate'), () => this.app.addKeyframe(true), { cls: 'icon-btn', title: 'Duplicate current keyframe' }),
@@ -3503,7 +3503,7 @@ export class UI {
       checkbox('Lock', this.app.lockCamToView, (v) => { this.app.lockCamToView = v; }),
       btn(icon('pin'), () => this.app.addCameraKey(), { cls: 'icon-btn', title: 'Keyframe the camera at the current frame' }),
       btn(icon('minus'), () => this.app.removeCameraKeyAtFrame(), { cls: 'icon-btn', title: 'Remove camera key at current frame' }),
-      numField('FOV', activeCam(ctx.scene).fov, (v) => { activeCam(ctx.scene).fov = Math.min(140, Math.max(5, v)); }, 1),
+      numField('FOV', activeCam(ctx.scene).fov, (v) => { activeCam(ctx.scene).fov = Math.min(140, Math.max(5, v)); }, 1, { def: 50, min: 5, max: 140, route: 'camera.0.fov' }),
       btn(icon('gear'), () => this.openSettings(), { title: 'Settings & shortcuts (,)' }),
     );
   }
