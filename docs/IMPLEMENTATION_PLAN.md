@@ -1681,3 +1681,52 @@ now alongside the grid work above.)
   distinct oval/eyes/iris-rings/lips at the larger size, hands are
   clearly bigger and well clear of the torso, and clicking a thumb tip
   still correctly picks `HAND_LEFT 4`.
+
+## Combined map: uniform pose/hand/face dot size, hug pose, tighter face
+- **Pose dots were quietly smaller than hand/face dots** the whole time
+  — `addLandmarks` drew every dot at the same LOCAL radius, but the pose
+  sub-diagram's `<g>` has no scale (it's the base coordinate system the
+  whole combined map is laid out in) while the hand/face groups are
+  wrapped in `scale(handScale)`/`scale(faceScale)` — so a dot's radius
+  scaled up right along with those groups' positions, and pose dots
+  never got that multiplier. Fixed by having `addLandmarks` accept an
+  explicit radius, and `combinedBodyMapPicker` compute
+  `ON_SCREEN_DOT_R / groupScale` per sub-diagram (`ON_SCREEN_DOT_R = 12`)
+  so every dot reads the same size regardless of which group it's in.
+  Standalone `poseMapPicker`/`handMapPicker`/`faceMapPicker` are
+  unaffected (still default to `DOT_R`, no enclosing scaled group).
+- **Hands turned outward ("hug" pose)**: each hand's `<g transform>`
+  gained `rotate(±90, 100, 210)` — the SAME pivot point the wrist sits
+  at, so rotating doesn't move the wrist off the pose's own wrist, only
+  swings the rest of the hand. First attempt got the right hand's sign
+  backwards (rotated it inward, toward the torso, instead of outward) —
+  caught by resolving the actual on-screen wrist→middle-fingertip vector
+  for both hands (should point away from body center on both sides) and
+  seeing the right hand's `dx` come out negative (toward center) instead
+  of positive; fixed by flipping its rotation from `-90` to `90`
+  (the left hand's own mirror `scale(-handScale, handScale)` means it
+  needs the OPPOSITE rotation sign from the right hand's unmirrored one
+  to land on the same "outward" direction — not symmetric the way it'd
+  first look).
+- **Eyes moved off the oval edge, mouth shrunk to fit**: per the user's
+  own worked example — `dist(127, 158)` (oval point to a right-eye
+  point) should equal `dist(472, 158)` (iris-ring point to that same
+  eye point), i.e. the eye ring should sit roughly midway between the
+  iris and the oval boundary instead of hugging the oval edge. Solved
+  numerically (bisection on the eye scale factor) rather than by
+  further hand-tuned guessing: `EYE_R` (55,45)→(44,36) makes both
+  distances ≈26.2. Lips: found the smallest `LIPS_OUTER_R`/
+  `LIPS_INNER_R` that still keeps every pair of the 40 lip points (both
+  loops, including across the two loops) past `2×dotRadius` via a small
+  grid search over candidate sizes rather than eyeballing — (105,60)/
+  (80,42) → (70,56)/(43,42), visibly less like the mouth was crowding
+  the face boundary.
+- Verified live: transform-and-rotation-resolving overlap check (same
+  approach as the prior pass, extended to account for the new `rotate()`
+  in each hand's transform) found zero unintended overlaps across all
+  176 dots — only the two wrist-anchor coincidences, now at `r=12` each.
+  Screenshot confirms pose/hand/face dots read as visually the same
+  size, hands open outward symmetrically, and the face reads noticeably
+  less cramped. Clicking a hand dot after the rotation change still
+  correctly resolves to the right `(kind, landmark)` pair (`HAND_LEFT 4`
+  for a thumb tip, `HAND_LEFT 10` for a middle-finger PIP).

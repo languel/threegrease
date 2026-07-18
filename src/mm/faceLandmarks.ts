@@ -48,10 +48,16 @@ const OVAL_CENTER: [number, number] = [150, 165];
 const OVAL_R: [number, number] = [140, 155];
 const RIGHT_EYE_CENTER: [number, number] = [85, 125];
 const LEFT_EYE_CENTER: [number, number] = [215, 125];
-const EYE_R: [number, number] = [55, 45];
+// sized so the eye ring sits equidistant between the iris ring and the
+// oval boundary (dist(127,158) == dist(472,158), solved numerically —
+// the previous, bigger eye hugged the oval edge instead)
+const EYE_R: [number, number] = [44, 36];
 const LIPS_CENTER: [number, number] = [150, 235];
-const LIPS_OUTER_R: [number, number] = [105, 60];
-const LIPS_INNER_R: [number, number] = [80, 42];
+// smallest size (found by grid search) that still clears 2x the dot
+// radius on both loops and between them — the previous size read as
+// crowding the oval edge
+const LIPS_OUTER_R: [number, number] = [70, 56];
+const LIPS_INNER_R: [number, number] = [43, 42];
 const IRIS_R = 18;
 
 const posMap = new Map<number, [number, number]>();

@@ -70,8 +70,11 @@ function faceSet(): LandmarkSet {
 
 /** One picker's worth of dots + drag/click wiring, appended into a
  *  caller-supplied <svg> (own coordinate space, transform applied by the
- *  caller for the combined map). `onPick(id)` fires on click/drag/drop. */
-function addLandmarks(svg: SVGSVGElement, set: LandmarkSet, onPick: (id: number) => void): Map<number, SVGCircleElement> {
+ *  caller for the combined map). `onPick(id)` fires on click/drag/drop.
+ *  `r` is in the SAME local units as `set.pos()` — pass a pre-divided
+ *  radius when the caller wraps this in a scaled <g> so the ON-SCREEN
+ *  size still comes out to DOT_R regardless of that group's scale. */
+function addLandmarks(svg: SVGSVGElement, set: LandmarkSet, onPick: (id: number) => void, r: number = DOT_R): Map<number, SVGCircleElement> {
   for (const [a, b] of set.edges) {
     const [ax, ay] = set.pos(a);
     const [bx, by] = set.pos(b);
@@ -80,7 +83,7 @@ function addLandmarks(svg: SVGSVGElement, set: LandmarkSet, onPick: (id: number)
   const dots = new Map<number, SVGCircleElement>();
   for (const id of set.ids) {
     const [x, y] = set.pos(id);
-    const dot = svgEl('circle', { cx: x, cy: y, r: DOT_R, class: 'pose-map-dot' });
+    const dot = svgEl('circle', { cx: x, cy: y, r, class: 'pose-map-dot' });
     dot.append(svgEl('title'));
     (dot.firstChild as SVGTitleElement).textContent = `${id}: ${set.name(id)}`;
     dot.style.cursor = 'pointer';
@@ -199,19 +202,28 @@ export function combinedBodyMapPicker(
   const poseG = svgEl('g');
   svg.append(poseG);
 
-  // hands: local origin is the wrist (id 0) at (100,210), fingers up.
-  // Each hand's own wrist point lands on the pose's wrist. The hand's
-  // local layout has the thumb on the LEFT (low x), so the left-side
-  // hand is the one that gets mirrored — thumb faces the body on both
-  // sides, like palms-forward vitruvian arms.
+  // Every dot reads the same size on screen regardless of which sub-
+  // diagram it's in, even though pose/hand/face live at different group
+  // scales — divide the target radius by each group's own scale before
+  // handing it to addLandmarks (which draws in that group's local units).
+  const ON_SCREEN_DOT_R = 12;
+
+  // hands: local origin is the wrist (id 0) at (100,210), fingers "up"
+  // in their own frame. A rotate(*, 100, 210) around that same pivot
+  // (applied first, before the scale/translate that place the wrist on
+  // the pose's own wrist) turns the fingers outward instead — open arms,
+  // like reaching in for a hug, rather than fingers pointing straight up.
+  // The hand's local layout has the thumb on the LEFT (low x), so the
+  // left-side hand is the one that gets mirrored — thumb still faces the
+  // body on both sides.
   const [lwx, lwy] = VITRUVIAN_POSE_POS[15];
   const [rwx, rwy] = VITRUVIAN_POSE_POS[16];
   const handScale = 2;
   const leftHandG = svgEl('g', {
-    transform: `translate(${lwx + 100 * handScale} ${lwy - 210 * handScale}) scale(${-handScale} ${handScale})`,
+    transform: `translate(${lwx + 100 * handScale} ${lwy - 210 * handScale}) scale(${-handScale} ${handScale}) rotate(90 100 210)`,
   });
   const rightHandG = svgEl('g', {
-    transform: `translate(${rwx - 100 * handScale} ${rwy - 210 * handScale}) scale(${handScale})`,
+    transform: `translate(${rwx - 100 * handScale} ${rwy - 210 * handScale}) scale(${handScale}) rotate(90 100 210)`,
   });
   svg.append(leftHandG, rightHandG);
 
@@ -231,14 +243,14 @@ export function combinedBodyMapPicker(
     label.textContent = `${k} ${id}`;
   };
 
-  const wire = (targetSvg: SVGGElement, set: LandmarkSet, k: RigMapKind) => {
-    const dots = addLandmarks(targetSvg as unknown as SVGSVGElement, set, (id) => pick(k, id));
+  const wire = (targetSvg: SVGGElement, set: LandmarkSet, k: RigMapKind, groupScale: number) => {
+    const dots = addLandmarks(targetSvg as unknown as SVGSVGElement, set, (id) => pick(k, id), ON_SCREEN_DOT_R / groupScale);
     for (const [id, d] of dots) allDots.set(key(k, id), d);
   };
-  wire(poseG, poseSetVitruvian, 'POSE');
-  wire(leftHandG, handSet(), 'HAND_LEFT');
-  wire(rightHandG, handSet(), 'HAND_RIGHT');
-  wire(faceG, faceSet(), 'FACE');
+  wire(poseG, poseSetVitruvian, 'POSE', 1);
+  wire(leftHandG, handSet(), 'HAND_LEFT', handScale);
+  wire(rightHandG, handSet(), 'HAND_RIGHT', handScale);
+  wire(faceG, faceSet(), 'FACE', faceScale);
 
   allDots.get(key(kind, landmark))?.classList.add('picked');
   label.textContent = `${kind} ${landmark}`;
