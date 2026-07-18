@@ -1631,3 +1631,13 @@ now alongside the grid work above.)
   where the inner/outer lip loops naturally pinch at the mouth corners —
   no other pair anywhere in the 176-dot set overlaps. `npx tsc --noEmit`
   and `npx vite build` clean.
+- Second pass (user feedback on the first): hands and head ~2x bigger
+  relative to the pose (handScale 0.5→1, faceScale 0.72→1.4, viewBox
+  grown to 900×840, widget 300×280px) with more air between them and the
+  body — the arms now angle upward so the raised hands flank the face
+  with clear gaps on all sides, easier to click freely. Hand mirroring
+  flipped to anatomically correct palms-forward: the hand's local layout
+  has the thumb at LOW x, so the image-LEFT hand is the mirrored one —
+  thumb faces the body on both sides. Verified programmatically (thumb-
+  tip x vs pinky-tip x, per side, transform-resolved): `thumbTowardBody:
+  true` for both hands; clicking a thumb tip picks `HAND_LEFT 4`.

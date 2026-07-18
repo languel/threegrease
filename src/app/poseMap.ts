@@ -169,14 +169,14 @@ export type RigMapKind = 'POSE' | 'HAND_LEFT' | 'HAND_RIGHT' | 'FACE';
 // detailed face/hand diagrams cover that ground instead, so keeping
 // both would just be redundant clutter sitting on top of each other.
 const VITRUVIAN_POSE_POS: Record<number, [number, number]> = {
-  11: [230, 220], 12: [410, 220],   // shoulders
-  13: [150, 215], 14: [490, 215],   // elbows
-  15: [70, 235], 16: [570, 235],    // wrists
-  23: [280, 340], 24: [360, 340],   // hips
-  25: [260, 460], 26: [380, 460],   // knees
-  27: [245, 580], 28: [395, 580],   // ankles
-  29: [230, 600], 30: [410, 600],   // heels
-  31: [270, 605], 32: [370, 605],   // foot index
+  11: [330, 400], 12: [570, 400],   // shoulders
+  13: [230, 390], 14: [670, 390],   // elbows
+  15: [130, 420], 16: [770, 420],   // wrists
+  23: [390, 540], 24: [510, 540],   // hips
+  25: [370, 660], 26: [530, 660],   // knees
+  27: [355, 780], 28: [545, 780],   // ankles
+  29: [330, 800], 30: [570, 800],   // heels
+  31: [395, 805], 32: [505, 805],   // foot index
 };
 
 /** Combined picker for the MediaMime rig mapper: pose + a hand attached
@@ -188,7 +188,7 @@ export function combinedBodyMapPicker(
   const wrap = document.createElement('div');
   wrap.className = 'pose-map';
 
-  const svg = svgEl('svg', { viewBox: '0 0 640 660', width: 280, height: 290 });
+  const svg = svgEl('svg', { viewBox: '0 0 900 840', width: 300, height: 280 });
   svg.classList.add('pose-map-svg');
 
   const label = document.createElement('div');
@@ -201,26 +201,27 @@ export function combinedBodyMapPicker(
   const poseG = svgEl('g');
   svg.append(poseG);
 
-  // hands: local origin is the wrist (id 0) at (100,210) — translate so
-  // that point lands on the pose's own wrist, scaled down. No rotation
-  // (fingers stay pointing "up" in their own local frame) — simpler than
-  // it sounds, and the wrists sit far enough from the torso/face/legs
-  // that the extra vertical reach never collides with anything else.
+  // hands: local origin is the wrist (id 0) at (100,210), fingers up.
+  // Each hand's own wrist point lands on the pose's wrist. The hand's
+  // local layout has the thumb on the LEFT (low x), so the left-side
+  // hand is the one that gets mirrored — thumb faces the body on both
+  // sides, like palms-forward vitruvian arms.
   const [lwx, lwy] = VITRUVIAN_POSE_POS[15];
   const [rwx, rwy] = VITRUVIAN_POSE_POS[16];
-  const handScale = 0.5;
+  const handScale = 1;
   const leftHandG = svgEl('g', {
-    transform: `translate(${lwx - 100 * handScale} ${lwy - 210 * handScale}) scale(${handScale})`,
+    transform: `translate(${lwx + 100 * handScale} ${lwy - 210 * handScale}) scale(${-handScale} ${handScale})`,
   });
   const rightHandG = svgEl('g', {
-    transform: `translate(${rwx + 100 * handScale} ${rwy - 210 * handScale}) scale(${-handScale} ${handScale})`,
+    transform: `translate(${rwx - 100 * handScale} ${rwy - 210 * handScale}) scale(${handScale})`,
   });
   svg.append(leftHandG, rightHandG);
 
-  // face: own viewBox is 240x224 — place it above the head with a clear
-  // gap before the shoulder line (y=220)
-  const faceScale = 0.72;
-  const faceG = svgEl('g', { transform: `translate(146 4) scale(${faceScale})` });
+  // face: own viewBox is 240x224 — top-center, with clear air between
+  // its bottom edge and the shoulder line, and between its sides and
+  // the raised hands
+  const faceScale = 1.4;
+  const faceG = svgEl('g', { transform: `translate(282 10) scale(${faceScale})` });
   svg.append(faceG);
 
   const allDots = new Map<string, SVGCircleElement>();
