@@ -2585,7 +2585,7 @@ export class UI {
           btn(icon('xMark'), () => { ctx.pushUndo(); sc.cursors.splice(sc.cursors.indexOf(cur), 1); this.refresh(); }, { cls: 'icon-btn' }),
         ),
         el('div', { class: 'row' },
-          numField('Speed', cur.speed, (v) => { cur.speed = v; }, 0.05),
+          numField('Speed', cur.speed, (v) => { cur.speed = v; }, 0.05, { route: `cursor.${cur.id}.speed` }),
           numField('Rate', cur.rate, (v) => { cur.rate = Math.max(1, Math.round(v)); }, 1),
           selectField('', cur.loop, [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { cur.loop = v as typeof cur.loop; }),
         ),
@@ -2597,7 +2597,7 @@ export class UI {
     for (const trig of sc.triggers) {
       const body = el('div', { class: 'body' },
         el('div', { class: 'row' },
-          numField('Radius', trig.radius, (v) => { trig.radius = Math.max(0.01, v); }, 0.05),
+          numField('Radius', trig.radius, (v) => { trig.radius = Math.max(0.01, v); }, 0.05, { min: 0.01, route: `trigger.${trig.id}.radius` }),
           checkbox('Retrigger', trig.retrigger, (v) => { trig.retrigger = v; }),
           this.followField(() => trig.follow, (v) => { trig.follow = v; }),
           btn(icon('xMark'), () => { ctx.pushUndo(); sc.triggers.splice(sc.triggers.indexOf(trig), 1); this.refresh(); }, { cls: 'icon-btn' }),
@@ -2788,8 +2788,8 @@ export class UI {
 
     const attractorItems: Node[] = ctx.scene.attractors.map((at) => el('div', { class: 'row' },
       el('span', { text: at.name }),
-      numField('str', at.strength, (v) => { at.strength = v; }, 0.1),
-      numField('rad', at.radius, (v) => { at.radius = Math.max(0.01, v); }, 0.1),
+      numField('str', at.strength, (v) => { at.strength = v; }, 0.1, { route: `attractor.${at.id}.strength` }),
+      numField('rad', at.radius, (v) => { at.radius = Math.max(0.01, v); }, 0.1, { min: 0.01 }),
       this.followField(() => at.follow, (v) => { at.follow = v; }),
       btn(icon('target'), () => { at.position = [...ctx.scene.cursor] as [number, number, number]; }, { cls: 'icon-btn', title: 'Move to 3D cursor' }),
       btn(icon('xMark'), () => {
