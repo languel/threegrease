@@ -74,7 +74,10 @@ function faceSet(): LandmarkSet {
  *  `r` is in the SAME local units as `set.pos()` — pass a pre-divided
  *  radius when the caller wraps this in a scaled <g> so the ON-SCREEN
  *  size still comes out to DOT_R regardless of that group's scale. */
-function addLandmarks(svg: SVGSVGElement, set: LandmarkSet, onPick: (id: number) => void, r: number = DOT_R): Map<number, SVGCircleElement> {
+function addLandmarks(
+  svg: SVGSVGElement, set: LandmarkSet, onPick: (id: number) => void, r: number = DOT_R,
+  opts: { colorClass?: string; titleFor?: (id: number) => string; skip?: (id: number) => boolean } = {},
+): Map<number, SVGCircleElement> {
   for (const [a, b] of set.edges) {
     const [ax, ay] = set.pos(a);
     const [bx, by] = set.pos(b);
@@ -82,10 +85,12 @@ function addLandmarks(svg: SVGSVGElement, set: LandmarkSet, onPick: (id: number)
   }
   const dots = new Map<number, SVGCircleElement>();
   for (const id of set.ids) {
+    if (opts.skip?.(id)) continue;
     const [x, y] = set.pos(id);
-    const dot = svgEl('circle', { cx: x, cy: y, r, class: 'pose-map-dot' });
+    const cls = opts.colorClass ? `pose-map-dot ${opts.colorClass}` : 'pose-map-dot';
+    const dot = svgEl('circle', { cx: x, cy: y, r, class: cls });
     dot.append(svgEl('title'));
-    (dot.firstChild as SVGTitleElement).textContent = `${id}: ${set.name(id)}`;
+    (dot.firstChild as SVGTitleElement).textContent = opts.titleFor ? opts.titleFor(id) : `${id}: ${set.name(id)}`;
     dot.style.cursor = 'pointer';
     dot.setAttribute('draggable', 'true');
     dot.onclick = () => onPick(id);
@@ -162,6 +167,24 @@ export function faceMapPicker(value: number, onChange: (v: number) => void): HTM
  *  'iris'/'custom' for the manual-address fallback below it. */
 export type RigMapKind = 'POSE' | 'HAND_LEFT' | 'HAND_RIGHT' | 'FACE';
 
+/** Bus-address path segment per rig-map kind (matches `streamBusPath` in
+ *  mm/streams.ts) — shared here so the combined picker's hover tooltips
+ *  can show a real resolvable address instead of just "id: name". */
+export const RIG_KIND_PATH: Record<RigMapKind, string> = {
+  POSE: 'pose', HAND_LEFT: 'hand/l', HAND_RIGHT: 'hand/r', FACE: 'face',
+};
+
+/** CSS class per rig-map kind (styles.css), matching the reference SVGs
+ *  in docs/assets/: left hand green, right hand pink, body blue, head
+ *  yellow. A class (not an inline fill) so :hover/.picked in the same
+ *  stylesheet still take over — an SVG presentation attribute always
+ *  loses to ANY stylesheet rule, inline style always beats every
+ *  stylesheet rule including :hover/.picked, so only a class survives
+ *  both directions of that cascade. */
+const KIND_COLOR_CLASS: Record<RigMapKind, string> = {
+  POSE: 'pose-map-dot-pose', HAND_LEFT: 'pose-map-dot-handL', HAND_RIGHT: 'pose-map-dot-handR', FACE: 'pose-map-dot-face',
+};
+
 // Vitruvian-style pose layout used ONLY by the combined map: arms spread
 // wide and legs apart (rather than the standalone pose picker's more
 // compact hanging-arm layout) so the attached hand diagrams have room to
@@ -180,11 +203,13 @@ const VITRUVIAN_POSE_POS: Record<number, [number, number]> = {
   31: [603, 1393], 32: [767, 1393], // foot index
 };
 
-/** Combined picker for the MediaMime rig mapper: pose + a hand attached
- *  at each wrist + the face above the head, all in one diagram, since
- *  picking here can target any of the four kinds. Returns (kind, id). */
+/** Combined picker for the capture rig mapper: pose + a hand attached at
+ *  each wrist + the face above the head, all in one diagram, since
+ *  picking here can target any of the four kinds. Returns (kind, id).
+ *  `prefix` (the bus address prefix, e.g. "/mp") is used only to build
+ *  each dot's hover tooltip as a real resolvable address. */
 export function combinedBodyMapPicker(
-  kind: RigMapKind, landmark: number, onChange: (kind: RigMapKind, id: number) => void,
+  kind: RigMapKind, landmark: number, onChange: (kind: RigMapKind, id: number) => void, prefix: string,
 ): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'pose-map';
@@ -246,13 +271,20 @@ export function combinedBodyMapPicker(
     label.textContent = `${k} ${id}`;
   };
 
-  const wire = (targetSvg: SVGGElement, set: LandmarkSet, k: RigMapKind, groupScale: number) => {
-    const dots = addLandmarks(targetSvg as unknown as SVGSVGElement, set, (id) => pick(k, id), ON_SCREEN_DOT_R / groupScale);
+  const wire = (targetSvg: SVGGElement, set: LandmarkSet, k: RigMapKind, groupScale: number, skip?: (id: number) => boolean) => {
+    const dots = addLandmarks(targetSvg as unknown as SVGSVGElement, set, (id) => pick(k, id), ON_SCREEN_DOT_R / groupScale, {
+      colorClass: KIND_COLOR_CLASS[k],
+      titleFor: (id) => `${id} · ${set.name(id)} · ${prefix}/${RIG_KIND_PATH[k]}/${id}`,
+      skip,
+    });
     for (const [id, d] of dots) allDots.set(key(k, id), d);
   };
   wire(poseG, poseSetVitruvian, 'POSE', 1);
-  wire(leftHandG, handSet(), 'HAND_LEFT', handScale);
-  wire(rightHandG, handSet(), 'HAND_RIGHT', handScale);
+  // the hand's own wrist point (id 0) sits exactly on the pose's own
+  // wrist — skip drawing it so the body-colored pose marker is the only
+  // one shown there instead of two stacked circles
+  wire(leftHandG, handSet(), 'HAND_LEFT', handScale, (id) => id === 0);
+  wire(rightHandG, handSet(), 'HAND_RIGHT', handScale, (id) => id === 0);
   wire(faceG, faceSet(), 'FACE', faceScale);
 
   allDots.get(key(kind, landmark))?.classList.add('picked');

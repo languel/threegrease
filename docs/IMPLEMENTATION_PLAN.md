@@ -1757,3 +1757,83 @@ now alongside the grid work above.)
   wrist-anchor coincidences); opened the regenerated large SVG directly
   in the browser and confirmed both hands render complete (no clipping)
   and the inner mouth reads as a clear oval.
+
+## Capture panel UI cleanup: colors in-app, renaming, dropdown-attach flow
+- **Combined map colors, in the app**: same scheme as the reference SVGs
+  (left hand `#7aff99`, right hand `#ff7ab1`, body `#7ab4ff`, head
+  `#fffb7a`), applied to the live interactive `combinedBodyMapPicker`.
+  First attempt used the SVG `fill` presentation attribute and silently
+  did nothing — presentation attributes lose to ANY stylesheet rule
+  regardless of specificity, and `.pose-map-dot { fill: var(--accent2) }`
+  already claims it. Inline `style.fill` would have gone too far the
+  other way (inline style beats every stylesheet rule including
+  `:hover`/`.picked`, breaking those). The fix that survives both
+  directions of the cascade: four new CSS classes
+  (`.pose-map-dot-pose/-handL/-handR/-face`, styles.css) declared BEFORE
+  the existing `:hover`/`.picked` rules — same specificity (two classes),
+  so source order lets hover/picked win on tie, same as a normal
+  stylesheet without inline style involved at all. `addLandmarks`
+  (poseMap.ts) takes a `colorClass` option instead of a `fill` string.
+  Also, per the earlier "use body markers for wrists" ask: the hand's own
+  wrist point (id 0) is now skipped entirely in the combined map (an
+  `opts.skip` callback on `addLandmarks`), not just recolored — one
+  marker at that shared point, not two.
+- **Hover tooltips now show a resolvable address**, not just id+name:
+  `RIG_KIND_PATH` (pose/hand-l/hand-r/face bus-path segments) moved from
+  a copy living only in `ui.ts` to an export in `poseMap.ts`, so
+  `combinedBodyMapPicker` (now taking a `prefix` param) can build titles
+  like `"15 · left wrist · /mp/pose/15"` instead of `"15: left wrist"`.
+  `ui.ts` imports the shared constant instead of keeping its own copy.
+- **Renamed "MediaMime" to "Capture" in every user-facing string**: the
+  menubar menu, its "Open MediaMime panel" item, the sidebar tab tooltip,
+  the rig-mapper panel title, the outliner's trigger-row tooltip
+  ("Static / MediaMime-rigged" → "Static / capture-rigged"), and the
+  trigger info line ("MediaMime: {address}" → "Rig: {address}",
+  "bind in the MediaMime panel" → "bind in the Capture panel"). Left the
+  internal code/type/module naming (`scene.mediamime`, `MMRig`,
+  `addMediaMimeRig`, the `mediamime` singleton, `src/io/mediamime.ts`)
+  and the actual external-bridge GitHub link untouched — those aren't
+  user-facing UI text, and renaming them would be a much larger, riskier
+  refactor nobody asked for.
+- **Default address prefix `/mm` → `/mp`**: three independent places had
+  their own copy of the old default — `scene.mediamime.prefix`'s default
+  in `gpdata.ts`, the standalone `MediaMimeEngine.prefix` field in
+  `io/mediamime.ts` (confirmed synced from the scene value every frame
+  via `mediamime.setPrefix()` in main.ts, so this was only ever a
+  before-first-sync fallback, not a live source of truth), and the
+  placeholder/fallback text scattered through `mediamimePanel()`. New
+  scenes only — existing scenes keep whatever prefix they already have
+  serialized, no migration needed since this is just a default.
+- **Explanation rows moved to hover tooltips**: the always-visible
+  "camera streams re-emit world-space landmarks on the bus..." row in
+  the Streams panel is gone — its text is now the `title` on that
+  panel's own `<h3>` header (grabbed via `panel(...).querySelector('h3')`
+  post-construction rather than threading a new parameter through the
+  shared `panel()` helper, which every panel in the app calls). Same
+  treatment for the per-stream pen hint ("draws into the active GP
+  object · ...") — now the `pen` checkbox's `title`, via
+  `Object.assign(checkbox(...), {title: ...})` since the `checkbox()`
+  helper doesn't take a title param. The "· uses the WS bridge below"
+  aside became the address-prefix input's `title` the same way.
+- **Rig-mapper target dropdown replaces the Attach button**: picking a
+  target from the dropdown now performs the attach immediately — the
+  dropdown gained a `(none)` option at the top (default), and its
+  `onchange` calls `addMediaMimeRig` directly instead of a separate
+  button. New checkbox "reset original transform on attach" (default
+  ON, a new `mmRigResetTransform` UI-state field) — when checked,
+  `setObjectTransform` zeroes the target's translation/rotation and
+  resets scale to 1 before the rig is created, so a freshly-rigged
+  object starts from a clean base instead of compounding with wherever
+  it happened to be left. The dropdown resets to `(none)` after each
+  attach so it's ready for the next pick. The Trigger button is
+  unchanged (unrelated action — spawns a trigger primitive, doesn't
+  bind an existing object).
+- Verified live: menu bar reads "Capture" (not "MediaMime"); the
+  Streams panel header carries the moved explanation as a real `title`
+  attribute; address prefix defaults to `/mp` and the rig-mapper's
+  resolved address updates accordingly; hovering a wrist dot shows
+  `"15 · left wrist · /mp/pose/15"`; picking a mesh from the target
+  dropdown (after giving it a nonzero test translation) immediately
+  created the rig, zeroed the mesh's transform back to `[0,0,0]`, and
+  reset the dropdown to `(none)` — no separate Attach click needed.
+  `npx tsc --noEmit` and `npx vite build` both clean.

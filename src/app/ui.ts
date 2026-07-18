@@ -12,7 +12,7 @@ import { mediamime } from '../io/mediamime';
 import { mmCapture } from '../mm/capture';
 import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
-import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, type RigMapKind } from './poseMap';
+import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
 import { deleteAsset, listAssets } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import type { ConstraintType, TGConstraint } from '../core/types';
@@ -470,13 +470,13 @@ export class UI {
       { label: 'Top', do: () => this.app.snapView('TOP') },
     ]);
 
-    menu('MediaMime', [
-      { label: 'Open MediaMime panel', do: () => this.openTab('mediamime') },
+    menu('Capture', [
+      { label: 'Open Capture panel', do: () => this.openTab('mediamime') },
       { sep: true },
       { header: `Prefix: ${ctx.scene.mediamime.prefix}` },
       { label: `${ctx.scene.mediamime.rigs.length} rig(s) · ${mediamime.list().length} live address(es)`, do: () => this.openTab('mediamime') },
       { sep: true },
-      { label: 'mediamime on GitHub…', do: () => window.open('https://github.com/languel/mediamime', '_blank') },
+      { label: 'mediamime bridge on GitHub…', do: () => window.open('https://github.com/languel/mediamime', '_blank') },
     ]);
 
     menu('Help', [
@@ -988,7 +988,7 @@ export class UI {
         build: () => [this.scorePanel(), this.routesPanel(), this.ioPanel()],
       },
       {
-        id: 'mediamime', icon: 'camera', title: 'MediaMime — live landmarks & object rigging',
+        id: 'mediamime', icon: 'camera', title: 'Capture — live landmarks & object rigging',
         build: () => [this.mmStreamsPanel(), this.clipsPanel(), this.mediamimePanel()],
       },
       {
@@ -1175,7 +1175,7 @@ export class UI {
       },
       extras: [
         btn(t.zone ? icon('wave') : t.follow ? icon('link') : ctx.scene.mediamime.rigs.some((r) => r.target.kind === 'TRIGGER' && r.target.id === t.id) ? icon('camera') : icon('dot'),
-          () => {}, { cls: 'icon-btn', title: t.zone ? 'Stroke zone' : t.follow ? 'Follows an object' : 'Static / MediaMime-rigged' }),
+          () => {}, { cls: 'icon-btn', title: t.zone ? 'Stroke zone' : t.follow ? 'Follows an object' : 'Static / capture-rigged' }),
         ...viewLockBtns(
           !!t.hide, (v) => { t.hide = v; },
           !!t.lock, (v) => { t.lock = v; },
@@ -1427,7 +1427,7 @@ export class UI {
           checkbox('Retrigger', trig.retrigger, (v) => { trig.retrigger = v; }),
           this.followField(() => trig.follow, (v) => { trig.follow = v; }),
         ),
-        el('div', { class: 'row', text: trig.zone ? 'Zone: whole stroke (see Data → Stroke panel)' : rig ? `MediaMime: ${rig.address}` : 'Static position (drag to move, or bind in the MediaMime panel)' }),
+        el('div', { class: 'row', text: trig.zone ? 'Zone: whole stroke (see Data → Stroke panel)' : rig ? `Rig: ${rig.address}` : 'Static position (drag to move, or bind in the Capture panel)' }),
       );
     }
     return panel(`Properties — ${objectName(ctx.scene, ref)}`, ...rows);
@@ -2897,7 +2897,7 @@ export class UI {
       btn(iconLabel('folder', 'file…'), () => srcFile.click(), { title: 'Capture from a local video/gif/webp file' }),
     );
 
-    const busInput = el('input', { type: 'text', placeholder: '/mm/pose', value: '' }) as HTMLInputElement;
+    const busInput = el('input', { type: 'text', placeholder: '/mp/pose', value: '' }) as HTMLInputElement;
     const busRow = el('div', { class: 'row' },
       busInput,
       btn('＋Bus stream', () => {
@@ -2941,11 +2941,11 @@ export class UI {
         )] : []),
         // live pen: one landmark draws into the active GP object
         el('div', { class: 'row' },
-          checkbox('pen', !!st.pen?.active, (v) => {
+          Object.assign(checkbox('pen', !!st.pen?.active, (v) => {
             st.pen ??= { active: false, landmark: 0, minConf: 0.5 };
             st.pen.active = v;
             this.refresh();
-          }),
+          }), { title: `draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up` }),
           ...(st.pen?.active && !hasLandmarkMap(st.kind) ? [
             numField('landmark', st.pen.landmark, (v) => { st.pen!.landmark = Math.max(0, Math.round(v)); }, 1),
           ] : []),
@@ -2954,7 +2954,6 @@ export class UI {
           ] : []),
         ),
         ...(st.pen?.active ? [landmarkMapForKind(st.kind, st.pen.landmark, (v) => { st.pen!.landmark = v; })].filter((n): n is HTMLElement => !!n) : []),
-        ...(st.pen?.active ? [el('div', { class: 'row', text: `draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up` })] : []),
       ];
     });
 
@@ -2975,7 +2974,7 @@ export class UI {
         { cls: 'icon-btn', title: 'Reset to 1×' }),
     );
 
-    return panel('Streams — native capture',
+    const streamsPanel = panel('Streams — native capture',
       capRow,
       srcRow,
       ...(mmCapture.status === 'error' ? [el('div', { class: 'row', text: `! ${mmCapture.error.slice(0, 90)}` })] : []),
@@ -2983,8 +2982,10 @@ export class UI {
       ...(mmCapture.status === 'on' || mmCapture.status === 'starting' ? [mmCapture.sourceEl] : []),
       busRow,
       ...(rows.length ? rows : [el('div', { class: 'row', text: 'no streams yet — add Pose/Hands then Start camera, or feed one from the bus' })]),
-      el('div', { class: 'row', text: 'camera streams re-emit world-space landmarks on the bus (prefix below), so rigs/routes/triggers can ride them' }),
     );
+    const streamsHeader = streamsPanel.querySelector('h3');
+    if (streamsHeader) streamsHeader.title = 'camera streams re-emit world-space landmarks on the bus (prefix below), so rigs/routes/triggers can ride them';
+    return streamsPanel;
   }
 
   /** Clip assets: recorded point-sets-over-time. Record from any stream
@@ -3046,15 +3047,21 @@ export class UI {
   private mmRigLandmark = 0;
   private mmRigManual = false;
   private mmRigManualAddress = '';
+  /** Reset the target's translation/rotation/scale to identity when
+   *  attaching a rig — on by default, since a rig usually wants to drive
+   *  the object from a clean base rather than compound with wherever it
+   *  happened to be left. */
+  private mmRigResetTransform = true;
 
   private mediamimePanel(): HTMLElement {
     const { ctx } = this.app;
     const mm = ctx.scene.mediamime;
 
-    const prefixInput = el('input', { type: 'text', value: mm.prefix, placeholder: '/mm' }) as HTMLInputElement;
-    prefixInput.onchange = () => { mm.prefix = prefixInput.value.trim() || '/mm'; };
+    const prefixInput = el('input', { type: 'text', value: mm.prefix, placeholder: '/mp' }) as HTMLInputElement;
+    prefixInput.title = 'uses the WS bridge below (IO panel)';
+    prefixInput.onchange = () => { mm.prefix = prefixInput.value.trim() || '/mp'; };
 
-    const rigTargets: { label: string; ref: import('../tools/objects').ObjRef }[] = [
+    const rigTargets: { label: string; ref: ObjRef }[] = [
       ...ctx.scene.objects.map((o) => ({ label: `GP: ${o.name}`, ref: { kind: 'GP' as const, id: o.id } })),
       ...ctx.scene.meshes.map((m) => ({ label: `Mesh: ${m.name}`, ref: { kind: 'MESH' as const, id: m.id } })),
       ...ctx.scene.splats.map((s) => ({ label: `Splat: ${s.name}`, ref: { kind: 'SPLAT' as const, id: s.id } })),
@@ -3067,20 +3074,30 @@ export class UI {
     // Rig mapper: click/pick the SOURCE landmark on the combined body
     // map (pose + a hand at each wrist + face above the head — one
     // diagram, since a point here can come from any of those four
-    // kinds), pick the TARGET object, hit Attach — replaces the old
-    // one-row-per-live-address list, which didn't scale past a handful
-    // of points. Iris/custom addresses aren't on the diagram yet, so a
-    // manual-address toggle covers them.
-    const rigKindPath: Record<RigMapKind, string> = { POSE: 'pose', HAND_LEFT: 'hand/l', HAND_RIGHT: 'hand/r', FACE: 'face' };
+    // kinds), then pick the TARGET from the dropdown — picking IS the
+    // attach action (no separate button). Iris/custom addresses aren't
+    // on the diagram yet, so a manual-address toggle covers them.
     const address = this.mmRigManual
-      ? (this.mmRigManualAddress.trim() || `${mm.prefix || '/mm'}/iris/0`)
-      : `${mm.prefix || '/mm'}/${rigKindPath[this.mmRigKind]}/${this.mmRigLandmark}`;
+      ? (this.mmRigManualAddress.trim() || `${mm.prefix || '/mp'}/iris/0`)
+      : `${mm.prefix || '/mp'}/${RIG_KIND_PATH[this.mmRigKind]}/${this.mmRigLandmark}`;
     const liveInfo = liveByAddress.get(address);
 
     const targetSel = el('select') as HTMLSelectElement;
+    targetSel.append(el('option', { value: '', text: '(none)' }));
     rigTargets.forEach((t, i) => targetSel.append(el('option', { value: String(i), text: t.label })));
+    targetSel.value = '';
+    targetSel.onchange = () => {
+      const v = targetSel.value;
+      if (!v) return;
+      const target = rigTargets[Number(v)].ref;
+      if (this.mmRigResetTransform) {
+        setObjectTransform(ctx.scene, target, { translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
+      }
+      this.app.addMediaMimeRig(address, target);
+      targetSel.value = '';
+    };
 
-    const manualInput = el('input', { type: 'text', value: this.mmRigManualAddress, placeholder: `${mm.prefix || '/mm'}/iris/0` }) as HTMLInputElement;
+    const manualInput = el('input', { type: 'text', value: this.mmRigManualAddress, placeholder: `${mm.prefix || '/mp'}/iris/0` }) as HTMLInputElement;
     manualInput.onchange = () => { this.mmRigManualAddress = manualInput.value; this.refresh(); };
 
     const rigMapperRows: Node[] = [
@@ -3088,7 +3105,7 @@ export class UI {
         checkbox('manual address (iris, custom senders, ...)', this.mmRigManual, (v) => { this.mmRigManual = v; this.refresh(); })),
       this.mmRigManual
         ? el('div', { class: 'row' }, 'Address', manualInput)
-        : combinedBodyMapPicker(this.mmRigKind, this.mmRigLandmark, (k, v) => { this.mmRigKind = k; this.mmRigLandmark = v; this.refresh(); }),
+        : combinedBodyMapPicker(this.mmRigKind, this.mmRigLandmark, (k, v) => { this.mmRigKind = k; this.mmRigLandmark = v; this.refresh(); }, mm.prefix || '/mp'),
       el('div', {
         class: 'row',
         text: liveInfo
@@ -3097,23 +3114,22 @@ export class UI {
       }),
       ...(rigTargets.length ? [el('div', { class: 'row' },
         targetSel,
-        btn('Attach', () => this.app.addMediaMimeRig(address, rigTargets[Number(targetSel.value)].ref),
-          { cls: 'icon-btn', title: 'Rig the selected object to this address' }),
         btn('＋Trigger', () => this.app.addMediaMimeTrigger(address, liveInfo?.pos ?? [0, 0, 0]),
           { cls: 'icon-btn', title: 'Spawn a trigger primitive rigged to this address' }),
+      ), el('div', { class: 'row' },
+        checkbox('reset original transform on attach', this.mmRigResetTransform, (v) => { this.mmRigResetTransform = v; }),
       )] : []),
     ];
 
-    const rigRows: Node[] = mm.rigs.map((rig) => el('div', { class: 'row' },
+    const rigRows: Node[] = mm.rigs.map((rig) => el('div', { class: 'row', title: rig.address },
       checkbox('', rig.enabled, (v) => { rig.enabled = v; }),
       el('span', { class: 'grow', text: rig.name }),
       numField('scale', rig.scale, (v) => { rig.scale = v; }, 0.05),
       btn(icon('xMark'), () => this.app.deleteMediaMimeRig(rig.id), { cls: 'icon-btn' }),
     ));
 
-    return panel('MediaMime — landmarks & rigs',
-      el('div', { class: 'row' }, 'Address prefix', prefixInput,
-        el('span', { class: 'row', text: '· uses the WS bridge below (IO panel)' })),
+    return panel('Capture — landmarks & rigs',
+      el('div', { class: 'row' }, 'Address prefix', prefixInput),
       el('div', { class: 'menu-header', text: `Rig mapper · ${live.length} live address${live.length === 1 ? '' : 'es'}` }),
       ...rigMapperRows,
       el('div', { class: 'menu-header', text: 'Rigs (object ← address)' }),

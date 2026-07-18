@@ -14,7 +14,7 @@ interface Landmark { pos: Vec3; t: number }
 export class MediaMimeEngine {
   private landmarks = new Map<string, Landmark>();
   private unsub: (() => void) | null = null;
-  private prefix = '/mm';
+  private prefix = '/mp';
 
   /** Re-subscribe when the prefix changes (cheap; call whenever it might have). */
   setPrefix(prefix: string): void {
