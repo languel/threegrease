@@ -765,7 +765,7 @@ export class UI {
       if (s.activeTool === 'erase') {
         bar.append(
           selectField('Eraser', s.eraser.mode, [['POINT', 'Point'], ['STROKE', 'Stroke'], ['SOFT', 'Soft']] as [EraserMode, string][], (v) => { s.eraser.mode = v; }),
-          slider('Size', s.eraser.radius, 4, 120, 1, (v) => { s.eraser.radius = v; }),
+          slider('Size', s.eraser.radius, 4, 120, 1, (v) => { s.eraser.radius = v; }, { def: 24 }),
         );
       }
     } else if (s.mode === 'EDIT') {
@@ -781,20 +781,20 @@ export class UI {
       ];
       bar.append(
         selectField('Brush', s.sculpt.brush, brushes, (v) => { s.sculpt.brush = v; }),
-        slider('Radius', s.sculpt.radius, 10, 200, 1, (v) => { s.sculpt.radius = v; }),
-        slider('Strength', s.sculpt.strength, 0.05, 1, 0.05, (v) => { s.sculpt.strength = v; }),
+        slider('Radius', s.sculpt.radius, 10, 200, 1, (v) => { s.sculpt.radius = v; }, { def: 50 }),
+        slider('Strength', s.sculpt.strength, 0.05, 1, 0.05, (v) => { s.sculpt.strength = v; }, { def: 0.5 }),
       );
     } else if (s.mode === 'VERTEX') {
       bar.append(
         selectField('Brush', s.paint.brush, [['DRAW', 'Draw'], ['BLUR', 'Blur'], ['AVERAGE', 'Average'], ['SMEAR', 'Smear']] as [PaintBrush, string][], (v) => { s.paint.brush = v; }),
         colorField('Color', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }),
-        slider('Radius', s.paint.radius, 5, 150, 1, (v) => { s.paint.radius = v; }),
+        slider('Radius', s.paint.radius, 5, 150, 1, (v) => { s.paint.radius = v; }, { def: 40 }),
         slider('Strength', s.paint.strength, 0.05, 1, 0.05, (v) => { s.paint.strength = v; }),
       );
     } else if (s.mode === 'WEIGHT') {
       bar.append(
         slider('Weight', s.weight.target, 0, 1, 0.05, (v) => { s.weight.target = v; }),
-        slider('Radius', s.weight.radius, 5, 150, 1, (v) => { s.weight.radius = v; }),
+        slider('Radius', s.weight.radius, 5, 150, 1, (v) => { s.weight.radius = v; }, { def: 40 }),
         slider('Strength', s.weight.strength, 0.05, 1, 0.05, (v) => { s.weight.strength = v; }),
       );
     }
@@ -1664,23 +1664,23 @@ export class UI {
           (v) => { st.unit = v as 'VIEW' | 'SCENE'; }),
         checkbox('Stamp', st.stamp, (v) => { st.stamp = v; }),
       ),
-      slider('Hardness', b.hardness, 0.05, 1, 0.01, (v) => { b.hardness = v; }),
-      slider('Spacing', st.spacing, 0.03, 1, 0.01, (v) => { st.spacing = v; }),
-      slider('Angle', st.angle, -Math.PI, Math.PI, 0.05, (v) => { st.angle = v; }),
-      slider('Aspect', st.aspect, 0.1, 1, 0.01, (v) => { st.aspect = v; }),
-      slider('Jitter', st.jitter, 0, 1, 0.01, (v) => { st.jitter = v; }),
-      slider('Grain', st.grain, 0, 1, 0.01, (v) => { st.grain = v; }),
-      slider('Grain scale', st.grainScale, 1, 30, 0.5, (v) => { st.grainScale = v; }),
+      slider('Hardness', b.hardness, 0.05, 1, 0.01, (v) => { b.hardness = v; }, { def: 1, route: 'brush.hardness' }),
+      slider('Spacing', st.spacing, 0.03, 1, 0.01, (v) => { st.spacing = v; }, { def: 0.12 }),
+      slider('Angle', st.angle, -Math.PI, Math.PI, 0.05, (v) => { st.angle = v; }, { def: 0 }),
+      slider('Aspect', st.aspect, 0.1, 1, 0.01, (v) => { st.aspect = v; }, { def: 1 }),
+      slider('Jitter', st.jitter, 0, 1, 0.01, (v) => { st.jitter = v; }, { def: 0, route: 'brush.style.jitter' }),
+      slider('Grain', st.grain, 0, 1, 0.01, (v) => { st.grain = v; }, { def: 0, route: 'brush.style.grain' }),
+      slider('Grain scale', st.grainScale, 1, 30, 0.5, (v) => { st.grainScale = v; }, { def: 6 }),
       el('div', { class: 'row' },
-        slider('Active smooth', b.activeSmooth, 0, 0.8, 0.02, (v) => { b.activeSmooth = v; }),
+        slider('Active smooth', b.activeSmooth, 0, 0.8, 0.02, (v) => { b.activeSmooth = v; }, { def: 0.2 }),
       ),
       el('div', { class: 'row' },
-        slider('Post smooth', b.postSmooth, 0, 1, 0.02, (v) => { b.postSmooth = v; }),
-        numField('Simplify', b.simplify, (v) => { b.simplify = Math.max(0, v); }, 0.001),
+        slider('Post smooth', b.postSmooth, 0, 1, 0.02, (v) => { b.postSmooth = v; }, { def: 0.3 }),
+        numField('Simplify', b.simplify, (v) => { b.simplify = Math.max(0, v); }, 0.001, { def: 0.002 }),
       ),
       el('div', { class: 'row' },
         checkbox('Stabilize', b.stabilize, (v) => { b.stabilize = v; }),
-        slider('Radius', b.stabilizeRadius, 5, 120, 1, (v) => { b.stabilizeRadius = v; }),
+        slider('Radius', b.stabilizeRadius, 5, 120, 1, (v) => { b.stabilizeRadius = v; }, { def: 30 }),
       ),
     );
   }
