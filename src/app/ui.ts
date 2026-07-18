@@ -991,7 +991,7 @@ export class UI {
       },
       {
         id: 'mediamime', icon: 'camera', title: 'Capture — live landmarks & object rigging',
-        build: () => [this.mmStreamsPanel(), this.clipsPanel(), this.mediamimePanel()],
+        build: () => [this.mmStreamsPanel(), this.mediamimePanel(), this.clipsPanel()],
       },
       {
         id: 'solvers', icon: 'variable', title: 'Solvers — splats · string art · wire art',
@@ -3085,6 +3085,21 @@ export class UI {
       : `${mm.prefix || '/mp'}/${RIG_KIND_PATH[this.mmRigKind]}/${this.mmRigLandmark}`;
     const liveInfo = liveByAddress.get(address);
 
+    // eyedropper + dropdown both funnel through the same attach action —
+    // pick a target either way, immediately rig it (no separate Attach
+    // button; see the dropdown's own onchange below)
+    const attachTarget = (target: ObjRef) => {
+      if (this.mmRigResetTransform) {
+        setObjectTransform(ctx.scene, target, { translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
+      }
+      this.app.addMediaMimeRig(address, target);
+      this.refresh();
+    };
+
+    const eyedrop = btn('◎', () => {
+      this.app.pickObject((ref) => { if (ref) attachTarget(ref); });
+    }, { cls: 'icon-btn', title: 'Click, then click an object in the viewport to attach it (Esc cancels)' });
+
     const targetSel = el('select') as HTMLSelectElement;
     targetSel.append(el('option', { value: '', text: '(none)' }));
     rigTargets.forEach((t, i) => targetSel.append(el('option', { value: String(i), text: t.label })));
@@ -3092,11 +3107,7 @@ export class UI {
     targetSel.onchange = () => {
       const v = targetSel.value;
       if (!v) return;
-      const target = rigTargets[Number(v)].ref;
-      if (this.mmRigResetTransform) {
-        setObjectTransform(ctx.scene, target, { translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
-      }
-      this.app.addMediaMimeRig(address, target);
+      attachTarget(rigTargets[Number(v)].ref);
       targetSel.value = '';
     };
 
@@ -3117,9 +3128,9 @@ export class UI {
           : `${address}  · not seen yet — connect the WS bridge below and point a sender at this prefix`,
       }),
       ...(rigTargets.length ? [el('div', { class: 'row' },
-        targetSel,
-        btn('＋Trigger', () => this.app.addMediaMimeTrigger(address, liveInfo?.pos ?? [0, 0, 0]),
-          { cls: 'icon-btn', title: 'Spawn a trigger primitive rigged to this address' }),
+        eyedrop, targetSel,
+        btn(icon('plus'), () => this.app.addMediaMimeTrigger(address, liveInfo?.pos ?? [0, 0, 0]),
+          { cls: 'icon-btn', title: 'Trigger — spawn a trigger primitive rigged to this address' }),
       ), el('div', { class: 'row' },
         checkbox('reset transform', this.mmRigResetTransform, (v) => { this.mmRigResetTransform = v; },
           'zero translation/rotation and scale to 1 on the target when attaching a rig'),

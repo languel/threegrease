@@ -1880,3 +1880,30 @@ now alongside the grid work above.)
   the combined map still correctly resolves to `FACE 249` with the
   `pose-map-dot-leye` class applied. `npx tsc --noEmit` and
   `npx vite build` both clean.
+
+## Rig mapper: eyedropper, icon-only Trigger button, Clips reordered
+- **Trigger button label → tooltip**: was `btn('＋Trigger', ...)`, wide
+  enough to wrap onto two lines at the panel's width (screenshotted by
+  the user). Now `btn(icon('plus'), ...)` — icon only, same as every
+  other icon-btn in the app — with the label folded into the title as
+  `"Trigger — spawn a trigger primitive rigged to this address"`.
+- **Object eyedropper before the target dropdown**: turns out this
+  repo already has the exact Blender pattern — `App.pickObject(cb)`
+  (main.ts) arms `objectPicking`, the next viewport click resolves via
+  the same raycast `ObjectSelectTool` already uses for click-select and
+  calls back with the hit ref (or `null`), Esc cancels. It's already
+  used by `objectPickerField()` (a constraint-target helper) elsewhere
+  in ui.ts — the rig mapper just didn't have one yet. Added an eyedropper
+  button (`◎`) before `targetSel`; factored the dropdown's own onchange
+  and the eyedropper's callback through one shared `attachTarget(ref)`
+  so both paths do the identical reset-transform-then-rig sequence
+  instead of duplicating it.
+- **Clips moved under the rig section**: sidebar tab's `build()` array
+  reordered from `[streams, clips, rigMapper]` to
+  `[streams, rigMapper, clips]`.
+- Verified live: screenshot confirms panel order (Streams → Capture →
+  Clips) and the eyedropper/dropdown/icon-only-Trigger row layout;
+  clicking the eyedropper then dispatching a real `pointerdown` on the
+  canvas at the test mesh's screen position correctly attached it
+  (`rigs: ["/mp/pose/0"]`) and exited picking mode automatically.
+  `npx tsc --noEmit` and `npx vite build` both clean.
