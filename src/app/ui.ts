@@ -1713,7 +1713,8 @@ export class UI {
     const props: Node[] = [];
     if (layer) {
       props.push(
-        slider('Opacity', layer.opacity, 0, 1, 0.01, (v) => { layer.opacity = v; ctx.requestRender(); }),
+        slider('Opacity', layer.opacity, 0, 1, 0.01, (v) => { layer.opacity = v; ctx.requestRender(); },
+          { def: 1, route: `layer.${layer.id}.opacity` }),
         el('div', { class: 'row' },
           selectField('Blend', layer.blendMode, [['REGULAR', 'Regular'], ['ADD', 'Add'], ['MULTIPLY', 'Multiply']] as [BlendMode, string][], (v) => { layer.blendMode = v; ctx.requestRender(); }),
           numField('Thickness +', layer.thicknessOffset, (v) => { layer.thicknessOffset = v; ctx.requestRender(); }, 1),
@@ -2033,13 +2034,15 @@ export class UI {
 
   private paramEditors(
     params: Record<string, number | boolean | number[]>, onChange: () => void,
+    routePrefix?: string,
   ): Node[] {
     const out: Node[] = [];
     for (const [key, val] of Object.entries(params)) {
       if (typeof val === 'boolean') {
         out.push(checkbox(key, val, (v) => { params[key] = v; onChange(); }));
       } else if (typeof val === 'number') {
-        out.push(numField(key, val, (v) => { params[key] = v; onChange(); }));
+        out.push(numField(key, val, (v) => { params[key] = v; onChange(); },
+          0.1, routePrefix ? { route: `${routePrefix}.${key}` } : {}));
       } else if (Array.isArray(val) && val.length === 3 && key.toLowerCase().includes('color')) {
         out.push(colorField(key, [...val, 1], (rgb) => { params[key] = rgb; onChange(); }));
       } else if (Array.isArray(val)) {
@@ -2083,7 +2086,7 @@ export class UI {
           }, { cls: 'icon-btn', title: 'Apply: bake into keyframes and remove from the stack' }),
           btn(icon('xMark'), () => { ctx.pushUndo(); ob.modifiers.splice(i, 1); ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn' }),
         ),
-        ...this.paramEditors(mod.params, () => ctx.requestRender()),
+        ...this.paramEditors(mod.params, () => ctx.requestRender(), `modifier.${mod.id}`),
       );
       const layerFilterSel = el('select') as HTMLSelectElement;
       layerFilterSel.append(el('option', { value: '', text: 'All layers' }));
@@ -2123,7 +2126,7 @@ export class UI {
           checkbox('On', fx.enabled, (v) => { fx.enabled = v; ctx.requestRender(); }),
           btn(icon('xMark'), () => { ctx.pushUndo(); ob.effects.splice(i, 1); ctx.requestRender(); this.refresh(); }, { cls: 'icon-btn' }),
         ),
-        ...this.paramEditors(fx.params, () => ctx.requestRender()),
+        ...this.paramEditors(fx.params, () => ctx.requestRender(), `effect.${fx.id}`),
       );
       items.push(el('div', { class: 'panel' }, el('h3', { text: fx.name }), body));
     });
