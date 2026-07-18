@@ -1837,3 +1837,46 @@ now alongside the grid work above.)
   created the rig, zeroed the mesh's transform back to `[0,0,0]`, and
   reset the dropdown to `(none)` — no separate Attach click needed.
   `npx tsc --noEmit` and `npx vite build` both clean.
+
+## Eye colors, checkbox restyle, further label cleanup
+- **Distinct left/right eye colors**: `faceLandmarks.ts` exports
+  `FACE_LEFT_EYE_IDS`/`FACE_RIGHT_EYE_IDS` (each eye ring + its iris);
+  `poseMap.ts` uses them in a per-point `faceColorClass(id)` function
+  (green `#2AFF00` left, red `#FF0D12` right, rest of the face stays
+  yellow) rather than the flat per-kind color the other three regions
+  use. `addLandmarks`'s `colorClass` option now accepts a function as
+  well as a plain string so this could plug in without a parallel
+  code path. Applied everywhere a face diagram appears: the combined
+  rig-mapper picker AND the standalone `faceMapPicker` (constraint/pen
+  fields) — while at it, gave `poseMapPicker`/`handMapPicker` their own
+  kind colors too for consistency (`handMapPicker` gained a `side`
+  param so `landmarkMapForKind` can color HAND_LEFT vs HAND_RIGHT
+  correctly instead of both defaulting to the same color).
+- **Checkboxes app-wide**: were already custom-styled (not the native OS
+  control) but drew a checkmark tick inside a rounded box. Simplified to
+  match the flat line-icon language elsewhere in the app — plain
+  empty square (unchecked) vs. solid-filled square (checked), no drawn
+  symbol, smaller radius. CSS-only change (`input[type="checkbox"]` in
+  styles.css), so every checkbox in the app updated from one edit.
+- **Long checkbox labels moved to hover tooltips**: `checkbox()`
+  (ui.ts) gained an optional `title` param. Shortened labels + moved the
+  parenthetical/descriptive part to the tooltip at every checkbox whose
+  label was a full phrase rather than 1-2 words: the Capture panel's
+  "manual address (iris, custom senders, ...)" → "manual address" and
+  "reset original transform on attach" → "reset transform" (both new
+  from the last pass), plus three pre-existing ones elsewhere in the app
+  that were the same pattern — grid's "Auto color (matches Background)",
+  and the nav-prefs "Trackpad navigation (two-finger orbit, Shift pan,
+  Ctrl zoom)", "Emulate Numpad (digit-row view keys)", "Emulate 3-Button
+  Mouse (Alt+LMB navigates)". Short 1-2 word labels (Retrigger, Mask,
+  Visible, ...) were left alone — the ask was about long labels
+  specifically, not tooltips on every checkbox regardless of length.
+- Verified live: screenshot shows the rig mapper's face with a visibly
+  green left eye and red right eye distinct from the yellow face/oval/
+  lips, plain square checkboxes throughout (no checkmark glyph), and the
+  shortened labels with their tooltips confirmed via
+  `label.title`. A HAND_LEFT and HAND_RIGHT pen-field picker opened side
+  by side correctly rendered green vs. pink. Clicking a left-eye dot on
+  the combined map still correctly resolves to `FACE 249` with the
+  `pose-map-dot-leye` class applied. `npx tsc --noEmit` and
+  `npx vite build` both clean.

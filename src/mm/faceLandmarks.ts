@@ -95,3 +95,9 @@ export const FACE_LANDMARK_IDS: number[] = [...posMap.keys()].sort((a, b) => a -
 export const FACE_LANDMARK_POS: Map<number, [number, number]> = posMap;
 export const FACE_LANDMARK_NAMES: Map<number, string> = nameMap;
 export const FACE_LANDMARK_EDGES: [number, number][] = edges;
+
+/** Ids belonging to each eye (ring + its iris) — for the picker's
+ *  distinct left/right eye coloring, kept separate from the rest of the
+ *  face (oval/lips) which share one color. */
+export const FACE_LEFT_EYE_IDS: number[] = [...LEFT_EYE, LEFT_IRIS_CENTER, ...LEFT_IRIS_RING];
+export const FACE_RIGHT_EYE_IDS: number[] = [...RIGHT_EYE, RIGHT_IRIS_CENTER, ...RIGHT_IRIS_RING];

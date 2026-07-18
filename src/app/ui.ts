@@ -160,11 +160,13 @@ function numField(label: string, value: number, onChange: (v: number) => void, s
   return el('label', { class: 'inline' }, label, input);
 }
 
-function checkbox(label: string, value: boolean, onChange: (v: boolean) => void): HTMLElement {
+function checkbox(label: string, value: boolean, onChange: (v: boolean) => void, title?: string): HTMLElement {
   const input = el('input', { type: 'checkbox' }) as HTMLInputElement;
   input.checked = value;
   input.onchange = () => onChange(input.checked);
-  return el('label', { class: 'inline' }, input, label);
+  const el2 = el('label', { class: 'inline' }, input, label);
+  if (title) el2.title = title;
+  return el2;
 }
 
 /** Icon-only checkbox (no visible text) with a hover tooltip. */
@@ -1038,10 +1040,10 @@ export class UI {
       ),
       el('div', { class: 'row', text: 'Magnet INCREMENT snaps to the subdivision lines (Step ÷ Subdivisions).' }),
       el('div', { class: 'row' },
-        checkbox('Auto color (matches Background)', !s.gridColor, (v) => {
+        checkbox('Auto color', !s.gridColor, (v) => {
           s.gridColor = v ? null : [...s.background];
           this.app.rebuildGrid(); save(); this.refresh();
-        }),
+        }, 'grid color matches the background'),
         ...(s.gridColor ? [colorField('Color', [...s.gridColor, 1], (rgb) => {
           s.gridColor = rgb; this.app.rebuildGrid(); save();
         })] : []),
@@ -2141,14 +2143,15 @@ export class UI {
         checkbox('Show axes', s.showAxes, (v) => this.app.setShowAxes(v)),
       ),
       el('div', { class: 'row' },
-        checkbox('Trackpad navigation (two-finger orbit, Shift pan, Ctrl zoom)', s.trackpadNav, (v) => this.app.setTrackpadNav(v)),
+        checkbox('Trackpad navigation', s.trackpadNav, (v) => this.app.setTrackpadNav(v),
+          'two-finger orbit, Shift pan, Ctrl zoom'),
         checkbox('Invert orbit direction', s.invertTrackpadOrbit, (v) => { s.invertTrackpadOrbit = v; save(); }),
       ),
       el('div', { class: 'row' },
-        checkbox('Emulate Numpad (digit-row view keys)', s.emulateNumpad, (v) => { s.emulateNumpad = v; save(); }),
+        checkbox('Emulate Numpad', s.emulateNumpad, (v) => { s.emulateNumpad = v; save(); }, 'digit-row keys become view shortcuts'),
       ),
       el('div', { class: 'row' },
-        checkbox('Emulate 3-Button Mouse (Alt+LMB navigates)', s.emulate3Button, (v) => { s.emulate3Button = v; save(); }),
+        checkbox('Emulate 3-Button Mouse', s.emulate3Button, (v) => { s.emulate3Button = v; save(); }, 'Alt+LMB navigates'),
       ),
       el('div', { class: 'row' },
         checkbox('Show transform gizmo', s.showGizmo, (v) => { s.showGizmo = v; this.app.refreshWidget(); save(); }),
@@ -2941,11 +2944,11 @@ export class UI {
         )] : []),
         // live pen: one landmark draws into the active GP object
         el('div', { class: 'row' },
-          Object.assign(checkbox('pen', !!st.pen?.active, (v) => {
+          checkbox('pen', !!st.pen?.active, (v) => {
             st.pen ??= { active: false, landmark: 0, minConf: 0.5 };
             st.pen.active = v;
             this.refresh();
-          }), { title: `draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up` }),
+          }, `draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up`),
           ...(st.pen?.active && !hasLandmarkMap(st.kind) ? [
             numField('landmark', st.pen.landmark, (v) => { st.pen!.landmark = Math.max(0, Math.round(v)); }, 1),
           ] : []),
@@ -3102,7 +3105,8 @@ export class UI {
 
     const rigMapperRows: Node[] = [
       el('div', { class: 'row' },
-        checkbox('manual address (iris, custom senders, ...)', this.mmRigManual, (v) => { this.mmRigManual = v; this.refresh(); })),
+        checkbox('manual address', this.mmRigManual, (v) => { this.mmRigManual = v; this.refresh(); },
+          'iris, custom senders, or anything else not on the body map')),
       this.mmRigManual
         ? el('div', { class: 'row' }, 'Address', manualInput)
         : combinedBodyMapPicker(this.mmRigKind, this.mmRigLandmark, (k, v) => { this.mmRigKind = k; this.mmRigLandmark = v; this.refresh(); }, mm.prefix || '/mp'),
@@ -3117,7 +3121,8 @@ export class UI {
         btn('＋Trigger', () => this.app.addMediaMimeTrigger(address, liveInfo?.pos ?? [0, 0, 0]),
           { cls: 'icon-btn', title: 'Spawn a trigger primitive rigged to this address' }),
       ), el('div', { class: 'row' },
-        checkbox('reset original transform on attach', this.mmRigResetTransform, (v) => { this.mmRigResetTransform = v; }),
+        checkbox('reset transform', this.mmRigResetTransform, (v) => { this.mmRigResetTransform = v; },
+          'zero translation/rotation and scale to 1 on the target when attaching a rig'),
       )] : []),
     ];
 

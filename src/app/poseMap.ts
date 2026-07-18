@@ -8,7 +8,7 @@
 // single picking surface, since a point there can come from any kind.
 import { POSE_LANDMARK_EDGES, POSE_LANDMARK_NAMES, POSE_LANDMARK_POS, POSE_VIEWBOX } from '../mm/poseLandmarks';
 import { HAND_LANDMARK_EDGES, HAND_LANDMARK_NAMES, HAND_LANDMARK_POS, HAND_VIEWBOX } from '../mm/handLandmarks';
-import { FACE_LANDMARK_EDGES, FACE_LANDMARK_IDS, FACE_LANDMARK_NAMES, FACE_LANDMARK_POS, FACE_VIEWBOX } from '../mm/faceLandmarks';
+import { FACE_LANDMARK_EDGES, FACE_LANDMARK_IDS, FACE_LANDMARK_NAMES, FACE_LANDMARK_POS, FACE_LEFT_EYE_IDS, FACE_RIGHT_EYE_IDS, FACE_VIEWBOX } from '../mm/faceLandmarks';
 import type { MMStream } from '../core/types';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -68,6 +68,16 @@ function faceSet(): LandmarkSet {
   };
 }
 
+const FACE_LEFT_EYE_SET = new Set(FACE_LEFT_EYE_IDS);
+const FACE_RIGHT_EYE_SET = new Set(FACE_RIGHT_EYE_IDS);
+/** Per-point face color: each eye (ring + its iris) gets its own color,
+ *  the rest of the face (oval/lips) shares the default face color. */
+function faceColorClass(id: number): string {
+  if (FACE_LEFT_EYE_SET.has(id)) return 'pose-map-dot-leye';
+  if (FACE_RIGHT_EYE_SET.has(id)) return 'pose-map-dot-reye';
+  return 'pose-map-dot-face';
+}
+
 /** One picker's worth of dots + drag/click wiring, appended into a
  *  caller-supplied <svg> (own coordinate space, transform applied by the
  *  caller for the combined map). `onPick(id)` fires on click/drag/drop.
@@ -76,7 +86,7 @@ function faceSet(): LandmarkSet {
  *  size still comes out to DOT_R regardless of that group's scale. */
 function addLandmarks(
   svg: SVGSVGElement, set: LandmarkSet, onPick: (id: number) => void, r: number = DOT_R,
-  opts: { colorClass?: string; titleFor?: (id: number) => string; skip?: (id: number) => boolean } = {},
+  opts: { colorClass?: string | ((id: number) => string | undefined); titleFor?: (id: number) => string; skip?: (id: number) => boolean } = {},
 ): Map<number, SVGCircleElement> {
   for (const [a, b] of set.edges) {
     const [ax, ay] = set.pos(a);
@@ -87,7 +97,8 @@ function addLandmarks(
   for (const id of set.ids) {
     if (opts.skip?.(id)) continue;
     const [x, y] = set.pos(id);
-    const cls = opts.colorClass ? `pose-map-dot ${opts.colorClass}` : 'pose-map-dot';
+    const colorClass = typeof opts.colorClass === 'function' ? opts.colorClass(id) : opts.colorClass;
+    const cls = colorClass ? `pose-map-dot ${colorClass}` : 'pose-map-dot';
     const dot = svgEl('circle', { cx: x, cy: y, r, class: cls });
     dot.append(svgEl('title'));
     (dot.firstChild as SVGTitleElement).textContent = opts.titleFor ? opts.titleFor(id) : `${id}: ${set.name(id)}`;
@@ -108,7 +119,10 @@ function addLandmarks(
 /** Single-kind picker: map + name dropdown + picked-point label. Used
  *  wherever a field is bound to one specific stream's own index space
  *  (a constraint's landmark, a stream's live-pen landmark). */
-function singleKindPicker(set: LandmarkSet, value: number, onChange: (v: number) => void, widthPx: number, heightPx: number): HTMLElement {
+function singleKindPicker(
+  set: LandmarkSet, value: number, onChange: (v: number) => void, widthPx: number, heightPx: number,
+  colorClass?: string | ((id: number) => string | undefined),
+): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'pose-map';
 
@@ -125,7 +139,7 @@ function singleKindPicker(set: LandmarkSet, value: number, onChange: (v: number)
     select.value = String(v);
     setLabel(v);
   };
-  const dots = addLandmarks(svg, set, pick);
+  const dots = addLandmarks(svg, set, pick, undefined, { colorClass });
   dots.get(value)?.classList.add('picked');
 
   wrap.ondragover = (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
@@ -151,15 +165,15 @@ function singleKindPicker(set: LandmarkSet, value: number, onChange: (v: number)
 }
 
 export function poseMapPicker(value: number, onChange: (v: number) => void): HTMLElement {
-  return singleKindPicker(poseSet(), value, onChange, 150, 280);
+  return singleKindPicker(poseSet(), value, onChange, 150, 280, 'pose-map-dot-pose');
 }
 
-export function handMapPicker(value: number, onChange: (v: number) => void): HTMLElement {
-  return singleKindPicker(handSet(), value, onChange, 140, 160);
+export function handMapPicker(value: number, onChange: (v: number) => void, side: 'left' | 'right' = 'left'): HTMLElement {
+  return singleKindPicker(handSet(), value, onChange, 140, 160, side === 'left' ? 'pose-map-dot-handL' : 'pose-map-dot-handR');
 }
 
 export function faceMapPicker(value: number, onChange: (v: number) => void): HTMLElement {
-  return singleKindPicker(faceSet(), value, onChange, 190, 209);
+  return singleKindPicker(faceSet(), value, onChange, 190, 209, faceColorClass);
 }
 
 /** Rig-mapper kind: matches MMStream['kind'] for POSE/HAND_LEFT/
@@ -271,9 +285,12 @@ export function combinedBodyMapPicker(
     label.textContent = `${k} ${id}`;
   };
 
-  const wire = (targetSvg: SVGGElement, set: LandmarkSet, k: RigMapKind, groupScale: number, skip?: (id: number) => boolean) => {
+  const wire = (
+    targetSvg: SVGGElement, set: LandmarkSet, k: RigMapKind, groupScale: number,
+    skip?: (id: number) => boolean, colorClass: string | ((id: number) => string | undefined) = KIND_COLOR_CLASS[k],
+  ) => {
     const dots = addLandmarks(targetSvg as unknown as SVGSVGElement, set, (id) => pick(k, id), ON_SCREEN_DOT_R / groupScale, {
-      colorClass: KIND_COLOR_CLASS[k],
+      colorClass,
       titleFor: (id) => `${id} · ${set.name(id)} · ${prefix}/${RIG_KIND_PATH[k]}/${id}`,
       skip,
     });
@@ -285,7 +302,7 @@ export function combinedBodyMapPicker(
   // one shown there instead of two stacked circles
   wire(leftHandG, handSet(), 'HAND_LEFT', handScale, (id) => id === 0);
   wire(rightHandG, handSet(), 'HAND_RIGHT', handScale, (id) => id === 0);
-  wire(faceG, faceSet(), 'FACE', faceScale);
+  wire(faceG, faceSet(), 'FACE', faceScale, undefined, faceColorClass);
 
   allDots.get(key(kind, landmark))?.classList.add('picked');
   label.textContent = `${kind} ${landmark}`;
@@ -316,7 +333,8 @@ export function hasLandmarkMap(kind: MMStream['kind']): boolean {
 export function landmarkMapForKind(kind: MMStream['kind'], value: number, onChange: (v: number) => void): HTMLElement | null {
   switch (kind) {
     case 'POSE': return poseMapPicker(value, onChange);
-    case 'HAND_LEFT': case 'HAND_RIGHT': return handMapPicker(value, onChange);
+    case 'HAND_LEFT': return handMapPicker(value, onChange, 'left');
+    case 'HAND_RIGHT': return handMapPicker(value, onChange, 'right');
     case 'FACE': return faceMapPicker(value, onChange);
     default: return null;
   }

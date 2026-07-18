@@ -95,25 +95,19 @@ input[type="color"] { padding: 0; width: 26px; height: 22px; }
 input[type="number"], input[type="text"] { width: 56px; cursor: text; }
 label.inline { display: flex; align-items: center; gap: 4px; color: var(--dim); white-space: nowrap; }
 
-/* Prettier checkbox: a flat rounded box instead of the OS-native control,
-   with a CSS-drawn checkmark (no icon font needed) so it stays crisp at
-   any zoom and themes off --accent automatically. */
+/* Plain empty/filled square, matching the flat geometric line-icon style
+   in icons.ts rather than a checkmark glyph: unchecked is just an
+   outlined box, checked is solid-filled — no separate drawn symbol. */
 input[type="checkbox"] {
   appearance: none; -webkit-appearance: none; margin: 0; padding: 0;
-  width: 15px; height: 15px; border-radius: 4px;
-  border: 1px solid var(--border); background: var(--panel2);
+  width: 13px; height: 13px; border-radius: 2px;
+  border: 1.5px solid var(--dim); background: transparent;
   display: inline-block; position: relative; cursor: pointer; flex-shrink: 0;
   transition: background 0.1s, border-color 0.1s;
 }
 input[type="checkbox"]:hover { border-color: var(--accent); }
 input[type="checkbox"]:checked {
   background: var(--accent); border-color: var(--accent);
-}
-input[type="checkbox"]:checked::after {
-  content: ''; position: absolute; left: 4px; top: 1px;
-  width: 4px; height: 8px;
-  border: solid #fff; border-width: 0 2px 2px 0;
-  transform: rotate(40deg);
 }
 
 .panel { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; }
@@ -287,6 +281,8 @@ button.props-tab.active { background: var(--panel); border-color: var(--border);
 .pose-map-dot-handL { fill: #7aff99; }
 .pose-map-dot-handR { fill: #ff7ab1; }
 .pose-map-dot-face { fill: #fffb7a; }
+.pose-map-dot-leye { fill: #2AFF00; }
+.pose-map-dot-reye { fill: #FF0D12; }
 .pose-map-dot:hover { fill: var(--accent); r: 8; }
 .pose-map-dot.picked { fill: #ff4444; r: 8; }
 .pose-map select { width: 100%; max-width: 220px; }
