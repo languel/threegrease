@@ -1434,3 +1434,38 @@ now alongside the grid work above.)
   display size; streams/triggers keep the 1-unit box. Verified live
   (screenshot): selecting a fresh strokeless Pencil1 now shows a small
   compact outline instead of a room-sized cube.
+
+## Shift+A on an empty scene, general Escape handling
+- **Shift+A crashed with zero GP objects**: `drawingPlane()`
+  (tools/projection.ts) read `activeObject(ctx.scene).translation`
+  unconditionally to anchor the FRONT/SIDE/TOP drawing plane, called from
+  `App.openAddMenu()`'s `screenToWorld()` on every Shift+A press.
+  Falls back to the world origin when `scene.objects` is empty (Object
+  mode legitimately allows that now — see the delete-last-GP-object fix
+  above). Exceptions thrown inside a `window.addEventListener('keydown',
+  ...)` callback don't propagate to the caller and don't show up in a
+  synchronous try/catch around `dispatchEvent` — they only surface as an
+  uncaught error in the console, which is why this one was easy to miss;
+  found it by calling `App.openAddMenu()` directly in a try/catch.
+- **General Escape handling**: added one capture-phase `keydown` listener
+  in `App.bindEvents()` (main.ts), replacing the narrower SELECT-only
+  blur it grew out of. Priority order per press: (1) if the focused
+  element has its own `onkeydown` handler (e.g. the outliner's inline
+  rename input, which needs Escape to CANCEL rather than commit-on-blur)
+  leave it alone entirely; (2) else if focus is in any other
+  INPUT/SELECT/TEXTAREA, blur it; (3) else if a context menu (`.menu-pop`)
+  is open, close it; (4) else, if nothing else claimed it and no
+  dialog/modal/pie/fly/object-picking state is active, deselect — objects
+  in Object mode, points/strokes in Edit-like modes. Capture phase runs
+  this before `App.onKey`'s own Escape branches (which run in bubble
+  phase) and before the settings dialog / command palette / rebind-capture
+  row's own window-capture Escape listeners registered later at runtime —
+  since those all call `stopPropagation()` when they handle Escape
+  themselves, and this new listener's dialog/modal checks make it a no-op
+  whenever one of those owns the keystroke, they never fight.
+- Verified live: rename-input Escape reverted the typed value instead of
+  committing it (a real regression risk from an earlier version of this
+  fix — fixed by the `onkeydown`-presence check); an open Add menu closed
+  on Escape; a focused number field blurred; a fully-selected object
+  deselected when nothing else was open/focused. `npx tsc --noEmit` and
+  `npx vite build` both clean.

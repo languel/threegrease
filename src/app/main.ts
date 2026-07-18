@@ -867,9 +867,37 @@ class App implements AppHandle {
     window.addEventListener('change', (e) => {
       if ((e.target as HTMLElement)?.tagName === 'SELECT') (e.target as HTMLElement).blur();
     });
+    // General Escape fallback: blur a focused field, else close an open
+    // popup menu, else deselect — whichever applies first. Capture phase
+    // so it runs before onKey's own INPUT/SELECT bail (below) would
+    // otherwise eat the keystroke silently. Dialogs/pies/modals with
+    // their own Escape handling (settings, mode pie, G/R/S modal, object
+    // picking) run in bubble phase and stopPropagation, so this never
+    // fights them — it only fires when nothing more specific claimed it.
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && (document.activeElement as HTMLElement)?.tagName === 'SELECT') {
-        (document.activeElement as HTMLElement).blur();
+      if (e.key !== 'Escape') return;
+      const active = document.activeElement as HTMLElement | null;
+      // fields with their own keydown handler (e.g. the outliner's
+      // inline rename input, which needs Escape to CANCEL rather than
+      // commit-on-blur) manage their own Escape — don't blur those out
+      // from under them, just let the event continue to their handler.
+      if (active && typeof (active as HTMLElement & { onkeydown?: unknown }).onkeydown === 'function') return;
+      if (active && (active.tagName === 'SELECT' || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+        active.blur();
+        return;
+      }
+      if (document.querySelector('.menu-pop')) { this.ui.closeContextMenu(); return; }
+      if (this.ui.settingsOpen || this.objModal.active || this.modal.active || this.nav.flying || this.objectPicking) return;
+      if (this.ctx.settings.mode === 'OBJECT') {
+        if (listSelected(this.ctx.scene).length) {
+          deselectAllObjects(this.ctx.scene);
+          this.refreshWidget();
+          this.gp.markDirty();
+          this.ui.refresh();
+        }
+      } else if (this.editLike()) {
+        selectAll(this.ctx, 'none');
+        this.gp.markDirty();
       }
     }, true);
     window.addEventListener('resize', () => this.resize());

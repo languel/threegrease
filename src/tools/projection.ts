@@ -286,7 +286,11 @@ export function drawingPlane(ctx: AppCtx): THREE.Plane {
   const s = ctx.settings;
   const anchor = s.placement === 'CURSOR' || s.plane === 'CURSOR'
     ? new THREE.Vector3(...ctx.scene.cursor)
-    : new THREE.Vector3(...activeObject(ctx.scene).translation);
+    // no active GP object (e.g. Object mode with an empty scene) — the
+    // world origin is as good a default anchor as any active object's own
+    : ctx.scene.objects.length
+      ? new THREE.Vector3(...activeObject(ctx.scene).translation)
+      : new THREE.Vector3();
   let normal: THREE.Vector3;
   const zUp = s.upAxis === 'Z';
   switch (s.plane) {
