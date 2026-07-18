@@ -403,6 +403,14 @@ class App implements AppHandle {
 
   setMode(mode: EditorMode): void {
     if (mode !== this.ctx.settings.mode) this.modeHistory = [this.ctx.settings.mode, mode];
+    // OBJECT mode (and the outliner) tolerate zero GP objects — every
+    // other mode edits the active one, so create a blank on entry rather
+    // than force one to always exist (lets "delete the last GP object"
+    // actually empty the scene while staying in Object mode).
+    if (mode !== 'OBJECT' && this.ctx.scene.objects.length === 0) {
+      this.ctx.scene.objects.push(createObject('Pencil1'));
+      this.ctx.scene.activeObject = 0;
+    }
     this.ctx.settings.mode = mode;
     this.setTool(DEFAULT_TOOL[mode]);
     this.gp.markDirty();
@@ -456,6 +464,7 @@ class App implements AppHandle {
   }
 
   addKeyframe(duplicate: boolean): void {
+    if (!this.ctx.scene.objects.length) return;
     const ob = activeObject(this.ctx.scene);
     const layer = activeLayer(ob);
     if (!layer || layer.lock) return;
@@ -473,6 +482,7 @@ class App implements AppHandle {
   }
 
   removeKeyframe(): void {
+    if (!this.ctx.scene.objects.length) return;
     const ob = activeObject(this.ctx.scene);
     const layer = activeLayer(ob);
     if (!layer || layer.lock) return;
@@ -665,6 +675,7 @@ class App implements AppHandle {
   snapView(view: 'FRONT' | 'BACK' | 'RIGHT' | 'LEFT' | 'TOP' | 'BOTTOM'): void { this.nav.snapView(view); }
 
   jumpKey(dir: 1 | -1): void {
+    if (!this.ctx.scene.objects.length) return;
     const ob = activeObject(this.ctx.scene);
     const frames = new Set<number>();
     for (const l of ob.layers) for (const f of l.frames) frames.add(f.frameNumber);

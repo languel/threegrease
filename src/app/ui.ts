@@ -1004,7 +1004,16 @@ export class UI {
     }
     const content = el('div', { class: 'props-content' });
     const active = tabs.find((t) => t.id === this.propsTab) ?? tabs[0];
-    content.append(...active.build());
+    // brush/data/mods all read the active GP object directly (no
+    // per-panel selection guard, unlike objectPropsPanel) — the scene can
+    // have zero GP objects while staying in Object mode, so show a
+    // placeholder instead of crashing on an undefined activeObject().
+    const needsGP = ['brush', 'data', 'mods'].includes(active.id);
+    if (needsGP && !ctx.scene.objects.length) {
+      content.append(panel('No GP object', el('div', { class: 'row', text: 'Add or select a GP object to edit its brush, data, or modifiers.' })));
+    } else {
+      content.append(...active.build());
+    }
     side.append(strip, content);
   }
 
@@ -3229,23 +3238,26 @@ export class UI {
       g.fillText(String(f), fx(f) + 3, 10 * devicePixelRatio);
     }
 
-    // keyframes of all layers (active layer bright)
-    const ob = activeObject(s);
-    const rowH = Math.min(8 * devicePixelRatio, H / Math.max(1, ob.layers.length));
-    ob.layers.forEach((layer, li) => {
-      const y = H - (li + 0.5) * rowH;
-      const isActive = layer.id === ob.activeLayerId;
-      for (const f of layer.frames) {
-        const x = fx(f.frameNumber);
-        const r = (isActive ? 4 : 2.5) * devicePixelRatio;
-        g.beginPath();
-        g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y);
-        g.closePath();
-        const typeColor = f.keyframeType === 'BREAKDOWN' ? '#41c8e0' : '#e0e0e0';
-        g.fillStyle = f.select ? '#ff9a3b' : isActive ? typeColor : '#77777e';
-        g.fill();
-      }
-    });
+    // keyframes of all layers (active layer bright) — no active GP object
+    // once the scene has zero (Object mode tolerates that; see setMode)
+    const ob = s.objects.length ? activeObject(s) : null;
+    if (ob) {
+      const rowH = Math.min(8 * devicePixelRatio, H / Math.max(1, ob.layers.length));
+      ob.layers.forEach((layer, li) => {
+        const y = H - (li + 0.5) * rowH;
+        const isActive = layer.id === ob.activeLayerId;
+        for (const f of layer.frames) {
+          const x = fx(f.frameNumber);
+          const r = (isActive ? 4 : 2.5) * devicePixelRatio;
+          g.beginPath();
+          g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y);
+          g.closePath();
+          const typeColor = f.keyframeType === 'BREAKDOWN' ? '#41c8e0' : '#e0e0e0';
+          g.fillStyle = f.select ? '#ff9a3b' : isActive ? typeColor : '#77777e';
+          g.fill();
+        }
+      });
+    }
 
     // camera keys along the top edge
     g.fillStyle = '#d8a03c';

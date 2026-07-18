@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import type { AppCtx } from './context';
 import type { GPScene, ParentRef, Vec3 } from '../core/types';
-import { createObject, frameAt } from '../core/gpdata';
+import { frameAt } from '../core/gpdata';
 import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso, pointInPolygon } from './draw';
@@ -136,12 +136,11 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     const i = gpIndexOf(scene, ref.id);
     if (i >= 0) {
       scene.objects.splice(i, 1);
-      // the rest of the app (draw tool, materials/layers panels, ...)
-      // assumes activeObject(scene) always resolves — replace a deleted
-      // LAST GP object with a fresh blank one rather than special-casing
-      // "no active GP object" everywhere
-      if (scene.objects.length === 0) scene.objects.push(createObject('Pencil1'));
-      scene.activeObject = Math.min(scene.activeObject, scene.objects.length - 1);
+      // OBJECT mode + the outliner tolerate zero GP objects; the modes
+      // that actually need an active one (DRAW/EDIT/SCULPT/...) create a
+      // blank on entry instead — see App.setMode. Just keep the index in
+      // range (harmless out-of-bounds when the array is now empty).
+      scene.activeObject = Math.max(0, Math.min(scene.activeObject, scene.objects.length - 1));
     }
   } else if (ref.kind === 'CANVAS') {
     scene.canvases = scene.canvases.filter((c) => c.id !== ref.id);

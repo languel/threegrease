@@ -1360,14 +1360,23 @@ now alongside the grid work above.)
 
 ## Delete last GP object, Object-mode lasso/circle select, three new shortcuts
 - **Delete last GP object**: `deleteObject()` (tools/objects.ts) previously
-  had no guard against removing the last remaining `GP` entry, but nothing
-  downstream tolerates `scene.objects` being empty — `activeObject(scene)`
-  and everything built on it (draw tool, materials/layers panels, ...)
-  assumes it always resolves. Rather than special-case "no active GP
-  object" everywhere, the GP branch now pushes a fresh `createObject
-  ('Pencil1')` when the splice would leave the array empty, and re-clamps
-  `scene.activeObject`. The original object is genuinely gone (new id);
-  a blank default just always exists to land on.
+  had no guard against removing the last remaining `GP` entry. First pass
+  auto-recreated a blank `Pencil1` on empty — but that made Object mode
+  incapable of ever showing zero GP objects; deleting the last one looked
+  like a no-op in the outliner. Reworked: `deleteObject` now just splices
+  and clamps `scene.activeObject`, full stop — Object mode and the
+  outliner correctly show an empty scene. `App.setMode()` (main.ts)
+  lazily creates a blank GP object only when switching INTO a mode that
+  actually edits one (DRAW/EDIT/SCULPT/VERTEX/WEIGHT), so those tools
+  never see an empty `scene.objects`. Guarded the remaining paths that
+  read `activeObject(scene)` outside a mode gate and would otherwise
+  throw on empty: `addKeyframe`/`removeKeyframe`/`jumpKey` (main.ts,
+  reachable via the global `i`/`shift+i`/arrow-key bindings and timeline
+  buttons even in Object mode) early-return; the sidebar's brush/data/mods
+  tabs (ui.ts `buildSidebar`) show a "No GP object" placeholder instead of
+  calling their panels; `drawTimeline()` (ui.ts, runs on every
+  `UI.refresh()` regardless of active tab) skips the keyframe-dot pass
+  when there's no active object.
 - **Object mode lasso/circle select**: `ObjectSelectTool` (tools/objects.ts)
   generalized from box-only to a `kind: 'BOX'|'LASSO'|'CIRCLE'` family,
   mirroring EDIT mode's `SelectTool` (tools/select.ts) — same Ctrl-drag =
@@ -1398,14 +1407,21 @@ now alongside the grid work above.)
     `togglePresentation()` (already hides panels/timeline/menus via the
     `#app.presentation` CSS rules in styles.css) rather than building new
     hide/show logic.
-- Verified live via `__tg` + dynamic `import()` of `tools/objects.ts` and
-  `keymap.ts` in the browser console (no test suite in this repo):
-  deleting the sole GP object replaced its id (4 → 6) and left exactly one
-  object in the scene; the Object-mode toolbar renders all three select
-  tools (`Box select (Ctrl lasso, C circle)`, `Lasso select`, `Circle
-  select ([ ] size)`); all three new actions round-tripped correctly
-  through `runAction()` (`toggleInfoOverlay` hid the grid + `#status`,
-  `toggleGizmoNav` flipped `navLocked`/`controls.enabled`, `toggleMaximize`
-  set `presentation` + the `#app` class), and `ACTIONS` carries the
-  expected `alt+shift+z` / `` ctrl+` `` / `ctrl+alt+space` combos.
+- Verified live via `__tg` + real `KeyboardEvent`/`dispatchEvent` (no test
+  suite in this repo, so real user-input paths, not just calling internals
+  directly): deleting the sole GP object via the `X` shortcut now leaves
+  `scene.objects` genuinely empty and the outliner shows zero rows;
+  switching to `data`/`brush`/`mods` tabs while empty shows the "No GP
+  object" placeholder instead of throwing; pressing `i` (insertKey)
+  globally with zero objects no-ops instead of throwing; switching to
+  DRAW mode lazily creates one blank object, returning to Object mode
+  keeps it. The Object-mode toolbar renders all three select tools (`Box
+  select (Ctrl lasso, C circle)`, `Lasso select`, `Circle select ([ ]
+  size)`). All three new shortcuts round-tripped correctly through both
+  `runAction()` and simulated Mac-remapped `KeyboardEvent`s (Option held →
+  `e.key` becomes an OS-layout character, `e.code` stays physical) —
+  `toggleInfoOverlay` hid the grid + `#status`, `toggleGizmoNav` flipped
+  `navLocked`/`controls.enabled`, `toggleMaximize` set `presentation` +
+  the `#app` class — with no regression on the pre-existing
+  `alt+a`/`alt+p`/`alt+tab` bindings.
   `npx tsc --noEmit` and `npx vite build` both clean.
