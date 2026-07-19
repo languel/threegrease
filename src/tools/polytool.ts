@@ -30,7 +30,7 @@ import * as THREE from 'three';
 import type { AppCtx } from './context';
 import type { TGPolyMesh, Vec3 } from '../core/types';
 import type { Tool, ToolEvent } from './toolsys';
-import { applyGuide, drawingPlane } from './projection';
+import { applyGuide, drawingPlane, perpendicularPlaneAt } from './projection';
 import { worldMatrixOf } from './objects';
 import {
   addEdge, addFace, addVertex, cleanupDegenerateFaces, dissolveEdge, dissolveVertex,
@@ -408,9 +408,17 @@ export class PolyPenTool implements Tool {
       const before = takeSnapshot(pm);
       const id = this.vertexFromHit(ctx, pm, pending.hit);
       if (id === null) { restoreSnapshot(pm, before); return; }
+      // Surface ⊥ placement: the chain STARTS on the surface it hit, then
+      // grows on the standing plane through that point (contains the
+      // surface normal, faces the view) — same semantics as pen strokes
+      const perp = ctx.settings.placement === 'SURFACE_PERP' && pending.hit.normal
+        ? perpendicularPlaneAt(ctx,
+            new THREE.Vector3(...pending.hit.world),
+            new THREE.Vector3(...pending.hit.normal))
+        : null;
       this.state = {
         kind: 'BUILD', meshId: pm.id, vertexIds: [id],
-        before, plane: drawingPlane(ctx).clone(),
+        before, plane: perp ?? drawingPlane(ctx).clone(),
       };
       polyOverlay.activeVertexIds = [id];
       return;

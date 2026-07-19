@@ -789,7 +789,7 @@ export class UI {
           }),
         slider('Size', s.brush.size, 1, 80, 1, (v) => { s.brush.size = v; }, { def: 8, route: 'brush.size' }),
         slider('Strength', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }, { def: 1, route: 'brush.strength' }),
-        selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['STROKE', 'Stroke']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
+        selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['SURFACE_PERP', 'Surface ⊥'], ['STROKE', 'Stroke']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
         ...(s.placement === 'SURFACE' ? [
           numField('Offset', s.surfaceOffset, (v) => { s.surfaceOffset = v; }, 0.01),
         ] : []),

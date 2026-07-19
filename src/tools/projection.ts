@@ -12,10 +12,28 @@ const raycaster = new THREE.Raycaster();
 let excludedStrokeId: number | null = null;
 let stickyDepth: number | null = null;
 let drawingSurface: THREE.Object3D | null = null;
+let perpPlane: THREE.Plane | null = null;
 export function setStrokeExclusion(id: number | null): void {
   excludedStrokeId = id;
   stickyDepth = null;     // each new stroke re-acquires its depth anchor
   drawingSurface = null;  // ...and its surface
+  perpPlane = null;       // ...and its Surface-⊥ standing plane
+}
+
+/** SURFACE_PERP: the plane the stroke grows on — through the surface hit
+ *  point, CONTAINING the surface normal ("grows perpendicular to the
+ *  reference"), oriented to face the camera as much as possible. Its
+ *  normal is the view direction with the surface-normal component
+ *  removed; when looking straight down the normal that degenerates, so
+ *  fall back to a camera-facing plane through the hit. */
+export function perpendicularPlaneAt(
+  ctx: AppCtx, point: THREE.Vector3, surfaceNormal: THREE.Vector3,
+): THREE.Plane {
+  const view = ctx.camera.getWorldDirection(new THREE.Vector3());
+  const n = surfaceNormal.clone().normalize();
+  const planeNormal = view.clone().sub(n.clone().multiplyScalar(view.dot(n)));
+  if (planeNormal.lengthSq() < 1e-6) planeNormal.copy(view);
+  return new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal.normalize().negate(), point);
 }
 
 function ownedBy(object: THREE.Object3D, root: THREE.Object3D): boolean {
@@ -400,6 +418,27 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
       }
       return lift(hits[0].point.clone(), hitNormal(hits[0]));
     }
+  }
+  if (ctx.settings.placement === 'SURFACE_PERP') {
+    // stroke in progress: every later point lives on the sticky standing
+    // plane captured at the first point (stable depth, no drift)
+    if (perpPlane) {
+      const out = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(perpPlane, out)) return out;
+    }
+    if (ctx.surfaces.length) {
+      const hits = raycaster.intersectObjects(ctx.surfaces, true);
+      if (hits.length) {
+        const h = hits[0];
+        const n = h.face
+          ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
+          : raycaster.ray.direction.clone().negate();
+        const plane = perpendicularPlaneAt(ctx, h.point, n);
+        if (excludedStrokeId !== null) perpPlane = plane; // stick for this stroke
+        return h.point.clone();
+      }
+    }
+    // nothing under the first point: fall through to the drawing plane
   }
   if (ctx.settings.placement === 'STROKE') {
     const hit = strokeDepthPoint(ctx, raycaster.ray, x - rect.left, y - rect.top);

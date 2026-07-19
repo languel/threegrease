@@ -4,7 +4,12 @@ import { defaultStyle } from '../core/brushes';
 import type { History } from '../core/history';
 import type { EditorMode, GPSceneRenderer } from '../render/GPSceneRenderer';
 
-export type PlacementMode = 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'STROKE';
+/** SURFACE_PERP = "Surface ⊥": the stroke/quilt STARTS on the surface
+ *  under the first point, then grows on the plane that stands
+ *  perpendicular to that surface (contains the hit normal) while facing
+ *  the camera as much as possible — drawing grass on a patch, fins off
+ *  a wall. The plane is sticky for the whole stroke/chain. */
+export type PlacementMode = 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'SURFACE_PERP' | 'STROKE';
 export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
 export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
