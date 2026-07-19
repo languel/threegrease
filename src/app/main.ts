@@ -1735,7 +1735,7 @@ class App implements AppHandle {
     const add = (id: string, title: string, run: (args?: string) => unknown, keywords = '') =>
       reg.register({ id, title, keywords, run });
 
-    for (const kind of ['PLANE', 'BOX', 'SPHERE', 'CYLINDER'] as const) {
+    for (const kind of ['PLANE', 'BOX', 'SPHERE', 'CYLINDER', 'EMPTY'] as const) {
       add(`add.${kind.toLowerCase()}`, `Add ${kind.toLowerCase()} at cursor`,
         () => this.addMeshObject(kind), 'object primitive mesh');
     }
@@ -1928,6 +1928,7 @@ class App implements AppHandle {
       { label: 'Sphere', icon: 'circle', do: () => this.addMeshObject('SPHERE', undefined, cursorAt) },
       { label: 'Cylinder', icon: 'cylinder', do: () => this.addMeshObject('CYLINDER', undefined, cursorAt) },
       { label: 'Editable Mesh', icon: 'wireframe', do: () => this.addPolyMeshObject(cursorAt) },
+      { label: 'Empty', icon: 'target', do: () => this.addMeshObject('EMPTY', undefined, cursorAt) },
       { sep: true },
       { label: 'Traveler here', icon: 'cursorArrow', do: () => this.addTravelerObjectAt(hereAt, px.x, px.y), disabled: !strokeHit },
       { label: 'Trigger here', icon: 'boltCircle', do: () => this.addTriggerAt(hereAt) },
@@ -2252,7 +2253,7 @@ class App implements AppHandle {
     URL.revokeObjectURL(a.href);
   }
 
-  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER', src?: string, at?: [number, number, number]): void {
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'EMPTY', src?: string, at?: [number, number, number]): void {
     this.ctx.pushUndo();
     const id = Date.now() % 1e9;
     this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, at ?? [...this.ctx.scene.cursor], src));

@@ -424,7 +424,10 @@ export interface TGSplat {
 export interface TGMesh {
   id: number;
   name: string;
-  kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'MODEL';
+  /** EMPTY = Blender-style null object: an axes tripod with no surface —
+   *  a parenting/grouping anchor and constraint target, never a draw
+   *  target or export geometry. */
+  kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'MODEL' | 'EMPTY';
   src?: string;            // MODEL only: .glb/.gltf/.obj URL (blob = session)
   translation: Vec3;
   rotation: Vec3;

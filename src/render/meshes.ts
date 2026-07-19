@@ -60,7 +60,7 @@ export class MeshManager {
         this.entries.set(data.id, entry);
       }
       // unlit toggles swap the material class on primitives
-      if (data.kind !== 'MODEL' && entry.unlit !== !!data.unlit) {
+      if (data.kind !== 'MODEL' && data.kind !== 'EMPTY' && entry.unlit !== !!data.unlit) {
         const mesh = entry.root as THREE.Mesh;
         (mesh.material as THREE.Material)?.dispose?.();
         mesh.material = data.unlit
@@ -73,7 +73,7 @@ export class MeshManager {
       // geometry doesn't jump; bake the offset DELTA into the procedural
       // geometry's vertex positions (it has no other persisted shape data).
       const off = data.originOffset ?? [0, 0, 0];
-      if (data.kind !== 'MODEL' && !vec3Eq(off, entry.originOffset)) {
+      if (data.kind !== 'MODEL' && data.kind !== 'EMPTY' && !vec3Eq(off, entry.originOffset)) {
         const geo = (entry.root as THREE.Mesh).geometry;
         geo.translate(off[0] - entry.originOffset[0], off[1] - entry.originOffset[1], off[2] - entry.originOffset[2]);
         geo.computeBoundingBox();
@@ -85,6 +85,28 @@ export class MeshManager {
   }
 
   private build(data: TGMesh): THREE.Object3D {
+    if (data.kind === 'EMPTY') {
+      // Blender "Plain Axes": six half-axes from the origin, plus an
+      // invisible-but-raycastable sphere so it stays clickable
+      const group = new THREE.Group();
+      const r = 0.35;
+      const pos = [
+        -r, 0, 0, r, 0, 0,
+        0, -r, 0, 0, r, 0,
+        0, 0, -r, 0, 0, r,
+      ];
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      const axes = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xbbbbc4 }));
+      axes.userData.emptyHelper = true;
+      const pick = new THREE.Mesh(
+        new THREE.SphereGeometry(r * 0.5, 8, 6),
+        new THREE.MeshBasicMaterial({ visible: false }),
+      );
+      pick.userData.emptyHelper = true;
+      group.add(axes, pick);
+      return group;
+    }
     if (data.kind === 'MODEL' && data.src) {
       const holder = new THREE.Group();
       const ext = data.src.split('?')[0].split('.').pop()?.toLowerCase();
@@ -129,7 +151,7 @@ export class MeshManager {
     root.visible = data.visible;
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
+      if (!mesh.isMesh || o.userData.emptyHelper) return;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       if (!mat || Array.isArray(mat)) return;
       if (data.kind !== 'MODEL') {
@@ -153,10 +175,10 @@ export class MeshManager {
 
   rootFor(id: number): THREE.Object3D | null { return this.entries.get(id)?.root ?? null; }
 
-  /** Meshes flagged as draw targets, for ctx.surfaces. */
+  /** Meshes flagged as draw targets, for ctx.surfaces (empties never). */
   drawTargets(scene: GPScene): THREE.Object3D[] {
     return scene.meshes
-      .filter((m) => m.visible && m.drawTarget)
+      .filter((m) => m.visible && m.drawTarget && m.kind !== 'EMPTY')
       .map((m) => this.entries.get(m.id)?.root)
       .filter((r): r is THREE.Object3D => !!r);
   }
@@ -176,7 +198,7 @@ export function createMeshObject(id: number, kind: TGMesh['kind'], at: [number, 
     id, name: src ? (src.split('/').pop() ?? 'model') : kind.toLowerCase(),
     kind, src,
     translation: [...at], rotation: [0, 0, 0], scale: [1, 1, 1],
-    visible: true, select: false, drawTarget: true, wireframe: false,
+    visible: true, select: false, drawTarget: kind !== 'EMPTY', wireframe: false,
     color: [0.62, 0.65, 0.72], opacity: 1,
     parent: null, texture: null, unlit: false, doubleSided: true, billboard: 'NONE',
     originOffset: [0, 0, 0],

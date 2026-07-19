@@ -77,7 +77,7 @@ export interface AppHandle {
   sim: { enabled: boolean; damping: number; stiffness: number; reset(): void };
   splats: { errors: Map<number, string> };
   meshes: { errors: Map<number, string> };
-  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER'): void;
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'EMPTY'): void;
   importModelFile(file: File): void;
   importImagePlane(file: File): void;
   setWidgetMode(mode: 'translate' | 'rotate' | 'scale'): void;
@@ -689,6 +689,7 @@ export class UI {
       { label: 'Box', do: () => this.app.addMeshObject('BOX') },
       { label: 'Sphere', do: () => this.app.addMeshObject('SPHERE') },
       { label: 'Cylinder', do: () => this.app.addMeshObject('CYLINDER') },
+      { label: 'Empty', do: () => this.app.addMeshObject('EMPTY') },
       { sep: true },
       { label: 'Model…', do: () => this.filePick('.glb,.gltf,.obj', (f) => this.app.importModelFile(f)) },
       { sep: true },
@@ -1383,7 +1384,7 @@ export class UI {
       rename: (v) => { c.name = v; },
     });
     for (const m of scene.meshes) nodes.push({
-      ref: { kind: 'MESH', id: m.id }, icon: m.kind === 'MODEL' ? icon('cubeModel') : icon('cube'), name: m.name,
+      ref: { kind: 'MESH', id: m.id }, icon: m.kind === 'MODEL' ? icon('cubeModel') : m.kind === 'EMPTY' ? icon('target') : icon('cube'), name: m.name,
       selected: m.select, parent: m.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'MESH', id: m.id });
