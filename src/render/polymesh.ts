@@ -365,6 +365,11 @@ export class PolyMeshManager {
     return this.entries.get(polyId)?.triFaceIds[triangleIndex] ?? null;
   }
 
+  /** Per-mesh render root (selection glyphs, zone flashes). NOTE: the box
+   *  of this group is polluted by the unit-sized instanced vertex handles —
+   *  size selection outlines from the DATA (vertices x world matrix). */
+  rootFor(id: number): THREE.Object3D | null { return this.entries.get(id)?.group ?? null; }
+
   private disposeEntry(entry: Entry): void {
     entry.faceMesh.geometry.dispose();
     (entry.faceMesh.material as THREE.Material).dispose();

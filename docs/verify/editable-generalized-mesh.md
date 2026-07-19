@@ -200,10 +200,13 @@ single context-sensitive pen covers the workflow at our sketch scale.
 75. **Snap-guideline placement** — enable the magnet with Increment or
     Grid: clicked construction points land on the grid lattice (in-plane
     rounding); vertex drags onto empty space do too.
-76. **Tool trio in EDIT mode** — select a pencil, enter Edit mode: the
-    toolbar shows PolyQuilt / Poly Build / Quad Patch after the select
-    tools. Pick PolyQuilt and click near the GP stroke: vertices snap to
-    it; with no editable mesh in the scene the first click creates one.
+76. **Tool trio in DRAW mode** — the toolbar shows PolyQuilt / Poly
+    Build / Quad Patch below Interpolate, ruled off by a separator; the
+    DRAW topbar's Placement/Plane/Guide options apply to poly
+    construction too (e.g. Guide = Circular constrains chain clicks to
+    the circle around the 3D cursor). Click near a GP stroke: vertices
+    snap to it; with no editable mesh in the scene the first click
+    creates one.
 77. **Poly Build mapping** — with the Poly Build tool: Shift+click an
     element deletes it; dragging a boundary edge extrudes from ANY grab
     point; click/Ctrl+click adds geometry.

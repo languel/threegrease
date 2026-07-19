@@ -30,7 +30,7 @@ import * as THREE from 'three';
 import type { AppCtx } from './context';
 import type { TGPolyMesh, Vec3 } from '../core/types';
 import type { Tool, ToolEvent } from './toolsys';
-import { drawingPlane } from './projection';
+import { applyGuide, drawingPlane } from './projection';
 import { worldMatrixOf } from './objects';
 import {
   addEdge, addFace, addVertex, cleanupDegenerateFaces, dissolveEdge, dissolveVertex,
@@ -162,7 +162,24 @@ export class PolyPenTool implements Tool {
 
   private pick(ctx: AppCtx, e: ToolEvent, excludeVertexIds?: number[]): ConstructionHit {
     const plane = this.state.kind === 'BUILD' ? this.state.plane : null;
-    return pickConstruction(ctx, e.x, e.y, {
+    // same Guide options as the pencil: constrain the pointer through the
+    // active guide (circular/radial/parallel/grid/iso) before picking —
+    // center anchored at the 3D cursor, "stroke start" = the previous
+    // chain vertex so circular/parallel guides behave like drawing
+    let gx = e.x, gy = e.y;
+    if (ctx.settings.guide.type !== 'NONE') {
+      const pm = this.editMesh(ctx);
+      let start: THREE.Vector2 | null = null;
+      if (pm && this.state.kind === 'BUILD') {
+        const prev = getVertex(pm, this.state.vertexIds[this.state.vertexIds.length - 1]);
+        if (prev) start = this.screenOf(ctx, this.localToWorld(ctx, pm, prev.co));
+      }
+      const center = this.screenOf(ctx, [...ctx.scene.cursor] as Vec3)
+        ?? new THREE.Vector2(e.x, e.y);
+      const g = applyGuide(ctx, new THREE.Vector2(e.x, e.y), start, center);
+      gx = g.x; gy = g.y;
+    }
+    return pickConstruction(ctx, gx, gy, {
       editMeshId: polyOverlay.editMeshId,
       excludeVertexIds,
       noSnap: e.ctrl,

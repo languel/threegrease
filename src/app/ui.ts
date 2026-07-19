@@ -466,16 +466,17 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['line', 'lineTool', 'Line'], ['polyline', 'polylineTool', 'Polyline'], ['arc', 'arcTool', 'Arc'],
     ['curve', 'curveTool', 'Curve'], ['box', 'square', 'Box'], ['circle', 'circle', 'Circle'],
     ['interpolate', 'arrowsRightLeft', 'Interpolate (drag)'],
+    // the quilt trio lives with the drawing tools: same Placement/Plane/
+    // Guide options as the pencil, retopologizing over what you draw
+    // (strokes, meshes, and splats are snap sources)
+    ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
+    ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
+    ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
   ],
   EDIT: [
     ['select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
     ['select-lasso', 'lasso', 'Lasso select'],
     ['select-circle', 'circle', 'Circle select ([ ] size)'],
-    // the quilt trio also lives here: retopologize over the pencil/objects
-    // you are editing (they snap to strokes, meshes, and splats)
-    ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
-    ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
-    ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
   ],
   SCULPT: [['sculpt', 'hand', 'Sculpt brush']],
   VERTEX: [['vertexpaint', 'brush', 'Vertex paint']],
@@ -868,6 +869,8 @@ export class UI {
     const bar = $('toolbar');
     bar.replaceChildren();
     for (const [id, iconName, title] of TOOLS_BY_MODE[ctx.settings.mode]) {
+      // the editable-mesh trio is a distinct family — rule it off
+      if (id === 'polypen') bar.append(el('div', { class: 'tool-sep' }));
       bar.append(btn(icon(iconName, 18), () => this.app.setTool(id), {
         active: ctx.settings.activeTool === id, title, cls: 'tool',
       }));

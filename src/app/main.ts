@@ -2338,7 +2338,20 @@ class App implements AppHandle {
       ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) :
       ref.kind === 'TRIGGER' ? this.scoreGroup.children.find((c) => c.userData.triggerId === ref.id) ?? null :
       ref.kind === 'STREAM' ? this.mmPoints.objectFor(ref.id) :
+      ref.kind === 'POLY' ? this.polys.rootFor(ref.id) :
       null;
+  }
+
+  /** World-space bounds of an editable mesh from its DATA — the render
+   *  group's box is inflated by the unit-geometry instanced vertex
+   *  handles, so selection outlines measure the topology itself. */
+  private polyDataBox(ref: ObjRef, box: THREE.Box3): void {
+    box.makeEmpty();
+    const pm = this.ctx.scene.polyMeshes.find((p) => p.id === ref.id);
+    if (!pm) return;
+    const world = worldMatrixOf(this.ctx.scene, ref);
+    const v = new THREE.Vector3();
+    for (const vert of pm.vertices) box.expandByPoint(v.set(...vert.co).applyMatrix4(world));
   }
 
   /** Visual feedback for TRIGGER zones: on enter (highlight color) or
@@ -2425,7 +2438,8 @@ class App implements AppHandle {
         entry = { box, helper, dot };
         this.selHelpers.set(key, entry);
       }
-      entry.box.setFromObject(root);
+      if (ref.kind === 'POLY') this.polyDataBox(ref, entry.box);
+      else entry.box.setFromObject(root);
       if (entry.box.isEmpty()) {
         // matrix-driven objects (streams/triggers) keep .position at 0 —
         // use the data-model world matrix for the fallback box center
@@ -2434,7 +2448,9 @@ class App implements AppHandle {
         // empty GP object (no strokes yet) — use a small marker instead,
         // matching Blender's "empty" display size.
         const center = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
-        const size = ref.kind === 'GP' ? 0.15 : 1;
+        // empty GP/poly objects (no strokes / no vertices yet) get a small
+        // Blender-"empty"-style marker, not a full unit cube
+        const size = ref.kind === 'GP' || ref.kind === 'POLY' ? 0.15 : 1;
         entry.box.setFromCenterAndSize(center, new THREE.Vector3(size, size, size));
       }
       const meshKind = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id)?.kind : undefined;
