@@ -2186,3 +2186,18 @@ POLY editing). Utilities: dissolveEdge/dissolveVertex/splitFace in
 core/polymesh.ts; walkQuadLoop/autoQuad in tools/polyops.ts. Skipped
 (documented in the verify addendum): brushes, seam, fan cut, hold-lock.
 Typecheck + build clean; manual steps 60-70 added to the verify doc.
+
+## PolyQuilt v3: intent feedback, center-drag extrude, tool trio in EDIT
+
+removeFaceCascade makes face deletion take its sole-use boundary edges
+and now-orphaned vertices (shared topology survives). HUD intent colors:
+red element highlight once a long-press matures (delete armed), yellow+
+thick edge with a grab-point tick in the extrude zone. Edge drags now
+split by grab position — center band extrudes (boundary) or loop-cuts
+(interior), off-center moves. Plane placement honors settings.snap
+(Increment/Grid in-plane lattice). PolyPenTool gained variants and ships
+as three tools in the POLY AND EDIT toolbars: PolyQuilt (context pen),
+Poly Build (Blender's mapping: Shift+click delete, boundary-edge drag
+extrudes anywhere, click adds), Quad Patch (click = AutoQuad fill); from
+EDIT mode they retopologize over the pencil/objects being edited and
+ensureEditMesh creates a target mesh on first use. Verify steps 71-78.

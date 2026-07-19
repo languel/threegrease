@@ -178,3 +178,33 @@ Not ported from PolyQuilt (documented): relax/move brushes, seam tool,
 fan cut, empty-drag view rotation (navigation stays on MMB/RMB), Alt
 double-click hold lock, and the Blender tool-palette sub-tools — the
 single context-sensitive pen covers the workflow at our sketch scale.
+
+## v3 addendum: intent feedback, center-drag, cascade delete, tool trio
+
+71. **Cascade face delete** — build a lone triangle, long-press inside it
+    and release: face, its 3 edges, AND its 3 vertices are gone. Build two
+    triangles sharing an edge, delete one face: the SHARED edge and its
+    vertices survive; only the sole-face edges/verts go.
+72. **Red delete feedback** — press and HOLD on a vertex/edge/face without
+    moving: after ~450ms it turns red (thick red segment / red ring / red
+    outline+tint). Releasing deletes; dragging away instead cancels the
+    red and runs the drag op.
+73. **Yellow extrude feedback** — hover an edge near its MIDDLE: it turns
+    yellow and thicker with a dot at the grab point (boundary edges
+    brighter). Hover near an endpoint: no yellow (that zone moves).
+74. **Center-drag extrude** — plain-drag a boundary edge from its middle:
+    quad extrusion, no long-press needed. Plain-drag the same edge near
+    an endpoint: the edge MOVES. Center-drag an interior (2-face) edge:
+    loop cut.
+75. **Snap-guideline placement** — enable the magnet with Increment or
+    Grid: clicked construction points land on the grid lattice (in-plane
+    rounding); vertex drags onto empty space do too.
+76. **Tool trio in EDIT mode** — select a pencil, enter Edit mode: the
+    toolbar shows PolyQuilt / Poly Build / Quad Patch after the select
+    tools. Pick PolyQuilt and click near the GP stroke: vertices snap to
+    it; with no editable mesh in the scene the first click creates one.
+77. **Poly Build mapping** — with the Poly Build tool: Shift+click an
+    element deletes it; dragging a boundary edge extrudes from ANY grab
+    point; click/Ctrl+click adds geometry.
+78. **Quad Patch** — with open edges around the cursor, a single click
+    fills the inferred patch (same inference as Shift+click AutoQuad).
