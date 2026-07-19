@@ -475,7 +475,7 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
   SCULPT: [['sculpt', 'hand', 'Sculpt brush']],
   VERTEX: [['vertexpaint', 'brush', 'Vertex paint']],
   WEIGHT: [['weightpaint', 'adjustments', 'Weight paint']],
-  POLY: [['polypen', 'wireframe', 'Topology pen — click builds, drag vertex moves, drag boundary edge extrudes']],
+  POLY: [['polypen', 'wireframe', 'Topology pen — click builds/fills · drag moves (vertex merge on release) · hold deletes/dissolves · hold+drag: vertex=extrude edge, boundary edge=quad extrude, interior edge=loop cut, empty=knife · Shift+click=AutoQuad · Ctrl+click=select']],
 };
 
 export class UI {

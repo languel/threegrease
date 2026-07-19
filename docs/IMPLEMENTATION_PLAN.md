@@ -2167,3 +2167,22 @@ test script in `docs/verify/editable-generalized-mesh.md`.
 Not verified live this pass (per current workflow: typecheck + build
 only); the verify doc lists the exact manual steps. `npx tsc --noEmit`
 and `npx vite build` clean after every phase.
+
+## PolyQuilt parity pass (Topology Pen v2)
+
+Matched the reference operations table (github.com/sakana3/PolyQuilt /
+Dangry98's 4.0 fork): click / drag / hold(450ms, Alt=hold) / hold+drag
+disambiguated per target. New: vertex move-merge on release, rigid edge/
+face move on a camera plane, hold delete/dissolve (dissolveEdge merges
+two adjacent faces into an n-gon, dissolveVertex fuses 2-edge pass-
+throughs), vertex hold+drag edge extrusion, interior-edge hold+drag LOOP
+CUT across quad strips (walkQuadLoop plan + aligned-t preview +
+splitEdge/splitFace commit, closed loops OK), empty hold+drag KNIFE
+(screen-line edge splitting + face-crossing connection), Shift+click
+AutoQuad (U-close / tri-close / bridge / L parallelogram-complete from
+nearby open edges), Ctrl+click element select, click-last-vertex chain
+finalize, and EDIT-mode routing (Tab/'2' on an active poly mesh lands in
+POLY editing). Utilities: dissolveEdge/dissolveVertex/splitFace in
+core/polymesh.ts; walkQuadLoop/autoQuad in tools/polyops.ts. Skipped
+(documented in the verify addendum): brushes, seam, fan cut, hold-lock.
+Typecheck + build clean; manual steps 60-70 added to the verify doc.

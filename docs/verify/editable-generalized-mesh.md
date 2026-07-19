@@ -60,15 +60,17 @@ limitations are documented in `docs/design/polymesh.md`.
 
 22-23. Click three chain points, press `Escape`. Expect: every vertex and
    edge created by the chain is gone; pre-existing topology untouched.
-24-25. Start dragging a boundary edge, press `Escape` mid-drag. Expect:
-   vertex/edge/face counts identical to before the drag.
+24-25. Long-press a boundary edge then drag (extrusion), press `Escape`
+   mid-drag. Expect: vertex/edge/face counts identical to before.
 
 ## Boundary extrusion
 
-26-28. Build a triangle. Drag one of its edges outward. Expect: +2
-   vertices, +3 edges, +1 quad face; the original edge still exists.
-29. Build two triangles sharing an edge; dragging the SHARED edge does
-   nothing (only boundary edges — fewer than two faces — extrude).
+26-28. Build a triangle. LONG-PRESS one of its edges, then drag outward
+   (plain drag just moves the edge). Expect: +2 vertices, +3 edges, +1
+   quad face; the original edge still exists.
+29. Build two triangles sharing an edge; hold+drag on the SHARED edge
+   runs LOOP CUT instead (only boundary edges — fewer than two faces —
+   extrude).
 30. Extrude an edge and release with a new endpoint on top of an existing
    vertex — they merge; no duplicate edges or degenerate faces appear
    (`validatePolyMesh` from `/src/core/polymesh.ts` returns `[]`).
@@ -132,3 +134,47 @@ probe comes within the constraint radius of ANY vertex/edge/face.
    vertex-only meshes). OBJ/STL/PLY: faces only; points and open edges
    are skipped there (exporter limitation), never converted into other
    geometry.
+
+## PolyQuilt parity addendum
+
+The Topology Pen now follows PolyQuilt's operations table (hold = press
+≥450ms without moving; Alt = hold-equivalent modifier):
+
+60. **Vertex merge on move** — drag a vertex and release it on top of
+    another; they fuse (edges rewired, no duplicates; degenerate faces
+    cleaned).
+61. **Edge move** — plain-drag an edge; both endpoints translate rigidly
+    on a camera-facing plane.
+62. **Face move** — drag inside a face; the whole boundary translates.
+63. **Hold-delete/dissolve** — long-press a vertex/edge/face and release
+    without moving: an edge shared by two faces DISSOLVES into one merged
+    n-gon; a 2-edge pass-through vertex fuses its edges into one; anything
+    else deletes with the documented cascades. Face hold deletes the face.
+64. **Vertex hold+drag = edge extrude** — long-press a vertex then drag:
+    a new vertex + connecting edge follows the cursor; releasing over an
+    existing vertex connects instead of duplicating.
+65. **Edge hold+drag** — boundary edge: quad extrusion (as before);
+    INTERIOR edge (2 faces): loop cut — a preview line runs across the
+    quad strip, pointer position along the edge sets the cut ratio,
+    release splits every crossed edge and face (closed loops supported;
+    walk stops at boundaries/non-quads).
+66. **Knife** — long-press in empty space then drag: dashed HUD line;
+    release splits every crossed edge and connects cut pairs through
+    their shared faces. One undo step.
+67. **AutoQuad (Shift+click)** — with open edges near the cursor: a
+    3-edge "U" closes into a quad; two edges converging on one vertex
+    close into a triangle; two facing edges bridge into a quad; an
+    "L"-corner parallelogram-completes with one new vertex. Nothing
+    within ~90px → no-op.
+68. **Ctrl+click = select toggle** (moved from Shift+click, which
+    AutoQuad now owns). Delete/X still removes the selection.
+69. **Chain finalize** — while building, clicking the LAST placed vertex
+    ends the open chain (same as Enter).
+70. **Edit-mode routing** — in object mode select an editable mesh, press
+    Tab / `2` (Edit mode): you land in POLY topology editing; with a GP
+    object active you get the normal GP edit mode.
+
+Not ported from PolyQuilt (documented): relax/move brushes, seam tool,
+fan cut, empty-drag view rotation (navigation stays on MMB/RMB), Alt
+double-click hold lock, and the Blender tool-palette sub-tools — the
+single context-sensitive pen covers the workflow at our sketch scale.
