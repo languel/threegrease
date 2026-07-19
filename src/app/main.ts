@@ -417,6 +417,18 @@ class App implements AppHandle {
   private modeHistory: EditorMode[] = ['DRAW', 'EDIT'];
 
   setMode(mode: EditorMode): void {
+    // Blender semantics: "Edit mode" edits whatever object is active —
+    // entering EDIT with an editable mesh active exposes its vertices,
+    // i.e. routes to POLY mode (GP objects keep the GP point editor).
+    if (mode === 'EDIT') {
+      const scene = this.ctx.scene;
+      const picked = this.objectPick.lastPicked;
+      const pickedPoly = picked?.kind === 'POLY'
+        && scene.polyMeshes.some((p) => p.id === picked.id && p.select);
+      const onlyPolySelected = scene.polyMeshes.some((p) => p.select)
+        && !scene.objects.some((o) => o.select);
+      if (pickedPoly || onlyPolySelected) mode = 'POLY';
+    }
     if (mode !== this.ctx.settings.mode) this.modeHistory = [this.ctx.settings.mode, mode];
     // OBJECT mode (and the outliner) tolerate zero GP objects — every
     // other mode edits the active one, so create a blank on entry rather
