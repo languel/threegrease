@@ -2201,3 +2201,19 @@ Poly Build (Blender's mapping: Shift+click delete, boundary-edge drag
 extrudes anywhere, click adds), Quad Patch (click = AutoQuad fill); from
 EDIT mode they retopologize over the pencil/objects being edited and
 ensureEditMesh creates a target mesh on first use. Verify steps 71-78.
+
+## PolyQuilt v4: mode retired, Surface ⊥ placement, Empty objects
+
+The standalone POLY editor mode is gone — the quilt trio lives in the
+Draw AND Edit toolbars, overlays keyed to the active tool (setTool
+targets the picked/selected/first editable mesh, other tools clear the
+overlays); '6' became a Tools shortcut for the PolyQuilt pen, and "Edit
+mode with a poly selected" / Add Editable Mesh land on the tool instead
+of a mode. New Placement "Surface ⊥" (SURFACE_PERP): first point on the
+surface, stroke/chain grows on the sticky standing plane through it
+(contains the hit normal, view-facing; perpendicularPlaneAt in
+projection.ts, per-stroke module state + per-chain BUILD plane). New
+TGMesh kind EMPTY: Blender-style plain-axes null object (Add menus +
+palette) for parenting/grouping/constraint anchoring — raycastable via
+an invisible pick sphere, never a draw target, skipped by material/
+origin sync. Verify steps 79-81.

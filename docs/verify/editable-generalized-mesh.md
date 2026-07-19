@@ -9,8 +9,8 @@ limitations are documented in `docs/design/polymesh.md`.
 
 1. **Add an empty editable mesh** — Shift+A → *Editable Mesh* (or command
    palette F3 → "Add Editable Mesh"). Expect: a new `PolyMesh` row in the
-   outliner, mode switches to the POLY topbar mode (wireframe icon, key
-   `6`), tool = Topology Pen.
+   outliner, Edit mode with the PolyQuilt tool active (there is no
+   standalone poly mode; key `6` jumps to the tool from anywhere).
 2. **Isolated vertex** — click once in empty space, press `Enter`.
    Expect: one cyan octahedron handle; `polyMeshes[0].vertices.length === 1`,
    no edges.
@@ -47,8 +47,8 @@ limitations are documented in `docs/design/polymesh.md`.
 16. Drag a vertex in empty space — it slides on the drawing plane.
 17. Add a Box (Shift+A), drag a poly vertex over it — the vertex lands on
     the box surface (its `binding.kind === 'MESH'`).
-18. Draw a GP stroke (mode 1), return to POLY (`6`), drag a vertex near
-    the stroke — it snaps to the polyline (`binding.kind === 'GP_STROKE'`).
+18. Draw a GP stroke (mode 1), press `6` (PolyQuilt tool), drag a vertex
+    near the stroke — it snaps to the polyline (`binding.kind === 'GP_STROKE'`).
 19. Load a splat, drag a vertex near it — snaps to the nearest SAMPLED
     center (approximate: clouds are subsampled to ≤5000 points).
 20. Start a drag, press `Escape` mid-drag — the vertex returns to its
@@ -212,3 +212,21 @@ single context-sensitive pen covers the workflow at our sketch scale.
     point; click/Ctrl+click adds geometry.
 78. **Quad Patch** — with open edges around the cursor, a single click
     fills the inferred patch (same inference as Shift+click AutoQuad).
+
+## v4 addendum: no standalone mode, Surface ⊥, empties
+
+79. **No POLY mode** — the topbar has no grid mode button; the quilt trio
+    appears in BOTH Draw and Edit toolbars. Switching to any non-quilt
+    tool hides the topology overlays; picking a quilt tool re-targets the
+    picked/selected/first editable mesh.
+80. **Surface ⊥ placement** — add a Plane/Box, set Placement = "Surface ⊥",
+    draw a pen stroke starting ON the surface and pull away: the first
+    point sits on the surface, the stroke grows on the standing plane
+    through it (contains the hit normal, faces the view) with no depth
+    drift. Same for a quilt chain: first click on a face, later clicks
+    build up perpendicular to it (grass-on-a-patch). First point missing
+    every surface falls back to the drawing plane.
+81. **Empty objects** — Shift+A → Empty: an axes tripod appears at the
+    cursor and in the outliner (target icon). It is clickable (invisible
+    pick sphere), transformable, parentable (drag rows onto it), carries
+    constraints, is never a draw target, and does not export geometry.
