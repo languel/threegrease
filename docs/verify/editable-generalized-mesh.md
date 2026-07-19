@@ -65,8 +65,9 @@ limitations are documented in `docs/design/polymesh.md`.
 
 ## Boundary extrusion
 
-26-28. Build a triangle. LONG-PRESS one of its edges, then drag outward
-   (plain drag just moves the edge). Expect: +2 vertices, +3 edges, +1
+26-28. Build a triangle. LONG-PRESS one of its edges then drag outward —
+   or plain-drag it from its CENTER band (see step 74; off-center plain
+   drag moves the edge instead). Expect: +2 vertices, +3 edges, +1
    quad face; the original edge still exists.
 29. Build two triangles sharing an edge; hold+drag on the SHARED edge
    runs LOOP CUT instead (only boundary edges — fewer than two faces —
