@@ -102,6 +102,7 @@ import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
 import { MeshManager, createMeshObject } from '../render/meshes';
 import { createPolyMesh } from '../core/polymesh';
+import { PolyMeshManager } from '../render/polymesh';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
   ObjectSelectTool, deleteObject, deselectAllObjects, getObjectTransform,
@@ -194,6 +195,7 @@ class App implements AppHandle {
   readonly sim = new StringSim();
   readonly splats = new SplatManager();
   readonly meshes = new MeshManager();
+  readonly polys = new PolyMeshManager();
   readonly mmPoints = new StreamPointsManager();
   /** app-instance store handle — evals/automation must use THIS, not an
    *  import('/src/mm/streams.ts') singleton (vite ?t= gives a second copy) */
@@ -290,6 +292,7 @@ class App implements AppHandle {
     this.splats.init(this.glRenderer);
     this.scene3.add(this.splats.group);
     this.scene3.add(this.meshes.group);
+    this.scene3.add(this.polys.group);
     this.scene3.add(this.mmPoints.group);
     mmCapture.onStatus = () => this.ui?.refresh();
     // mesh objects use MeshStandardMaterial — GP shaders ignore lights
@@ -1792,7 +1795,7 @@ class App implements AppHandle {
 
   viewAll(): void {
     const box = new THREE.Box3();
-    for (const g of [this.gp.root, this.canvasGroup, this.splats.group, this.meshes.group]) {
+    for (const g of [this.gp.root, this.canvasGroup, this.splats.group, this.meshes.group, this.polys.group]) {
       const b = new THREE.Box3().setFromObject(g);
       if (!b.isEmpty()) box.union(b);
     }
@@ -2613,13 +2616,18 @@ class App implements AppHandle {
     if (this.sim.step(ctx.scene, dt)) ctx.requestRender(this.sim.lastLayerId ?? undefined);
     this.splats.sync(ctx.scene);
     this.meshes.sync(ctx.scene, this.nav.active);
-    ctx.pickableMeshes = ctx.scene.meshes
-      .map((m) => this.meshes.rootFor(m.id))
-      .filter((r): r is THREE.Object3D => !!r && r.visible);
+    this.polys.sync(ctx.scene, this.nav.active);
+    ctx.pickableMeshes = [
+      ...ctx.scene.meshes
+        .map((m) => this.meshes.rootFor(m.id))
+        .filter((r): r is THREE.Object3D => !!r && r.visible),
+      ...this.polys.pickTargets(ctx.scene),
+    ];
     ctx.surfaces = [
       ...this.canvasSurfaces,
       ...this.meshes.drawTargets(ctx.scene),
       ...this.splats.drawTargets(ctx.scene),
+      ...this.polys.drawTargets(ctx.scene),
     ];
     // constraint stacks (FOLLOW_PATH/FOLLOW_STREAM/TRIGGER/...) — after the
     // score engine (trigger probes include this frame's cursors) and after

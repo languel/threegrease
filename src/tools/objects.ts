@@ -499,6 +499,7 @@ export class ObjectSelectTool implements Tool {
       while (cur) {
         if (cur.userData.canvasId !== undefined) return { kind: 'CANVAS', id: cur.userData.canvasId };
         if (cur.userData.meshId !== undefined) return { kind: 'MESH', id: cur.userData.meshId };
+        if (cur.userData.polyId !== undefined) return { kind: 'POLY', id: cur.userData.polyId };
         cur = cur.parent;
       }
     }
@@ -537,6 +538,19 @@ export class ObjectSelectTool implements Tool {
       if (!st.visible) continue;
       const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'STREAM', id: st.id }));
       if (p && Math.hypot(p.x - e.x, p.y - e.y) < 40) return { kind: 'STREAM', id: st.id };
+    }
+    // faceless poly meshes (points/edge chains) have nothing to raycast —
+    // fall back to a screen-distance test against their projected vertices
+    for (const pm of ctx.scene.polyMeshes) {
+      if (!pm.visible || pm.faces.length) continue;
+      const world = worldMatrixOf(ctx.scene, { kind: 'POLY', id: pm.id });
+      const rect2 = ctx.canvas.getBoundingClientRect();
+      for (const v of pm.vertices) {
+        const pr = new THREE.Vector3(...v.co).applyMatrix4(world).project(ctx.camera);
+        if (pr.z > 1) continue;
+        const sx = (pr.x * 0.5 + 0.5) * rect2.width, sy = (-pr.y * 0.5 + 0.5) * rect2.height;
+        if (Math.hypot(sx - e.x, sy - e.y) < 20) return { kind: 'POLY', id: pm.id };
+      }
     }
     const canvasHit = pickCanvas(ctx, e.x, e.y);
     if (canvasHit) return { kind: 'CANVAS', id: canvasHit.id };
