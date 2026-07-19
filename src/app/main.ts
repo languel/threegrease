@@ -217,7 +217,9 @@ class App implements AppHandle {
   private widgetProxy = new THREE.Object3D();
   private widgetBase: { refs: ObjRef[]; transforms: ObjTransform[]; proxy: ObjTransform } | null = null;
   private canvasSurfaces: THREE.Object3D[] = [];
-  private polyPen = new PolyPenTool();
+  private polyPen = new PolyPenTool('polypen', 'QUILT');
+  private polyBuild = new PolyPenTool('polybuild', 'BUILD');
+  private quadPatch = new PolyPenTool('quadpatch', 'PATCH');
   private objectPick = new ObjectSelectTool('object-select', 'BOX');
   private objectPickLasso = new ObjectSelectTool('object-select-lasso', 'LASSO');
   private objectPickCircle = new ObjectSelectTool('object-select-circle', 'CIRCLE');
@@ -354,7 +356,7 @@ class App implements AppHandle {
       new SelectTool('select-circle', 'CIRCLE'), new SculptTool(),
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
-      this.polyPen,
+      this.polyPen, this.polyBuild, this.quadPatch,
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
 

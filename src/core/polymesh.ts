@@ -125,6 +125,30 @@ export function removeVertex(pm: TGPolyMesh, id: number): boolean {
   return true;
 }
 
+/** Delete a face AND the boundary topology that only existed for it:
+ *  boundary edges left with zero faces go, then vertices left with no
+ *  edges and no faces go. Edges/vertices still shared with other faces,
+ *  chains, or points survive. (Plain removeFace keeps everything.) */
+export function removeFaceCascade(pm: TGPolyMesh, id: number): boolean {
+  const f = getFace(pm, id);
+  if (!f) return false;
+  const boundary = [...f.vertices];
+  pm.faces = pm.faces.filter((x) => x.id !== id);
+  for (let i = 0; i < boundary.length; i++) {
+    const a = boundary[i], b = boundary[(i + 1) % boundary.length];
+    const e = findEdge(pm, a, b);
+    if (e && !pm.faces.some((x) => faceUsesEdge(x, a, b))) {
+      pm.edges = pm.edges.filter((x) => x.id !== e.id);
+    }
+  }
+  const used = new Set<number>();
+  for (const e of pm.edges) { used.add(e.v[0]); used.add(e.v[1]); }
+  for (const x of pm.faces) for (const vid of x.vertices) used.add(vid);
+  pm.vertices = pm.vertices.filter((v) => used.has(v.id) || !boundary.includes(v.id));
+  touchPolyMesh(pm);
+  return true;
+}
+
 /** Remove vertices referenced by no edge and no face. Explicit opt-in. */
 export function removeOrphanVertices(pm: TGPolyMesh): number {
   const used = new Set<number>();

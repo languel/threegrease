@@ -471,11 +471,20 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
     ['select-lasso', 'lasso', 'Lasso select'],
     ['select-circle', 'circle', 'Circle select ([ ] size)'],
+    // the quilt trio also lives here: retopologize over the pencil/objects
+    // you are editing (they snap to strokes, meshes, and splats)
+    ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
+    ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
+    ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
   ],
   SCULPT: [['sculpt', 'hand', 'Sculpt brush']],
   VERTEX: [['vertexpaint', 'brush', 'Vertex paint']],
   WEIGHT: [['weightpaint', 'adjustments', 'Weight paint']],
-  POLY: [['polypen', 'wireframe', 'Topology pen — click builds/fills · drag moves (vertex merge on release) · hold deletes/dissolves · hold+drag: vertex=extrude edge, boundary edge=quad extrude, interior edge=loop cut, empty=knife · Shift+click=AutoQuad · Ctrl+click=select']],
+  POLY: [
+    ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
+    ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
+    ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
+  ],
 };
 
 export class UI {

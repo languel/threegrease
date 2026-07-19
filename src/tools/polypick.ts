@@ -10,6 +10,7 @@ import type { AppCtx } from './context';
 import type { PathRef, TGVertexBinding, Vec3 } from '../core/types';
 import { frameAt } from '../core/gpdata';
 import { drawingPlane } from './projection';
+import { snapIncrement } from './context';
 import { worldMatrixOf } from './objects';
 import { pickSplatPoint } from './splatpick';
 
@@ -268,18 +269,36 @@ export function pickConstruction(ctx: AppCtx, x: number, y: number, opts: Constr
     }
   }
 
-  // plane fallback: the operation's sticky plane, else the drawing plane
+  // plane fallback: the operation's sticky plane, else the drawing plane.
+  // Placement respects the global magnet: with snapping on in a lattice
+  // mode, plane points land on the same Increment/Grid unit every other
+  // tool uses (in-plane rounding, so points stay ON the plane).
   const ndc = new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
   raycaster.setFromCamera(ndc, ctx.camera);
   const plane = opts.planeOverride ?? drawingPlane(ctx);
   const out = new THREE.Vector3();
+  const latticeSnap = (p: THREE.Vector3, pl: THREE.Plane): THREE.Vector3 => {
+    const snap = ctx.settings.snap;
+    if (!snap.enabled || (snap.mode !== 'INCREMENT' && snap.mode !== 'GRID')) return p;
+    const g = snapIncrement(ctx.settings);
+    const anchor = pl.normal.clone().multiplyScalar(-pl.constant);
+    const tmp = Math.abs(pl.normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+    const u = new THREE.Vector3().crossVectors(tmp, pl.normal).normalize();
+    const v = new THREE.Vector3().crossVectors(pl.normal, u);
+    const d = p.clone().sub(anchor);
+    return anchor.clone()
+      .addScaledVector(u, Math.round(d.dot(u) / g) * g)
+      .addScaledVector(v, Math.round(d.dot(v) / g) * g);
+  };
   if (raycaster.ray.intersectPlane(plane, out)) {
-    return { world: [out.x, out.y, out.z], source: { kind: 'PLANE' } };
+    const s = latticeSnap(out, plane);
+    return { world: [s.x, s.y, s.z], source: { kind: 'PLANE' } };
   }
   // grazing view: camera-facing plane through the 3D cursor never fails
   const normal = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
   const free = new THREE.Plane().setFromNormalAndCoplanarPoint(
     normal, new THREE.Vector3(...ctx.scene.cursor));
   raycaster.ray.intersectPlane(free, out);
-  return { world: [out.x, out.y, out.z], source: { kind: 'FREE' } };
+  const s = latticeSnap(out, free);
+  return { world: [s.x, s.y, s.z], source: { kind: 'FREE' } };
 }

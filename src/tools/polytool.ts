@@ -35,8 +35,10 @@ import { worldMatrixOf } from './objects';
 import {
   addEdge, addFace, addVertex, cleanupDegenerateFaces, dissolveEdge, dissolveVertex,
   edgeFaceCount, getEdge, getFace, getVertex, isBoundaryEdge, mergeVertices,
-  removeEdge, removeFace, removeVertex, splitEdge, splitFace, touchPolyMesh,
+  removeEdge, removeFace, removeFaceCascade, removeVertex, splitEdge, splitFace, touchPolyMesh,
 } from '../core/polymesh';
+import { createPolyMesh } from '../core/polymesh';
+import { deselectAllObjects } from './objects';
 import { bindingFor, pickConstruction, pickPolyEdge, pickPolyFace, pickPolyVertex, type ConstructionHit } from './polypick';
 import { autoQuad, walkQuadLoop, type LoopCutPlan } from './polyops';
 import { clearPolyOverlay, polyOverlay } from '../render/polymesh';
@@ -46,6 +48,14 @@ const EDGE_PX = 10;
 const DRAG_PX = 5;
 const HOLD_MS = 450;          // long-press threshold (PolyQuilt-style hold)
 const ENDPOINT_SNAP_T = 0.12; // edge-split clicks this close to an end reuse it
+/** grab an edge inside its middle band -> extrude/loop-cut; outside -> move */
+const EDGE_CENTER_T = [0.35, 0.65] as const;
+
+/** Tool flavors, mirroring the Blender trio PolyQuilt ships alongside:
+ *  QUILT = the full context pen; BUILD = Blender's Poly Build mapping
+ *  (Shift+click deletes, drag on a boundary edge extrudes from anywhere);
+ *  PATCH = Quad Patch (click infers/fills the patch under the cursor). */
+export type PolyToolVariant = 'QUILT' | 'BUILD' | 'PATCH';
 
 function takeSnapshot(pm: TGPolyMesh): string {
   return JSON.stringify({ vertices: pm.vertices, edges: pm.edges, faces: pm.faces, nextElemId: pm.nextElemId });
@@ -90,15 +100,43 @@ interface Pending {
 }
 
 export class PolyPenTool implements Tool {
-  id = 'polypen';
+  id: string;
   cursor = 'crosshair';
+  private variant: PolyToolVariant;
   private state: ToolState = { kind: 'IDLE' };
   private pending: Pending | null = null;
+  /** last hovered edge (for intent feedback + center-band classification) */
+  private edgeHover: { edgeId: number; t: number; boundary: boolean } | null = null;
+
+  constructor(id = 'polypen', variant: PolyToolVariant = 'QUILT') {
+    this.id = id;
+    this.variant = variant;
+  }
 
   // ---- helpers -------------------------------------------------------------
 
   private editMesh(ctx: AppCtx): TGPolyMesh | null {
     return ctx.scene.polyMeshes.find((p) => p.id === polyOverlay.editMeshId) ?? null;
+  }
+
+  /** The quilt needs a target mesh. Outside POLY mode (the tools also live
+   *  in the EDIT toolbar, using the pencil/objects as snap basis) pick the
+   *  selected/first editable mesh, or create one on first use. */
+  private ensureEditMesh(ctx: AppCtx): TGPolyMesh | null {
+    let pm = this.editMesh(ctx);
+    if (pm) return pm;
+    const scene = ctx.scene;
+    pm = scene.polyMeshes.find((p) => p.select) ?? scene.polyMeshes[0] ?? null;
+    if (!pm) {
+      ctx.pushUndo();
+      pm = createPolyMesh(Date.now() % 1e9, `PolyMesh ${scene.polyMeshes.length + 1}`, [...scene.cursor]);
+      scene.polyMeshes.push(pm);
+      deselectAllObjects(scene);
+      pm.select = true;
+      ctx.refreshUI();
+    }
+    polyOverlay.editMeshId = pm.id;
+    return pm;
   }
 
   private worldToLocal(ctx: AppCtx, pm: TGPolyMesh, world: Vec3): Vec3 {
@@ -174,7 +212,7 @@ export class PolyPenTool implements Tool {
   // ---- pointer -------------------------------------------------------------
 
   onDown(ctx: AppCtx, e: ToolEvent): void {
-    const pm = this.editMesh(ctx);
+    const pm = this.ensureEditMesh(ctx);
     if (!pm || pm.lock) return;
     const hit = this.pick(ctx, e);
     this.pending = {
@@ -211,7 +249,9 @@ export class PolyPenTool implements Tool {
     this.updateHover(ctx, e);
   }
 
-  /** Drag start: pick the modal operation from target x hold state. */
+  /** Drag start: pick the modal operation from target x hold state x
+   *  grab position (PolyQuilt: edge grabbed in its CENTER band extrudes/
+   *  loop-cuts from there; grabbed off-center it moves). */
   private beginDragOp(ctx: AppCtx, pm: TGPolyMesh, p: Pending, held: boolean): void {
     if (this.state.kind !== 'IDLE') return; // BUILD ignores drags
     const src = p.hit.source;
@@ -232,9 +272,16 @@ export class PolyPenTool implements Tool {
     if (src.kind === 'POLY_EDGE' && src.meshId === pm.id) {
       const edge = getEdge(pm, src.edgeId);
       if (!edge) return;
-      if (held) {
-        if (isBoundaryEdge(pm, src.edgeId)) this.beginExtrude(ctx, pm, src.edgeId);
-        else this.beginLoopCut(ctx, pm, src.edgeId, src.t);
+      const boundary = isBoundaryEdge(pm, src.edgeId);
+      const center = src.t >= EDGE_CENTER_T[0] && src.t <= EDGE_CENTER_T[1];
+      // BUILD (Blender Poly Build): dragging a boundary edge extrudes from
+      // anywhere along it; QUILT/PATCH: center band extrudes/loop-cuts,
+      // off-center (or hold) keeps the richer PolyQuilt behaviors
+      const extrudeZone = this.variant === 'BUILD' ? boundary : center;
+      if (held || extrudeZone) {
+        if (boundary) this.beginExtrude(ctx, pm, src.edgeId);
+        else if (held || center) this.beginLoopCut(ctx, pm, src.edgeId, src.t);
+        else this.beginMoveElems(ctx, pm, [...edge.v]);
       } else {
         this.beginMoveElems(ctx, pm, [...edge.v]);
       }
@@ -300,13 +347,25 @@ export class PolyPenTool implements Tool {
     if (!pending.dragged) {
       const held = pending.alt || performance.now() - pending.downAt > HOLD_MS;
       if (held && this.state.kind === 'IDLE') { this.holdAction(ctx, pm, pending); return; }
-      if (pending.shift && this.state.kind === 'IDLE') {
-        // Shift+click: AutoQuad — infer the patch under the cursor
-        const before = takeSnapshot(pm);
-        if (autoQuad(ctx, pm, pending.x, pending.y)) this.commit(ctx, pm, before);
-        return;
+      if (this.state.kind === 'IDLE') {
+        const fill = () => {
+          const before = takeSnapshot(pm);
+          if (autoQuad(ctx, pm, pending.x, pending.y)) this.commit(ctx, pm, before);
+        };
+        if (this.variant === 'BUILD') {
+          // Blender Poly Build mapping: Shift+LMB deletes the element,
+          // Ctrl/Cmd+LMB (and plain click) adds geometry
+          if (pending.shift) { this.holdAction(ctx, pm, pending); return; }
+        } else if (this.variant === 'PATCH') {
+          // Quad Patch: clicking fills the inferred patch
+          if (pending.ctrl) { this.toggleSelect(ctx, pm, pending); return; }
+          fill();
+          return;
+        } else {
+          if (pending.shift) { fill(); return; }          // AutoQuad
+          if (pending.ctrl) { this.toggleSelect(ctx, pm, pending); return; }
+        }
       }
-      if (pending.ctrl && this.state.kind === 'IDLE') { this.toggleSelect(ctx, pm, pending); return; }
       this.clickAction(ctx, pm, pending);
     }
   }
@@ -320,7 +379,9 @@ export class PolyPenTool implements Tool {
     } else if (src.kind === 'POLY_EDGE' && src.meshId === pm.id) {
       apply(() => { if (!dissolveEdge(pm, src.edgeId)) removeEdge(pm, src.edgeId); });
     } else if (src.kind === 'POLY_FACE' && src.meshId === pm.id) {
-      apply(() => removeFace(pm, src.faceId));
+      // face deletion cascades to topology that only existed for it:
+      // sole-face boundary edges and now-unreferenced boundary vertices
+      apply(() => removeFaceCascade(pm, src.faceId));
     }
   }
 
@@ -651,7 +712,7 @@ export class PolyPenTool implements Tool {
     const verts = pm.vertices.filter((v) => v.select).map((v) => v.id);
     if (!faces.length && !edges.length && !verts.length) return false;
     ctx.pushUndo();
-    for (const id of faces) removeFace(pm, id);
+    for (const id of faces) removeFaceCascade(pm, id);
     for (const id of edges) removeEdge(pm, id);
     for (const id of verts) removeVertex(pm, id);
     ctx.refreshUI();
@@ -696,16 +757,103 @@ export class PolyPenTool implements Tool {
 
   // ---- hover / preview -----------------------------------------------------
 
-  drawHud(_ctx: AppCtx, hud: CanvasRenderingContext2D): void {
-    if (this.state.kind !== 'KNIFE') return;
-    hud.beginPath();
-    hud.moveTo(this.state.a.x, this.state.a.y);
-    hud.lineTo(this.state.b.x, this.state.b.y);
-    hud.strokeStyle = 'rgba(80,220,255,0.9)';
-    hud.setLineDash([6, 4]);
-    hud.lineWidth = 1.5;
-    hud.stroke();
-    hud.setLineDash([]);
+  drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
+    if (this.state.kind === 'KNIFE') {
+      hud.beginPath();
+      hud.moveTo(this.state.a.x, this.state.a.y);
+      hud.lineTo(this.state.b.x, this.state.b.y);
+      hud.strokeStyle = 'rgba(80,220,255,0.9)';
+      hud.setLineDash([6, 4]);
+      hud.lineWidth = 1.5;
+      hud.stroke();
+      hud.setLineDash([]);
+      return;
+    }
+    const pm = this.editMesh(ctx);
+    if (!pm) return;
+
+    const edgeScreen = (edgeId: number): [THREE.Vector2, THREE.Vector2] | null => {
+      const e = getEdge(pm, edgeId);
+      if (!e) return null;
+      const a = getVertex(pm, e.v[0]), b = getVertex(pm, e.v[1]);
+      if (!a || !b) return null;
+      const sa = this.screenOf(ctx, this.localToWorld(ctx, pm, a.co));
+      const sb = this.screenOf(ctx, this.localToWorld(ctx, pm, b.co));
+      return sa && sb ? [sa, sb] : null;
+    };
+    const strokeSeg = (seg: [THREE.Vector2, THREE.Vector2], color: string, width: number) => {
+      hud.beginPath();
+      hud.moveTo(seg[0].x, seg[0].y);
+      hud.lineTo(seg[1].x, seg[1].y);
+      hud.strokeStyle = color;
+      hud.lineWidth = width;
+      hud.stroke();
+    };
+
+    // -- delete-armed: element under a matured long-press turns RED --
+    const p = this.pending;
+    const armed = p && !p.dragged && this.state.kind === 'IDLE'
+      && (p.alt || performance.now() - p.downAt > HOLD_MS);
+    if (armed && p) {
+      const src = p.hit.source;
+      hud.save();
+      if (src.kind === 'POLY_EDGE' && src.meshId === pm.id) {
+        const seg = edgeScreen(src.edgeId);
+        if (seg) strokeSeg(seg, 'rgba(255,64,64,0.95)', 4);
+      } else if (src.kind === 'POLY_VERTEX' && src.meshId === pm.id) {
+        const v = getVertex(pm, src.vertexId);
+        const s = v && this.screenOf(ctx, this.localToWorld(ctx, pm, v.co));
+        if (s) {
+          hud.beginPath();
+          hud.arc(s.x, s.y, 9, 0, Math.PI * 2);
+          hud.strokeStyle = 'rgba(255,64,64,0.95)';
+          hud.lineWidth = 3;
+          hud.stroke();
+        }
+      } else if (src.kind === 'POLY_FACE' && src.meshId === pm.id) {
+        const f = getFace(pm, src.faceId);
+        if (f) {
+          hud.beginPath();
+          let started = false;
+          for (const vid of f.vertices) {
+            const v = getVertex(pm, vid);
+            const s = v && this.screenOf(ctx, this.localToWorld(ctx, pm, v.co));
+            if (!s) continue;
+            if (!started) { hud.moveTo(s.x, s.y); started = true; }
+            else hud.lineTo(s.x, s.y);
+          }
+          hud.closePath();
+          hud.strokeStyle = 'rgba(255,64,64,0.95)';
+          hud.lineWidth = 3;
+          hud.stroke();
+          hud.fillStyle = 'rgba(255,64,64,0.18)';
+          hud.fill();
+        }
+      }
+      hud.restore();
+      return;
+    }
+
+    // -- extrude intent: hovered edge in its extrude zone goes YELLOW and
+    //    thicker (center band for QUILT/PATCH, whole boundary for BUILD) --
+    if (!p && this.state.kind === 'IDLE' && this.edgeHover) {
+      const h = this.edgeHover;
+      const center = h.t >= EDGE_CENTER_T[0] && h.t <= EDGE_CENTER_T[1];
+      const zone = this.variant === 'BUILD' ? h.boundary : center;
+      if (zone) {
+        const seg = edgeScreen(h.edgeId);
+        if (seg) {
+          const color = h.boundary ? 'rgba(255,215,64,0.95)' : 'rgba(255,215,64,0.75)';
+          strokeSeg(seg, color, h.boundary ? 4 : 3);
+          // tick mark at the grab point: extrusion starts HERE
+          const mid = seg[0].clone().lerp(seg[1], h.t);
+          hud.beginPath();
+          hud.arc(mid.x, mid.y, 4, 0, Math.PI * 2);
+          hud.fillStyle = 'rgba(255,215,64,0.95)';
+          hud.fill();
+        }
+      }
+    }
   }
 
   private updateHover(ctx: AppCtx, e: ToolEvent, precomputed?: ConstructionHit): void {
@@ -717,6 +865,9 @@ export class PolyPenTool implements Tool {
       src.kind === 'POLY_VERTEX' ? { meshId: src.meshId, dim: 0, id: src.vertexId }
       : src.kind === 'POLY_EDGE' ? { meshId: src.meshId, dim: 1, id: src.edgeId }
       : src.kind === 'POLY_FACE' ? { meshId: src.meshId, dim: 2, id: src.faceId }
+      : null;
+    this.edgeHover = src.kind === 'POLY_EDGE' && src.meshId === pm.id
+      ? { edgeId: src.edgeId, t: src.t, boundary: isBoundaryEdge(pm, src.edgeId) }
       : null;
     polyOverlay.previewPoint = hit.world;
     if (this.state.kind === 'BUILD') {
