@@ -5,7 +5,7 @@ import { evaluateModifiers, remapTime } from '../modifiers/index';
 import { buildFillGeometry, buildStrokeGeometry, type BuildOptions } from './geometry';
 import { makeFillMaterial, makeStrokeMaterial } from './materials';
 
-export type EditorMode = 'OBJECT' | 'DRAW' | 'EDIT' | 'SCULPT' | 'VERTEX' | 'WEIGHT';
+export type EditorMode = 'OBJECT' | 'DRAW' | 'EDIT' | 'SCULPT' | 'VERTEX' | 'WEIGHT' | 'POLY';
 
 export interface RenderState {
   mode: EditorMode;

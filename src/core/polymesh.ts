@@ -187,6 +187,38 @@ export function splitEdge(
   return mid;
 }
 
+/** Merge vertex `fromId` into `intoId` (extrusion release-snap): edges are
+ *  rewired (degenerates and duplicates dropped), face boundaries rewritten
+ *  (consecutive duplicates collapsed; faces below 3 unique vertices
+ *  dropped). Returns false untouched when the merge is invalid. */
+export function mergeVertices(pm: TGPolyMesh, fromId: number, intoId: number): boolean {
+  if (fromId === intoId || !getVertex(pm, fromId) || !getVertex(pm, intoId)) return false;
+  pm.vertices = pm.vertices.filter((v) => v.id !== fromId);
+  const seen = new Set<string>();
+  const edges: TGPolyEdge[] = [];
+  for (const e of pm.edges) {
+    const a = e.v[0] === fromId ? intoId : e.v[0];
+    const b = e.v[1] === fromId ? intoId : e.v[1];
+    if (a === b) continue; // collapsed edge
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+    if (seen.has(key)) continue; // rewiring produced a duplicate
+    seen.add(key);
+    edges.push({ ...e, v: [a, b] });
+  }
+  pm.edges = edges;
+  pm.faces = pm.faces
+    .map((f) => {
+      const mapped = f.vertices.map((id) => (id === fromId ? intoId : id));
+      const out: number[] = [];
+      for (const id of mapped) if (out[out.length - 1] !== id) out.push(id);
+      while (out.length > 1 && out[0] === out[out.length - 1]) out.pop();
+      return { ...f, vertices: out };
+    })
+    .filter((f) => new Set(f.vertices).size >= 3 && new Set(f.vertices).size === f.vertices.length);
+  touchPolyMesh(pm);
+  return true;
+}
+
 // ---- adjacency / boundary ----------------------------------------------------
 
 export interface PolyAdjacency {

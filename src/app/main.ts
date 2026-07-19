@@ -104,6 +104,8 @@ import { MeshManager, createMeshObject } from '../render/meshes';
 import { createPolyMesh } from '../core/polymesh';
 import { PolyMeshManager } from '../render/polymesh';
 import { setSplatPickSource } from '../tools/splatpick';
+import { PolyPenTool } from '../tools/polytool';
+import { clearPolyOverlay, polyOverlay } from '../render/polymesh';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
   ObjectSelectTool, deleteObject, deselectAllObjects, getObjectTransform,
@@ -119,6 +121,7 @@ import type { CanvasPlane } from '../core/types';
 const DEFAULT_TOOL: Record<EditorMode, string> = {
   OBJECT: 'object-select', DRAW: 'draw', EDIT: 'select',
   SCULPT: 'sculpt', VERTEX: 'vertexpaint', WEIGHT: 'weightpaint',
+  POLY: 'polypen',
 };
 
 /** Interpolate tool: horizontal drag picks the breakdown factor; release commits. */
@@ -214,6 +217,7 @@ class App implements AppHandle {
   private widgetProxy = new THREE.Object3D();
   private widgetBase: { refs: ObjRef[]; transforms: ObjTransform[]; proxy: ObjTransform } | null = null;
   private canvasSurfaces: THREE.Object3D[] = [];
+  private polyPen = new PolyPenTool();
   private objectPick = new ObjectSelectTool('object-select', 'BOX');
   private objectPickLasso = new ObjectSelectTool('object-select-lasso', 'LASSO');
   private objectPickCircle = new ObjectSelectTool('object-select-circle', 'CIRCLE');
@@ -350,6 +354,7 @@ class App implements AppHandle {
       new SelectTool('select-circle', 'CIRCLE'), new SculptTool(),
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
+      this.polyPen,
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
 
@@ -417,9 +422,30 @@ class App implements AppHandle {
     // other mode edits the active one, so create a blank on entry rather
     // than force one to always exist (lets "delete the last GP object"
     // actually empty the scene while staying in Object mode).
-    if (mode !== 'OBJECT' && this.ctx.scene.objects.length === 0) {
+    if (mode !== 'OBJECT' && mode !== 'POLY' && this.ctx.scene.objects.length === 0) {
       this.ctx.scene.objects.push(createObject('Pencil1'));
       this.ctx.scene.activeObject = 0;
+    }
+    // POLY mode edits one editable mesh: prefer the picked/selected one,
+    // fall back to any existing, create a blank at the cursor otherwise
+    // (mirrors the blank-GP-on-entry behavior above)
+    if (mode === 'POLY') {
+      const scene = this.ctx.scene;
+      const picked = this.objectPick.lastPicked;
+      const target = (picked?.kind === 'POLY' ? scene.polyMeshes.find((p) => p.id === picked.id) : undefined)
+        ?? scene.polyMeshes.find((p) => p.select)
+        ?? scene.polyMeshes[0];
+      if (target) {
+        polyOverlay.editMeshId = target.id;
+      } else {
+        const id = Date.now() % 1e9;
+        const pm = createPolyMesh(id, 'PolyMesh 1', [...scene.cursor]);
+        scene.polyMeshes.push(pm);
+        polyOverlay.editMeshId = id;
+      }
+    } else if (this.ctx.settings.mode === 'POLY') {
+      clearPolyOverlay();
+      polyOverlay.editMeshId = null;
     }
     this.ctx.settings.mode = mode;
     this.setTool(DEFAULT_TOOL[mode]);
@@ -1068,6 +1094,7 @@ class App implements AppHandle {
       case 'modeSculpt': this.setMode('SCULPT'); break;
       case 'modeVertex': this.setMode('VERTEX'); break;
       case 'modeWeight': this.setMode('WEIGHT'); break;
+      case 'modePoly': this.setMode('POLY'); break;
       case 'toolDraw': if (ctx.settings.mode === 'DRAW') this.setTool('draw'); break;
       case 'toolErase': if (ctx.settings.mode === 'DRAW') this.setTool('erase'); break;
       case 'toolFill': if (ctx.settings.mode === 'DRAW') this.setTool('fill'); break;
@@ -2233,7 +2260,7 @@ class App implements AppHandle {
     deselectAllObjects(scene);
     pm.select = true;
     this.setLastPicked({ kind: 'POLY', id });
-    this.ui.refresh();
+    this.setMode('POLY'); // straight into topology editing (refreshes UI)
   }
 
   /** Blender Add > Grease Pencil > Blank: new empty GP object at the 3D cursor. */

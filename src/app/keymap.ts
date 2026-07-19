@@ -30,6 +30,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'modeSculpt', label: 'Sculpt mode', combo: '3', category: 'Modes' },
   { id: 'modeVertex', label: 'Vertex paint mode', combo: '4', category: 'Modes' },
   { id: 'modeWeight', label: 'Weight paint mode', combo: '5', category: 'Modes' },
+  { id: 'modePoly', label: 'Editable mesh (topology) mode', combo: '6', category: 'Modes' },
   // Tools
   { id: 'toolDraw', label: 'Draw tool', combo: 'd', category: 'Tools' },
   { id: 'toolErase', label: 'Erase tool', combo: 'e', category: 'Tools' },

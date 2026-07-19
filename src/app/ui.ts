@@ -475,6 +475,7 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
   SCULPT: [['sculpt', 'hand', 'Sculpt brush']],
   VERTEX: [['vertexpaint', 'brush', 'Vertex paint']],
   WEIGHT: [['weightpaint', 'adjustments', 'Weight paint']],
+  POLY: [['polypen', 'wireframe', 'Topology pen — click builds, drag vertex moves, drag boundary edge extrudes']],
 };
 
 export class UI {
@@ -744,6 +745,7 @@ export class UI {
     const modes: [EditorMode, IconName, string][] = [
       ['OBJECT', 'cursorArrow', 'Object mode'], ['DRAW', 'pencil', 'Draw mode'], ['EDIT', 'pencilSquare', 'Edit mode'],
       ['SCULPT', 'hand', 'Sculpt mode'], ['VERTEX', 'brush', 'Vertex paint'], ['WEIGHT', 'adjustments', 'Weight paint'],
+      ['POLY', 'wireframe', 'Editable mesh (topology pen)'],
     ];
     for (const [m, iconName, label] of modes) {
       bar.append(btn(icon(iconName), () => this.app.setMode(m), { active: s.mode === m, title: label }));
