@@ -103,6 +103,7 @@ import { SplatManager } from '../splats/index';
 import { MeshManager, createMeshObject } from '../render/meshes';
 import { createPolyMesh } from '../core/polymesh';
 import { PolyMeshManager } from '../render/polymesh';
+import { setSplatPickSource } from '../tools/splatpick';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
   ObjectSelectTool, deleteObject, deselectAllObjects, getObjectTransform,
@@ -254,6 +255,10 @@ class App implements AppHandle {
       surfaces: [],
       canvasMeshes: [],
       pickableMeshes: [],
+      polyPick: {
+        faceMeshes: () => this.polys.pickTargets(self.ctx.scene),
+        faceIdAt: (polyId, tri) => this.polys.faceIdAt(polyId, tri),
+      },
       syncCanvases: () => this.syncCanvases(),
       copyBuffer: [],
       requestRender: (layerId?: number) => {
@@ -290,6 +295,7 @@ class App implements AppHandle {
     this.scene3.add(this.canvasGroup);
     this.scene3.add(this.scoreGroup);
     this.splats.init(this.glRenderer);
+    setSplatPickSource(this.splats);
     this.scene3.add(this.splats.group);
     this.scene3.add(this.meshes.group);
     this.scene3.add(this.polys.group);

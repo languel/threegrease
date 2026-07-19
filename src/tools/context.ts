@@ -137,6 +137,12 @@ export interface AppCtx {
   canvasMeshes: THREE.Object3D[];
   /** mesh-object roots for object-mode picking */
   pickableMeshes: THREE.Object3D[];
+  /** editable-mesh render seam: face meshes + triangle->face-id resolution
+   *  (set by App; null until the poly manager exists) */
+  polyPick: {
+    faceMeshes(): THREE.Object3D[];
+    faceIdAt(polyId: number, triangleIndex: number): number | null;
+  } | null;
   syncCanvases(): void;
   copyBuffer: GPStroke[];
   /** mark for rebuild; pass a layerId for the cheap single-layer path (P10) */
