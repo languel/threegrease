@@ -10,6 +10,10 @@ import type { AppCtx } from '../tools/context';
 import { frameAt } from '../core/gpdata';
 import { evaluateModifiers, remapTime } from '../modifiers/index';
 import { buildFillGeometry } from '../render/geometry';
+import { triangulateFace } from '../render/polymesh';
+import { edgeFaceCount } from '../core/polymesh';
+import { worldMatrixOf } from '../tools/objects';
+import type { Vec3 } from '../core/types';
 
 export interface Export3DOptions {
   pxToWorld: number;        // width conversion for VIEW-unit strokes
@@ -81,6 +85,65 @@ export function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): THREE.Grou
       }
     }
   });
+
+  // editable generalized meshes: faces as triangulated geometry; face-less
+  // edges as GL line primitives and fully isolated vertices as GL points
+  // (GLTF carries lines/points; OBJ/STL/PLY exporters only process Mesh
+  // objects, so there faces export and points/edges are skipped — never
+  // silently converted into unrelated geometry).
+  for (const pm of scene.polyMeshes) {
+    if (!pm.visible) continue;
+    const matrix = worldMatrixOf(scene, { kind: 'POLY', id: pm.id });
+    const co = new Map(pm.vertices.map((v) => [v.id, v.co] as const));
+    const color = new THREE.Color(pm.color[0], pm.color[1], pm.color[2]);
+
+    const facePos: number[] = [];
+    for (const f of pm.faces) {
+      const boundary = f.vertices.map((id) => co.get(id)).filter((c): c is Vec3 => !!c);
+      if (boundary.length !== f.vertices.length || boundary.length < 3) continue;
+      for (const [a, b, c] of triangulateFace(boundary)) {
+        facePos.push(...boundary[a], ...boundary[b], ...boundary[c]);
+      }
+    }
+    if (facePos.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(facePos, 3));
+      geo.applyMatrix4(matrix);
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide }));
+      mesh.name = pm.name;
+      group.add(mesh);
+    }
+
+    const edgePos: number[] = [];
+    for (const e of pm.edges) {
+      if (edgeFaceCount(pm, e.id) > 0) continue; // face boundaries covered above
+      const a = co.get(e.v[0]), b = co.get(e.v[1]);
+      if (a && b) edgePos.push(...a, ...b);
+    }
+    if (edgePos.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(edgePos, 3));
+      geo.applyMatrix4(matrix);
+      const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color }));
+      lines.name = `${pm.name} edges`;
+      group.add(lines);
+    }
+
+    const used = new Set<number>();
+    for (const e of pm.edges) { used.add(e.v[0]); used.add(e.v[1]); }
+    for (const f of pm.faces) for (const id of f.vertices) used.add(id);
+    const pointPos: number[] = [];
+    for (const v of pm.vertices) if (!used.has(v.id)) pointPos.push(...v.co);
+    if (pointPos.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pointPos, 3));
+      geo.applyMatrix4(matrix);
+      const points = new THREE.Points(geo, new THREE.PointsMaterial({ color, size: 0.02 }));
+      points.name = `${pm.name} points`;
+      group.add(points);
+    }
+  }
   return group;
 }
 
