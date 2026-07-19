@@ -477,15 +477,15 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
     ['select-lasso', 'lasso', 'Lasso select'],
     ['select-circle', 'circle', 'Circle select ([ ] size)'],
-  ],
-  SCULPT: [['sculpt', 'hand', 'Sculpt brush']],
-  VERTEX: [['vertexpaint', 'brush', 'Vertex paint']],
-  WEIGHT: [['weightpaint', 'adjustments', 'Weight paint']],
-  POLY: [
+    // the quilt trio (same entries as DRAW): retopologize over what you
+    // are editing — strokes, meshes, and splats are snap sources
     ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
     ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
     ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
   ],
+  SCULPT: [['sculpt', 'hand', 'Sculpt brush']],
+  VERTEX: [['vertexpaint', 'brush', 'Vertex paint']],
+  WEIGHT: [['weightpaint', 'adjustments', 'Weight paint']],
 };
 
 export class UI {
@@ -755,7 +755,6 @@ export class UI {
     const modes: [EditorMode, IconName, string][] = [
       ['OBJECT', 'cursorArrow', 'Object mode'], ['DRAW', 'pencil', 'Draw mode'], ['EDIT', 'pencilSquare', 'Edit mode'],
       ['SCULPT', 'hand', 'Sculpt mode'], ['VERTEX', 'brush', 'Vertex paint'], ['WEIGHT', 'adjustments', 'Weight paint'],
-      ['POLY', 'wireframe', 'Editable mesh (topology pen)'],
     ];
     for (const [m, iconName, label] of modes) {
       bar.append(btn(icon(iconName), () => this.app.setMode(m), { active: s.mode === m, title: label }));

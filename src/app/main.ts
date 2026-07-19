@@ -121,7 +121,6 @@ import type { CanvasPlane } from '../core/types';
 const DEFAULT_TOOL: Record<EditorMode, string> = {
   OBJECT: 'object-select', DRAW: 'draw', EDIT: 'select',
   SCULPT: 'sculpt', VERTEX: 'vertexpaint', WEIGHT: 'weightpaint',
-  POLY: 'polypen',
 };
 
 /** Interpolate tool: horizontal drag picks the breakdown factor; release commits. */
@@ -419,50 +418,29 @@ class App implements AppHandle {
   private modeHistory: EditorMode[] = ['DRAW', 'EDIT'];
 
   setMode(mode: EditorMode): void {
-    // Blender semantics: "Edit mode" edits whatever object is active —
-    // entering EDIT with an editable mesh active exposes its vertices,
-    // i.e. routes to POLY mode (GP objects keep the GP point editor).
-    if (mode === 'EDIT') {
+    // "Edit mode" edits whatever object is active — with an editable mesh
+    // as the selection, EDIT opens straight onto the PolyQuilt tool (no
+    // standalone poly mode; GP objects keep the GP point editor).
+    const enterPolyPen = mode === 'EDIT' && (() => {
       const scene = this.ctx.scene;
       const picked = this.objectPick.lastPicked;
       const pickedPoly = picked?.kind === 'POLY'
         && scene.polyMeshes.some((p) => p.id === picked.id && p.select);
       const onlyPolySelected = scene.polyMeshes.some((p) => p.select)
         && !scene.objects.some((o) => o.select);
-      if (pickedPoly || onlyPolySelected) mode = 'POLY';
-    }
+      return pickedPoly || onlyPolySelected;
+    })();
     if (mode !== this.ctx.settings.mode) this.modeHistory = [this.ctx.settings.mode, mode];
     // OBJECT mode (and the outliner) tolerate zero GP objects — every
     // other mode edits the active one, so create a blank on entry rather
     // than force one to always exist (lets "delete the last GP object"
     // actually empty the scene while staying in Object mode).
-    if (mode !== 'OBJECT' && mode !== 'POLY' && this.ctx.scene.objects.length === 0) {
+    if (mode !== 'OBJECT' && this.ctx.scene.objects.length === 0) {
       this.ctx.scene.objects.push(createObject('Pencil1'));
       this.ctx.scene.activeObject = 0;
     }
-    // POLY mode edits one editable mesh: prefer the picked/selected one,
-    // fall back to any existing, create a blank at the cursor otherwise
-    // (mirrors the blank-GP-on-entry behavior above)
-    if (mode === 'POLY') {
-      const scene = this.ctx.scene;
-      const picked = this.objectPick.lastPicked;
-      const target = (picked?.kind === 'POLY' ? scene.polyMeshes.find((p) => p.id === picked.id) : undefined)
-        ?? scene.polyMeshes.find((p) => p.select)
-        ?? scene.polyMeshes[0];
-      if (target) {
-        polyOverlay.editMeshId = target.id;
-      } else {
-        const id = Date.now() % 1e9;
-        const pm = createPolyMesh(id, 'PolyMesh 1', [...scene.cursor]);
-        scene.polyMeshes.push(pm);
-        polyOverlay.editMeshId = id;
-      }
-    } else if (this.ctx.settings.mode === 'POLY') {
-      clearPolyOverlay();
-      polyOverlay.editMeshId = null;
-    }
     this.ctx.settings.mode = mode;
-    this.setTool(DEFAULT_TOOL[mode]);
+    this.setTool(enterPolyPen ? 'polypen' : DEFAULT_TOOL[mode]);
     this.gp.markDirty();
     this.refreshWidget();
     this.ui.refresh();
@@ -478,6 +456,20 @@ class App implements AppHandle {
     this.tools.setActive(this.ctx, id);
     const tool = this.tools.get(id);
     this.ctx.canvas.style.cursor = tool?.cursor ?? 'default';
+    // quilt overlays live and die with the quilt tools (no standalone
+    // mode): activating one targets the picked/selected/first editable
+    // mesh; leaving them hides the topology overlays
+    if (id === 'polypen' || id === 'polybuild' || id === 'quadpatch') {
+      const scene = this.ctx.scene;
+      const picked = this.objectPick.lastPicked;
+      const target = (picked?.kind === 'POLY' ? scene.polyMeshes.find((p) => p.id === picked.id) : undefined)
+        ?? scene.polyMeshes.find((p) => p.select)
+        ?? scene.polyMeshes[0];
+      polyOverlay.editMeshId = target?.id ?? null; // else first click creates one
+    } else {
+      clearPolyOverlay();
+      polyOverlay.editMeshId = null;
+    }
     this.ui.refresh();
   }
 
@@ -1108,7 +1100,12 @@ class App implements AppHandle {
       case 'modeSculpt': this.setMode('SCULPT'); break;
       case 'modeVertex': this.setMode('VERTEX'); break;
       case 'modeWeight': this.setMode('WEIGHT'); break;
-      case 'modePoly': this.setMode('POLY'); break;
+      case 'modePoly':
+        // '6': jump to the PolyQuilt tool (in EDIT unless already in a
+        // toolbar mode that hosts the trio)
+        if (ctx.settings.mode !== 'DRAW' && ctx.settings.mode !== 'EDIT') this.setMode('EDIT');
+        this.setTool('polypen');
+        break;
       case 'toolDraw': if (ctx.settings.mode === 'DRAW') this.setTool('draw'); break;
       case 'toolErase': if (ctx.settings.mode === 'DRAW') this.setTool('erase'); break;
       case 'toolFill': if (ctx.settings.mode === 'DRAW') this.setTool('fill'); break;
@@ -2274,7 +2271,10 @@ class App implements AppHandle {
     deselectAllObjects(scene);
     pm.select = true;
     this.setLastPicked({ kind: 'POLY', id });
-    this.setMode('POLY'); // straight into topology editing (refreshes UI)
+    // straight into topology editing: EDIT mode + the PolyQuilt tool
+    // (setTool targets the freshly selected mesh and refreshes the UI)
+    if (this.ctx.settings.mode !== 'DRAW' && this.ctx.settings.mode !== 'EDIT') this.setMode('EDIT');
+    this.setTool('polypen');
   }
 
   /** Blender Add > Grease Pencil > Blank: new empty GP object at the 3D cursor. */
