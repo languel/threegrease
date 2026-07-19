@@ -101,6 +101,7 @@ import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
 import { MeshManager, createMeshObject } from '../render/meshes';
+import { createPolyMesh } from '../core/polymesh';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
   ObjectSelectTool, deleteObject, deselectAllObjects, getObjectTransform,
@@ -1693,6 +1694,7 @@ class App implements AppHandle {
     }
     add('add.camera', 'Add camera at current view', () => this.addCamera(), 'object');
     add('add.gp', 'Add blank Grease Pencil object', () => this.addGPObject(), 'object grease pencil new');
+    add('add.polymesh', 'Add Editable Mesh', () => this.addPolyMeshObject(), 'object topology poly editable mesh');
     add('mediamime.panel', 'Open MediaMime panel', () => this.ui.openTab('mediamime'), 'landmarks rig mediapipe');
     add('export.glb', 'Export GLB', async () => (await import('../io/export3d')).exportGLB(this.ctx), 'file');
     add('export.obj', 'Export OBJ', async () => (await import('../io/export3d')).exportOBJ(this.ctx), 'file');
@@ -1830,6 +1832,15 @@ class App implements AppHandle {
         copy.translation[0] += 0.3;
         scene.splats.push(copy);
         clones.push({ kind: 'SPLAT', id: copy.id });
+      } else if (ref.kind === 'POLY') {
+        const src = scene.polyMeshes.find((p) => p.id === ref.id);
+        if (!src) continue;
+        // element ids are per-mesh, so a deep copy keeps them valid
+        const copy = { ...JSON.parse(JSON.stringify(src)), id: newId() };
+        copy.name += ' copy';
+        copy.translation[0] += 0.3;
+        scene.polyMeshes.push(copy);
+        clones.push({ kind: 'POLY', id: copy.id });
       } else {
         const src = scene.meshes.find((m) => m.id === ref.id);
         if (!src) continue;
@@ -1869,6 +1880,7 @@ class App implements AppHandle {
       { label: 'Box', icon: 'cube', do: () => this.addMeshObject('BOX', undefined, cursorAt) },
       { label: 'Sphere', icon: 'circle', do: () => this.addMeshObject('SPHERE', undefined, cursorAt) },
       { label: 'Cylinder', icon: 'cylinder', do: () => this.addMeshObject('CYLINDER', undefined, cursorAt) },
+      { label: 'Editable Mesh', icon: 'wireframe', do: () => this.addPolyMeshObject(cursorAt) },
       { sep: true },
       { label: 'Traveler here', icon: 'cursorArrow', do: () => this.addTravelerObjectAt(hereAt, px.x, px.y), disabled: !strokeHit },
       { label: 'Trigger here', icon: 'boltCircle', do: () => this.addTriggerAt(hereAt) },
@@ -2198,6 +2210,20 @@ class App implements AppHandle {
     const id = Date.now() % 1e9;
     this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, at ?? [...this.ctx.scene.cursor], src));
     this.meshes.sync(this.ctx.scene);
+    this.ui.refresh();
+  }
+
+  /** Add Editable Mesh: empty TGPolyMesh at the 3D cursor, selected and
+   *  active (Ctrl+P target), visible in the outliner immediately. */
+  addPolyMeshObject(at?: [number, number, number]): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    const id = Date.now() % 1e9;
+    const pm = createPolyMesh(id, `PolyMesh ${scene.polyMeshes.length + 1}`, at ?? [...scene.cursor]);
+    scene.polyMeshes.push(pm);
+    deselectAllObjects(scene);
+    pm.select = true;
+    this.setLastPicked({ kind: 'POLY', id });
     this.ui.refresh();
   }
 

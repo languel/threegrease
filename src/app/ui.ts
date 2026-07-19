@@ -1390,6 +1390,23 @@ export class UI {
         slider('Opacity', m.opacity, 0.05, 1, 0.01, (v) => { m.opacity = v; }),
       )] : [],
     });
+    for (const p of scene.polyMeshes) nodes.push({
+      ref: { kind: 'POLY', id: p.id }, icon: icon('wireframe'), name: p.name,
+      selected: p.select, parent: p.parent,
+      onSelect: (e) => {
+        this.app.setLastPicked({ kind: 'POLY', id: p.id });
+        toggleSel((v) => { p.select = v; }, p.select, !!e?.shiftKey);
+      },
+      extras: [
+        colorField('', [...p.color, 1], (rgb) => { p.color = rgb; }),
+        btn(p.drawTarget ? icon('pencilSquare') : icon('dot'), () => { p.drawTarget = !p.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
+        ...viewLockBtns(
+          !p.visible, (v) => { p.visible = !v; },
+          !!p.lock, (v) => { p.lock = v; },
+        ),
+      ],
+      rename: (v) => { p.name = v; },
+    });
     for (const s of scene.splats) nodes.push({
       ref: { kind: 'SPLAT', id: s.id }, icon: icon('sparkles'), name: s.name, selected: s.select,
       parent: s.parent,
@@ -1641,6 +1658,19 @@ export class UI {
           class: 'row',
           text: 'Camera lock: Loc/Rot/Scale become a view-space offset (keep z negative for depth)',
         })] : []),
+      );
+    } else if (ref.kind === 'POLY') {
+      const p = ctx.scene.polyMeshes.find((x) => x.id === ref.id)!;
+      rows.push(
+        el('div', { class: 'menu-sep' }),
+        el('div', { class: 'menu-header', text: 'Editable mesh' }),
+        el('div', { class: 'row', text: `${p.vertices.length} verts · ${p.edges.length} edges · ${p.faces.length} faces` }),
+        fieldRow('Color', colorField('', [...p.color, 1], (rgb) => { p.color = rgb; })),
+        fieldRow('Opacity', slider('', p.opacity, 0.02, 1, 0.01, (v) => { p.opacity = v; }, { def: 0.85 })),
+        fieldRow('', checkbox('Unlit', !!p.unlit, (v) => { p.unlit = v; })),
+        fieldRow('', checkbox('Two-sided', p.doubleSided !== false, (v) => { p.doubleSided = v; })),
+        fieldRow('', checkbox('Wireframe', p.wireframe, (v) => { p.wireframe = v; })),
+        fieldRow('', checkbox('Draw target', p.drawTarget, (v) => { p.drawTarget = v; }, 'faces become Surface-placement drawing targets')),
       );
     } else if (ref.kind === 'SPLAT') {
       const s = ctx.scene.splats.find((x) => x.id === ref.id)!;
