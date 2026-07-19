@@ -15,6 +15,7 @@ import {
 } from './engine';
 import { streamLandmarkWorld, streamStore, streamWorldMatrix } from '../mm/streams';
 import { meshLocalBounds } from '../tools/objectops';
+import { intersectsSpherePolyMesh, polyMeshWorldPrimitives } from '../core/polyspatial';
 
 export function constraintsOf(scene: GPScene, ref: ObjRef): TGConstraint[] {
   const e =
@@ -265,17 +266,26 @@ export class ConstraintEngine {
         if (!c.enabled || c.type !== 'TRIGGER') continue;
         const zoneCenter = worldPos(scene, ref);
         const radius = c.radius ?? 0.25;
-        // shape from the carrier: primitive mesh = volume/plane, else sphere
+        // shape from the carrier: primitive mesh = volume/plane, editable
+        // mesh = its actual topology (radius-inflated), else sphere
         const mesh = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id) : undefined;
         const bounds = mesh && mesh.kind !== 'MODEL' ? meshLocalBounds(mesh) : null;
         const isPlane = mesh?.kind === 'PLANE';
         const inv = bounds ? worldMatrixOf(scene, ref).invert() : null;
+        // POLY carrier: probe-inside = within `radius` of ANY vertex/edge/
+        // face of the editable mesh — the spatial-query seam. Primitives
+        // cached once per constraint per frame, not per probe.
+        const poly = ref.kind === 'POLY' ? scene.polyMeshes.find((p) => p.id === ref.id) : undefined;
+        const polyPrims = poly ? polyMeshWorldPrimitives(scene, poly) : null;
 
         for (const probe of probes) {
           if (probe.key === `${ref.kind}:${ref.id}`) continue; // not itself
           const key = `${ref.kind}:${ref.id}:${c.id}:${probe.key}`;
           let inside: boolean;
-          if (bounds && inv) {
+          if (poly && polyPrims) {
+            inside = intersectsSpherePolyMesh(
+              scene, poly, [probe.pos.x, probe.pos.y, probe.pos.z], radius, polyPrims);
+          } else if (bounds && inv) {
             local.copy(probe.pos).applyMatrix4(inv);
             if (isPlane) {
               // crossing detector: sign of local z flips while inside the
