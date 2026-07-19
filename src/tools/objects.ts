@@ -9,7 +9,7 @@ import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso, pointInPolygon } from './draw';
 
-export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM';
+export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY';
 export interface ObjRef { kind: ObjKind; id: number }
 
 export function gpIndexOf(scene: GPScene, id: number): number {
@@ -24,6 +24,7 @@ export function listSelected(scene: GPScene): ObjRef[] {
   for (const m of scene.meshes) if (m.select) out.push({ kind: 'MESH', id: m.id });
   for (const t of scene.score.triggers) if (t.select) out.push({ kind: 'TRIGGER', id: t.id });
   for (const st of scene.mmStreams) if (st.select) out.push({ kind: 'STREAM', id: st.id });
+  for (const p of scene.polyMeshes) if (p.select) out.push({ kind: 'POLY', id: p.id });
   return out;
 }
 
@@ -34,6 +35,7 @@ export function deselectAllObjects(scene: GPScene): void {
   for (const m of scene.meshes) m.select = false;
   for (const t of scene.score.triggers) t.select = false;
   for (const st of scene.mmStreams) st.select = false;
+  for (const p of scene.polyMeshes) p.select = false;
 }
 
 function entityOf(scene: GPScene, ref: ObjRef):
@@ -43,6 +45,7 @@ function entityOf(scene: GPScene, ref: ObjRef):
   if (ref.kind === 'SPLAT') return scene.splats.find((s) => s.id === ref.id);
   if (ref.kind === 'TRIGGER') return scene.score.triggers.find((t) => t.id === ref.id);
   if (ref.kind === 'STREAM') return scene.mmStreams.find((st) => st.id === ref.id);
+  if (ref.kind === 'POLY') return scene.polyMeshes.find((p) => p.id === ref.id);
   return scene.meshes.find((m) => m.id === ref.id);
 }
 
@@ -89,6 +92,10 @@ export function getObjectTransform(scene: GPScene, ref: ObjRef): ObjTransform | 
     const st = scene.mmStreams.find((x) => x.id === ref.id);
     return st ? { translation: [...st.translation], rotation: [...st.rotation], scale: [...st.scale] } : null;
   }
+  if (ref.kind === 'POLY') {
+    const p = scene.polyMeshes.find((x) => x.id === ref.id);
+    return p ? { translation: [...p.translation], rotation: [...p.rotation], scale: [...p.scale] } : null;
+  }
   const m = scene.meshes.find((x) => x.id === ref.id);
   return m ? { translation: [...m.translation], rotation: [...m.rotation], scale: [...m.scale] } : null;
 }
@@ -120,6 +127,9 @@ export function setObjectTransform(scene: GPScene, ref: ObjRef, t: ObjTransform)
   } else if (ref.kind === 'STREAM') {
     const st = scene.mmStreams.find((x) => x.id === ref.id);
     if (st) { st.translation = [...t.translation]; st.rotation = [...t.rotation]; st.scale = [...t.scale]; }
+  } else if (ref.kind === 'POLY') {
+    const p = scene.polyMeshes.find((x) => x.id === ref.id);
+    if (p) { p.translation = [...t.translation]; p.rotation = [...t.rotation]; p.scale = [...t.scale]; }
   } else {
     const m = scene.meshes.find((x) => x.id === ref.id);
     if (m) { m.translation = [...t.translation]; m.rotation = [...t.rotation]; m.scale = [...t.scale]; }
@@ -150,6 +160,8 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     scene.score.triggers = scene.score.triggers.filter((t) => t.id !== ref.id);
   } else if (ref.kind === 'STREAM') {
     scene.mmStreams = scene.mmStreams.filter((st) => st.id !== ref.id);
+  } else if (ref.kind === 'POLY') {
+    scene.polyMeshes = scene.polyMeshes.filter((p) => p.id !== ref.id);
   } else {
     scene.meshes = scene.meshes.filter((m) => m.id !== ref.id);
   }
@@ -163,6 +175,7 @@ export function allRefs(scene: GPScene): ObjRef[] {
     ...scene.meshes.map((m) => ({ kind: 'MESH' as const, id: m.id })),
     ...scene.score.triggers.map((t) => ({ kind: 'TRIGGER' as const, id: t.id })),
     ...scene.mmStreams.map((st) => ({ kind: 'STREAM' as const, id: st.id })),
+    ...scene.polyMeshes.map((p) => ({ kind: 'POLY' as const, id: p.id })),
   ];
 }
 

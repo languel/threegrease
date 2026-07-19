@@ -1,6 +1,7 @@
 import type { GPObject, GPScene } from '../core/types';
 import { bumpIdCounter, createDefaultCamera, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
+import { sanitizePolyMesh } from '../core/polymesh';
 
 const FORMAT = 'threegrease-scene';
 const VERSION = 3; // v3: MediaMime rigs + trigger select/parent (P11)
@@ -60,6 +61,21 @@ export function deserializeScene(json: string): GPScene {
   // object-URL sources don't survive reload
   scene.splats = scene.splats.filter((s) => !s.src.startsWith('blob:'));
   for (const s of scene.splats) { s.select ??= false; s.lock ??= false; s.drawTarget ??= false; s.constraints ??= []; }
+  // editable generalized meshes (TGPolyMesh): default the collection, then
+  // repair rather than reject — broken element references degrade to less
+  // topology, never to a failed load
+  scene.polyMeshes ??= [];
+  for (const pm of scene.polyMeshes) {
+    pm.select ??= false;
+    pm.lock ??= false;
+    pm.parent ??= null;
+    pm.constraints ??= [];
+    pm.rev ??= 0;
+    pm.unlit ??= false;
+    pm.doubleSided ??= true;
+    for (const v of pm.vertices ?? []) v.binding ??= null;
+    sanitizePolyMesh(pm);
+  }
   scene.meshes ??= [];
   scene.meshes = scene.meshes.filter((m) => !(m.src ?? '').startsWith('blob:'));
   for (const m of scene.meshes) {

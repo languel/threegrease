@@ -118,7 +118,7 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
-export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM'; id: number }
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY'; id: number }
 
 // ---- object constraints (Blender-style stack, evaluated every frame) ----
 
@@ -454,6 +454,70 @@ export interface TGMesh {
   originOffset?: Vec3;
 }
 
+// ---- Editable generalized mesh (TGPolyMesh) -------------------------------
+// Persistent authored topology: 0D vertices + 1D edges + 2D faces in ONE
+// object, deliberately non-manifold-tolerant (isolated vertices, dangling
+// edges, open chains, disconnected components are all valid). Faces store
+// ordered polygon BOUNDARIES; triangulation is derived for render/export/
+// queries and never written back. See docs/design/polymesh.md.
+
+/** Where a vertex came from — provenance only in this phase: the explicit
+ *  `co` is always authoritative and bindings are never re-evaluated when
+ *  the source moves or disappears. */
+export type TGVertexBinding =
+  | { kind: 'FREE' }
+  | { kind: 'PLANE' }
+  | { kind: 'GP_STROKE'; path: PathRef; t: number }
+  | { kind: 'SPLAT'; objectId: number; pointIndex?: number }
+  | { kind: 'MESH'; objectId: number };
+
+export interface TGPolyVertex {
+  id: number;
+  co: Vec3;                 // object-local
+  select?: boolean;
+  binding?: TGVertexBinding | null;
+}
+
+/** Identity is the UNORDERED vertex pair; `v` order is storage only. */
+export interface TGPolyEdge {
+  id: number;
+  v: [number, number];
+  select?: boolean;
+}
+
+export interface TGPolyFace {
+  id: number;
+  vertices: number[];       // ordered boundary, >= 3 unique vertex ids
+  select?: boolean;
+}
+
+export interface TGPolyMesh {
+  id: number;
+  name: string;
+  vertices: TGPolyVertex[];
+  edges: TGPolyEdge[];
+  faces: TGPolyFace[];
+  /** monotonic per-mesh element-id counter (shared across v/e/f) */
+  nextElemId: number;
+  /** bumped by every topology/geometry mutation — renderer cache key */
+  rev: number;
+  translation: Vec3;
+  rotation: Vec3;
+  scale: Vec3;
+  visible: boolean;
+  select: boolean;
+  lock?: boolean;
+  parent?: ParentRef | null;
+  constraints?: TGConstraint[];
+  // mesh-look fields, matching TGMesh conventions
+  drawTarget: boolean;      // faces join ctx.surfaces for Surface placement
+  wireframe: boolean;
+  color: Vec3;
+  opacity: number;
+  unlit?: boolean;
+  doubleSided?: boolean;
+}
+
 /** Point force for the dynamic string simulation (P5). */
 export interface TGAttractor {
   id: number;
@@ -495,6 +559,8 @@ export interface GPScene {
   routes: TGRoute[];
   splats: TGSplat[];
   meshes: TGMesh[];
+  /** editable generalized meshes (authored topology) */
+  polyMeshes: TGPolyMesh[];
   attractors: TGAttractor[];
   mediamime: { prefix: string; rigs: MMRig[] };
   /** native MediaMime landmark streams (config; frames are runtime-only) */
