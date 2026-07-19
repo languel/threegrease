@@ -187,6 +187,89 @@ export function splitEdge(
   return mid;
 }
 
+/** PolyQuilt-style dissolve: an edge shared by exactly two faces melts
+ *  into them — the faces merge into one n-gon around the removed edge.
+ *  Any other edge (boundary/dangling/non-manifold) returns false so the
+ *  caller can fall back to plain deletion. */
+export function dissolveEdge(pm: TGPolyMesh, edgeId: number): boolean {
+  const e = getEdge(pm, edgeId);
+  if (!e) return false;
+  const [a, b] = e.v;
+  const adjacent = pm.faces.filter((f) => faceUsesEdge(f, a, b));
+  if (adjacent.length !== 2) return false;
+  const [f1, f2] = adjacent;
+  // rotate each boundary so it STARTS just after the shared edge, walking
+  // away from it; concatenating the two walks yields the merged loop
+  const walkFrom = (f: TGPolyFace, from: number, to: number): number[] | null => {
+    const n = f.vertices.length;
+    for (let i = 0; i < n; i++) {
+      const p = f.vertices[i], q = f.vertices[(i + 1) % n];
+      if (p === from && q === to) {
+        const out: number[] = [];
+        for (let k = 1; k < n; k++) out.push(f.vertices[(i + k) % n]);
+        return out; // to ... (all the way around) ... from, minus `from`
+      }
+    }
+    return null;
+  };
+  // f1 traverses a->b or b->a; f2 must traverse the opposite direction
+  let w1 = walkFrom(f1, a, b), w2 = walkFrom(f2, b, a);
+  if (!w1 || !w2) { w1 = walkFrom(f1, b, a); w2 = walkFrom(f2, a, b); }
+  if (!w1 || !w2) return false;
+  // w1 = b..a (exclusive of nothing at the end: ends with a), w2 = a..b;
+  // drop each walk's final vertex to avoid repeats when concatenating
+  const merged = [...w1.slice(0, -1), ...w2.slice(0, -1)];
+  if (new Set(merged).size !== merged.length || merged.length < 3) return false;
+  pm.faces = pm.faces.filter((f) => f.id !== f1.id && f.id !== f2.id);
+  pm.edges = pm.edges.filter((x) => x.id !== edgeId);
+  pm.faces.push({ id: allocElemId(pm), vertices: merged, select: false });
+  touchPolyMesh(pm);
+  return true;
+}
+
+/** Dissolve a 2-edge pass-through vertex (not used by any face): its two
+ *  edges fuse into one spanning edge. Returns false otherwise. */
+export function dissolveVertex(pm: TGPolyMesh, vertexId: number): boolean {
+  if (!getVertex(pm, vertexId)) return false;
+  if (pm.faces.some((f) => f.vertices.includes(vertexId))) return false;
+  const edges = pm.edges.filter((e) => e.v[0] === vertexId || e.v[1] === vertexId);
+  if (edges.length !== 2) return false;
+  const other = (e: TGPolyEdge) => (e.v[0] === vertexId ? e.v[1] : e.v[0]);
+  const a = other(edges[0]), b = other(edges[1]);
+  if (a === b || findEdge(pm, a, b)) return false;
+  pm.edges = pm.edges.filter((e) => e.id !== edges[0].id && e.id !== edges[1].id);
+  pm.vertices = pm.vertices.filter((v) => v.id !== vertexId);
+  addEdge(pm, a, b);
+  touchPolyMesh(pm);
+  return true;
+}
+
+/** Split a face into two along two of its boundary vertices (non-adjacent
+ *  in the loop). Creates the connecting edge; each half keeps boundary
+ *  order. Returns the two new faces, or null untouched. */
+export function splitFace(
+  pm: TGPolyMesh, faceId: number, va: number, vb: number,
+): [TGPolyFace, TGPolyFace] | null {
+  const f = getFace(pm, faceId);
+  if (!f || va === vb) return null;
+  const ia = f.vertices.indexOf(va), ib = f.vertices.indexOf(vb);
+  if (ia < 0 || ib < 0) return null;
+  const n = f.vertices.length;
+  if ((ia + 1) % n === ib || (ib + 1) % n === ia) return null; // adjacent
+  const loopA: number[] = [];
+  for (let i = ia; ; i = (i + 1) % n) { loopA.push(f.vertices[i]); if (i === ib) break; }
+  const loopB: number[] = [];
+  for (let i = ib; ; i = (i + 1) % n) { loopB.push(f.vertices[i]); if (i === ia) break; }
+  if (loopA.length < 3 || loopB.length < 3) return null;
+  pm.faces = pm.faces.filter((x) => x.id !== faceId);
+  addEdge(pm, va, vb);
+  const fa: TGPolyFace = { id: allocElemId(pm), vertices: loopA, select: false };
+  const fb: TGPolyFace = { id: allocElemId(pm), vertices: loopB, select: false };
+  pm.faces.push(fa, fb);
+  touchPolyMesh(pm);
+  return [fa, fb];
+}
+
 /** Merge vertex `fromId` into `intoId` (extrusion release-snap): edges are
  *  rewired (degenerates and duplicates dropped), face boundaries rewritten
  *  (consecutive duplicates collapsed; faces below 3 unique vertices
