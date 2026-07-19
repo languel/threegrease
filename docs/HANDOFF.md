@@ -430,3 +430,46 @@ not "unselectable everywhere."
 Where next: same as above (N8 splat nibs, PRD §1b vision items, legacy
 score/constraint consolidation, post-transform redo panel) — nothing
 in this session changed those priorities.
+
+## Session log (2026-07-18): editable generalized meshes (TGPolyMesh)
+
+New object type for authored topology, distinct from primitive/imported
+`TGMesh` (design note: `docs/design/polymesh.md`; manual verification
+script: `docs/verify/editable-generalized-mesh.md`).
+
+- **Data**: `scene.polyMeshes: TGPolyMesh[]` — plain-JSON vertices/edges/
+  faces with stable per-mesh element ids (`nextElemId`), mixed 0D/1D/2D
+  topology by design, faces store polygon BOUNDARIES (triangulation always
+  derived). `rev` counter drives renderer cache invalidation. Pure
+  topology utilities in `src/core/polymesh.ts` (add/remove/split/merge/
+  adjacency/validate/sanitize); vertex `binding` records provenance only
+  (never re-evaluated when sources move).
+- **Object system**: ObjKind/ParentRef `'POLY'` participates everywhere —
+  selection, G/R/S, parenting, outliner (color/drawTarget/eye/lock),
+  duplication, deletion, constraints, save/load migration.
+- **Renderer**: `PolyMeshManager` (`src/render/polymesh.ts`) — triangulated
+  face meshes (Newell-plane + ShapeUtils on copies), edge LineSegments,
+  instanced screen-scaled vertex handles, hover/select/active/invalid
+  states, transient previews via the `polyOverlay` singleton (the tool<->
+  renderer channel; nothing transient touches GPScene).
+- **Tool**: POLY mode (key `6`) + Topology Pen (`src/tools/polytool.ts`):
+  click-to-build chains, close faces on the start vertex, edge split on
+  click, modal vertex move (Ctrl = no snapping), single-boundary-edge
+  extrusion with release merge, Shift+click element select + Delete
+  cascades, Enter finishes open chains, Escape restores the exact
+  pre-op state. Modal undo = local mesh snapshot -> pushUndo -> reapply
+  (one step per op, none on cancel).
+- **Picking**: `pickConstruction` (`src/tools/polypick.ts`) unified hit
+  with fixed priority (poly vert/edge/face -> mesh -> GP stroke w/ PathRef
+  -> splat -> sticky plane -> view plane). Splat adapter
+  (`src/tools/splatpick.ts`): cached, subsampled (<=5000) center
+  projection — approximate by design, the only Spark-aware poly code.
+- **Spatial queries**: `src/core/polyspatial.ts` —
+  `distancePointToPolyMesh` (dimension + element id, ties prefer faces),
+  `intersectsSpherePolyMesh`; TRIGGER constraints on POLY carriers test
+  probes against actual topology inflated by the radius.
+- **Export**: GLB carries faces + face-less edges (lines) + isolated
+  vertices (points); OBJ/STL/PLY export faces only (documented).
+- **Deferred**: live re-binding/resnap of bound vertices, BVH/accel
+  structures, loop cut/multi-edge extrusion and the rest of the explicit
+  out-of-scope list, N-panel poly element inspector.

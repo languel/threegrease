@@ -167,3 +167,14 @@ rendering along the stroke with procedural grain in the fragment shader.
    strokes between planes, two-finger navigation, pen+touch simultaneous.
 3. Live performance: MIDI/OSC bindings for brush params, audio-reactive
    modifiers, timed replay of stroke capture (action painting playback).
+
+## Editable generalized meshes (TGPolyMesh)
+- [x] Persistent mixed-dimensional topology objects (0D/1D/2D in one mesh):
+      isolated vertices, open chains, tris/quads/n-gons, non-manifold OK
+- [x] POLY edit mode + Topology Pen (click builds chains/faces, click edge
+      splits, drag vertex moves, drag boundary edge extrudes a quad)
+- [x] Spatial query layer (distance / sphere intersection over points +
+      segments + triangles) with TRIGGER-constraint integration
+- [x] Draw-target faces, GLB export (faces + line/point primitives),
+      serialization migration, verify doc (docs/verify/editable-generalized-mesh.md)
+- [ ] Later: live source re-binding, BVH acceleration, loop/multi-edge ops

@@ -2117,3 +2117,53 @@ options across the UI:
   phase/speed, pen min conf).
 Typecheck clean at every step; per user direction, no browser
 verification this pass — committed in six standalone commits.
+
+## Editable generalized meshes (TGPolyMesh) — phases 1-7
+
+Persistent, interactively editable mixed-dimensional topology (isolated
+vertices + open edges + n-gon faces in one object), built in seven
+committed phases; design rationale in `docs/design/polymesh.md`, manual
+test script in `docs/verify/editable-generalized-mesh.md`.
+
+- **Phase 1 — data model**: `TGPolyMesh` in `scene.polyMeshes` (plain
+  JSON; stable per-mesh element ids via `nextElemId`; faces store ordered
+  boundaries, never triangulations; `rev` cache counter). Pure utilities
+  in `src/core/polymesh.ts`: add/find/remove for all three element kinds
+  (duplicate edges rejected orientation-independently), `splitEdge` with
+  adjacent-face boundary patching, `mergeVertices` (extrusion release-
+  snap), adjacency/boundary queries, degenerate/orphan cleanup,
+  `validatePolyMesh` + load-time `sanitizePolyMesh`. Serialization:
+  `polyMeshes ??= []`, per-mesh defaults, broken refs degrade to less
+  topology. Bindings are provenance-only.
+- **Phase 2 — object integration**: ObjKind/ParentRef `'POLY'` across
+  objects.ts (select/transform/delete/allRefs/world matrix/parenting),
+  Add Editable Mesh (Shift+A + palette), Shift+D duplication, outliner
+  rows, properties section (counts/color/opacity/unlit/two-sided/
+  wireframe/drawTarget).
+- **Phase 3 — renderer**: `PolyMeshManager` — per-face triangulation
+  (Newell-normal plane projection, ShapeUtils on fresh copies, fan
+  fallback), triangle->face-id map, edge overlay LineSegments, instanced
+  screen-scaled vertex handles with per-state colors, transient previews
+  from the `polyOverlay` singleton; rebuilds only on `rev` change; wired
+  into pickableMeshes + ctx.surfaces (overlays raycast-inert).
+- **Phase 4 — picking**: `pickConstruction` unified hit (priority: poly
+  vertex/edge/face -> mesh surface -> GP stroke with PathRef + t ->
+  sampled splat center -> sticky plane -> camera plane), `noSnap` (Ctrl)
+  and `excludeVertexIds`; `bindingFor()` provenance mapping; splat
+  adapter caches <=5000 subsampled centers per splat.
+- **Phase 5 — Topology Pen + POLY mode**: context-sensitive build/close/
+  split/reuse/move/extrude/select/delete/cancel with one-undo-step modal
+  commits (local snapshot -> pushUndo -> reapply; cancel pushes nothing).
+- **Phase 6 — spatial queries**: `polyMeshWorldPrimitives`,
+  `distancePointToPolyMesh` (min distance, closest point, dimension
+  0/1/2, element id; ties prefer higher dimension),
+  `intersectsSpherePolyMesh`; TRIGGER constraints on POLY carriers test
+  probes against real topology (primitives cached per constraint/frame).
+- **Phase 7 — export + docs**: GLB exports faces (triangulated, world
+  transform, color) + face-less edges as line primitives + isolated
+  vertices as point primitives; OBJ/STL/PLY faces only (documented, not
+  silently converted). Verification doc + HANDOFF/PLAN updates.
+
+Not verified live this pass (per current workflow: typecheck + build
+only); the verify doc lists the exact manual steps. `npx tsc --noEmit`
+and `npx vite build` clean after every phase.
