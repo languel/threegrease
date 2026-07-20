@@ -76,6 +76,17 @@ export function deserializeScene(json: string): GPScene {
     for (const v of pm.vertices ?? []) v.binding ??= null;
     sanitizePolyMesh(pm);
   }
+  // painted splat clouds: default + drop malformed point arrays
+  scene.paintClouds ??= [];
+  for (const pc of scene.paintClouds) {
+    pc.select ??= false;
+    pc.lock ??= false;
+    pc.parent ??= null;
+    pc.constraints ??= [];
+    pc.rev ??= 0;
+    if (!Array.isArray(pc.points) || pc.points.length % 8 !== 0
+      || pc.points.some((v) => !Number.isFinite(v))) pc.points = [];
+  }
   scene.meshes ??= [];
   scene.meshes = scene.meshes.filter((m) => !(m.src ?? '').startsWith('blob:'));
   for (const m of scene.meshes) {

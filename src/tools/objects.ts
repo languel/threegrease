@@ -9,7 +9,7 @@ import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso, pointInPolygon } from './draw';
 
-export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY';
+export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD';
 export interface ObjRef { kind: ObjKind; id: number }
 
 export function gpIndexOf(scene: GPScene, id: number): number {
@@ -25,6 +25,7 @@ export function listSelected(scene: GPScene): ObjRef[] {
   for (const t of scene.score.triggers) if (t.select) out.push({ kind: 'TRIGGER', id: t.id });
   for (const st of scene.mmStreams) if (st.select) out.push({ kind: 'STREAM', id: st.id });
   for (const p of scene.polyMeshes) if (p.select) out.push({ kind: 'POLY', id: p.id });
+  for (const pc of scene.paintClouds) if (pc.select) out.push({ kind: 'PCLOUD', id: pc.id });
   return out;
 }
 
@@ -36,6 +37,7 @@ export function deselectAllObjects(scene: GPScene): void {
   for (const t of scene.score.triggers) t.select = false;
   for (const st of scene.mmStreams) st.select = false;
   for (const p of scene.polyMeshes) p.select = false;
+  for (const pc of scene.paintClouds) pc.select = false;
 }
 
 function entityOf(scene: GPScene, ref: ObjRef):
@@ -46,6 +48,7 @@ function entityOf(scene: GPScene, ref: ObjRef):
   if (ref.kind === 'TRIGGER') return scene.score.triggers.find((t) => t.id === ref.id);
   if (ref.kind === 'STREAM') return scene.mmStreams.find((st) => st.id === ref.id);
   if (ref.kind === 'POLY') return scene.polyMeshes.find((p) => p.id === ref.id);
+  if (ref.kind === 'PCLOUD') return scene.paintClouds.find((pc) => pc.id === ref.id);
   return scene.meshes.find((m) => m.id === ref.id);
 }
 
@@ -96,6 +99,10 @@ export function getObjectTransform(scene: GPScene, ref: ObjRef): ObjTransform | 
     const p = scene.polyMeshes.find((x) => x.id === ref.id);
     return p ? { translation: [...p.translation], rotation: [...p.rotation], scale: [...p.scale] } : null;
   }
+  if (ref.kind === 'PCLOUD') {
+    const pc = scene.paintClouds.find((x) => x.id === ref.id);
+    return pc ? { translation: [...pc.translation], rotation: [...pc.rotation], scale: [...pc.scale] } : null;
+  }
   const m = scene.meshes.find((x) => x.id === ref.id);
   return m ? { translation: [...m.translation], rotation: [...m.rotation], scale: [...m.scale] } : null;
 }
@@ -130,6 +137,9 @@ export function setObjectTransform(scene: GPScene, ref: ObjRef, t: ObjTransform)
   } else if (ref.kind === 'POLY') {
     const p = scene.polyMeshes.find((x) => x.id === ref.id);
     if (p) { p.translation = [...t.translation]; p.rotation = [...t.rotation]; p.scale = [...t.scale]; }
+  } else if (ref.kind === 'PCLOUD') {
+    const pc = scene.paintClouds.find((x) => x.id === ref.id);
+    if (pc) { pc.translation = [...t.translation]; pc.rotation = [...t.rotation]; pc.scale = [...t.scale]; }
   } else {
     const m = scene.meshes.find((x) => x.id === ref.id);
     if (m) { m.translation = [...t.translation]; m.rotation = [...t.rotation]; m.scale = [...t.scale]; }
@@ -162,6 +172,8 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     scene.mmStreams = scene.mmStreams.filter((st) => st.id !== ref.id);
   } else if (ref.kind === 'POLY') {
     scene.polyMeshes = scene.polyMeshes.filter((p) => p.id !== ref.id);
+  } else if (ref.kind === 'PCLOUD') {
+    scene.paintClouds = scene.paintClouds.filter((pc) => pc.id !== ref.id);
   } else {
     scene.meshes = scene.meshes.filter((m) => m.id !== ref.id);
   }
@@ -176,6 +188,7 @@ export function allRefs(scene: GPScene): ObjRef[] {
     ...scene.score.triggers.map((t) => ({ kind: 'TRIGGER' as const, id: t.id })),
     ...scene.mmStreams.map((st) => ({ kind: 'STREAM' as const, id: st.id })),
     ...scene.polyMeshes.map((p) => ({ kind: 'POLY' as const, id: p.id })),
+    ...scene.paintClouds.map((pc) => ({ kind: 'PCLOUD' as const, id: pc.id })),
   ];
 }
 
@@ -538,6 +551,22 @@ export class ObjectSelectTool implements Tool {
       if (!st.visible) continue;
       const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'STREAM', id: st.id }));
       if (p && Math.hypot(p.x - e.x, p.y - e.y) < 40) return { kind: 'STREAM', id: st.id };
+    }
+    // painted splat clouds: screen-distance test against sampled points
+    for (const pc of ctx.scene.paintClouds) {
+      if (!pc.visible) continue;
+      const world = worldMatrixOf(ctx.scene, { kind: 'PCLOUD', id: pc.id });
+      const rectPc = ctx.canvas.getBoundingClientRect();
+      const n = pc.points.length / 8;
+      const stride = Math.max(1, Math.floor(n / 400));
+      for (let i = 0; i < n; i += stride) {
+        const o = i * 8;
+        const pr = new THREE.Vector3(pc.points[o], pc.points[o + 1], pc.points[o + 2])
+          .applyMatrix4(world).project(ctx.camera);
+        if (pr.z > 1) continue;
+        const sx = (pr.x * 0.5 + 0.5) * rectPc.width, sy = (-pr.y * 0.5 + 0.5) * rectPc.height;
+        if (Math.hypot(sx - e.x, sy - e.y) < 16) return { kind: 'PCLOUD', id: pc.id };
+      }
     }
     // faceless poly meshes (points/edge chains) have nothing to raycast —
     // fall back to a screen-distance test against their projected vertices

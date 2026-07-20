@@ -1458,6 +1458,22 @@ export class UI {
       ],
       rename: (v) => { p.name = v; },
     });
+    for (const pc of scene.paintClouds) nodes.push({
+      ref: { kind: 'PCLOUD', id: pc.id }, icon: icon('droplet'), name: pc.name,
+      selected: pc.select, parent: pc.parent,
+      onSelect: (e) => {
+        this.app.setLastPicked({ kind: 'PCLOUD', id: pc.id });
+        toggleSel((v) => { pc.select = v; }, pc.select, !!e?.shiftKey);
+      },
+      extras: [
+        el('span', { text: `${pc.points.length / 8}`, title: 'painted splats' }),
+        ...viewLockBtns(
+          !pc.visible, (v) => { pc.visible = !v; },
+          !!pc.lock, (v) => { pc.lock = v; },
+        ),
+      ],
+      rename: (v) => { pc.name = v; },
+    });
     for (const s of scene.splats) nodes.push({
       ref: { kind: 'SPLAT', id: s.id }, icon: icon('sparkles'), name: s.name, selected: s.select,
       parent: s.parent,

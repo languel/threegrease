@@ -95,6 +95,7 @@ export function createScene(): GPScene {
     splats: [],
     meshes: [],
     polyMeshes: [],
+    paintClouds: [],
     mediamime: { prefix: '/mp', rigs: [] },
     mmStreams: [],
     clips: [],

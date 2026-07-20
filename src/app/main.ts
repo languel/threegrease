@@ -103,6 +103,7 @@ import { SplatManager } from '../splats/index';
 import { MeshManager, createMeshObject } from '../render/meshes';
 import { createPolyMesh, smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
 import { PolyMeshManager } from '../render/polymesh';
+import { PaintCloudManager, createPaintCloud } from '../render/paintclouds';
 import { setSplatPickSource } from '../tools/splatpick';
 import { PolyPenTool } from '../tools/polytool';
 import { clearPolyOverlay, polyOverlay } from '../render/polymesh';
@@ -199,6 +200,7 @@ class App implements AppHandle {
   readonly splats = new SplatManager();
   readonly meshes = new MeshManager();
   readonly polys = new PolyMeshManager();
+  readonly paints = new PaintCloudManager();
   readonly mmPoints = new StreamPointsManager();
   /** app-instance store handle — evals/automation must use THIS, not an
    *  import('/src/mm/streams.ts') singleton (vite ?t= gives a second copy) */
@@ -304,6 +306,7 @@ class App implements AppHandle {
     this.scene3.add(this.splats.group);
     this.scene3.add(this.meshes.group);
     this.scene3.add(this.polys.group);
+    this.scene3.add(this.paints.group);
     this.scene3.add(this.mmPoints.group);
     mmCapture.onStatus = () => this.ui?.refresh();
     // mesh objects use MeshStandardMaterial — GP shaders ignore lights
@@ -1853,7 +1856,7 @@ class App implements AppHandle {
 
   viewAll(): void {
     const box = new THREE.Box3();
-    for (const g of [this.gp.root, this.canvasGroup, this.splats.group, this.meshes.group, this.polys.group]) {
+    for (const g of [this.gp.root, this.canvasGroup, this.splats.group, this.meshes.group, this.polys.group, this.paints.group]) {
       const b = new THREE.Box3().setFromObject(g);
       if (!b.isEmpty()) box.union(b);
     }
@@ -1902,6 +1905,14 @@ class App implements AppHandle {
         copy.translation[0] += 0.3;
         scene.polyMeshes.push(copy);
         clones.push({ kind: 'POLY', id: copy.id });
+      } else if (ref.kind === 'PCLOUD') {
+        const src = scene.paintClouds.find((c) => c.id === ref.id);
+        if (!src) continue;
+        const copy = { ...JSON.parse(JSON.stringify(src)), id: newId() };
+        copy.name += ' copy';
+        copy.translation[0] += 0.3;
+        scene.paintClouds.push(copy);
+        clones.push({ kind: 'PCLOUD', id: copy.id });
       } else {
         const src = scene.meshes.find((m) => m.id === ref.id);
         if (!src) continue;
@@ -2693,6 +2704,7 @@ class App implements AppHandle {
     this.splats.sync(ctx.scene);
     this.meshes.sync(ctx.scene, this.nav.active);
     this.polys.sync(ctx.scene, this.nav.active);
+    this.paints.sync(ctx.scene, this.glRenderer.domElement.height);
     ctx.pickableMeshes = [
       ...ctx.scene.meshes
         .map((m) => this.meshes.rootFor(m.id))

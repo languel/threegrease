@@ -118,7 +118,7 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
-export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY'; id: number }
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD'; id: number }
 
 // ---- object constraints (Blender-style stack, evaluated every frame) ----
 
@@ -521,6 +521,28 @@ export interface TGPolyMesh {
   doubleSided?: boolean;
 }
 
+/** 3DGS painting: a gaussian-splat cloud AUTHORED with the Splat Paint
+ *  brush (vs TGSplat, which is a URL-loaded asset). Plain JSON — points
+ *  are packed stride 8: x,y,z (object-local), radius (world units at
+ *  scale 1), r,g,b, alpha. Rendered as soft gaussian sprites; exportable
+ *  as a standard 3DGS PLY. */
+export interface TGPaintCloud {
+  id: number;
+  name: string;
+  /** packed [x,y,z, radius, r,g,b, a] * N */
+  points: number[];
+  /** bumped on every paint/erase — renderer cache key */
+  rev: number;
+  translation: Vec3;
+  rotation: Vec3;
+  scale: Vec3;
+  visible: boolean;
+  select: boolean;
+  lock?: boolean;
+  parent?: ParentRef | null;
+  constraints?: TGConstraint[];
+}
+
 /** Point force for the dynamic string simulation (P5). */
 export interface TGAttractor {
   id: number;
@@ -564,6 +586,8 @@ export interface GPScene {
   meshes: TGMesh[];
   /** editable generalized meshes (authored topology) */
   polyMeshes: TGPolyMesh[];
+  /** painted gaussian-splat clouds (3DGS painting) */
+  paintClouds: TGPaintCloud[];
   attractors: TGAttractor[];
   mediamime: { prefix: string; rigs: MMRig[] };
   /** native MediaMime landmark streams (config; frames are runtime-only) */
