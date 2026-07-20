@@ -1385,6 +1385,12 @@ export class UI {
 
     const toggleSel = (apply: (v: boolean) => void, cur: boolean, shift: boolean) => {
       ctx.pushUndo();
+      // plain click on the ONE currently-selected row toggles it off
+      // (otherwise a lone selected item — a splat especially, which has
+      // no reliable empty-space viewport click to deselect — could never
+      // be unselected from the outliner: clicking it just re-selected
+      // the same thing)
+      const solelySelected = cur && listSelectedObjects(scene).length === 1;
       if (!shift) {
         for (const o of scene.objects) o.select = false;
         for (const c of scene.canvases) c.select = false;
@@ -1392,8 +1398,10 @@ export class UI {
         for (const m of scene.meshes) m.select = false;
         for (const t of scene.score.triggers) t.select = false;
         for (const st of scene.mmStreams) st.select = false;
+        for (const p of scene.polyMeshes) p.select = false;
+        for (const pc of scene.paintClouds) pc.select = false;
       }
-      apply(shift ? !cur : true);
+      apply(shift ? !cur : !solelySelected);
       ctx.syncCanvases();
       ctx.requestRender();
       this.app.refreshWidget();
