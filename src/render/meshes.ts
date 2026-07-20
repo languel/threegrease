@@ -23,7 +23,7 @@ function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
 
 export class MeshManager {
   readonly group = new THREE.Group();
-  private entries = new Map<number, { root: THREE.Object3D; src?: string; kind: string; unlit?: boolean; originOffset: Vec3 }>();
+  private entries = new Map<number, { root: THREE.Object3D; src?: string; kind: string; unlit?: boolean; originOffset: Vec3; live?: boolean }>();
   private textures = new Map<string, THREE.Texture>();
   readonly errors = new Map<number, string>();
 
@@ -80,7 +80,7 @@ export class MeshManager {
         geo.computeBoundingSphere();
         entry.originOffset = [...off];
       }
-      this.apply(entry.root, data, scene, camera);
+      this.apply(entry.root, data, scene, camera, entry.live);
     }
   }
 
@@ -128,7 +128,7 @@ export class MeshManager {
     return mesh;
   }
 
-  private apply(root: THREE.Object3D, data: TGMesh, scene: GPScene, camera?: THREE.Camera): void {
+  private apply(root: THREE.Object3D, data: TGMesh, scene: GPScene, camera?: THREE.Camera, live?: boolean): void {
     if (data.billboard === 'CAMERA' && camera) {
       // locked to the view: local transform is a camera-space offset
       camera.updateMatrixWorld();
@@ -154,7 +154,7 @@ export class MeshManager {
       if (!mesh.isMesh || o.userData.emptyHelper) return;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       if (!mat || Array.isArray(mat)) return;
-      if (data.kind !== 'MODEL') {
+      if (data.kind !== 'MODEL' && !live) {
         mat.color.setRGB(...data.color);
         const tex = data.texture ? this.textureFor(data.texture) : null;
         if (mat.map !== tex) {
@@ -162,6 +162,10 @@ export class MeshManager {
           if (tex) mat.color.setRGB(1, 1, 1); // don't tint the image
           mat.needsUpdate = true;
         }
+      } else if (live) {
+        // texture-paint stroke in flight: the tool owns the map (a
+        // CanvasTexture over its paint canvas) — don't fight it
+        mat.color.setRGB(1, 1, 1);
       }
       mat.wireframe = data.wireframe;
       mat.side = data.doubleSided !== false ? THREE.DoubleSide : THREE.FrontSide;
@@ -181,6 +185,37 @@ export class MeshManager {
       .filter((m) => m.visible && m.drawTarget && m.kind !== 'EMPTY')
       .map((m) => this.entries.get(m.id)?.root)
       .filter((r): r is THREE.Object3D => !!r);
+  }
+
+  /** Texture painting: while a stroke is in flight the tool paints into
+   *  an offscreen canvas and we show it live as a CanvasTexture; apply()
+   *  leaves the map alone until endLiveTexture(). */
+  beginLiveTexture(id: number, canvas: HTMLCanvasElement): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    entry.live = true;
+    const mesh = entry.root as THREE.Mesh;
+    const mat = mesh.material as THREE.MeshStandardMaterial;
+    if (!mat || Array.isArray(mat)) return;
+    if (!(mat.map instanceof THREE.CanvasTexture) || mat.map.image !== canvas) {
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      mat.map = tex;
+      mat.transparent = true;
+      mat.needsUpdate = true;
+    }
+  }
+
+  /** Repaint after new stamps landed on the live canvas. */
+  refreshLiveTexture(id: number): void {
+    const mesh = this.entries.get(id)?.root as THREE.Mesh | undefined;
+    const mat = mesh?.material as THREE.MeshStandardMaterial | undefined;
+    if (mat?.map) mat.map.needsUpdate = true;
+  }
+
+  endLiveTexture(id: number): void {
+    const entry = this.entries.get(id);
+    if (entry) entry.live = false; // next sync re-applies data.texture
   }
 
   private disposeTree(root: THREE.Object3D): void {

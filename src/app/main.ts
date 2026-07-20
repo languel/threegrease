@@ -106,6 +106,7 @@ import { PolyMeshManager } from '../render/polymesh';
 import { PaintCloudManager, createPaintCloud } from '../render/paintclouds';
 import { setSplatPickSource } from '../tools/splatpick';
 import { SplatPaintTool } from '../tools/splatbrush';
+import { TexturePaintTool, setTexPaintMeshManager } from '../tools/texpaint';
 import { PolyPenTool } from '../tools/polytool';
 import { clearPolyOverlay, polyOverlay } from '../render/polymesh';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -304,6 +305,7 @@ class App implements AppHandle {
     this.scene3.add(this.scoreGroup);
     this.splats.init(this.glRenderer);
     setSplatPickSource(this.splats);
+    setTexPaintMeshManager(this.meshes);
     this.scene3.add(this.splats.group);
     this.scene3.add(this.meshes.group);
     this.scene3.add(this.polys.group);
@@ -359,7 +361,7 @@ class App implements AppHandle {
       new SelectTool('select-circle', 'CIRCLE'), new SculptTool(),
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
-      this.polyPen, this.polyBuild, this.quadPatch, new SplatPaintTool(),
+      this.polyPen, this.polyBuild, this.quadPatch, new SplatPaintTool(), new TexturePaintTool(),
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
 

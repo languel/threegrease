@@ -486,6 +486,7 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
     ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
     ['splatpaint', 'droplet', 'Splat Paint (3DGS) — deposit gaussian splats along the pointer path; Size=stamp px, Strength=alpha, vertex color=splat color, spacing/jitter from brush style; Ctrl+drag erases; placement/plane options apply'],
+    ['texpaint', 'photo', 'Texture Paint — brush directly into the texture of the mesh under the pointer (vertex color = paint color, Strength = opacity); persists to the mesh texture on release'],
   ],
   EDIT: [
     ['select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
