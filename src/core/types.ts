@@ -472,6 +472,7 @@ export type TGVertexBinding =
   | { kind: 'PLANE' }
   | { kind: 'GP_STROKE'; path: PathRef; t: number }
   | { kind: 'SPLAT'; objectId: number; pointIndex?: number }
+  | { kind: 'PCLOUD'; cloudId: number; pointIndex?: number }
   | { kind: 'MESH'; objectId: number };
 
 export interface TGPolyVertex {

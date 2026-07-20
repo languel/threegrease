@@ -12,7 +12,7 @@ import { frameAt } from '../core/gpdata';
 import { drawingPlane } from './projection';
 import { snapIncrement } from './context';
 import { worldMatrixOf } from './objects';
-import { pickSplatPoint } from './splatpick';
+import { pickPaintCloudPoint, pickSplatPoint } from './splatpick';
 
 export type ConstructionSource =
   | { kind: 'POLY_VERTEX'; meshId: number; vertexId: number }
@@ -21,6 +21,7 @@ export type ConstructionSource =
   | { kind: 'MESH'; objectId: number }
   | { kind: 'GP_STROKE'; path: PathRef; t: number }
   | { kind: 'SPLAT'; objectId: number; pointIndex?: number }
+  | { kind: 'PCLOUD'; cloudId: number; pointIndex?: number }
   | { kind: 'PLANE' }
   | { kind: 'FREE' };
 
@@ -51,6 +52,7 @@ export function bindingFor(source: ConstructionSource): TGVertexBinding {
   switch (source.kind) {
     case 'GP_STROKE': return { kind: 'GP_STROKE', path: source.path, t: source.t };
     case 'SPLAT': return { kind: 'SPLAT', objectId: source.objectId, pointIndex: source.pointIndex };
+    case 'PCLOUD': return { kind: 'PCLOUD', cloudId: source.cloudId, pointIndex: source.pointIndex };
     case 'MESH': return { kind: 'MESH', objectId: source.objectId };
     case 'PLANE': return { kind: 'PLANE' };
     default: return { kind: 'FREE' };
@@ -259,7 +261,15 @@ export function pickConstruction(ctx: AppCtx, x: number, y: number, opts: Constr
         distancePx: s.d,
       };
     }
+    const pcp = pickPaintCloudPoint(ctx, x, y, splatPx);
     const sp = pickSplatPoint(ctx, x, y, splatPx);
+    if (pcp && (!sp || pcp.d <= sp.d)) {
+      return {
+        world: pcp.world,
+        source: { kind: 'PCLOUD', cloudId: pcp.cloudId, pointIndex: pcp.pointIndex },
+        distancePx: pcp.d,
+      };
+    }
     if (sp) {
       return {
         world: sp.world,

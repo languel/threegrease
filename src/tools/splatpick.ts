@@ -1,19 +1,26 @@
-// Approximate splat-point picking adapter for the editable-mesh tool.
-// The ONLY poly-system code that knows about the Spark splat integration.
+// Point-cloud picking adapters: nearest-splat-point queries used by
+// construction picking and SPLAT placement. Two backing stores, two
+// functions:
+//  - pickSplatPoint: loaded Spark PLY assets (scene.splats) — the ONLY
+//    poly-system code that knows about the Spark splat integration.
+//  - pickPaintCloudPoint: painted TGPaintCloud points (scene.paintClouds,
+//    from the Splat Paint brush) — plain scene data, no Spark dependency.
 //
-// Method (coarse by design, documented in docs/design/polymesh.md):
-// Spark exposes no hit-testing API here, so we enumerate splat centers via
-// packedSplats.forEachSplat ONCE per splat (cached, sampled with a stride
-// so at most SAMPLE_CAP local centers are kept), then per query project the
-// cached centers of each visible splat to screen space and take the
-// nearest inside the pixel threshold. Precision = "nearest sampled center",
-// not a surface hit; large clouds are subsampled, so the picked point may
-// skip fine detail. No unbounded full-cloud scan happens on pointer moves.
+// Method for pickSplatPoint (coarse by design, documented in
+// docs/design/polymesh.md): Spark exposes no hit-testing API here, so we
+// enumerate splat centers via packedSplats.forEachSplat ONCE per splat
+// (cached, sampled with a stride so at most SAMPLE_CAP local centers are
+// kept), then per query project the cached centers of each visible splat
+// to screen space and take the nearest inside the pixel threshold.
+// Precision = "nearest sampled center", not a surface hit; large clouds
+// are subsampled, so the picked point may skip fine detail. No unbounded
+// full-cloud scan happens on pointer moves.
 import * as THREE from 'three';
 import type { AppCtx } from './context';
 import type { Vec3 } from '../core/types';
 import { worldMatrixOf } from './objects';
 import type { SplatManager } from '../splats/index';
+import { PAINT_STRIDE } from '../render/paintclouds';
 
 const SAMPLE_CAP = 5000;
 
@@ -75,6 +82,34 @@ export function pickSplatPoint(
       const d = Math.hypot(sx - x, sy - y);
       if (d < thresholdPx && (!best || d < best.d)) {
         best = { objectId: s.id, pointIndex: cache.indices[i], world: [wp.x, wp.y, wp.z], d };
+      }
+    }
+  }
+  return best;
+}
+
+/** Nearest painted splat point (TGPaintCloud, scene.paintClouds) under a
+ *  screen position — the direct, no-caching counterpart to pickSplatPoint
+ *  for the app's own paint-brush clouds rather than loaded Spark assets. */
+export function pickPaintCloudPoint(
+  ctx: AppCtx, x: number, y: number, thresholdPx: number,
+): { cloudId: number; pointIndex: number; world: Vec3; d: number } | null {
+  const rect = ctx.canvas.getBoundingClientRect();
+  const wp = new THREE.Vector3();
+  let best: { cloudId: number; pointIndex: number; world: Vec3; d: number } | null = null;
+  for (const pc of ctx.scene.paintClouds) {
+    if (!pc.visible || !pc.points.length) continue;
+    const world = worldMatrixOf(ctx.scene, { kind: 'PCLOUD', id: pc.id });
+    const n = pc.points.length / PAINT_STRIDE;
+    for (let i = 0; i < n; i++) {
+      const o = i * PAINT_STRIDE;
+      wp.set(pc.points[o], pc.points[o + 1], pc.points[o + 2]).applyMatrix4(world);
+      const p = wp.clone().project(ctx.camera);
+      if (p.z > 1) continue;
+      const sx = (p.x * 0.5 + 0.5) * rect.width, sy = (-p.y * 0.5 + 0.5) * rect.height;
+      const d = Math.hypot(sx - x, sy - y);
+      if (d < thresholdPx && (!best || d < best.d)) {
+        best = { cloudId: pc.id, pointIndex: i, world: [wp.x, wp.y, wp.z], d };
       }
     }
   }

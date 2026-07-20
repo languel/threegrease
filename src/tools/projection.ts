@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Vec3 } from '../core/types';
 import { activeObject, frameAt } from '../core/gpdata';
 import type { AppCtx } from './context';
-import { pickSplatPoint } from './splatpick';
+import { pickPaintCloudPoint, pickSplatPoint } from './splatpick';
 import { pickConstruction } from './polypick';
 
 const raycaster = new THREE.Raycaster();
@@ -486,7 +486,11 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
     // nothing under the first point: fall through to the drawing plane
   }
   if (ctx.settings.placement === 'SPLAT') {
+    // painted clouds (the app's own splat brush) AND loaded Spark assets
+    // are both valid "splat" sources; take whichever is nearer on screen
+    const pcp = pickPaintCloudPoint(ctx, x - rect.left, y - rect.top, 40);
     const sp = pickSplatPoint(ctx, x - rect.left, y - rect.top, 40);
+    if (pcp && (!sp || pcp.d <= sp.d)) return new THREE.Vector3(...pcp.world);
     if (sp) return new THREE.Vector3(...sp.world);
     // nothing under the pointer: fall through to the drawing plane
   }
