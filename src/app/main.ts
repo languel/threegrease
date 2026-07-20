@@ -101,7 +101,7 @@ import { routes } from '../events/routes';
 import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
 import { MeshManager, createMeshObject } from '../render/meshes';
-import { createPolyMesh } from '../core/polymesh';
+import { createPolyMesh, smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
 import { PolyMeshManager } from '../render/polymesh';
 import { setSplatPickSource } from '../tools/splatpick';
 import { PolyPenTool } from '../tools/polytool';
@@ -1742,6 +1742,20 @@ class App implements AppHandle {
     add('add.camera', 'Add camera at current view', () => this.addCamera(), 'object');
     add('add.gp', 'Add blank Grease Pencil object', () => this.addGPObject(), 'object grease pencil new');
     add('add.polymesh', 'Add Editable Mesh', () => this.addPolyMeshObject(), 'object topology poly editable mesh');
+    add('poly.subdivide', 'Subdivide selected editable meshes', () => {
+      const polys = this.ctx.scene.polyMeshes.filter((p) => p.select);
+      if (!polys.length) return;
+      this.ctx.pushUndo();
+      for (const pm of polys) subdividePolyMesh(pm);
+      this.ui.refresh();
+    }, 'topology quads catmull');
+    add('poly.smooth', 'Smooth selected editable meshes', () => {
+      const polys = this.ctx.scene.polyMeshes.filter((p) => p.select);
+      if (!polys.length) return;
+      this.ctx.pushUndo();
+      for (const pm of polys) smoothPolyMesh(pm, 0.5, 2);
+      this.ui.refresh();
+    }, 'topology laplacian relax');
     add('mediamime.panel', 'Open MediaMime panel', () => this.ui.openTab('mediamime'), 'landmarks rig mediapipe');
     add('export.glb', 'Export GLB', async () => (await import('../io/export3d')).exportGLB(this.ctx), 'file');
     add('export.obj', 'Export OBJ', async () => (await import('../io/export3d')).exportOBJ(this.ctx), 'file');

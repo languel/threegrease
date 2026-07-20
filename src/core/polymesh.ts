@@ -326,6 +326,81 @@ export function mergeVertices(pm: TGPolyMesh, fromId: number, intoId: number): b
   return true;
 }
 
+// ---- subdivision / smoothing -------------------------------------------------
+
+/** One round of uniform subdivision across the whole mesh: every edge
+ *  gains a midpoint vertex; every face (tri/quad/n-gon) is replaced by a
+ *  fan of QUADS around a new center vertex (Catmull-Clark connectivity,
+ *  no smoothing — pair with smoothPolyMesh for the rounded look).
+ *  Dangling edges simply split in two; isolated vertices are untouched. */
+export function subdividePolyMesh(pm: TGPolyMesh): void {
+  const originalFaces = pm.faces.map((f) => ({ id: f.id, corners: [...f.vertices] }));
+  // split every edge at its midpoint (patches face boundaries in place)
+  for (const e of [...pm.edges]) splitEdge(pm, e.id, 0.5);
+  for (const of of originalFaces) {
+    const f = getFace(pm, of.id);
+    if (!f) continue;
+    const corners = new Set(of.corners);
+    const n = f.vertices.length;
+    // center vertex at the boundary average
+    const c: Vec3 = [0, 0, 0];
+    let count = 0;
+    for (const vid of f.vertices) {
+      const v = getVertex(pm, vid);
+      if (!v) continue;
+      c[0] += v.co[0]; c[1] += v.co[1]; c[2] += v.co[2]; count++;
+    }
+    if (count < 3) continue;
+    const center = addVertex(pm, [c[0] / count, c[1] / count, c[2] / count]);
+    pm.faces = pm.faces.filter((x) => x.id !== f.id);
+    for (let i = 0; i < n; i++) {
+      const vid = f.vertices[i];
+      if (!corners.has(vid)) continue; // quads start at original corners
+      const next = f.vertices[(i + 1) % n];
+      const prev = f.vertices[(i - 1 + n) % n];
+      addFace(pm, [vid, next, center.id, prev]);
+    }
+  }
+  touchPolyMesh(pm);
+}
+
+/** Laplacian smoothing over edge adjacency: each vertex moves toward the
+ *  average of its neighbors by `factor`, `iterations` times. Acts on the
+ *  SELECTED vertices when any are selected, else the whole mesh;
+ *  vertices with no edges never move. */
+export function smoothPolyMesh(pm: TGPolyMesh, factor = 0.5, iterations = 1): void {
+  const anySelected = pm.vertices.some((v) => v.select);
+  const neighbors = new Map<number, number[]>();
+  for (const e of pm.edges) {
+    (neighbors.get(e.v[0]) ?? neighbors.set(e.v[0], []).get(e.v[0])!).push(e.v[1]);
+    (neighbors.get(e.v[1]) ?? neighbors.set(e.v[1], []).get(e.v[1])!).push(e.v[0]);
+  }
+  for (let it = 0; it < iterations; it++) {
+    const next = new Map<number, Vec3>();
+    for (const v of pm.vertices) {
+      if (anySelected && !v.select) continue;
+      const ns = neighbors.get(v.id);
+      if (!ns?.length) continue;
+      const avg: Vec3 = [0, 0, 0];
+      for (const nid of ns) {
+        const nv = getVertex(pm, nid);
+        if (!nv) continue;
+        avg[0] += nv.co[0]; avg[1] += nv.co[1]; avg[2] += nv.co[2];
+      }
+      next.set(v.id, [
+        v.co[0] + (avg[0] / ns.length - v.co[0]) * factor,
+        v.co[1] + (avg[1] / ns.length - v.co[1]) * factor,
+        v.co[2] + (avg[2] / ns.length - v.co[2]) * factor,
+      ]);
+    }
+    for (const [id, co] of next) {
+      const v = getVertex(pm, id);
+      if (v) v.co = co;
+    }
+  }
+  touchPolyMesh(pm);
+}
+
 // ---- adjacency / boundary ----------------------------------------------------
 
 export interface PolyAdjacency {

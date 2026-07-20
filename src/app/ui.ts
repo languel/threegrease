@@ -15,6 +15,7 @@ import { penLandmarkHint } from '../mm/pen';
 import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, multiLandmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
 import { deleteAsset, listAssets } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
+import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
 import type { ConstraintType, TGConstraint } from '../core/types';
 import {
   getObjectTransform, listSelected as listSelectedObjects, objectName, selectionPivot,
@@ -1123,6 +1124,30 @@ export class UI {
           if (n === 0) alert('Already one connected piece (or nothing to separate) — origin was still set to the first point.');
         },
         disabled: !one || one.kind !== 'GP',
+      },
+      {
+        label: 'Subdivide', disabled: !refs.some((r) => r.kind === 'POLY'),
+        do: () => {
+          ctx.pushUndo();
+          for (const r of refs) {
+            if (r.kind !== 'POLY') continue;
+            const pm = ctx.scene.polyMeshes.find((p) => p.id === r.id);
+            if (pm) subdividePolyMesh(pm);
+          }
+          this.refresh();
+        },
+      },
+      {
+        label: 'Smooth', disabled: !refs.some((r) => r.kind === 'POLY'),
+        do: () => {
+          ctx.pushUndo();
+          for (const r of refs) {
+            if (r.kind !== 'POLY') continue;
+            const pm = ctx.scene.polyMeshes.find((p) => p.id === r.id);
+            if (pm) smoothPolyMesh(pm, 0.5, 2);
+          }
+          this.refresh();
+        },
       },
       {
         label: 'Mirror', items: [
