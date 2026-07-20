@@ -1378,7 +1378,7 @@ export class UI {
       fieldRow('', checkbox('Plane helper', s.showPlaneHelper, (v) => { s.showPlaneHelper = v; save(); },
         'wireframe square showing the plane strokes/splats/etc. are actually landing on right now')),
       fieldRow('', checkbox('Depth line', s.showDepthHelper, (v) => { s.showDepthHelper = v; save(); },
-        'ground-plane line + ring showing where the pointer would place a point right now, relative to the camera')),
+        'drop line + ring from the current placement point down to the ground plane')),
     );
   }
 

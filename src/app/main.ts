@@ -2694,9 +2694,9 @@ class App implements AppHandle {
     this.planeHelper.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
   }
 
-  /** Debug aid: a dashed line lying flat on the ground (from the camera's
-   *  ground footprint) plus a small ring, positioned each frame in
-   *  updateDepthHelper. */
+  /** Debug aid: a dashed line dropping straight from the current
+   *  placement point to its footprint on the ground, plus a small ring
+   *  marking the footprint — positioned each frame in updateDepthHelper. */
   private makeDepthHelper(): THREE.Group {
     const g = new THREE.Group();
     const line = new THREE.Line(
@@ -2722,10 +2722,10 @@ class App implements AppHandle {
   /** Grounds the CURRENT placement point (wherever a mouse-down would
    *  land right now, under whatever Placement mode is active — works for
    *  ORIGIN/CURSOR too, unlike placementPreview which only covers modes
-   *  with a discrete snap target) onto the floor: a dashed line from the
-   *  camera's own ground footprint out to the point's footprint, so its
-   *  depth reads clearly against the grid, plus a ring marking the exact
-   *  footprint. */
+   *  with a discrete snap target — and matches the plane helper's own
+   *  anchor) onto the floor: a dashed line straight down to its
+   *  footprint, so its depth/height reads clearly against the grid,
+   *  plus a ring marking the exact footprint. */
   private updateDepthHelper(): void {
     const ctx = this.ctx;
     this.depthHelper.visible = ctx.settings.showDepthHelper && !this.presentation && !this.nav.flying;
@@ -2737,11 +2737,10 @@ class App implements AppHandle {
 
     const upIdx = ctx.settings.upAxis === 'Z' ? 2 : 1;
     const foot = point.clone().setComponent(upIdx, 0);
-    const camFoot = ctx.camera.position.clone().setComponent(upIdx, 0);
 
     const line = this.depthHelper.children[0] as THREE.Line;
     const pos = line.geometry.getAttribute('position') as THREE.BufferAttribute;
-    pos.setXYZ(0, camFoot.x, camFoot.y, camFoot.z);
+    pos.setXYZ(0, point.x, point.y, point.z);
     pos.setXYZ(1, foot.x, foot.y, foot.z);
     pos.needsUpdate = true;
     line.geometry.computeBoundingSphere();

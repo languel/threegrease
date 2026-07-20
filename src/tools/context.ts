@@ -86,11 +86,11 @@ export interface Settings {
    *  standing plane while mid-stroke, else the plain Plane setting's
    *  resolution) — see App.updatePlaneHelper. */
   showPlaneHelper: boolean;
-  /** debug aid: a yellow line lying flat on the ground plane from the
-   *  camera's ground footprint out to the CURRENT placement point's
-   *  ground footprint (plus a small ring marking it) — where a stroke
-   *  point would actually land if you moused down right now, grounded
-   *  onto the floor so its depth reads clearly against the grid. See
+  /** debug aid: a yellow line dropping straight from the CURRENT
+   *  placement point (wherever a stroke point would actually land if
+   *  you moused down right now — the plane helper's own anchor) down to
+   *  its footprint on the ground plane, plus a small ring marking it,
+   *  so its depth/height reads clearly against the grid. See
    *  App.updateDepthHelper. */
   showDepthHelper: boolean;
   /** Blender-style magnet: one snap setting for transforms AND the 3D
