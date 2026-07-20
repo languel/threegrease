@@ -172,6 +172,9 @@ class App implements AppHandle {
    *  drawing plane — toggled via settings.showPlaneHelper */
   private planeHelper: THREE.Group;
   private planeHelperRay = new THREE.Raycaster();
+  /** debug aid: ground-plane line from the camera's footprint to the
+   *  current placement point's footprint — toggled via showDepthHelper */
+  private depthHelper: THREE.Group;
   /** N2: Blender-style orange outlines + origin dots for selected objects */
   private selGlyphs = new THREE.Group();
   private selHelpers = new Map<string, { box: THREE.Box3; helper: LineSegments2; dot: THREE.Points }>();
@@ -305,6 +308,8 @@ class App implements AppHandle {
     this.scene3.add(this.cursorMarker);
     this.planeHelper = this.makePlaneHelper();
     this.scene3.add(this.planeHelper);
+    this.depthHelper = this.makeDepthHelper();
+    this.scene3.add(this.depthHelper);
     this.scene3.add(this.selGlyphs);
     // a ground plane for SURFACE placement demos
     this.scene3.add(this.canvasGroup);
@@ -2689,6 +2694,68 @@ class App implements AppHandle {
     this.planeHelper.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
   }
 
+  /** Debug aid: a dashed line lying flat on the ground (from the camera's
+   *  ground footprint) plus a small ring, positioned each frame in
+   *  updateDepthHelper. */
+  private makeDepthHelper(): THREE.Group {
+    const g = new THREE.Group();
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+      new THREE.LineDashedMaterial({
+        color: 0xffcc33, depthTest: false, transparent: true, dashSize: 0.15, gapSize: 0.1,
+      }),
+    );
+    const R = 0.08, SEG = 20;
+    const ring = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(Array.from({ length: SEG + 1 }, (_, i) => {
+        const a = (i / SEG) * Math.PI * 2;
+        return new THREE.Vector3(Math.cos(a) * R, Math.sin(a) * R, 0);
+      })),
+      new THREE.LineBasicMaterial({ color: 0xffcc33, depthTest: false, transparent: true }),
+    );
+    g.add(line, ring);
+    g.traverse((o) => { o.renderOrder = 15000; });
+    g.visible = false;
+    return g;
+  }
+
+  /** Grounds the CURRENT placement point (wherever a mouse-down would
+   *  land right now, under whatever Placement mode is active — works for
+   *  ORIGIN/CURSOR too, unlike placementPreview which only covers modes
+   *  with a discrete snap target) onto the floor: a dashed line from the
+   *  camera's own ground footprint out to the point's footprint, so its
+   *  depth reads clearly against the grid, plus a ring marking the exact
+   *  footprint. */
+  private updateDepthHelper(): void {
+    const ctx = this.ctx;
+    this.depthHelper.visible = ctx.settings.showDepthHelper && !this.presentation && !this.nav.flying;
+    if (!this.depthHelper.visible) return;
+    const { x, y } = this.tools.lastPointer;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const point = screenToWorld(ctx, x + rect.left, y + rect.top);
+    if (!point) { this.depthHelper.visible = false; return; }
+
+    const upIdx = ctx.settings.upAxis === 'Z' ? 2 : 1;
+    const foot = point.clone().setComponent(upIdx, 0);
+    const camFoot = ctx.camera.position.clone().setComponent(upIdx, 0);
+
+    const line = this.depthHelper.children[0] as THREE.Line;
+    const pos = line.geometry.getAttribute('position') as THREE.BufferAttribute;
+    pos.setXYZ(0, camFoot.x, camFoot.y, camFoot.z);
+    pos.setXYZ(1, foot.x, foot.y, foot.z);
+    pos.needsUpdate = true;
+    line.geometry.computeBoundingSphere();
+    line.computeLineDistances();
+
+    const ring = this.depthHelper.children[1];
+    ring.position.copy(foot);
+    const normal = new THREE.Vector3().setComponent(upIdx, 1);
+    const tmp = Math.abs(normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+    const right = new THREE.Vector3().crossVectors(tmp, normal).normalize();
+    const up = new THREE.Vector3().crossVectors(normal, right);
+    ring.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, normal));
+  }
+
   private resize(): void {
     const vp = document.getElementById('viewport')!;
     const w = vp.clientWidth, h = vp.clientHeight;
@@ -2827,6 +2894,7 @@ class App implements AppHandle {
     this.cursorMarker.position.set(...ctx.scene.cursor);
     this.updateCursorMarker();
     this.updatePlaneHelper();
+    this.updateDepthHelper();
 
     // hide groups whose object has active effects; composite them after
     const fxJobs: { group: THREE.Group; obIndex: number }[] = [];

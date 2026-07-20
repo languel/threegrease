@@ -86,6 +86,13 @@ export interface Settings {
    *  standing plane while mid-stroke, else the plain Plane setting's
    *  resolution) — see App.updatePlaneHelper. */
   showPlaneHelper: boolean;
+  /** debug aid: a yellow line lying flat on the ground plane from the
+   *  camera's ground footprint out to the CURRENT placement point's
+   *  ground footprint (plus a small ring marking it) — where a stroke
+   *  point would actually land if you moused down right now, grounded
+   *  onto the floor so its depth reads clearly against the grid. See
+   *  App.updateDepthHelper. */
+  showDepthHelper: boolean;
   /** Blender-style magnet: one snap setting for transforms AND the 3D
    *  cursor (Shift+RMB drag). 'CANVAS' is a legacy alias for 'SURFACE'.
    *  strokeScope limits POINT snapping to selected strokes only.
@@ -115,7 +122,7 @@ export function snapIncrement(s: Settings): number {
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
-  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'showPlaneHelper', 'background', 'snap',
+  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'showPlaneHelper', 'showDepthHelper', 'background', 'snap',
   'uiAccent', 'uiHighlight', 'gridColor',
 ] as const;
 
@@ -207,6 +214,7 @@ export function defaultSettings(): Settings {
     upAxis: 'Z',
     showAxes: false,
     showPlaneHelper: false,
+    showDepthHelper: false,
     snap: { enabled: false, mode: 'INCREMENT', strokeScope: 'ANY' },
   };
 }
