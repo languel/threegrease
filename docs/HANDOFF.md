@@ -473,3 +473,16 @@ script: `docs/verify/editable-generalized-mesh.md`).
 - **Deferred**: live re-binding/resnap of bound vertices, BVH/accel
   structures, loop cut/multi-edge extrusion and the rest of the explicit
   out-of-scope list, N-panel poly element inspector.
+
+## Session log (2026-07-19): PolyQuilt parity + UI restructure
+
+TGPolyMesh gained full PolyQuilt-style interaction (see
+IMPLEMENTATION_PLAN entries "PolyQuilt parity" through "v4" + the UI
+polish pass): operations-table pen (click/drag/hold/hold+drag per
+element), dissolve/loop cut/knife/AutoQuad, intent-colored HUD
+feedback, center-band edge drags, Surface ⊥ placement (SURFACE_PERP),
+Empty null objects, no standalone POLY mode (quilt trio lives in the
+DRAW and EDIT toolbars, '6' jumps to the pen), snap-respecting drags,
+outliner pinned above the properties tabs, Constraints folded into the
+Modifiers tab, instructional rows converted to header tooltips.
+Verify doc: docs/verify/editable-generalized-mesh.md steps 1-81.

@@ -2217,3 +2217,17 @@ TGMesh kind EMPTY: Blender-style plain-axes null object (Add menus +
 palette) for parenting/grouping/constraint anchoring — raycastable via
 an invisible pick sphere, never a draw target, skipped by material/
 origin sync. Verify steps 79-81.
+
+## UI polish pass: sidebar layout, hints, quilt fixes, finer dashes
+
+Empty objects show the small marker selection box; quilt edge/face move
+and boundary extrusion now snap their drag delta to the Increment/Grid
+lattice (they bypassed pickConstruction); vertex diamond handles render
+only on the actively-edited mesh. Grid subdivision dashes default to
+step/16. Sidebar restructured Blender-style: the outliner is pinned at
+the top (own scroll region, max 34vh) above the properties tab strip;
+the Object tab keeps just the properties subpanel; the Constraints tab
+merged into "Modifiers, effects & constraints". panelHint() turns
+standalone instructional rows into panel-header hover tooltips
+(outliner legend, Scene magnet note, Canvases placement note, Settings
+notes, wire-art assist note, Constraints explainer).
