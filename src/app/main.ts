@@ -106,7 +106,7 @@ import { PolyMeshManager } from '../render/polymesh';
 import { PaintCloudManager, createPaintCloud } from '../render/paintclouds';
 import { setSplatPickSource } from '../tools/splatpick';
 import { SplatPaintTool } from '../tools/splatbrush';
-import { TexturePaintTool, setTexPaintMeshManager } from '../tools/texpaint';
+import { TexturePaintTool, setTexPaintMeshManager, setTexPaintPolyManager } from '../tools/texpaint';
 import { PolyPenTool } from '../tools/polytool';
 import { clearPolyOverlay, polyOverlay } from '../render/polymesh';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -306,6 +306,7 @@ class App implements AppHandle {
     this.splats.init(this.glRenderer);
     setSplatPickSource(this.splats);
     setTexPaintMeshManager(this.meshes);
+    setTexPaintPolyManager(this.polys);
     this.scene3.add(this.splats.group);
     this.scene3.add(this.meshes.group);
     this.scene3.add(this.polys.group);

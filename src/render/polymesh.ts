@@ -101,6 +101,10 @@ interface Entry {
   rev: number;
   editStyled: boolean;
   unlit: boolean;
+  /** texture-paint stroke in flight: applyFrame leaves the material's
+   *  map alone (the tool owns it as a CanvasTexture) until endLiveTexture */
+  live: boolean;
+  texSrc: string | null;
 }
 
 const VERT_CAP = 4096; // instanced-handle capacity per mesh (sketch scale)
@@ -108,6 +112,7 @@ const VERT_CAP = 4096; // instanced-handle capacity per mesh (sketch scale)
 export class PolyMeshManager {
   readonly group = new THREE.Group();
   private entries = new Map<number, Entry>();
+  private textures = new Map<string, THREE.Texture>();
   // transient preview objects (rebuilt from polyOverlay every frame)
   private previewLine: THREE.Line;
   private previewPoint: THREE.Mesh;
@@ -182,6 +187,7 @@ export class PolyMeshManager {
     return {
       group, faceMesh, triFaceIds: [], edgeLines, segEdgeIds: [], verts,
       instVertIds: [], rev: -1, editStyled: false, unlit: false,
+      live: false, texSrc: null,
     };
   }
 
@@ -191,17 +197,38 @@ export class PolyMeshManager {
     const pos: number[] = [];
     entry.triFaceIds = [];
     const co = new Map(pm.vertices.map((v) => [v.id, v.co] as const));
+
+    // auto-UV: box-project onto the mesh's dominant flat plane (the axis
+    // with the SMALLEST overall extent is treated as the "normal", the
+    // other two become U/V) — a dynamic, always-available unwrap good
+    // enough for texture painting on a roughly-flat quilt; recomputed
+    // every rebuild since it only depends on the current vertex bounds.
+    const box = new THREE.Box3();
+    for (const v of pm.vertices) box.expandByPoint(new THREE.Vector3(...v.co));
+    const size = box.getSize(new THREE.Vector3());
+    const flatAxis = size.x <= size.y && size.x <= size.z ? 0 : size.y <= size.z ? 1 : 2;
+    const [uAxis, vAxis] = flatAxis === 0 ? [1, 2] : flatAxis === 1 ? [0, 2] : [0, 1];
+    const uExt = Math.max(1e-6, size.getComponent(uAxis));
+    const vExt = Math.max(1e-6, size.getComponent(vAxis));
+    const uvOf = (c: Vec3): [number, number] => [
+      (c[uAxis] - box.min.getComponent(uAxis)) / uExt,
+      (c[vAxis] - box.min.getComponent(vAxis)) / vExt,
+    ];
+
+    const uvs: number[] = [];
     for (const f of pm.faces) {
       const boundary = f.vertices.map((id) => co.get(id)).filter((c): c is Vec3 => !!c);
       if (boundary.length !== f.vertices.length || boundary.length < 3) continue;
       for (const [a, b, c] of triangulateFace(boundary)) {
         pos.push(...boundary[a], ...boundary[b], ...boundary[c]);
+        uvs.push(...uvOf(boundary[a]), ...uvOf(boundary[b]), ...uvOf(boundary[c]));
         entry.triFaceIds.push(f.id);
       }
     }
     entry.faceMesh.geometry.dispose();
     const fg = new THREE.BufferGeometry();
     fg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    fg.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     fg.computeVertexNormals();
     entry.faceMesh.geometry = fg;
     entry.faceMesh.visible = pos.length > 0;
@@ -245,12 +272,24 @@ export class PolyMeshManager {
         ? new THREE.MeshBasicMaterial({ polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
         : new THREE.MeshStandardMaterial({ polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
       entry.unlit = !!pm.unlit;
+      entry.texSrc = null; // fresh material has no map yet — force reapply below
     }
     const fmat = entry.faceMesh.material as THREE.MeshStandardMaterial;
-    fmat.color.setRGB(...pm.color);
+    if (!entry.live) {
+      fmat.color.setRGB(...pm.color);
+      const src = pm.texture ?? null;
+      if (entry.texSrc !== src) {
+        fmat.map = src ? this.textureFor(src) : null;
+        if (src) fmat.color.setRGB(1, 1, 1); // don't tint the image
+        fmat.needsUpdate = true;
+        entry.texSrc = src;
+      }
+    } else {
+      fmat.color.setRGB(1, 1, 1); // texture-paint stroke in flight
+    }
     fmat.wireframe = pm.wireframe;
     fmat.side = pm.doubleSided !== false ? THREE.DoubleSide : THREE.FrontSide;
-    fmat.transparent = pm.opacity < 1;
+    fmat.transparent = pm.opacity < 1 || !!fmat.map;
     fmat.opacity = pm.opacity;
     fmat.depthWrite = pm.opacity >= 0.99;
     // hovered face tint (edit mode)
@@ -373,6 +412,44 @@ export class PolyMeshManager {
    *  of this group is polluted by the unit-sized instanced vertex handles —
    *  size selection outlines from the DATA (vertices x world matrix). */
   rootFor(id: number): THREE.Object3D | null { return this.entries.get(id)?.group ?? null; }
+
+  private textureFor(src: string): THREE.Texture {
+    let tex = this.textures.get(src);
+    if (!tex) {
+      tex = new THREE.TextureLoader().load(src);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.textures.set(src, tex);
+    }
+    return tex;
+  }
+
+  /** Texture painting on a quilt face: while a stroke is in flight the
+   *  tool paints into an offscreen canvas and we show it live as a
+   *  CanvasTexture (applyFrame leaves the map alone until endLiveTexture).
+   *  Mirrors MeshManager's beginLive/refreshLive/endLiveTexture seam. */
+  beginLiveTexture(id: number, canvas: HTMLCanvasElement): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    entry.live = true;
+    const mat = entry.faceMesh.material as THREE.MeshStandardMaterial;
+    if (!(mat.map instanceof THREE.CanvasTexture) || mat.map.image !== canvas) {
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      mat.map = tex;
+      mat.transparent = true;
+      mat.needsUpdate = true;
+    }
+  }
+
+  refreshLiveTexture(id: number): void {
+    const mat = this.entries.get(id)?.faceMesh.material as THREE.MeshStandardMaterial | undefined;
+    if (mat?.map) mat.map.needsUpdate = true;
+  }
+
+  endLiveTexture(id: number): void {
+    const entry = this.entries.get(id);
+    if (entry) { entry.live = false; entry.texSrc = null; } // force reapply from pm.texture next sync
+  }
 
   private disposeEntry(entry: Entry): void {
     entry.faceMesh.geometry.dispose();

@@ -1,27 +1,35 @@
 // Texture Paint: brush strokes land DIRECTLY in a mesh's texture — the
-// 2D complement to painting in 3D. Raycasts the mesh under the pointer,
-// takes the hit UV, and stamps soft circles into an offscreen canvas
-// shown live as a CanvasTexture (MeshManager.beginLiveTexture seam); on
-// release the canvas persists as the mesh's `texture` dataURL, so it
+// 2D complement to painting in 3D. Raycasts the mesh/quilt under the
+// pointer, takes the hit UV (primitive meshes use their real UVs;
+// editable meshes use PolyMeshManager's auto-generated planar UVs), and
+// stamps soft circles into an offscreen canvas shown live as a
+// CanvasTexture (begin/refresh/endLiveTexture seam on both managers); on
+// release the canvas persists as the target's `texture` dataURL, so it
 // saves with the scene and survives reload. Brush mappings: Size = stamp
 // diameter in TEXTURE pixels, Strength = stamp opacity, vertex color =
-// paint color. One undo step per stroke. One mesh per stroke (the one
-// first hit); meshes without UVs (imported models sometimes) are skipped.
+// paint color. One undo step per stroke. One target per stroke (the one
+// first hit); UV-less/EMPTY/locked targets are skipped.
 import * as THREE from 'three';
 import type { AppCtx } from './context';
 import type { Tool, ToolEvent } from './toolsys';
 import type { MeshManager } from '../render/meshes';
+import type { PolyMeshManager } from '../render/polymesh';
 
 const TEX_SIZE = 1024;
 
 let meshMgr: MeshManager | null = null;
-/** Wired once from App init (keeps the manager out of AppCtx). */
+let polyMgr: PolyMeshManager | null = null;
+/** Wired once from App init (keeps the managers out of AppCtx). */
 export function setTexPaintMeshManager(m: MeshManager): void { meshMgr = m; }
+export function setTexPaintPolyManager(m: PolyMeshManager): void { polyMgr = m; }
 
 const raycaster = new THREE.Raycaster();
 
+type TargetKind = 'MESH' | 'POLY';
+
 interface Session {
-  meshId: number;
+  kind: TargetKind;
+  targetId: number;
   canvas: HTMLCanvasElement;
   g: CanvasRenderingContext2D;
   lastUv: THREE.Vector2 | null;
@@ -32,7 +40,7 @@ export class TexturePaintTool implements Tool {
   cursor = 'crosshair';
   private session: Session | null = null;
 
-  private hit(ctx: AppCtx, e: ToolEvent): { meshId: number; uv: THREE.Vector2 } | null {
+  private hit(ctx: AppCtx, e: ToolEvent): { kind: TargetKind; targetId: number; uv: THREE.Vector2 } | null {
     const rect = ctx.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2((e.x / rect.width) * 2 - 1, -(e.y / rect.height) * 2 + 1);
     raycaster.setFromCamera(ndc, ctx.camera);
@@ -40,10 +48,15 @@ export class TexturePaintTool implements Tool {
       if (!h.uv) continue;
       let cur: THREE.Object3D | null = h.object;
       while (cur) {
+        if (cur.userData.polyId !== undefined) {
+          const pm = ctx.scene.polyMeshes.find((x) => x.id === cur!.userData.polyId);
+          if (!pm || pm.lock) return null;
+          return { kind: 'POLY', targetId: pm.id, uv: h.uv.clone() };
+        }
         if (cur.userData.meshId !== undefined) {
           const m = ctx.scene.meshes.find((x) => x.id === cur!.userData.meshId);
           if (!m || m.lock || m.kind === 'EMPTY') return null;
-          return { meshId: m.id, uv: h.uv.clone() };
+          return { kind: 'MESH', targetId: m.id, uv: h.uv.clone() };
         }
         cur = cur.parent;
       }
@@ -51,27 +64,42 @@ export class TexturePaintTool implements Tool {
     return null;
   }
 
-  private beginSession(ctx: AppCtx, meshId: number): Session {
-    const m = ctx.scene.meshes.find((x) => x.id === meshId)!;
+  private beginSession(ctx: AppCtx, kind: TargetKind, targetId: number): Session {
+    const target = kind === 'MESH'
+      ? ctx.scene.meshes.find((x) => x.id === targetId)
+      : ctx.scene.polyMeshes.find((x) => x.id === targetId);
     const canvas = document.createElement('canvas');
     canvas.width = TEX_SIZE;
     canvas.height = TEX_SIZE;
     const g = canvas.getContext('2d')!;
-    // start from the mesh's current look: its texture if present (drawn
+    // start from the target's current look: its texture if present (drawn
     // when the image decodes — stamps before that land on the base color),
     // else a solid fill of the object color
-    g.fillStyle = `rgb(${m.color.map((c) => Math.round(c * 255)).join(',')})`;
+    const color = target && 'color' in target ? target.color : [0.7, 0.7, 0.7];
+    g.fillStyle = `rgb(${color.map((c) => Math.round(c * 255)).join(',')})`;
     g.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    if (m.texture) {
+    const texture = target?.texture;
+    if (texture) {
       const img = new Image();
       img.onload = () => {
         g.drawImage(img, 0, 0, TEX_SIZE, TEX_SIZE);
-        meshMgr?.refreshLiveTexture(meshId);
+        this.refreshLive(kind, targetId);
       };
-      img.src = m.texture;
+      img.src = texture;
     }
-    meshMgr?.beginLiveTexture(meshId, canvas);
-    return { meshId, canvas, g, lastUv: null };
+    if (kind === 'MESH') meshMgr?.beginLiveTexture(targetId, canvas);
+    else polyMgr?.beginLiveTexture(targetId, canvas);
+    return { kind, targetId, canvas, g, lastUv: null };
+  }
+
+  private refreshLive(kind: TargetKind, id: number): void {
+    if (kind === 'MESH') meshMgr?.refreshLiveTexture(id);
+    else polyMgr?.refreshLiveTexture(id);
+  }
+
+  private endLive(kind: TargetKind, id: number): void {
+    if (kind === 'MESH') meshMgr?.endLiveTexture(id);
+    else polyMgr?.endLiveTexture(id);
   }
 
   private stamp(ctx: AppCtx, s: Session, uv: THREE.Vector2, pressure: number): void {
@@ -100,21 +128,21 @@ export class TexturePaintTool implements Tool {
       draw(uv.x, uv.y);
     }
     s.lastUv = uv.clone();
-    meshMgr?.refreshLiveTexture(s.meshId);
+    this.refreshLive(s.kind, s.targetId);
   }
 
   onDown(ctx: AppCtx, e: ToolEvent): void {
     const hit = this.hit(ctx, e);
     if (!hit) return;
     ctx.pushUndo(); // one undo step per stroke (texture dataURL snapshot)
-    this.session = this.beginSession(ctx, hit.meshId);
+    this.session = this.beginSession(ctx, hit.kind, hit.targetId);
     this.stamp(ctx, this.session, hit.uv, e.pressure || 1);
   }
 
   onMove(ctx: AppCtx, e: ToolEvent): void {
     if (!this.session) return;
     const hit = this.hit(ctx, e);
-    if (!hit || hit.meshId !== this.session.meshId) {
+    if (!hit || hit.kind !== this.session.kind || hit.targetId !== this.session.targetId) {
       this.session.lastUv = null; // brush left the surface: lift
       return;
     }
@@ -125,18 +153,20 @@ export class TexturePaintTool implements Tool {
     if (!this.session) return;
     const s = this.session;
     this.session = null;
-    const m = ctx.scene.meshes.find((x) => x.id === s.meshId);
-    if (m) {
-      m.texture = s.canvas.toDataURL('image/png');
-      m.unlit ??= false;
+    const target = s.kind === 'MESH'
+      ? ctx.scene.meshes.find((x) => x.id === s.targetId)
+      : ctx.scene.polyMeshes.find((x) => x.id === s.targetId);
+    if (target) {
+      target.texture = s.canvas.toDataURL('image/png');
+      if ('unlit' in target) target.unlit ??= false;
     }
-    meshMgr?.endLiveTexture(s.meshId);
+    this.endLive(s.kind, s.targetId);
     ctx.refreshUI();
   }
 
   onCancel(ctx: AppCtx): void {
     // discard the in-flight canvas; next sync restores the data texture
-    if (this.session) meshMgr?.endLiveTexture(this.session.meshId);
+    if (this.session) this.endLive(this.session.kind, this.session.targetId);
     this.session = null;
     void ctx;
   }
