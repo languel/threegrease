@@ -76,6 +76,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'cycleCamera', label: 'Next camera', combo: 'ctrl+shift+c', category: 'View' },
   { id: 'viewAll', label: 'Frame all (view fit)', combo: 'home', category: 'View' },
   { id: 'centerCursorViewAll', label: 'Center cursor & frame all', combo: 'shift+c', category: 'View' },
+  { id: 'quadView', label: 'Toggle Quad View', combo: 'ctrl+alt+q', category: 'View' },
 ];
 
 const STORAGE_KEY = 'threegrease.keymap';

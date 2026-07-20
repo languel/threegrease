@@ -119,6 +119,8 @@ import {
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
+import type { OrthoPane, PaneId, PaneRect } from './quadview';
+import { computePaneRects, createOrthoPanes, relockOrthoPane, syncOrthoFrustum } from './quadview';
 import type { CanvasPlane } from '../core/types';
 
 const DEFAULT_TOOL: Record<EditorMode, string> = {
@@ -235,6 +237,11 @@ class App implements AppHandle {
   private objectPickCircle = new ObjectSelectTool('object-select-circle', 'CIRCLE');
   private scoreGroup = new THREE.Group(); // cursor + trigger + attractor glyphs
   private scoreGlyphKey = '';
+  /** Blender-style 2x2 Quad View (Ctrl+Alt+Q): view-layout state, not a
+   *  scene/Settings field — matches `presentation`'s precedent. */
+  private quadView = false;
+  private orthoPanes: OrthoPane[] = [];
+  private paneRects: Record<PaneId, PaneRect> | null = null;
 
   constructor() {
     const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
@@ -360,6 +367,9 @@ class App implements AppHandle {
     this.scene3.add(this.axes);
     this.applyUpAxis(true);
     this.axes.visible = settings.showAxes;
+    this.orthoPanes = createOrthoPanes(
+      this.nav.upAxis, this.camera.position.distanceTo(this.controls.target),
+    );
 
     this.fx = new EffectsPipeline(2, 2);
 
@@ -1203,6 +1213,7 @@ class App implements AppHandle {
       case 'open': void this.loadScene(); break;
       case 'newScene': this.newScene(); break;
       case 'viewAll': this.viewAll(); break;
+      case 'quadView': this.toggleQuadView(); break;
       case 'parentSet': {
         if (ctx.settings.mode !== 'OBJECT') break;
         const active = this.objectPick.lastPicked;
@@ -1294,6 +1305,7 @@ class App implements AppHandle {
     this.controls.target.copy(target);
     this.nav.controls = this.controls;
     this.nav.setUpAxis(axis);
+    for (const pane of this.orthoPanes) relockOrthoPane(pane, axis);
 
     // floor grid passes through the origin, Blender-style
     this.grid.rotation.set(axis === 'Z' ? Math.PI / 2 : 0, 0, 0);
@@ -1443,6 +1455,24 @@ class App implements AppHandle {
     this.camHelper.visible = !this.presentation;
     this.axes.visible = this.ctx.settings.showAxes && !this.presentation;
     this.gp.markDirty();
+    this.resize();
+  }
+
+  /** Ctrl+Alt+Q: Blender-style Quad View — persp pane (unchanged nav) +
+   *  3 locked ortho reference panes (Front/Side/Top), pan+zoom only. Step 1:
+   *  rendering skeleton only — input routing per pane lands in later steps,
+   *  so drawing/navigating currently still targets the single active camera
+   *  regardless of which pane it visually renders into. */
+  toggleQuadView(): void {
+    this.quadView = !this.quadView;
+    if (this.quadView) {
+      // reframe the 3 ortho panes from the persp camera's CURRENT distance,
+      // so quad view opens roughly matching what you were just looking at
+      const dist = this.camera.position.distanceTo(this.controls.target);
+      this.orthoPanes = createOrthoPanes(this.nav.upAxis, dist);
+    } else {
+      this.refreshWidget(); // restore selection-driven visibility (step 1 forces it hidden while on)
+    }
     this.resize();
   }
 
@@ -2760,7 +2790,20 @@ class App implements AppHandle {
     const w = vp.clientWidth, h = vp.clientHeight;
     if (w === 0 || h === 0) return;
     this.glRenderer.setSize(w, h, false);
-    this.nav.setAspect(w, h);
+    if (this.quadView) {
+      this.paneRects = computePaneRects(w, h);
+      const persp = this.paneRects.persp;
+      this.nav.setAspect(persp.w, persp.h);
+      for (const pane of this.orthoPanes) {
+        const rect = this.paneRects[pane.id];
+        const halfH = pane.camera.position.distanceTo(pane.target)
+          * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+        syncOrthoFrustum(pane.camera, halfH, rect.w / rect.h, pane.zoom);
+      }
+    } else {
+      this.paneRects = null;
+      this.nav.setAspect(w, h);
+    }
     this.gp.setSize(w * devicePixelRatio, h * devicePixelRatio);
     this.fx.setSize(w * devicePixelRatio, h * devicePixelRatio);
     this.hud.width = w * devicePixelRatio;
@@ -2768,6 +2811,28 @@ class App implements AppHandle {
     for (const entry of this.selHelpers.values()) entry.helper.material.resolution.set(w, h);
     this.gp.markDirty();
     this.ui?.drawTimeline();
+  }
+
+  /** Renders the 4 quad-view panes into their own sub-rects of the single
+   *  canvas via WebGL viewport/scissor. `rects` use top-left-origin CSS px
+   *  (DOM/canvas-2D convention, matching computePaneRects); WebGL's own
+   *  viewport/scissor origin is bottom-left, so Y is flipped here. */
+  private renderQuadView(rects: Record<PaneId, PaneRect>): void {
+    const vp = document.getElementById('viewport')!;
+    const totalH = vp.clientHeight;
+    this.glRenderer.setScissorTest(true);
+    const panes: { camera: THREE.Camera; rect: PaneRect }[] = [
+      { camera: this.nav.active, rect: rects.persp },
+      ...this.orthoPanes.map((p) => ({ camera: p.camera, rect: rects[p.id] })),
+    ];
+    for (const { camera, rect } of panes) {
+      const glY = totalH - rect.y - rect.h;
+      this.glRenderer.setViewport(rect.x, glY, rect.w, rect.h);
+      this.glRenderer.setScissor(rect.x, glY, rect.w, rect.h);
+      this.glRenderer.render(this.scene3, camera);
+    }
+    this.glRenderer.setScissorTest(false);
+    this.glRenderer.setViewport(0, 0, vp.clientWidth, totalH);
   }
 
   private loop(): void {
@@ -2867,6 +2932,12 @@ class App implements AppHandle {
       console.error('constraint engine:', err);
     }
     this.widget.camera = this.nav.active; // ortho/persp swaps
+    // quad view step 1: the widget is scene-graph-resident (renders into
+    // every pane) and its own sizing/pointer math is bound to one camera +
+    // the whole canvas rect, so it's restricted to the persp pane only —
+    // force-hidden here regardless of selection while quad view is on;
+    // toggleQuadView() restores selection-driven visibility on the way out
+    if (this.quadView) this.widget.getHelper().visible = false;
 
     if (ctx.scene.score.attachments.some((a) => a.running && a.target.kind === 'CANVAS')) {
       this.syncCanvases();
@@ -2917,26 +2988,34 @@ class App implements AppHandle {
     });
 
     this.syncSelectionGlyphs();
-    this.glRenderer.render(this.scene3, this.nav.active);
 
-    for (const job of fxJobs) {
-      const ob = ctx.scene.objects[job.obIndex];
-      this.fx.apply(this.glRenderer, (rt) => {
-        const savedRoot: boolean[] = this.scene3.children.map((c) => c.visible);
-        for (const c of this.scene3.children) c.visible = c === this.gp.root;
-        const savedGroups = this.gp.objectGroups.map((g) => g.visible);
-        for (const g of this.gp.objectGroups) g.visible = g === job.group;
-        const savedBg = this.scene3.background;
-        this.scene3.background = null;
-        this.glRenderer.setRenderTarget(rt);
-        this.glRenderer.setClearColor(0x000000, 0);
-        this.glRenderer.clear();
-        this.glRenderer.render(this.scene3, this.nav.active);
-        this.scene3.background = savedBg;
-        this.scene3.children.forEach((c, i) => { c.visible = savedRoot[i]; });
-        this.gp.objectGroups.forEach((g, i) => { g.visible = savedGroups[i]; });
-      }, ob.effects);
-      job.group.visible = true;
+    if (this.quadView && this.paneRects) {
+      this.renderQuadView(this.paneRects);
+      // quad view step 1 scope cut: per-object screen-space FX compositing
+      // isn't generalized to 4 panes yet — objects with effects enabled
+      // just render without their effect while quad view is on.
+      for (const job of fxJobs) job.group.visible = true;
+    } else {
+      this.glRenderer.render(this.scene3, this.nav.active);
+      for (const job of fxJobs) {
+        const ob = ctx.scene.objects[job.obIndex];
+        this.fx.apply(this.glRenderer, (rt) => {
+          const savedRoot: boolean[] = this.scene3.children.map((c) => c.visible);
+          for (const c of this.scene3.children) c.visible = c === this.gp.root;
+          const savedGroups = this.gp.objectGroups.map((g) => g.visible);
+          for (const g of this.gp.objectGroups) g.visible = g === job.group;
+          const savedBg = this.scene3.background;
+          this.scene3.background = null;
+          this.glRenderer.setRenderTarget(rt);
+          this.glRenderer.setClearColor(0x000000, 0);
+          this.glRenderer.clear();
+          this.glRenderer.render(this.scene3, this.nav.active);
+          this.scene3.background = savedBg;
+          this.scene3.children.forEach((c, i) => { c.visible = savedRoot[i]; });
+          this.gp.objectGroups.forEach((g, i) => { g.visible = savedGroups[i]; });
+        }, ob.effects);
+        job.group.visible = true;
+      }
     }
 
     this.drawHud();

@@ -5,7 +5,7 @@ export type ViewName = 'FRONT' | 'BACK' | 'RIGHT' | 'LEFT' | 'TOP' | 'BOTTOM';
 export type UpAxis = 'Y' | 'Z';
 
 /** [camera offset direction from target, view up] per world-up convention. */
-function viewDirs(up: UpAxis): Record<ViewName, [THREE.Vector3, THREE.Vector3]> {
+export function viewDirs(up: UpAxis): Record<ViewName, [THREE.Vector3, THREE.Vector3]> {
   if (up === 'Z') {
     // Blender: front looks along +Y, top looks down -Z
     return {
