@@ -839,8 +839,8 @@ export class UI {
           numField('Offset', s.surfaceOffset, (v) => { s.surfaceOffset = v; }, 0.01),
         ] : []),
         selectField('Plane', s.plane, (s.upAxis === 'Z'
-          ? [['VIEW', 'View'], ['FRONT', 'Front (X·Z)'], ['SIDE', 'Side (Y·Z)'], ['TOP', 'Top (X·Y)'], ['CURSOR', 'Cursor']]
-          : [['VIEW', 'View'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)'], ['CURSOR', 'Cursor']]) as [PlaneMode, string][],
+          ? [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['FRONT', 'Front (X·Z)'], ['SIDE', 'Side (Y·Z)'], ['TOP', 'Top (X·Y)'], ['CURSOR', 'Cursor']]
+          : [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)'], ['CURSOR', 'Cursor']]) as [PlaneMode, string][],
         (v) => { s.plane = v; }),
         ...(s.placement === 'STROKE' ? [
           selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][], (v) => { s.strokeTarget = v; }),

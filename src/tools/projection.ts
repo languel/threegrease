@@ -26,12 +26,18 @@ let perpPlane: THREE.Plane | null = null;
  *  detaches the stroke back to the normal drawing plane instead of keeping
  *  it glued to the accretion depth forever. */
 let stickyAnchorPx: { x: number; y: number } | null = null;
+/** Plane.VIEW_ORIGIN's sticky standing plane: view-aligned, through
+ *  wherever THIS stroke's first point actually landed (whatever the
+ *  active Placement resolved it to), instead of a fixed cursor/object
+ *  anchor — captured once per stroke, reused for every later point. */
+let viewOriginPlane: THREE.Plane | null = null;
 export function setStrokeExclusion(id: number | null): void {
   excludedStrokeId = id;
   stickyDepth = null;     // each new stroke re-acquires its depth anchor
   stickyAnchorPx = null;  // ...and its clay-accretion anchor
   drawingSurface = null;  // ...and its surface
   perpPlane = null;       // ...and its Surface-⊥ / Stroke-⊥ standing plane
+  viewOriginPlane = null; // ...and its View-at-Origin standing plane
 }
 
 /** SURFACE_PERP: the plane the stroke grows on — through the surface hit
@@ -432,7 +438,20 @@ export function raycastFaceTriangle(ctx: AppCtx, x: number, y: number): { point:
   return null;
 }
 
-/** Screen px -> point on drawing plane (or surface), in world space. */
+/** Screen px -> point on drawing plane (or surface), in world space.
+ *  Plane: View at Origin is a TOP-LEVEL override, not just another
+ *  fallback stage: several Placement modes (STROKE/SPLAT/NEAREST/etc.)
+ *  have their own persistent sticky fallback that never lets execution
+ *  reach the bottom of resolvePlacement(), so hooking in down there
+ *  would have no effect for exactly the combinations most likely to use
+ *  it (e.g. "start on a stroke, then continue on a flat view plane").
+ *  Instead: the FIRST point of a stroke resolves through the normal
+ *  Placement chain (resolvePlacement) same as always — whatever it
+ *  lands on (a snapped stroke/splat point, a surface hit, or just the
+ *  drawing plane) becomes the anchor of a view-facing plane, captured
+ *  once and reused directly for every later point, bypassing Placement
+ *  entirely so the stroke stops tracking a moving target and just lies
+ *  flat from where it started. */
 export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 | null {
   const rect = ctx.canvas.getBoundingClientRect();
   const ndc = new THREE.Vector2(
@@ -440,6 +459,26 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
     -((y - rect.top) / rect.height) * 2 + 1,
   );
   raycaster.setFromCamera(ndc, ctx.camera);
+
+  if (ctx.settings.plane === 'VIEW_ORIGIN') {
+    if (viewOriginPlane) {
+      const out = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(viewOriginPlane, out)) return out;
+      // degenerate ray (parallel to the standing plane): fall through
+    } else {
+      const first = resolvePlacement(ctx, x, y, rect);
+      if (first && excludedStrokeId !== null) {
+        const normal = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
+        viewOriginPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, first);
+      }
+      return first;
+    }
+  }
+  return resolvePlacement(ctx, x, y, rect);
+}
+
+function resolvePlacement(ctx: AppCtx, x: number, y: number, rect: DOMRect): THREE.Vector3 | null {
+  // raycaster is already configured by screenToWorld for this query
   if (ctx.settings.placement === 'SURFACE' && ctx.surfaces.length) {
     const lift = (point: THREE.Vector3, normal: THREE.Vector3) => {
       const off = ctx.settings.surfaceOffset;

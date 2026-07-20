@@ -13,7 +13,7 @@ export type PlacementMode =
   | 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'SURFACE_PERP' | 'STROKE'
   | 'STROKE_PERP' | 'SPLAT' | 'NEAREST';
 export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
-export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR';
+export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR' | 'VIEW_ORIGIN';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
 export type EraserMode = 'POINT' | 'STROKE' | 'SOFT';
 export type SculptBrush =
