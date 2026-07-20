@@ -415,9 +415,20 @@ function panelCollapsed(): Record<string, boolean> {
   catch { return {}; }
 }
 
-function panel(title: string, ...children: (Node | string)[]): HTMLElement {
-  const body = el('div', { class: 'body' }, ...children);
-  const h = el('h3', {}, el('span', { class: 'panel-caret', text: '▸' }), title);
+/** Marker for panel()'s variadic children: wraps instructional/help text
+ *  that should surface as a hover tooltip on the panel header instead of
+ *  sitting in the body as a permanently-visible row. */
+interface PanelHint { __panelHint: string }
+function panelHint(text: string): PanelHint { return { __panelHint: text }; }
+function isPanelHint(c: unknown): c is PanelHint {
+  return typeof c === 'object' && c !== null && !(c instanceof Node) && '__panelHint' in c;
+}
+
+function panel(title: string, ...children: (Node | string | PanelHint)[]): HTMLElement {
+  const hint = children.find(isPanelHint)?.__panelHint;
+  const kids = children.filter((c) => !isPanelHint(c)) as (Node | string)[];
+  const body = el('div', { class: 'body' }, ...kids);
+  const h = el('h3', hint ? { title: hint } : {}, el('span', { class: 'panel-caret', text: '▸' }), title);
   const root = el('div', { class: `panel${panelCollapsed()[title] ? ' collapsed' : ''}` }, h, body);
   h.onclick = () => {
     root.classList.toggle('collapsed');
@@ -1290,13 +1301,13 @@ export class UI {
     const save = () => this.app.savePrefs();
 
     return panel('Scene',
+      panelHint('Magnet Increment/Grid snap unit = the subdivision lines (Step ÷ Subdivisions).'),
       el('div', { class: 'menu-header', text: 'Grid' }),
       fieldRow('Step', numField('', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5, { def: 1, min: 0.01 })),
       fieldRow('Subdivisions', numField('', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1, { def: 10, min: 1 })),
       fieldRow('Subdivision style', selectField('', s.gridSubdivStyle, [
         ['dashed', 'Dashed'], ['solid', 'Solid'],
       ], (v) => { s.gridSubdivStyle = v as 'dashed' | 'solid'; this.app.rebuildGrid(); save(); })),
-      el('div', { class: 'row', text: 'Magnet Increment/Grid snap unit = the subdivision lines (Step ÷ Subdivisions).' }),
       fieldRow('', checkbox('Auto color', !s.gridColor, (v) => {
         s.gridColor = v ? null : [...s.background];
         this.app.rebuildGrid(); save(); this.refresh();
@@ -1556,15 +1567,19 @@ export class UI {
     };
     for (const n of roots) emit(n, 0);
 
-    const hint = el('div', { class: 'row', text: 'Click selects · dbl-click renames · drag onto a row parents · drop here unparents · Ctrl+P/Alt+P · X deletes' });
-    hint.ondragover = (e) => e.preventDefault();
-    hint.ondrop = (e) => {
+    // still a functional drop target (drop here to unparent), just no
+    // longer a permanently-visible instruction row — see panelHint below
+    const dropZone = el('div', { class: 'row', title: 'Drop here to unparent' });
+    dropZone.ondragover = (e) => e.preventDefault();
+    dropZone.ondrop = (e) => {
       e.preventDefault();
       const src = e.dataTransfer?.getData('text/tg-ref');
       if (src) reparent(src, null);
     };
 
-    return panel('Objects', hint, ...rows);
+    return panel('Objects',
+      panelHint('Click selects · dbl-click renames · drag onto a row parents · drop here unparents · Ctrl+P/Alt+P · X deletes'),
+      dropZone, ...rows);
   }
 
   /** Blender-lite per-object Properties + Material panel (single selection). */
@@ -1943,11 +1958,11 @@ export class UI {
       items.push(el('div', { class: 'panel' }, el('h3', { text: c.name }), body));
     }
     return panel('Canvases',
+      panelHint('Use Placement: Surface to draw on canvases'),
       el('div', { class: 'row' },
         btn('＋ Plane at cursor', () => this.app.addCanvasPlane(),
           { title: 'Add a drawable plane at the 3D cursor, oriented to the current drawing plane' }),
       ),
-      el('div', { class: 'row', text: 'Use Placement: Surface to draw on canvases' }),
       ...items,
     );
   }
@@ -2421,7 +2436,8 @@ export class UI {
         checkbox('Invert orbit direction', s.invertTrackpadOrbit, (v) => { s.invertTrackpadOrbit = v; save(); }),
       ),
       el('div', { class: 'row' },
-        checkbox('Emulate Numpad', s.emulateNumpad, (v) => { s.emulateNumpad = v; save(); }, 'digit-row keys become view shortcuts'),
+        checkbox('Emulate Numpad', s.emulateNumpad, (v) => { s.emulateNumpad = v; save(); },
+          'digit-row keys become view shortcuts — mode shortcuts are shadowed while this is on (use the topbar or Tab)'),
       ),
       el('div', { class: 'row' },
         checkbox('Emulate 3-Button Mouse', s.emulate3Button, (v) => { s.emulate3Button = v; save(); }, 'Alt+LMB navigates'),
@@ -2435,7 +2451,6 @@ export class UI {
           ['ANY', 'Any GP object'], ['SELECTED', 'Selected strokes only'],
         ], (v) => { s.snap.strokeScope = v as 'ANY' | 'SELECTED'; save(); }),
       ),
-      el('div', { class: 'row', text: 'Grid step/subdivisions and Background live in the Scene tab (sidebar).' }),
       el('div', { class: 'menu-header', text: 'Theme' }),
       el('div', { class: 'row' },
         colorField('Accent', [...s.uiAccent, 1], (rgb) => { s.uiAccent = rgb; this.app.applyThemeColors(); save(); }),
@@ -2443,7 +2458,6 @@ export class UI {
           s.uiHighlight = rgb; this.app.applyThemeColors(); this.app.refreshWidget(); save();
         }),
       ),
-      el('div', { class: 'row', text: 'While Emulate Numpad is on, digit keys are view keys and mode shortcuts are shadowed (use the topbar or Tab).' }),
     );
 
     const shortcutRows = el('div', { class: 'body' });
@@ -2491,7 +2505,9 @@ export class UI {
         el('h2', { text: 'Settings' }),
         btn(icon('xMark'), close, { cls: 'icon-btn' }),
       ),
-      el('div', { class: 'panel' }, el('h3', { text: 'Preferences' }), prefs),
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Preferences', title: 'Grid step/subdivisions and Background live in the Scene tab (sidebar), not here.' }),
+        prefs),
       el('div', { class: 'panel' }, el('h3', { text: 'Shortcuts (click a binding to change it)' }), shortcutRows),
     );
     overlay.append(dialog);
@@ -2891,12 +2907,13 @@ export class UI {
         }, { title: 'One 3D wire matching the camera target drawings' }),
         waStatus,
       ),
-      el('div', { class: 'row', text: 'Assist: in camera view (0) the target shows as an overlay — trace it, switch cameras, connect in 3D.' }),
     );
 
     return panel('Solvers (string art · wire art · attractors)',
       el('div', { class: 'panel' }, el('h3', { text: 'String art' }), stringArt),
-      el('div', { class: 'panel' }, el('h3', { text: 'Multi-view wire art' }), wireArt),
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Multi-view wire art', title: 'Assist: in camera view (0) the target shows as an overlay — trace it, switch cameras, connect in 3D.' }),
+        wireArt),
       el('div', { class: 'body' },
         el('div', { class: 'row' },
           btn('＋Attractor at cursor', () => {
@@ -3117,8 +3134,9 @@ export class UI {
     });
 
     return panel(`Constraints — ${objectName(ctx.scene, ref)}`,
+      panelHint('Follow Path makes this a traveler, Trigger makes it a proximity zone'),
       addSel,
-      ...(items.length ? items : [el('div', { class: 'row', text: 'no constraints — Follow Path makes this a traveler, Trigger makes it a proximity zone' })]),
+      ...(items.length ? items : [el('div', { class: 'row', text: 'no constraints' })]),
     );
   }
 
