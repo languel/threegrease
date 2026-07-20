@@ -171,6 +171,7 @@ class App implements AppHandle {
   /** debug aid: wireframe unit square + normal tick showing the current
    *  drawing plane — toggled via settings.showPlaneHelper */
   private planeHelper: THREE.Group;
+  private planeHelperRay = new THREE.Raycaster();
   /** N2: Blender-style orange outlines + origin dots for selected objects */
   private selGlyphs = new THREE.Group();
   private selHelpers = new Map<string, { box: THREE.Box3; helper: LineSegments2; dot: THREE.Points }>();
@@ -2652,16 +2653,25 @@ class App implements AppHandle {
   /** Orients the plane helper to the plane strokes/splats actually land
    *  on right now: the active sticky standing plane while mid-stroke
    *  (Surface ⊥ / Stroke ⊥ / View at Origin), else the idle Plane
-   *  setting's own resolution — anchored at whichever point on that
-   *  plane is nearest the 3D cursor, so it stays near where you're
-   *  working instead of drifting off to wherever the plane's arbitrary
-   *  reference point happens to be. */
+   *  setting's own resolution — anchored where the pointer ACTUALLY
+   *  meets that plane (exactly where the next stroke point would land),
+   *  not an unrelated fixed point like the 3D cursor, so it visibly
+   *  tracks the stroke you're about to draw or are drawing. */
   private updatePlaneHelper(): void {
     const ctx = this.ctx;
     this.planeHelper.visible = ctx.settings.showPlaneHelper && !this.presentation;
     if (!this.planeHelper.visible) return;
     const plane = currentStickyPlane() ?? drawingPlane(ctx);
-    const anchor = plane.projectPoint(new THREE.Vector3(...ctx.scene.cursor), new THREE.Vector3());
+    const { x, y } = this.tools.lastPointer;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
+    this.planeHelperRay.setFromCamera(ndc, ctx.camera);
+    const anchor = new THREE.Vector3();
+    if (!this.planeHelperRay.ray.intersectPlane(plane, anchor)) {
+      // pointer ray grazes the plane (near-parallel view): fall back to
+      // the 3D cursor's projection rather than leaving a stale position
+      plane.projectPoint(new THREE.Vector3(...ctx.scene.cursor), anchor);
+    }
     this.planeHelper.position.copy(anchor);
     const target = anchor.clone().add(plane.normal);
     this.planeHelper.lookAt(target);
