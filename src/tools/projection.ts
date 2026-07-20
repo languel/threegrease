@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { Vec3 } from '../core/types';
 import { activeObject, frameAt } from '../core/gpdata';
 import type { AppCtx } from './context';
+import { pickSplatPoint } from './splatpick';
+import { pickConstruction } from './polypick';
 
 const raycaster = new THREE.Raycaster();
 
@@ -17,7 +19,7 @@ export function setStrokeExclusion(id: number | null): void {
   excludedStrokeId = id;
   stickyDepth = null;     // each new stroke re-acquires its depth anchor
   drawingSurface = null;  // ...and its surface
-  perpPlane = null;       // ...and its Surface-⊥ standing plane
+  perpPlane = null;       // ...and its Surface-⊥ / Stroke-⊥ standing plane
 }
 
 /** SURFACE_PERP: the plane the stroke grows on — through the surface hit
@@ -152,6 +154,20 @@ export function strokeSnapPreview(ctx: AppCtx, screenX: number, screenY: number)
   return { x: nearest.sx, y: nearest.sy };
 }
 
+/**
+ * HUD preview for NEAREST placement: whichever snap source (poly element,
+ * mesh, GP stroke, splat) pickConstruction would resolve right now, or null
+ * when nothing is close enough (i.e. it would only land on the bare plane).
+ */
+export function nearestConstructionPreview(ctx: AppCtx, screenX: number, screenY: number): { x: number; y: number } | null {
+  const hit = pickConstruction(ctx, screenX, screenY, {});
+  if (hit.source.kind === 'PLANE' || hit.source.kind === 'FREE') return null;
+  const p = new THREE.Vector3(...hit.world).project(ctx.camera);
+  if (p.z > 1) return null;
+  const rect = ctx.canvas.getBoundingClientRect();
+  return { x: (p.x * 0.5 + 0.5) * rect.width, y: (-p.y * 0.5 + 0.5) * rect.height };
+}
+
 /** Canvas plane under a canvas-local screen point, or null. */
 export function pickCanvas(ctx: AppCtx, x: number, y: number): { id: number; point: THREE.Vector3 } | null {
   if (!ctx.canvasMeshes.length) return null;
@@ -248,6 +264,7 @@ export function nearestStrokeSegmentAll(
       const frame = frameAt(layer, ctx.scene.frame);
       if (!frame) continue;
       for (const s of frame.strokes) {
+        if (s.id === excludedStrokeId) continue; // the in-progress stroke isn't a valid anchor
         if (scope === 'SELECTED' && !s.select && !s.points.some((p) => p.select)) continue;
         if (s.points.length < 2) continue;
         const proj = s.points.map((p) => {
@@ -443,6 +460,39 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
   if (ctx.settings.placement === 'STROKE') {
     const hit = strokeDepthPoint(ctx, raycaster.ray, x - rect.left, y - rect.top);
     if (hit) return hit;
+  }
+  if (ctx.settings.placement === 'STROKE_PERP') {
+    // stroke in progress: every later point lives on the sticky standing
+    // plane captured at the first point (mirrors SURFACE_PERP, but the
+    // reference is a GP stroke's local tangent instead of a face normal)
+    if (perpPlane) {
+      const out = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(perpPlane, out)) return out;
+    }
+    const seg = nearestStrokeSegmentAll(ctx, x - rect.left, y - rect.top, 80);
+    if (seg) {
+      const point = seg.a.clone().lerp(seg.b, seg.t);
+      const tangent = seg.b.clone().sub(seg.a);
+      if (tangent.lengthSq() > 1e-9) {
+        const view = ctx.camera.getWorldDirection(new THREE.Vector3());
+        let side = new THREE.Vector3().crossVectors(tangent, view);
+        if (side.lengthSq() < 1e-9) side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0));
+        if (side.lengthSq() < 1e-9) side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(1, 0, 0));
+        const plane = perpendicularPlaneAt(ctx, point, side.normalize());
+        if (excludedStrokeId !== null) perpPlane = plane; // stick for this stroke
+      }
+      return point.clone();
+    }
+    // nothing under the first point: fall through to the drawing plane
+  }
+  if (ctx.settings.placement === 'SPLAT') {
+    const sp = pickSplatPoint(ctx, x - rect.left, y - rect.top, 40);
+    if (sp) return new THREE.Vector3(...sp.world);
+    // nothing under the pointer: fall through to the drawing plane
+  }
+  if (ctx.settings.placement === 'NEAREST') {
+    const hit = pickConstruction(ctx, x - rect.left, y - rect.top, {});
+    return new THREE.Vector3(...hit.world);
   }
   const plane = drawingPlane(ctx);
   const out = new THREE.Vector3();

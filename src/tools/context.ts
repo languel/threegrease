@@ -9,7 +9,9 @@ import type { EditorMode, GPSceneRenderer } from '../render/GPSceneRenderer';
  *  perpendicular to that surface (contains the hit normal) while facing
  *  the camera as much as possible — drawing grass on a patch, fins off
  *  a wall. The plane is sticky for the whole stroke/chain. */
-export type PlacementMode = 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'SURFACE_PERP' | 'STROKE';
+export type PlacementMode =
+  | 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'SURFACE_PERP' | 'STROKE'
+  | 'STROKE_PERP' | 'SPLAT' | 'NEAREST';
 export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
 export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
