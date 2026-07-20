@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { GPPoint, GPStroke, Vec4 } from '../core/types';
+import type { GPPoint, GPStroke, TGPaintCloud, Vec3, Vec4 } from '../core/types';
 import {
   activeLayer, activeObject, createPoint, createStroke, ensureFrame, frameAt,
   genId, visibleEditableLayers,
@@ -7,6 +7,8 @@ import {
 import { simplifyStroke, smoothAttr, smoothPoints, clamp } from '../core/mathutil';
 import type { AppCtx } from './context';
 import { applyGuide, eventToCanvas, objectToScreen, screenToWorld, setStrokeExclusion, worldToObject } from './projection';
+import { listSelected, worldMatrixOf } from './objects';
+import { PAINT_STRIDE } from '../render/paintclouds';
 import type { Tool, ToolEvent } from './toolsys';
 
 /** Brush size → stroke lineWidth: px for VIEW, world units (size/100) for SCENE. */
@@ -117,6 +119,22 @@ export class DrawTool implements Tool {
 
 // --------------------------------------------------------------- Erase tool
 
+/** Local-only GP object transform (matches gatherDepthCandidates/objectToWorld's
+ *  convention: GP stroke editing ignores the parent chain, by convention
+ *  across the codebase — kept consistent here rather than switching to
+ *  worldMatrixOf's parent-aware matrix for just this tool). */
+function gpLocalMatrix(ob: { translation: Vec3; rotation: Vec3; scale: Vec3 }): THREE.Matrix4 {
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(...ob.translation),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+    new THREE.Vector3(...ob.scale),
+  );
+}
+
+/** Erases from whatever kind(s) of object the outliner has selected (GP
+ *  strokes, painted splat-cloud points), not just a hardcoded GP target.
+ *  Falls back to the active GP object when nothing is explicitly selected
+ *  (fresh scene / single default object, pre-existing default behavior). */
 export class EraseTool implements Tool {
   id = 'erase';
   cursor = 'none';
@@ -135,16 +153,44 @@ export class EraseTool implements Tool {
   }
 
   private erase(ctx: AppCtx, e: ToolEvent): void {
-    const ob = activeObject(ctx.scene);
-    const { mode, radius } = ctx.settings.eraser;
     const cursor = new THREE.Vector2(e.x, e.y);
+    let changed = false;
+
+    const selected = listSelected(ctx.scene);
+    const selectedGPIds = new Set(selected.filter((r) => r.kind === 'GP').map((r) => r.id));
+    const selectedCloudIds = new Set(selected.filter((r) => r.kind === 'PCLOUD').map((r) => r.id));
+
+    const gpTargets = selectedGPIds.size
+      ? ctx.scene.objects.filter((o) => selectedGPIds.has(o.id))
+      : (selected.length === 0 ? [activeObject(ctx.scene)] : []);
+    for (const ob of gpTargets) {
+      if (ob.lock || ob.hide) continue;
+      if (this.eraseGP(ctx, ob, cursor, e.pressure || 1)) changed = true;
+    }
+
+    for (const pc of ctx.scene.paintClouds) {
+      if (!selectedCloudIds.has(pc.id) || pc.lock || !pc.visible || !pc.points.length) continue;
+      if (this.erasePaintCloud(ctx, pc, cursor)) changed = true;
+    }
+
+    if (changed) ctx.requestRender();
+  }
+
+  private eraseGP(ctx: AppCtx, ob: ReturnType<typeof activeObject>, cursor: THREE.Vector2, pressure: number): boolean {
+    const { mode, radius } = ctx.settings.eraser;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const m = gpLocalMatrix(ob);
+    const toScreen = (co: Vec3) => {
+      const v = new THREE.Vector3(...co).applyMatrix4(m).project(ctx.camera);
+      return new THREE.Vector2((v.x * 0.5 + 0.5) * rect.width, (-v.y * 0.5 + 0.5) * rect.height);
+    };
     let changed = false;
     for (const layer of visibleEditableLayers(ob)) {
       const frame = frameAt(layer, ctx.scene.frame);
       if (!frame) continue;
       const keep: GPStroke[] = [];
       for (const s of frame.strokes) {
-        const dists = s.points.map((p) => objectToScreen(ctx, p.co).distanceTo(cursor));
+        const dists = s.points.map((p) => toScreen(p.co).distanceTo(cursor));
         const anyHit = dists.some((d) => d < radius);
         if (!anyHit) { keep.push(s); continue; }
         changed = true;
@@ -152,7 +198,7 @@ export class EraseTool implements Tool {
         if (mode === 'SOFT') {
           s.points.forEach((p, i) => {
             if (dists[i] < radius) {
-              p.strength -= 0.15 * (1 - dists[i] / radius) * (e.pressure || 1);
+              p.strength -= 0.15 * (1 - dists[i] / radius) * pressure;
             }
           });
           s.points = s.points.filter((p) => p.strength > 0.02);
@@ -164,7 +210,29 @@ export class EraseTool implements Tool {
       }
       frame.strokes = keep;
     }
-    if (changed) ctx.requestRender();
+    return changed;
+  }
+
+  /** Delete painted splat points under the brush (POINT-style; mirrors
+   *  SplatPaintTool's Ctrl+drag erase, scoped to the selected cloud). */
+  private erasePaintCloud(ctx: AppCtx, pc: TGPaintCloud, cursor: THREE.Vector2): boolean {
+    const { radius } = ctx.settings.eraser;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const world = worldMatrixOf(ctx.scene, { kind: 'PCLOUD', id: pc.id });
+    const v = new THREE.Vector3();
+    const keep: number[] = [];
+    let touched = false;
+    for (let o = 0; o < pc.points.length; o += PAINT_STRIDE) {
+      v.set(pc.points[o], pc.points[o + 1], pc.points[o + 2]).applyMatrix4(world).project(ctx.camera);
+      const sx = (v.x * 0.5 + 0.5) * rect.width, sy = (-v.y * 0.5 + 0.5) * rect.height;
+      if (v.z <= 1 && Math.hypot(sx - cursor.x, sy - cursor.y) < radius) { touched = true; continue; }
+      for (let k = 0; k < PAINT_STRIDE; k++) keep.push(pc.points[o + k]);
+    }
+    if (keep.length !== pc.points.length) {
+      pc.points = keep;
+      pc.rev = (pc.rev + 1) % 1e9;
+    }
+    return touched;
   }
 }
 
