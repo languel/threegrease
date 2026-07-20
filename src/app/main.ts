@@ -2673,8 +2673,20 @@ class App implements AppHandle {
       plane.projectPoint(new THREE.Vector3(...ctx.scene.cursor), anchor);
     }
     this.planeHelper.position.copy(anchor);
-    const target = anchor.clone().add(plane.normal);
-    this.planeHelper.lookAt(target);
+    // Object3D.lookAt() picks a fixed world-Y "up" reference to disambiguate
+    // roll, which goes degenerate (nearly parallel to the target) whenever
+    // the plane's normal is close to world Y — exactly the "looking almost
+    // down Y" case, producing an unstable, seemingly-arbitrary 45°-ish
+    // rotation. Build the basis directly instead, picking whichever world
+    // axis is LEAST aligned with the normal as the reference (same
+    // never-degenerate pattern used for triangulateFace/Stroke ⊥ elsewhere
+    // in this file), so the square's edges land the same way every frame
+    // regardless of view direction.
+    const n = plane.normal;
+    const tmp = Math.abs(n.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+    const right = new THREE.Vector3().crossVectors(tmp, n).normalize();
+    const up = new THREE.Vector3().crossVectors(n, right);
+    this.planeHelper.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
   }
 
   private resize(): void {
