@@ -11,7 +11,7 @@ function vec3Eq(a: Vec3, b: Vec3): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 }
 
-function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
+export function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
   switch (kind) {
     case 'PLANE': return new THREE.PlaneGeometry(2, 2);
     case 'BOX': return new THREE.BoxGeometry(1, 1, 1);

@@ -13,6 +13,8 @@ import { buildFillGeometry } from '../render/geometry';
 import { triangulateFace } from '../render/polymesh';
 import { edgeFaceCount } from '../core/polymesh';
 import { worldMatrixOf } from '../tools/objects';
+import { primitiveGeometry } from '../render/meshes';
+import { PAINT_STRIDE } from '../render/paintclouds';
 import type { Vec3 } from '../core/types';
 
 export interface Export3DOptions {
@@ -20,10 +22,17 @@ export interface Export3DOptions {
   radialSegments: number;
   minRadius: number;
   selectedOnly: boolean;
+  /** Include loose-point geometry (paint-cloud splats, isolated poly-mesh
+   *  vertices). Default true; face-only exporters (exportPLY) turn this
+   *  off because THREE's PLYExporter drops ALL triangle faces the moment
+   *  any Points object is present in the traversal (see exportScenePLY's
+   *  doc comment) — mixing would silently corrupt a "just the geometry"
+   *  export the moment a splat exists anywhere in the scene. */
+  includePointClouds: boolean;
 }
 
 export const DEFAULT_EXPORT3D: Export3DOptions = {
-  pxToWorld: 0.005, radialSegments: 6, minRadius: 0.002, selectedOnly: false,
+  pxToWorld: 0.005, radialSegments: 6, minRadius: 0.002, selectedOnly: false, includePointClouds: true,
 };
 
 /** Build a plain-geometry group mirroring the visible drawing. */
@@ -135,7 +144,7 @@ export function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): THREE.Grou
     for (const f of pm.faces) for (const id of f.vertices) used.add(id);
     const pointPos: number[] = [];
     for (const v of pm.vertices) if (!used.has(v.id)) pointPos.push(...v.co);
-    if (pointPos.length) {
+    if (opts.includePointClouds && pointPos.length) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pointPos, 3));
       geo.applyMatrix4(matrix);
@@ -143,6 +152,48 @@ export function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): THREE.Grou
       points.name = `${pm.name} points`;
       group.add(points);
     }
+  }
+
+  // primitive mesh objects (PLANE/BOX/SPHERE/CYLINDER). MODEL is a loaded
+  // external asset (not owned data, and loading it here would make this
+  // synchronous builder async for one uncommon case) and EMPTY has no
+  // surface — both skipped, matching the live renderer's non-draw-target
+  // treatment of EMPTY.
+  for (const m of scene.meshes) {
+    if (!m.visible || m.kind === 'EMPTY' || m.kind === 'MODEL') continue;
+    const geo = primitiveGeometry(m.kind).clone();
+    geo.applyMatrix4(worldMatrixOf(scene, { kind: 'MESH', id: m.id }));
+    geo.computeVertexNormals();
+    const color = new THREE.Color(m.color[0], m.color[1], m.color[2]);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color, opacity: m.opacity, transparent: m.opacity < 1, side: m.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
+    }));
+    mesh.name = m.name;
+    group.add(mesh);
+  }
+
+  // painted splat clouds (TGPaintCloud): no gaussian ellipsoids in a plain
+  // export, so represent each point as a colored vertex (GLB carries a
+  // POINTS-mode primitive with vertex color; PLYExporter also understands
+  // Points — see exportScenePLY for the combined-with-faces PLY case,
+  // where THREE's own PLYExporter can't mix points and faces correctly).
+  for (const pc of opts.includePointClouds ? scene.paintClouds : []) {
+    if (!pc.visible || !pc.points.length) continue;
+    const n = pc.points.length / PAINT_STRIDE;
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const o = i * PAINT_STRIDE;
+      pos[i * 3] = pc.points[o]; pos[i * 3 + 1] = pc.points[o + 1]; pos[i * 3 + 2] = pc.points[o + 2];
+      col[i * 3] = pc.points[o + 4]; col[i * 3 + 1] = pc.points[o + 5]; col[i * 3 + 2] = pc.points[o + 6];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.applyMatrix4(worldMatrixOf(scene, { kind: 'PCLOUD', id: pc.id }));
+    const points = new THREE.Points(geo, new THREE.PointsMaterial({ vertexColors: true, size: 0.03 }));
+    points.name = pc.name;
+    group.add(points);
   }
   return group;
 }
@@ -168,12 +219,106 @@ export function exportOBJ(ctx: AppCtx, opts = DEFAULT_EXPORT3D): string {
   return text;
 }
 
-/** Geometry PLY (tubes + fills as one merged mesh cloud, binary). */
+/** Geometry-only PLY (tubes + fills as one merged mesh cloud, binary).
+ *  Always excludes point clouds regardless of opts.includePointClouds —
+ *  THREE's PLYExporter drops ALL triangle faces the moment any Points
+ *  object is present in the group (see exportScenePLY), so this format
+ *  stays a pure-faces export; use "Export Full Scene (PLY)" for splats. */
 export function exportPLY(ctx: AppCtx, opts = DEFAULT_EXPORT3D): ArrayBuffer | string | null {
-  const group = buildExportGroup(ctx, opts);
+  const group = buildExportGroup(ctx, { ...opts, includePointClouds: false });
   const result = new PLYExporter().parse(group, () => {}, { binary: true }) as ArrayBuffer | null;
   if (result) download(result, 'threegrease.ply', 'application/octet-stream');
   return result;
+}
+
+/** Combined PLY: geometry AS FACES + splat/point clouds as loose colored
+ *  vertices in the SAME file. Blender's PLY importer builds one mesh
+ *  object per file — faces become real polygons, and the extra vertices
+ *  with no face references stay as loose colored points (visible via a
+ *  Color Attribute / Vertex Paint overlay, or with the Point Cloud Visualizer
+ *  addon for a proper splat-like look). THREE's own PLYExporter can't
+ *  produce this: parse() sets includeIndices = false the moment ANY
+ *  Points object appears anywhere in the traversal, silently discarding
+ *  every triangle face in the file — so this walks buildExportGroup's
+ *  Mesh/Points children directly and writes the binary file by hand.
+ *  LineSegments (poly-mesh edges with no face) have no PLY analogue and
+ *  are skipped, same as every other exporter in this file. */
+export function exportScenePLY(ctx: AppCtx, opts = DEFAULT_EXPORT3D): ArrayBuffer | null {
+  const group = buildExportGroup(ctx, opts);
+  const positions: number[] = [];
+  const colors: number[] = []; // 0-255 per channel, parallel to positions
+  const faces: number[][] = [];
+
+  const pushColor = (c: THREE.Color) => {
+    colors.push(
+      Math.round(THREE.MathUtils.clamp(c.r, 0, 1) * 255),
+      Math.round(THREE.MathUtils.clamp(c.g, 0, 1) * 255),
+      Math.round(THREE.MathUtils.clamp(c.b, 0, 1) * 255),
+    );
+  };
+
+  group.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
+      const pos = mesh.geometry.getAttribute('position');
+      if (!pos) return;
+      const base = positions.length / 3;
+      const matColor = (mesh.material as THREE.MeshStandardMaterial).color ?? new THREE.Color(1, 1, 1);
+      for (let i = 0; i < pos.count; i++) {
+        positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+        pushColor(matColor);
+      }
+      const index = mesh.geometry.getIndex();
+      if (index) {
+        for (let i = 0; i + 2 < index.count; i += 3) {
+          faces.push([base + index.getX(i), base + index.getX(i + 1), base + index.getX(i + 2)]);
+        }
+      } else {
+        for (let i = 0; i + 2 < pos.count; i += 3) faces.push([base + i, base + i + 1, base + i + 2]);
+      }
+    } else if ((child as THREE.Points).isPoints) {
+      const points = child as THREE.Points;
+      const pos = points.geometry.getAttribute('position');
+      if (!pos) return;
+      const colAttr = points.geometry.getAttribute('color');
+      const matColor = (points.material as THREE.PointsMaterial).color ?? new THREE.Color(1, 1, 1);
+      for (let i = 0; i < pos.count; i++) {
+        positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+        pushColor(colAttr ? new THREE.Color(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i)) : matColor);
+      }
+    }
+  });
+
+  const vertexCount = positions.length / 3;
+  if (!vertexCount) return null;
+  const header = 'ply\nformat binary_little_endian 1.0\n'
+    + `element vertex ${vertexCount}\n`
+    + 'property float x\nproperty float y\nproperty float z\n'
+    + 'property uchar red\nproperty uchar green\nproperty uchar blue\n'
+    + `element face ${faces.length}\n`
+    + 'property list uchar int vertex_indices\n'
+    + 'end_header\n';
+  const headerBytes = new TextEncoder().encode(header);
+  const buffer = new ArrayBuffer(headerBytes.length + vertexCount * 15 + faces.length * 13);
+  new Uint8Array(buffer).set(headerBytes);
+  const view = new DataView(buffer, headerBytes.length);
+  let off = 0;
+  for (let i = 0; i < vertexCount; i++) {
+    view.setFloat32(off, positions[i * 3], true); off += 4;
+    view.setFloat32(off, positions[i * 3 + 1], true); off += 4;
+    view.setFloat32(off, positions[i * 3 + 2], true); off += 4;
+    view.setUint8(off, colors[i * 3]); off += 1;
+    view.setUint8(off, colors[i * 3 + 1]); off += 1;
+    view.setUint8(off, colors[i * 3 + 2]); off += 1;
+  }
+  for (const f of faces) {
+    view.setUint8(off, 3); off += 1;
+    view.setInt32(off, f[0], true); off += 4;
+    view.setInt32(off, f[1], true); off += 4;
+    view.setInt32(off, f[2], true); off += 4;
+  }
+  download(buffer, 'threegrease-scene.ply', 'application/octet-stream');
+  return buffer;
 }
 
 export function exportSTL(ctx: AppCtx, opts = DEFAULT_EXPORT3D): DataView | string {

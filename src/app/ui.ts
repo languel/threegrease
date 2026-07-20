@@ -673,10 +673,11 @@ export class UI {
       { sep: true },
       { header: 'Export' },
       { label: 'GP object (.threegrease.json)', do: () => this.app.exportActiveGP() },
-      { label: 'GLB', do: async () => { const m = await import('../io/export3d'); m.exportGLB(ctx); } },
+      { label: 'GLB (full scene, incl. splats) — recommended for Blender', do: async () => { const m = await import('../io/export3d'); m.exportGLB(ctx); } },
       { label: 'OBJ', do: async () => { const m = await import('../io/export3d'); m.exportOBJ(ctx); } },
       { label: 'STL', do: async () => { const m = await import('../io/export3d'); m.exportSTL(ctx); } },
-      { label: 'PLY (geometry)', do: async () => { const m = await import('../io/export3d'); m.exportPLY(ctx); } },
+      { label: 'PLY (geometry only)', do: async () => { const m = await import('../io/export3d'); m.exportPLY(ctx); } },
+      { label: 'PLY (full scene, incl. splats)', do: async () => { const m = await import('../io/export3d'); m.exportScenePLY(ctx); } },
       { label: 'PNG snapshot', do: () => this.app.exportPng() },
     ]);
 

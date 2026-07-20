@@ -1768,6 +1768,7 @@ class App implements AppHandle {
     add('export.obj', 'Export OBJ', async () => (await import('../io/export3d')).exportOBJ(this.ctx), 'file');
     add('export.stl', 'Export STL', async () => (await import('../io/export3d')).exportSTL(this.ctx), 'file');
     add('export.ply', 'Export PLY geometry', async () => (await import('../io/export3d')).exportPLY(this.ctx), 'file');
+    add('export.ply.scene', 'Export PLY full scene (incl. splats)', async () => (await import('../io/export3d')).exportScenePLY(this.ctx), 'file blender splat');
     add('export.png', 'Export PNG snapshot', () => this.exportPng(), 'file render');
     add('export.gp', 'Export active GP object', () => this.exportActiveGP(), 'file json');
     add('view.front', 'View front', () => this.nav.snapView('FRONT'), 'viewpoint');
