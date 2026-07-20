@@ -833,7 +833,7 @@ export class UI {
         ...(s.activeTool === 'splatpaint' || s.activeTool === 'texpaint' ? [
           colorField('Color', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }),
         ] : []),
-        selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['SURFACE_PERP', 'Surface ⊥'], ['STROKE', 'Stroke']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
+        selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['SURFACE_PERP', 'Surface ⊥'], ['STROKE', 'Stroke'], ['STROKE_PERP', 'Stroke ⊥'], ['SPLAT', 'Splat (nearest)'], ['NEAREST', 'Nearest Object']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
         ...(s.placement === 'SURFACE' ? [
           numField('Offset', s.surfaceOffset, (v) => { s.surfaceOffset = v; }, 0.01),
         ] : []),

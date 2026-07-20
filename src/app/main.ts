@@ -79,7 +79,7 @@ import {
   downloadScene, downloadText, importGPObjects, openSceneFile,
   remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
-import { drawingPlane, nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, objectToScreen, perpendicularFoot, raycastFaceTriangle, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
+import { drawingPlane, nearestConstructionPreview, nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, objectToScreen, perpendicularFoot, raycastFaceTriangle, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
@@ -2852,10 +2852,14 @@ class App implements AppHandle {
       g.fillText(line, w / 2, 23);
       g.textAlign = 'left';
     }
-    // STROKE placement: show which stroke the depth will lock to
-    if (this.ctx.settings.mode === 'DRAW' && this.ctx.settings.placement === 'STROKE' && !this.nav.flying) {
+    // STROKE / NEAREST placement: show what the pointer will snap to
+    const previewPlacement = this.ctx.settings.mode === 'DRAW'
+      && (this.ctx.settings.placement === 'STROKE' || this.ctx.settings.placement === 'NEAREST');
+    if (previewPlacement && !this.nav.flying) {
       const { x, y } = this.tools.lastPointer;
-      const anchor = strokeSnapPreview(this.ctx, x, y);
+      const anchor = this.ctx.settings.placement === 'STROKE'
+        ? strokeSnapPreview(this.ctx, x, y)
+        : nearestConstructionPreview(this.ctx, x, y);
       if (anchor) {
         g.beginPath();
         g.moveTo(x, y);
