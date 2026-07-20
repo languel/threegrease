@@ -16,6 +16,7 @@ import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandm
 import { deleteAsset, listAssets } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
+import { exportPaintCloudPly } from '../render/paintclouds';
 import type { ConstraintType, TGConstraint } from '../core/types';
 import {
   getObjectTransform, listSelected as listSelectedObjects, objectName, selectionPivot,
@@ -1468,6 +1469,15 @@ export class UI {
       },
       extras: [
         el('span', { text: `${pc.points.length / 8}`, title: 'painted splats' }),
+        btn('⬇.ply', () => {
+          const buf = exportPaintCloudPly(scene, pc);
+          if (!buf) return;
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
+          a.download = `${pc.name.replace(/\s+/g, '-')}.ply`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        }, { cls: 'icon-btn', title: 'Export as 3DGS PLY (world-space, PlayCanvas/SuperSplat compatible)' }),
         ...viewLockBtns(
           !pc.visible, (v) => { pc.visible = !v; },
           !!pc.lock, (v) => { pc.lock = v; },

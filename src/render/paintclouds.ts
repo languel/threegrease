@@ -112,6 +112,47 @@ export class PaintCloudManager {
   }
 }
 
+/** Serialize a painted cloud to a standard (uncompressed) 3DGS PLY —
+ *  same field layout as SplatManager.exportPly, so PlayCanvas/SuperSplat/
+ *  Spark all read it. Points export in WORLD space (isotropic scale,
+ *  identity rotation): the cloud looks exactly as placed in the scene. */
+export function exportPaintCloudPly(scene: GPScene, pc: TGPaintCloud): ArrayBuffer | null {
+  const n = pc.points.length / PAINT_STRIDE;
+  if (!n) return null;
+  const world = worldMatrixOf(scene, { kind: 'PCLOUD', id: pc.id });
+  const worldScale = new THREE.Vector3().setFromMatrixScale(world);
+  const avgScale = (Math.abs(worldScale.x) + Math.abs(worldScale.y) + Math.abs(worldScale.z)) / 3;
+  const props = ['x', 'y', 'z', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity',
+    'scale_0', 'scale_1', 'scale_2', 'rot_0', 'rot_1', 'rot_2', 'rot_3'];
+  const header = `ply\nformat binary_little_endian 1.0\nelement vertex ${n}\n`
+    + props.map((p) => `property float ${p}`).join('\n') + '\nend_header\n';
+  const headerBytes = new TextEncoder().encode(header);
+  const buffer = new ArrayBuffer(headerBytes.length + n * props.length * 4);
+  new Uint8Array(buffer).set(headerBytes);
+  const view = new DataView(buffer, headerBytes.length);
+  const SH_C0 = 0.28209479177387814;
+  const clamp01 = (v: number) => Math.max(1e-6, Math.min(1 - 1e-6, v));
+  const logit = (v: number) => Math.log(clamp01(v) / (1 - clamp01(v)));
+  let off = 0;
+  const put = (v: number) => { view.setFloat32(off, v, true); off += 4; };
+  const p = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    const o = i * PAINT_STRIDE;
+    p.set(pc.points[o], pc.points[o + 1], pc.points[o + 2]).applyMatrix4(world);
+    put(p.x); put(p.y); put(p.z);
+    put((pc.points[o + 4] - 0.5) / SH_C0);
+    put((pc.points[o + 5] - 0.5) / SH_C0);
+    put((pc.points[o + 6] - 0.5) / SH_C0);
+    put(logit(pc.points[o + 7]));
+    // gaussian sigma ~ half the sprite radius reads closest to the
+    // painted footprint after 3DGS reconstruction
+    const s = Math.log(Math.max(1e-9, pc.points[o + 3] * avgScale * 0.5));
+    put(s); put(s); put(s);
+    put(1); put(0); put(0); put(0); // identity rotation (w,x,y,z)
+  }
+  return buffer;
+}
+
 export function createPaintCloud(id: number, name: string, at: [number, number, number]): TGPaintCloud {
   return {
     id, name, points: [], rev: 0,
