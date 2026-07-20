@@ -484,6 +484,7 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
     ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
     ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
+    ['splatpaint', 'droplet', 'Splat Paint (3DGS) — deposit gaussian splats along the pointer path; Size=stamp px, Strength=alpha, vertex color=splat color, spacing/jitter from brush style; Ctrl+drag erases; placement/plane options apply'],
   ],
   EDIT: [
     ['select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
