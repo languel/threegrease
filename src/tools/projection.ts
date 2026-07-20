@@ -7,6 +7,12 @@ import { pickConstruction } from './polypick';
 
 const raycaster = new THREE.Raycaster();
 
+/** SPLAT/NEAREST "clay" release radius, in screen px: how far the cursor
+ *  can drift from the last real snap hit before the stroke detaches from
+ *  the sticky accretion depth and resumes following the normal drawing
+ *  plane (see stickyAnchorPx below). */
+const STICKY_RELEASE_PX = 120;
+
 /**
  * Stroke id excluded from STROKE-placement depth sampling — set by drawing
  * tools so the in-progress stroke doesn't attract its own points.
@@ -15,9 +21,15 @@ let excludedStrokeId: number | null = null;
 let stickyDepth: number | null = null;
 let drawingSurface: THREE.Object3D | null = null;
 let perpPlane: THREE.Plane | null = null;
+/** Screen px where SPLAT/NEAREST last actually snapped to something — the
+ *  "clay" anchor: pulling the cursor away from it beyond STICKY_RELEASE_PX
+ *  detaches the stroke back to the normal drawing plane instead of keeping
+ *  it glued to the accretion depth forever. */
+let stickyAnchorPx: { x: number; y: number } | null = null;
 export function setStrokeExclusion(id: number | null): void {
   excludedStrokeId = id;
   stickyDepth = null;     // each new stroke re-acquires its depth anchor
+  stickyAnchorPx = null;  // ...and its clay-accretion anchor
   drawingSurface = null;  // ...and its surface
   perpPlane = null;       // ...and its Surface-⊥ / Stroke-⊥ standing plane
 }
@@ -508,38 +520,48 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
   if (ctx.settings.placement === 'SPLAT') {
     // painted clouds (the app's own splat brush) AND loaded Spark assets
     // are both valid "splat" sources; take whichever is nearer on screen
-    const pcp = pickPaintCloudPoint(ctx, x - rect.left, y - rect.top, 40);
-    const sp = pickSplatPoint(ctx, x - rect.left, y - rect.top, 40);
+    const px = x - rect.left, py = y - rect.top;
+    const pcp = pickPaintCloudPoint(ctx, px, py, 40);
+    const sp = pickSplatPoint(ctx, px, py, 40);
     const hit = pcp && (!sp || pcp.d <= sp.d) ? new THREE.Vector3(...pcp.world)
       : sp ? new THREE.Vector3(...sp.world) : null;
     if (hit) {
-      if (excludedStrokeId !== null) stickyDepth = depthAlongView(ctx, raycaster.ray, hit);
+      if (excludedStrokeId !== null) {
+        stickyDepth = depthAlongView(ctx, raycaster.ray, hit);
+        stickyAnchorPx = { x: px, y: py };
+      }
       return hit;
     }
-    // pointer drifted off every splat point: hold the depth of the
-    // stroke's first hit (view-parallel plane through it) instead of
-    // dropping all the way to the drawing plane
-    if (excludedStrokeId !== null && stickyDepth !== null) {
+    // "clay" behavior: near the accretion point (within STICKY_RELEASE_PX
+    // of where it last actually hit), keep gluing to its depth so small
+    // gaps between splat points don't cause flicker; pull further away and
+    // it detaches, falling through to the normal drawing plane below
+    if (excludedStrokeId !== null && stickyDepth !== null && stickyAnchorPx
+      && Math.hypot(px - stickyAnchorPx.x, py - stickyAnchorPx.y) < STICKY_RELEASE_PX) {
       const p = pointAtViewDepth(ctx, raycaster.ray, stickyDepth);
       if (p) return p;
     }
-    // no hit yet this stroke either: fall through to the drawing plane
+    // detached (or no hit yet this stroke): fall through to the drawing plane
   }
   if (ctx.settings.placement === 'NEAREST') {
-    const hit = pickConstruction(ctx, x - rect.left, y - rect.top, {});
+    const px = x - rect.left, py = y - rect.top;
+    const hit = pickConstruction(ctx, px, py, {});
     const real = hit.source.kind !== 'PLANE' && hit.source.kind !== 'FREE';
     if (real) {
       const w = new THREE.Vector3(...hit.world);
-      if (excludedStrokeId !== null) stickyDepth = depthAlongView(ctx, raycaster.ray, w);
+      if (excludedStrokeId !== null) {
+        stickyDepth = depthAlongView(ctx, raycaster.ray, w);
+        stickyAnchorPx = { x: px, y: py };
+      }
       return w;
     }
-    // nothing snappable under the pointer: prefer the sticky depth from
-    // this stroke's first hit over pickConstruction's own plane fallback
-    // (which is anchored at the 3D cursor/origin, not the stroke's depth)
-    if (excludedStrokeId !== null && stickyDepth !== null) {
+    // same "clay" release as SPLAT: only stay glued near the last real hit
+    if (excludedStrokeId !== null && stickyDepth !== null && stickyAnchorPx
+      && Math.hypot(px - stickyAnchorPx.x, py - stickyAnchorPx.y) < STICKY_RELEASE_PX) {
       const p = pointAtViewDepth(ctx, raycaster.ray, stickyDepth);
       if (p) return p;
     }
+    // detached: pickConstruction's own plane fallback is as good as ours
     return new THREE.Vector3(...hit.world);
   }
   const plane = drawingPlane(ctx);
