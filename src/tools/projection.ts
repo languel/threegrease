@@ -31,6 +31,13 @@ let stickyAnchorPx: { x: number; y: number } | null = null;
  *  active Placement resolved it to), instead of a fixed cursor/object
  *  anchor — captured once per stroke, reused for every later point. */
 let viewOriginPlane: THREE.Plane | null = null;
+/** placementLock's frozen depth for STROKE/SPLAT/NEAREST — captured from
+ *  whatever the stroke's first point resolved to (target or plane
+ *  fallback alike) and reused unchanged for the rest of the stroke. */
+let lockedDepth: number | null = null;
+/** placementSmooth's eased depth for STROKE/SPLAT/NEAREST — chases each
+ *  newly-resolved depth instead of snapping straight to it. */
+let smoothedDepth: number | null = null;
 export function setStrokeExclusion(id: number | null): void {
   excludedStrokeId = id;
   stickyDepth = null;     // each new stroke re-acquires its depth anchor
@@ -38,6 +45,32 @@ export function setStrokeExclusion(id: number | null): void {
   drawingSurface = null;  // ...and its surface
   perpPlane = null;       // ...and its Surface-⊥ / Stroke-⊥ standing plane
   viewOriginPlane = null; // ...and its View-at-Origin standing plane
+  lockedDepth = null;     // ...and its placementLock freeze
+  smoothedDepth = null;   // ...and its placementSmooth chase
+}
+
+/** How fast placementSmooth's eased depth chases a newly-resolved target,
+ *  per point (0 = never moves, 1 = instant snap = same as off). */
+const DEPTH_SMOOTH_FACTOR = 0.25;
+
+/** placementLock/placementSmooth: STROKE/SPLAT/NEAREST placement re-query
+ *  their target continuously and can otherwise jump discontinuously
+ *  between two valid targets as the pointer drifts (e.g. from one nearby
+ *  stroke to another) — almost never what you want mid-stroke. Both
+ *  operate purely on DEPTH (distance along the view ray), so screen-space
+ *  XY still tracks the pointer exactly; only "which target is supplying
+ *  depth" is frozen/softened. Applied as a post-process over whatever
+ *  resolvePlacement() already returned (target hit, clay-release point,
+ *  or its own plane fallback alike), so none of that logic needs to know
+ *  about locking/smoothing at all. */
+function applyDepthPolicy(ctx: AppCtx, ray: THREE.Ray, raw: THREE.Vector3): THREE.Vector3 {
+  const rawDepth = depthAlongView(ctx, ray, raw);
+  if (ctx.settings.placementLock) {
+    if (lockedDepth === null) lockedDepth = rawDepth;
+    return pointAtViewDepth(ctx, ray, lockedDepth) ?? raw;
+  }
+  smoothedDepth = smoothedDepth === null ? rawDepth : smoothedDepth + (rawDepth - smoothedDepth) * DEPTH_SMOOTH_FACTOR;
+  return pointAtViewDepth(ctx, ray, smoothedDepth) ?? raw;
 }
 
 /** The sticky standing plane actually in effect for the in-progress
@@ -521,6 +554,19 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
       }
       return first;
     }
+  }
+  // STROKE/SPLAT/NEAREST re-query their target continuously and can jump
+  // discontinuously between two valid targets as the pointer drifts — see
+  // applyDepthPolicy's doc comment. Applied as a post-process over
+  // whatever resolvePlacement() returns, so its own target/clay/fallback
+  // logic doesn't need to know about locking/smoothing at all. No-op for
+  // placements with no target concept (ORIGIN/CURSOR/SURFACE) or that
+  // already lock permanently by design (SURFACE_PERP/STROKE_PERP).
+  const p = ctx.settings.placement;
+  if ((p === 'STROKE' || p === 'SPLAT' || p === 'NEAREST')
+    && (ctx.settings.placementLock || ctx.settings.placementSmooth) && excludedStrokeId !== null) {
+    const raw = resolvePlacement(ctx, x, y, rect);
+    return raw ? applyDepthPolicy(ctx, raycaster.ray, raw) : null;
   }
   return resolvePlacement(ctx, x, y, rect);
 }

@@ -838,6 +838,12 @@ export class UI {
         ...(s.placement === 'SURFACE' ? [
           numField('Offset', s.surfaceOffset, (v) => { s.surfaceOffset = v; }, 0.01),
         ] : []),
+        ...(s.placement === 'STROKE' || s.placement === 'SPLAT' || s.placement === 'NEAREST' ? [
+          checkbox('Lock', s.placementLock, (v) => { s.placementLock = v; },
+            'freeze the depth this stroke started at instead of re-snapping to whatever is nearest as you draw'),
+          checkbox('Smooth', s.placementSmooth, (v) => { s.placementSmooth = v; },
+            'ease toward a new target depth instead of jumping straight to it (ignored when Lock is on)'),
+        ] : []),
         selectField('Plane', s.plane, (s.upAxis === 'Z'
           ? [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['FRONT', 'Front (X·Z)'], ['SIDE', 'Side (Y·Z)'], ['TOP', 'Top (X·Y)'], ['CURSOR', 'Cursor']]
           : [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)'], ['CURSOR', 'Cursor']]) as [PlaneMode, string][],

@@ -47,6 +47,18 @@ export interface Settings {
   strokeTarget: StrokeTarget;  // which points of existing strokes anchor depth
   surfaceOffset: number;       // world units above the surface hit (along normal)
   plane: PlaneMode;
+  /** STROKE/SPLAT/NEAREST placement continuously re-resolve their target as
+   *  the pointer moves and can jump discontinuously between two valid
+   *  targets (e.g. drifting from one nearby stroke to another) — almost
+   *  never what you want mid-stroke. placementLock freezes whatever the
+   *  stroke's first point resolved to (depth only — screen-space XY still
+   *  tracks the pointer exactly) for the rest of that stroke.
+   *  placementSmooth eases toward each newly-resolved depth instead of
+   *  snapping to it. Both no-ops for placements that already have their
+   *  own permanent lock (SURFACE_PERP/STROKE_PERP) or no target concept
+   *  (ORIGIN/CURSOR/SURFACE). Lock wins if both are on. */
+  placementLock: boolean;
+  placementSmooth: boolean;
   guide: { type: GuideType; angle: number; spacing: number };
   selectMode: 'POINT' | 'STROKE';
   autoKey: boolean;
@@ -190,6 +202,8 @@ export function defaultSettings(): Settings {
     strokeTarget: 'ALL',
     surfaceOffset: 0,
     plane: 'VIEW',
+    placementLock: false,
+    placementSmooth: false,
     guide: { type: 'NONE', angle: 0, spacing: 40 },
     selectMode: 'POINT',
     autoKey: false,
