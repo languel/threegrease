@@ -73,6 +73,8 @@ export function deserializeScene(json: string): GPScene {
     pm.rev ??= 0;
     pm.unlit ??= false;
     pm.doubleSided ??= true;
+    pm.texture ??= null;
+    if (pm.texture?.startsWith('blob:')) pm.texture = null; // session-only
     for (const v of pm.vertices ?? []) v.binding ??= null;
     sanitizePolyMesh(pm);
   }

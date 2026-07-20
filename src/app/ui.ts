@@ -487,6 +487,10 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
     ['splatpaint', 'droplet', 'Splat Paint (3DGS) — deposit gaussian splats along the pointer path; Size=stamp px, Strength=alpha, vertex color=splat color, spacing/jitter from brush style; Ctrl+drag erases; placement/plane options apply'],
     ['texpaint', 'photo', 'Texture Paint — brush directly into the texture of the mesh under the pointer (vertex color = paint color, Strength = opacity); persists to the mesh texture on release'],
+    // spray-style color tools, same brush family as VERTEX/WEIGHT modes —
+    // available here too so you never have to leave DRAW to touch color
+    ['vertexpaint', 'brush', 'Vertex Paint — spray per-point color onto the active GP object\'s strokes'],
+    ['weightpaint', 'adjustments', 'Weight Paint — spray the softness vertex group onto the active GP object\'s strokes'],
   ],
   EDIT: [
     ['select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
@@ -789,6 +793,23 @@ export class UI {
           btn(icon('arrowsRightLeft'), () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
         );
       }
+    } else if (s.mode === 'DRAW' && s.activeTool === 'vertexpaint') {
+      // spray color directly onto GP point vertex colors — same controls
+      // as the old standalone VERTEX mode, just reachable without leaving
+      // DRAW (proper Color swatch instead of the flat brush.vertexColor
+      // default nothing else exposed)
+      bar.append(
+        selectField('Brush', s.paint.brush, [['DRAW', 'Draw'], ['BLUR', 'Blur'], ['AVERAGE', 'Average'], ['SMEAR', 'Smear']] as [PaintBrush, string][], (v) => { s.paint.brush = v; }),
+        colorField('Color', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }),
+        slider('Radius', s.paint.radius, 5, 150, 1, (v) => { s.paint.radius = v; }, { def: 40 }),
+        slider('Strength', s.paint.strength, 0.05, 1, 0.05, (v) => { s.paint.strength = v; }),
+      );
+    } else if (s.mode === 'DRAW' && s.activeTool === 'weightpaint') {
+      bar.append(
+        slider('Weight', s.weight.target, 0, 1, 0.05, (v) => { s.weight.target = v; }),
+        slider('Radius', s.weight.radius, 5, 150, 1, (v) => { s.weight.radius = v; }, { def: 40 }),
+        slider('Strength', s.weight.strength, 0.05, 1, 0.05, (v) => { s.weight.strength = v; }),
+      );
     } else if (s.mode === 'DRAW') {
       bar.append(
         selectField('Brush', s.brush.preset,
@@ -805,6 +826,13 @@ export class UI {
           }),
         slider('Size', s.brush.size, 1, 80, 1, (v) => { s.brush.size = v; }, { def: 8, route: 'brush.size' }),
         slider('Strength', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }, { def: 1, route: 'brush.strength' }),
+        // splat/texture painting spray their color from the same
+        // brush.vertexColor swatch as vertex paint — surface it here so
+        // it's never a hidden default (this was previously invisible,
+        // making the spray color look "stuck" on its orange default)
+        ...(s.activeTool === 'splatpaint' || s.activeTool === 'texpaint' ? [
+          colorField('Color', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }),
+        ] : []),
         selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['SURFACE_PERP', 'Surface ⊥'], ['STROKE', 'Stroke']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
         ...(s.placement === 'SURFACE' ? [
           numField('Offset', s.surfaceOffset, (v) => { s.surfaceOffset = v; }, 0.01),
