@@ -1374,6 +1374,9 @@ export class UI {
       }))] : []),
       el('div', { class: 'menu-header', text: 'Background' }),
       fieldRow('Color', colorField('', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); })),
+      el('div', { class: 'menu-header', text: 'Helpers' }),
+      fieldRow('', checkbox('Plane helper', s.showPlaneHelper, (v) => { s.showPlaneHelper = v; save(); },
+        'wireframe square showing the plane strokes/splats/etc. are actually landing on right now')),
     );
   }
 

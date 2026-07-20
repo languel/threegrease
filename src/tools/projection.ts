@@ -40,6 +40,17 @@ export function setStrokeExclusion(id: number | null): void {
   viewOriginPlane = null; // ...and its View-at-Origin standing plane
 }
 
+/** The sticky standing plane actually in effect for the in-progress
+ *  stroke, if any (Surface ⊥ / Stroke ⊥ / View at Origin) — used by the
+ *  Plane Helper to show what strokes are REALLY landing on mid-draw,
+ *  not just the idle Plane setting's default resolution. Null when
+ *  nothing is sticky yet (no stroke in progress, or its first point
+ *  hasn't resolved one), in which case drawingPlane(ctx) is the right
+ *  thing to visualize instead. */
+export function currentStickyPlane(): THREE.Plane | null {
+  return perpPlane ?? viewOriginPlane;
+}
+
 /** SURFACE_PERP: the plane the stroke grows on — through the surface hit
  *  point, CONTAINING the surface normal ("grows perpendicular to the
  *  reference"), oriented to face the camera as much as possible. Its
@@ -204,6 +215,43 @@ export function nearestConstructionPreview(ctx: AppCtx, screenX: number, screenY
   if (p.z > 1) return null;
   const rect = ctx.canvas.getBoundingClientRect();
   return { x: (p.x * 0.5 + 0.5) * rect.width, y: (-p.y * 0.5 + 0.5) * rect.height };
+}
+
+/** HUD preview for whichever Placement mode is active — one entry point
+ *  so the HUD draw code doesn't need to special-case each mode. Returns
+ *  the screen anchor a click would snap to, or null when there's nothing
+ *  to preview (ORIGIN/CURSOR/⊥ modes that don't have a discrete "target"
+ *  to point at, or a miss for the modes that do). */
+export function placementPreview(ctx: AppCtx, screenX: number, screenY: number): { x: number; y: number } | null {
+  const rect = ctx.canvas.getBoundingClientRect();
+  const toScreen = (world: THREE.Vector3): { x: number; y: number } | null => {
+    const p = world.clone().project(ctx.camera);
+    if (p.z > 1) return null;
+    return { x: (p.x * 0.5 + 0.5) * rect.width, y: (-p.y * 0.5 + 0.5) * rect.height };
+  };
+  switch (ctx.settings.placement) {
+    case 'STROKE':
+      return strokeSnapPreview(ctx, screenX, screenY);
+    case 'NEAREST':
+      return nearestConstructionPreview(ctx, screenX, screenY);
+    case 'SURFACE':
+    case 'SURFACE_PERP': {
+      const hit = raycastSurfaces(ctx, screenX + rect.left, screenY + rect.top);
+      return hit ? toScreen(hit) : null;
+    }
+    case 'STROKE_PERP': {
+      const seg = nearestStrokeSegmentAll(ctx, screenX, screenY, 80);
+      return seg ? toScreen(seg.a.clone().lerp(seg.b, seg.t)) : null;
+    }
+    case 'SPLAT': {
+      const pcp = pickPaintCloudPoint(ctx, screenX, screenY, 40);
+      const sp = pickSplatPoint(ctx, screenX, screenY, 40);
+      const world = pcp && (!sp || pcp.d <= sp.d) ? pcp.world : sp ? sp.world : null;
+      return world ? toScreen(new THREE.Vector3(...world)) : null;
+    }
+    default:
+      return null; // ORIGIN/CURSOR: no discrete snap target to point at
+  }
 }
 
 /** Canvas plane under a canvas-local screen point, or null. */

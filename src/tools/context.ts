@@ -81,6 +81,11 @@ export interface Settings {
   gridColor: Vec3 | null;
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
+  /** debug aid: a wireframe unit square + normal tick showing the plane
+   *  strokes/splats/etc. actually land on right now (the active sticky
+   *  standing plane while mid-stroke, else the plain Plane setting's
+   *  resolution) — see App.updatePlaneHelper. */
+  showPlaneHelper: boolean;
   /** Blender-style magnet: one snap setting for transforms AND the 3D
    *  cursor (Shift+RMB drag). 'CANVAS' is a legacy alias for 'SURFACE'.
    *  strokeScope limits POINT snapping to selected strokes only.
@@ -110,7 +115,7 @@ export function snapIncrement(s: Settings): number {
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
-  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'background', 'snap',
+  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'showPlaneHelper', 'background', 'snap',
   'uiAccent', 'uiHighlight', 'gridColor',
 ] as const;
 
@@ -201,6 +206,7 @@ export function defaultSettings(): Settings {
     gridColor: null,
     upAxis: 'Z',
     showAxes: false,
+    showPlaneHelper: false,
     snap: { enabled: false, mode: 'INCREMENT', strokeScope: 'ANY' },
   };
 }

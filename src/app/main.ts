@@ -79,7 +79,7 @@ import {
   downloadScene, downloadText, importGPObjects, openSceneFile,
   remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
-import { drawingPlane, nearestConstructionPreview, nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, objectToScreen, perpendicularFoot, raycastFaceTriangle, raycastSurfaces, screenToWorld, strokeSnapPreview } from '../tools/projection';
+import { currentStickyPlane, drawingPlane, nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, objectToScreen, perpendicularFoot, placementPreview, raycastFaceTriangle, raycastSurfaces, screenToWorld } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
@@ -168,6 +168,9 @@ class App implements AppHandle {
   private ui!: UI;
   private hud: HTMLCanvasElement;
   private cursorMarker: THREE.Group;
+  /** debug aid: wireframe unit square + normal tick showing the current
+   *  drawing plane — toggled via settings.showPlaneHelper */
+  private planeHelper: THREE.Group;
   /** N2: Blender-style orange outlines + origin dots for selected objects */
   private selGlyphs = new THREE.Group();
   private selHelpers = new Map<string, { box: THREE.Box3; helper: LineSegments2; dot: THREE.Points }>();
@@ -299,6 +302,8 @@ class App implements AppHandle {
     this.scene3.add(this.gp.root);
     this.cursorMarker = this.makeCursorMarker();
     this.scene3.add(this.cursorMarker);
+    this.planeHelper = this.makePlaneHelper();
+    this.scene3.add(this.planeHelper);
     this.scene3.add(this.selGlyphs);
     // a ground plane for SURFACE placement demos
     this.scene3.add(this.canvasGroup);
@@ -2622,6 +2627,46 @@ class App implements AppHandle {
     m.scale.setScalar(Math.max(1e-6, worldPerPx * PX));
   }
 
+  /** Debug aid: a plain wireframe unit square + a short normal tick,
+   *  facing whichever way the plane's normal points. */
+  private makePlaneHelper(): THREE.Group {
+    const g = new THREE.Group();
+    const h = 0.5;
+    const square = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-h, -h, 0), new THREE.Vector3(h, -h, 0),
+        new THREE.Vector3(h, h, 0), new THREE.Vector3(-h, h, 0),
+      ]),
+      new THREE.LineBasicMaterial({ color: 0xffcc33, depthTest: false, transparent: true }),
+    );
+    const normalTick = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0.35)]),
+      new THREE.LineBasicMaterial({ color: 0xffcc33, depthTest: false, transparent: true }),
+    );
+    g.add(square, normalTick);
+    g.traverse((o) => { o.renderOrder = 15000; });
+    g.visible = false;
+    return g;
+  }
+
+  /** Orients the plane helper to the plane strokes/splats actually land
+   *  on right now: the active sticky standing plane while mid-stroke
+   *  (Surface ⊥ / Stroke ⊥ / View at Origin), else the idle Plane
+   *  setting's own resolution — anchored at whichever point on that
+   *  plane is nearest the 3D cursor, so it stays near where you're
+   *  working instead of drifting off to wherever the plane's arbitrary
+   *  reference point happens to be. */
+  private updatePlaneHelper(): void {
+    const ctx = this.ctx;
+    this.planeHelper.visible = ctx.settings.showPlaneHelper && !this.presentation;
+    if (!this.planeHelper.visible) return;
+    const plane = currentStickyPlane() ?? drawingPlane(ctx);
+    const anchor = plane.projectPoint(new THREE.Vector3(...ctx.scene.cursor), new THREE.Vector3());
+    this.planeHelper.position.copy(anchor);
+    const target = anchor.clone().add(plane.normal);
+    this.planeHelper.lookAt(target);
+  }
+
   private resize(): void {
     const vp = document.getElementById('viewport')!;
     const w = vp.clientWidth, h = vp.clientHeight;
@@ -2759,6 +2804,7 @@ class App implements AppHandle {
     }
     this.cursorMarker.position.set(...ctx.scene.cursor);
     this.updateCursorMarker();
+    this.updatePlaneHelper();
 
     // hide groups whose object has active effects; composite them after
     const fxJobs: { group: THREE.Group; obIndex: number }[] = [];
@@ -2853,14 +2899,11 @@ class App implements AppHandle {
       g.fillText(line, w / 2, 23);
       g.textAlign = 'left';
     }
-    // STROKE / NEAREST placement: show what the pointer will snap to
-    const previewPlacement = this.ctx.settings.mode === 'DRAW'
-      && (this.ctx.settings.placement === 'STROKE' || this.ctx.settings.placement === 'NEAREST');
-    if (previewPlacement && !this.nav.flying) {
+    // Placement preview: show what the pointer will snap to (every mode
+    // with a discrete target — ORIGIN/CURSOR have none, so no HUD there)
+    if (this.ctx.settings.mode === 'DRAW' && !this.nav.flying) {
       const { x, y } = this.tools.lastPointer;
-      const anchor = this.ctx.settings.placement === 'STROKE'
-        ? strokeSnapPreview(this.ctx, x, y)
-        : nearestConstructionPreview(this.ctx, x, y);
+      const anchor = placementPreview(this.ctx, x, y);
       if (anchor) {
         g.beginPath();
         g.moveTo(x, y);
