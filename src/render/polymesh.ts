@@ -307,8 +307,12 @@ export class PolyMeshManager {
     }
     entry.verts.instanceMatrix.needsUpdate = true;
     if (entry.verts.instanceColor) entry.verts.instanceColor.needsUpdate = true;
-    entry.verts.visible = isEdit || pm.select || pm.faces.length === 0;
-    (entry.verts.material as THREE.MeshBasicMaterial).opacity = isEdit ? 0.95 : 0.6;
+    // vertex diamonds are an editing affordance, not a display style —
+    // only the mesh actively being worked on (a quilt tool is active AND
+    // targeting it) shows them; a merely-selected-in-object-mode mesh
+    // does not, so idle meshes don't clutter the viewport
+    entry.verts.visible = isEdit;
+    (entry.verts.material as THREE.MeshBasicMaterial).opacity = 0.95;
   }
 
   private applyPreview(camera: THREE.Camera): void {

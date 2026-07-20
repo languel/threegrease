@@ -2439,19 +2439,17 @@ class App implements AppHandle {
         entry = { box, helper, dot };
         this.selHelpers.set(key, entry);
       }
+      const isEmptyMesh = ref.kind === 'MESH' && scene.meshes.find((m) => m.id === ref.id)?.kind === 'EMPTY';
       if (ref.kind === 'POLY') this.polyDataBox(ref, entry.box);
-      else entry.box.setFromObject(root);
-      if (entry.box.isEmpty()) {
-        // matrix-driven objects (streams/triggers) keep .position at 0 —
-        // use the data-model world matrix for the fallback box center
-        // instead. A full unit cube reads fine for those (no geometry of
-        // their own to size against) but is oversized for a genuinely
-        // empty GP object (no strokes yet) — use a small marker instead,
-        // matching Blender's "empty" display size.
+      else if (!isEmptyMesh) entry.box.setFromObject(root);
+      if (isEmptyMesh || entry.box.isEmpty()) {
+        // matrix-driven objects (streams/triggers/empties) keep .position
+        // at 0 or have no surface geometry of their own — use the
+        // data-model world matrix for a small Blender-"empty"-style
+        // marker rather than a full unit cube (a genuinely empty GP/poly
+        // object, with no strokes/vertices yet, gets the same treatment).
         const center = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
-        // empty GP/poly objects (no strokes / no vertices yet) get a small
-        // Blender-"empty"-style marker, not a full unit cube
-        const size = ref.kind === 'GP' || ref.kind === 'POLY' ? 0.15 : 1;
+        const size = ref.kind === 'GP' || ref.kind === 'POLY' || isEmptyMesh ? 0.15 : 1;
         entry.box.setFromCenterAndSize(center, new THREE.Vector3(size, size, size));
       }
       const meshKind = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id)?.kind : undefined;

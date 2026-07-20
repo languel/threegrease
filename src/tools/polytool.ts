@@ -31,6 +31,7 @@ import type { AppCtx } from './context';
 import type { TGPolyMesh, Vec3 } from '../core/types';
 import type { Tool, ToolEvent } from './toolsys';
 import { applyGuide, drawingPlane, perpendicularPlaneAt } from './projection';
+import { snapIncrement } from './context';
 import { worldMatrixOf } from './objects';
 import {
   addEdge, addFace, addVertex, cleanupDegenerateFaces, dissolveEdge, dissolveVertex,
@@ -217,6 +218,18 @@ export class PolyPenTool implements Tool {
     ray.setFromCamera(ndc, ctx.camera);
     const out = new THREE.Vector3();
     return ray.ray.intersectPlane(plane, out) ? out : null;
+  }
+
+  /** Rigid moves (edge/face drag, boundary extrusion) compute a raw plane
+   *  delta with no source to snap to — round it to the Increment/Grid
+   *  lattice (in LOCAL space, so it lines up with everything else the
+   *  magnet drives) when the global magnet is on in a lattice mode. */
+  private snapLocalDelta(ctx: AppCtx, d: THREE.Vector3): THREE.Vector3 {
+    const snap = ctx.settings.snap;
+    if (!snap.enabled || (snap.mode !== 'INCREMENT' && snap.mode !== 'GRID')) return d;
+    const g = snapIncrement(ctx.settings);
+    return new THREE.Vector3(
+      Math.round(d.x / g) * g, Math.round(d.y / g) * g, Math.round(d.z / g) * g);
   }
 
   private screenOf(ctx: AppCtx, world: Vec3): THREE.Vector2 | null {
@@ -497,7 +510,7 @@ export class PolyPenTool implements Tool {
     const inv = worldMatrixOf(ctx.scene, { kind: 'POLY', id: pm.id }).invert();
     const p0 = new THREE.Vector3().copy(st.startWorld).applyMatrix4(inv);
     const p1 = cur.clone().applyMatrix4(inv);
-    const d = p1.sub(p0);
+    const d = e.ctrl ? p1.sub(p0) : this.snapLocalDelta(ctx, p1.sub(p0));
     for (const id of st.vertexIds) {
       const orig = snap.vertices.find((v) => v.id === id);
       const v = getVertex(pm, id);
@@ -558,7 +571,7 @@ export class PolyPenTool implements Tool {
     const inv = worldMatrixOf(ctx.scene, { kind: 'POLY', id: pm.id }).invert();
     const p0 = new THREE.Vector3().copy(st.startWorld).applyMatrix4(inv);
     const p1 = cur.clone().applyMatrix4(inv);
-    const d = p1.sub(p0);
+    const d = e.ctrl ? p1.sub(p0) : this.snapLocalDelta(ctx, p1.sub(p0));
     na.co = [origA.co[0] + d.x, origA.co[1] + d.y, origA.co[2] + d.z];
     nb.co = [origB.co[0] + d.x, origB.co[1] + d.y, origB.co[2] + d.z];
     touchPolyMesh(pm);
