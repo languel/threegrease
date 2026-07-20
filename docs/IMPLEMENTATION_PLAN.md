@@ -2231,3 +2231,25 @@ merged into "Modifiers, effects & constraints". panelHint() turns
 standalone instructional rows into panel-header hover tooltips
 (outliner legend, Scene magnet note, Canvases placement note, Settings
 notes, wire-art assist note, Constraints explainer).
+
+## 3DGS painting + texture painting + subdivision/smoothing
+
+- **Subdivide/Smooth for editable meshes**: subdividePolyMesh (edge
+  midpoints via splitEdge + quad fans around boundary-average centers —
+  Catmull-Clark connectivity) and smoothPolyMesh (Laplacian over edge
+  adjacency, selection-aware). Object right-click menu + palette;
+  strokes already had Subdivide/Smooth edit ops.
+- **3DGS painting**: TGPaintCloud (scene.paintClouds) — authored splat
+  clouds, plain-JSON points stride 8 (x,y,z local, world radius, rgb,
+  alpha), full ObjKind 'PCLOUD' object integration, per-point gaussian
+  sprite renderer (PaintCloudManager, rev-cached), Splat Paint brush in
+  the DRAW toolbar (pencil placement rules incl. Surface ⊥; Size px ->
+  world radius at deposit depth; Strength=alpha; vertex color; spacing/
+  jitter; Ctrl+drag erases; one undo per stroke), and world-space 3DGS
+  PLY export per cloud (outliner button, PlayCanvas/SuperSplat layout).
+- **Texture painting**: Texture Paint tool stamps into a 1024px canvas
+  at the raycast hit UV, live via MeshManager begin/refresh/endLive-
+  Texture (apply() defers while a stroke is in flight), persisting to
+  TGMesh.texture as a dataURL on release. Segment-filled stamps, pen
+  pressure, starts from the mesh's current texture/color.
+Not verified live this pass (typecheck + build only per workflow).
