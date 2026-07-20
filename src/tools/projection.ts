@@ -38,6 +38,26 @@ export function perpendicularPlaneAt(
   return new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal.normalize().negate(), point);
 }
 
+/** Signed distance of `point` from the ray origin along the camera's view
+ *  direction — the depth of a plane parallel to the view plane through
+ *  that point. Paired with pointAtViewDepth() below to build a sticky
+ *  "hold the depth of the stroke's first snapped point" fallback for
+ *  placement modes whose snap source (a single point/vertex, not a
+ *  continuous surface) can go out of range mid-stroke. */
+function depthAlongView(ctx: AppCtx, ray: THREE.Ray, point: THREE.Vector3): number {
+  const camDir = ctx.camera.getWorldDirection(new THREE.Vector3());
+  return camDir.dot(point.clone().sub(ray.origin));
+}
+
+/** Inverse of depthAlongView: where the ray crosses the view-parallel plane
+ *  at that depth. Null when the ray is ~parallel to the view plane. */
+function pointAtViewDepth(ctx: AppCtx, ray: THREE.Ray, depth: number): THREE.Vector3 | null {
+  const camDir = ctx.camera.getWorldDirection(new THREE.Vector3());
+  const cos = camDir.dot(ray.direction);
+  if (Math.abs(cos) < 1e-6) return null;
+  return ray.origin.clone().addScaledVector(ray.direction, depth / cos);
+}
+
 function ownedBy(object: THREE.Object3D, root: THREE.Object3D): boolean {
   let cur: THREE.Object3D | null = object;
   while (cur) {
@@ -490,12 +510,36 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
     // are both valid "splat" sources; take whichever is nearer on screen
     const pcp = pickPaintCloudPoint(ctx, x - rect.left, y - rect.top, 40);
     const sp = pickSplatPoint(ctx, x - rect.left, y - rect.top, 40);
-    if (pcp && (!sp || pcp.d <= sp.d)) return new THREE.Vector3(...pcp.world);
-    if (sp) return new THREE.Vector3(...sp.world);
-    // nothing under the pointer: fall through to the drawing plane
+    const hit = pcp && (!sp || pcp.d <= sp.d) ? new THREE.Vector3(...pcp.world)
+      : sp ? new THREE.Vector3(...sp.world) : null;
+    if (hit) {
+      if (excludedStrokeId !== null) stickyDepth = depthAlongView(ctx, raycaster.ray, hit);
+      return hit;
+    }
+    // pointer drifted off every splat point: hold the depth of the
+    // stroke's first hit (view-parallel plane through it) instead of
+    // dropping all the way to the drawing plane
+    if (excludedStrokeId !== null && stickyDepth !== null) {
+      const p = pointAtViewDepth(ctx, raycaster.ray, stickyDepth);
+      if (p) return p;
+    }
+    // no hit yet this stroke either: fall through to the drawing plane
   }
   if (ctx.settings.placement === 'NEAREST') {
     const hit = pickConstruction(ctx, x - rect.left, y - rect.top, {});
+    const real = hit.source.kind !== 'PLANE' && hit.source.kind !== 'FREE';
+    if (real) {
+      const w = new THREE.Vector3(...hit.world);
+      if (excludedStrokeId !== null) stickyDepth = depthAlongView(ctx, raycaster.ray, w);
+      return w;
+    }
+    // nothing snappable under the pointer: prefer the sticky depth from
+    // this stroke's first hit over pickConstruction's own plane fallback
+    // (which is anchored at the 3D cursor/origin, not the stroke's depth)
+    if (excludedStrokeId !== null && stickyDepth !== null) {
+      const p = pointAtViewDepth(ctx, raycaster.ray, stickyDepth);
+      if (p) return p;
+    }
     return new THREE.Vector3(...hit.world);
   }
   const plane = drawingPlane(ctx);
