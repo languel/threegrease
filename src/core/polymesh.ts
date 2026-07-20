@@ -14,7 +14,10 @@ export function createPolyMesh(id: number, name: string, at: Vec3 = [0, 0, 0]): 
     translation: [...at], rotation: [0, 0, 0], scale: [1, 1, 1],
     visible: true, select: false, lock: false, parent: null, constraints: [],
     drawTarget: true, wireframe: false,
-    color: [0.35, 0.78, 0.95], opacity: 0.85,
+    // neutral, matching primitive mesh defaults (render/meshes.ts) — the
+    // blue/cyan accents belong to the edit-time vertex/edge overlay only
+    // (COL_SELECT etc. in render/polymesh.ts), never the object's own color
+    color: [0.62, 0.65, 0.72], opacity: 1,
     unlit: false, doubleSided: true,
   };
 }

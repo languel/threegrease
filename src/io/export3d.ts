@@ -10,7 +10,7 @@ import type { AppCtx } from '../tools/context';
 import { frameAt } from '../core/gpdata';
 import { evaluateModifiers, remapTime } from '../modifiers/index';
 import { buildFillGeometry } from '../render/geometry';
-import { triangulateFace } from '../render/polymesh';
+import { polyAutoUV, triangulateFace } from '../render/polymesh';
 import { edgeFaceCount } from '../core/polymesh';
 import { worldMatrixOf } from '../tools/objects';
 import { primitiveGeometry } from '../render/meshes';
@@ -35,8 +35,20 @@ export const DEFAULT_EXPORT3D: Export3DOptions = {
   pxToWorld: 0.005, radialSegments: 6, minRadius: 0.002, selectedOnly: false, includePointClouds: true,
 };
 
-/** Build a plain-geometry group mirroring the visible drawing. */
-export function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): THREE.Group {
+const textureLoader = new THREE.TextureLoader();
+/** Loads and decodes a texture (dataURL or blob/http URL) for embedding
+ *  into an export — awaited so GLTFExporter sees a ready image, never a
+ *  blank one from a texture that hadn't finished decoding yet. */
+async function loadTexture(src: string): Promise<THREE.Texture> {
+  const tex = await textureLoader.loadAsync(src);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** Build a plain-geometry group mirroring the visible drawing. Async: it
+ *  awaits painted-texture decode (primitive mesh / poly mesh .texture
+ *  dataURLs) so exported materials carry them, not just a flat color. */
+export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Promise<THREE.Group> {
   const group = new THREE.Group();
   group.name = 'threegrease';
   const scene = ctx.scene;
@@ -106,20 +118,28 @@ export function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): THREE.Grou
     const co = new Map(pm.vertices.map((v) => [v.id, v.co] as const));
     const color = new THREE.Color(pm.color[0], pm.color[1], pm.color[2]);
 
+    const uvOf = polyAutoUV(pm);
     const facePos: number[] = [];
+    const faceUv: number[] = [];
     for (const f of pm.faces) {
       const boundary = f.vertices.map((id) => co.get(id)).filter((c): c is Vec3 => !!c);
       if (boundary.length !== f.vertices.length || boundary.length < 3) continue;
       for (const [a, b, c] of triangulateFace(boundary)) {
         facePos.push(...boundary[a], ...boundary[b], ...boundary[c]);
+        faceUv.push(...uvOf(boundary[a]), ...uvOf(boundary[b]), ...uvOf(boundary[c]));
       }
     }
     if (facePos.length) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(facePos, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(faceUv, 2));
       geo.applyMatrix4(matrix);
       geo.computeVertexNormals();
-      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide }));
+      const material = new THREE.MeshStandardMaterial({
+        color, side: THREE.DoubleSide, transparent: pm.opacity < 1, opacity: pm.opacity,
+      });
+      if (pm.texture) material.map = await loadTexture(pm.texture);
+      const mesh = new THREE.Mesh(geo, material);
       mesh.name = pm.name;
       group.add(mesh);
     }
@@ -165,9 +185,11 @@ export function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): THREE.Grou
     geo.applyMatrix4(worldMatrixOf(scene, { kind: 'MESH', id: m.id }));
     geo.computeVertexNormals();
     const color = new THREE.Color(m.color[0], m.color[1], m.color[2]);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    const material = new THREE.MeshStandardMaterial({
       color, opacity: m.opacity, transparent: m.opacity < 1, side: m.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
-    }));
+    });
+    if (m.texture) material.map = await loadTexture(m.texture);
+    const mesh = new THREE.Mesh(geo, material);
     mesh.name = m.name;
     group.add(mesh);
   }
@@ -207,14 +229,14 @@ function download(data: BlobPart, filename: string, type: string): void {
 }
 
 export async function exportGLB(ctx: AppCtx, opts = DEFAULT_EXPORT3D): Promise<ArrayBuffer> {
-  const group = buildExportGroup(ctx, opts);
+  const group = await buildExportGroup(ctx, opts);
   const buffer = await new GLTFExporter().parseAsync(group, { binary: true }) as ArrayBuffer;
   download(buffer, 'threegrease.glb', 'model/gltf-binary');
   return buffer;
 }
 
-export function exportOBJ(ctx: AppCtx, opts = DEFAULT_EXPORT3D): string {
-  const text = new OBJExporter().parse(buildExportGroup(ctx, opts));
+export async function exportOBJ(ctx: AppCtx, opts = DEFAULT_EXPORT3D): Promise<string> {
+  const text = new OBJExporter().parse(await buildExportGroup(ctx, opts));
   download(text, 'threegrease.obj', 'text/plain');
   return text;
 }
@@ -223,9 +245,11 @@ export function exportOBJ(ctx: AppCtx, opts = DEFAULT_EXPORT3D): string {
  *  Always excludes point clouds regardless of opts.includePointClouds —
  *  THREE's PLYExporter drops ALL triangle faces the moment any Points
  *  object is present in the group (see exportScenePLY), so this format
- *  stays a pure-faces export; use "Export Full Scene (PLY)" for splats. */
-export function exportPLY(ctx: AppCtx, opts = DEFAULT_EXPORT3D): ArrayBuffer | string | null {
-  const group = buildExportGroup(ctx, { ...opts, includePointClouds: false });
+ *  stays a pure-faces export; use "Export Full Scene (PLY)" for splats.
+ *  PLY has no texture support at all (per THREE's own PLYExporter docs),
+ *  so textured faces fall back to their flat material color here. */
+export async function exportPLY(ctx: AppCtx, opts = DEFAULT_EXPORT3D): Promise<ArrayBuffer | string | null> {
+  const group = await buildExportGroup(ctx, { ...opts, includePointClouds: false });
   const result = new PLYExporter().parse(group, () => {}, { binary: true }) as ArrayBuffer | null;
   if (result) download(result, 'threegrease.ply', 'application/octet-stream');
   return result;
@@ -242,9 +266,11 @@ export function exportPLY(ctx: AppCtx, opts = DEFAULT_EXPORT3D): ArrayBuffer | s
  *  every triangle face in the file — so this walks buildExportGroup's
  *  Mesh/Points children directly and writes the binary file by hand.
  *  LineSegments (poly-mesh edges with no face) have no PLY analogue and
- *  are skipped, same as every other exporter in this file. */
-export function exportScenePLY(ctx: AppCtx, opts = DEFAULT_EXPORT3D): ArrayBuffer | null {
-  const group = buildExportGroup(ctx, opts);
+ *  are skipped, same as every other exporter in this file. Textures
+ *  aren't carried either (PLY has no texture concept) — textured faces
+ *  fall back to their flat material color, same as exportPLY. */
+export async function exportScenePLY(ctx: AppCtx, opts = DEFAULT_EXPORT3D): Promise<ArrayBuffer | null> {
+  const group = await buildExportGroup(ctx, opts);
   const positions: number[] = [];
   const colors: number[] = []; // 0-255 per channel, parallel to positions
   const faces: number[][] = [];
@@ -321,8 +347,8 @@ export function exportScenePLY(ctx: AppCtx, opts = DEFAULT_EXPORT3D): ArrayBuffe
   return buffer;
 }
 
-export function exportSTL(ctx: AppCtx, opts = DEFAULT_EXPORT3D): DataView | string {
-  const result = new STLExporter().parse(buildExportGroup(ctx, opts), { binary: true });
+export async function exportSTL(ctx: AppCtx, opts = DEFAULT_EXPORT3D): Promise<DataView | string> {
+  const result = new STLExporter().parse(await buildExportGroup(ctx, opts), { binary: true });
   download(result as unknown as BlobPart, 'threegrease.stl', 'model/stl');
   return result;
 }

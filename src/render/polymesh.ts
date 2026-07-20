@@ -87,6 +87,26 @@ export function triangulateFace(coords: Vec3[]): [number, number, number][] {
   return tris.filter((t) => t.length === 3 && t.every((i) => i < count)) as [number, number, number][];
 }
 
+/** Dynamic planar auto-UV: box-projects a mesh's vertices onto its
+ *  dominant flat plane (the axis with the SMALLEST overall extent is
+ *  treated as the "normal", the other two become U/V) — good enough for
+ *  texture painting on a roughly-flat quilt, no persisted UV data needed.
+ *  Shared by the live renderer (rebuildGeometry) and the scene exporter
+ *  so painted textures line up the same way in both. */
+export function polyAutoUV(pm: TGPolyMesh): (co: Vec3) => [number, number] {
+  const box = new THREE.Box3();
+  for (const v of pm.vertices) box.expandByPoint(new THREE.Vector3(...v.co));
+  const size = box.getSize(new THREE.Vector3());
+  const flatAxis = size.x <= size.y && size.x <= size.z ? 0 : size.y <= size.z ? 1 : 2;
+  const [uAxis, vAxis] = flatAxis === 0 ? [1, 2] : flatAxis === 1 ? [0, 2] : [0, 1];
+  const uExt = Math.max(1e-6, size.getComponent(uAxis));
+  const vExt = Math.max(1e-6, size.getComponent(vAxis));
+  return (c: Vec3) => [
+    (c[uAxis] - box.min.getComponent(uAxis)) / uExt,
+    (c[vAxis] - box.min.getComponent(vAxis)) / vExt,
+  ];
+}
+
 interface Entry {
   group: THREE.Group;
   faceMesh: THREE.Mesh;
@@ -197,23 +217,7 @@ export class PolyMeshManager {
     const pos: number[] = [];
     entry.triFaceIds = [];
     const co = new Map(pm.vertices.map((v) => [v.id, v.co] as const));
-
-    // auto-UV: box-project onto the mesh's dominant flat plane (the axis
-    // with the SMALLEST overall extent is treated as the "normal", the
-    // other two become U/V) — a dynamic, always-available unwrap good
-    // enough for texture painting on a roughly-flat quilt; recomputed
-    // every rebuild since it only depends on the current vertex bounds.
-    const box = new THREE.Box3();
-    for (const v of pm.vertices) box.expandByPoint(new THREE.Vector3(...v.co));
-    const size = box.getSize(new THREE.Vector3());
-    const flatAxis = size.x <= size.y && size.x <= size.z ? 0 : size.y <= size.z ? 1 : 2;
-    const [uAxis, vAxis] = flatAxis === 0 ? [1, 2] : flatAxis === 1 ? [0, 2] : [0, 1];
-    const uExt = Math.max(1e-6, size.getComponent(uAxis));
-    const vExt = Math.max(1e-6, size.getComponent(vAxis));
-    const uvOf = (c: Vec3): [number, number] => [
-      (c[uAxis] - box.min.getComponent(uAxis)) / uExt,
-      (c[vAxis] - box.min.getComponent(vAxis)) / vExt,
-    ];
+    const uvOf = polyAutoUV(pm);
 
     const uvs: number[] = [];
     for (const f of pm.faces) {
