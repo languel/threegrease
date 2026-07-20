@@ -1220,12 +1220,8 @@ export class UI {
         build: () => [this.scenePanel()],
       },
       {
-        id: 'object', icon: 'cube', title: 'Objects — outliner · transform · material',
-        build: () => [this.objectsPanel(), this.objectPropsPanel()],
-      },
-      {
-        id: 'constraints', icon: 'link', title: 'Constraints — travelers · triggers · physics',
-        build: () => [this.constraintsPanel()],
+        id: 'object', icon: 'cube', title: 'Object — transform · material',
+        build: () => [this.objectPropsPanel()],
       },
       {
         id: 'brush', icon: 'brush', title: 'Brush & GP materials',
@@ -1243,8 +1239,8 @@ export class UI {
         ],
       },
       {
-        id: 'mods', icon: 'wrench', title: 'Modifiers & effects',
-        build: () => [this.modifiersPanel(), this.effectsPanel()],
+        id: 'mods', icon: 'wrench', title: 'Modifiers, effects & constraints',
+        build: () => [this.modifiersPanel(), this.effectsPanel(), this.constraintsPanel()],
       },
       {
         id: 'bindings', icon: 'boltCircle', title: 'Bindings — score · routes · MIDI/OSC/WS',
@@ -1278,7 +1274,12 @@ export class UI {
     } else {
       content.append(...active.build());
     }
-    side.append(strip, content);
+    // Blender-style outliner: pinned above the tab strip, always visible
+    // no matter which properties tab is open — object properties stay a
+    // subpanel under the "Object" tab rather than living in the outliner.
+    const outliner = el('div', { class: 'sidebar-outliner' }, this.objectsPanel());
+    const tabsRow = el('div', { class: 'sidebar-tabsrow' }, strip, content);
+    side.append(outliner, tabsRow);
   }
 
   /** Scene tab: grid + background — the environment settings that used to

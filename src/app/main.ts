@@ -1511,11 +1511,11 @@ class App implements AppHandle {
       minorGeo.setAttribute('position', new THREE.Float32BufferAttribute(minorPos, 3));
       if (s.gridSubdivStyle === 'dashed') {
         // dash pattern scales with the MAJOR step (the grid unit), not the
-        // subdivision spacing: dash = gap = step/4, so the step/2 period
-        // tiles each major cell exactly twice and the dashes stay aligned
-        // with the grid at any subdivision count
+        // subdivision spacing: dash = gap = step/16, so the period still
+        // tiles each major cell evenly and the dashes stay aligned with
+        // the grid at any subdivision count (finer default per user pref)
         const dashMat = new THREE.LineDashedMaterial({
-          color: sub, transparent: true, dashSize: step / 4, gapSize: step / 4,
+          color: sub, transparent: true, dashSize: step / 16, gapSize: step / 16,
         });
         const minorLines = new THREE.LineSegments(minorGeo, dashMat);
         minorLines.computeLineDistances(); // required per-object for dashing

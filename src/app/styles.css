@@ -69,7 +69,17 @@ body {
 }
 #sidebar {
   width: 288px; background: var(--panel); border-left: 1px solid var(--border);
-  padding: 0; display: flex; flex-direction: row; gap: 0; overflow: hidden;
+  padding: 0; display: flex; flex-direction: column; gap: 0; overflow: hidden;
+}
+/* Blender-style outliner: pinned at the top of the sidebar, always
+   visible regardless of which properties tab is open below it. Its own
+   scroll region so a long hierarchy doesn't push the tabs off-screen. */
+.sidebar-outliner {
+  flex: 0 0 auto; max-height: 34vh; overflow-y: auto;
+  border-bottom: 1px solid var(--border); padding: 6px;
+}
+.sidebar-tabsrow {
+  flex: 1; min-height: 0; display: flex; flex-direction: row; gap: 0; overflow: hidden;
 }
 .props-content {
   flex: 1; min-width: 0; overflow-y: auto; padding: 6px;
