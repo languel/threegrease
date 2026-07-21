@@ -10,7 +10,7 @@ import { GPSceneRenderer, type EditorMode } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { defaultSettings, loadPrefs, savePrefs, snapIncrement, type AppCtx } from '../tools/context';
 import { ToolManager, type ToolEvent } from '../tools/toolsys';
-import { DrawTool, EraseTool, TintTool, CutterTool, EyedropperTool } from '../tools/draw';
+import { DrawTool, EraseTool, SmoothTool, TintTool, CutterTool, EyedropperTool } from '../tools/draw';
 import { FillTool } from '../tools/fill';
 import { PrimitiveTool } from '../tools/primitives';
 import { SelectTool, selectAll, selectConnected, selectLinked, selectMoreLess, selectedPoints } from '../tools/select';
@@ -375,7 +375,7 @@ class App implements AppHandle {
 
     // tools
     for (const t of [
-      new DrawTool(), new EraseTool(), new FillTool(), new TintTool(), new CutterTool(),
+      new DrawTool(), new EraseTool(), new SmoothTool(), new FillTool(), new TintTool(), new CutterTool(),
       new EyedropperTool(), new PrimitiveTool('line'), new PrimitiveTool('polyline'),
       new PrimitiveTool('arc'), new PrimitiveTool('curve'), new PrimitiveTool('box'),
       new PrimitiveTool('circle'), this.interpTool,

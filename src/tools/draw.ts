@@ -4,7 +4,7 @@ import {
   activeLayer, activeObject, createPoint, createStroke, ensureFrame, frameAt,
   genId, visibleEditableLayers,
 } from '../core/gpdata';
-import { simplifyStroke, smoothAttr, smoothPoints, clamp } from '../core/mathutil';
+import { simplifyStroke, smoothAttr, smoothPoints, clamp, falloff } from '../core/mathutil';
 import type { AppCtx } from './context';
 import { applyGuide, eventToCanvas, objectToScreen, screenToWorld, setStrokeExclusion, worldToObject } from './projection';
 import { listSelected, worldMatrixOf } from './objects';
@@ -249,6 +249,78 @@ export function splitRuns(s: GPStroke, keepMask: boolean[]): GPStroke[] {
   s.points.forEach((p, i) => { if (keepMask[i]) run.push(p); else flush(); });
   flush();
   return out;
+}
+
+// -------------------------------------------------------------- Smooth tool
+
+/** A copy of Sculpt mode's SMOOTH brush usable directly from DRAW mode (no
+ *  mode switch needed) — sits right after Erase in the toolbar, defaults to
+ *  smoothing (there's no other brush to pick, unlike SculptTool which reads
+ *  ctx.settings.sculpt.brush). Scoped to the active GP object by default,
+ *  matching Sculpt mode's own scope; holding Shift broadens the brush to
+ *  every visible, unlocked GP object it passes over, not just the active
+ *  one (mirrors EraseTool's per-object local-matrix generalization above).
+ *  Mesh/splat smoothing is a natural extension of the same per-object-kind
+ *  loop pattern but isn't implemented yet — GP strokes only for now. */
+export class SmoothTool implements Tool {
+  id = 'smooth';
+  cursor = 'none';
+  private active = false;
+
+  onDown(ctx: AppCtx, e: ToolEvent): void {
+    ctx.pushUndo();
+    this.active = true;
+    this.apply(ctx, e);
+  }
+  onMove(ctx: AppCtx, e: ToolEvent): void { if (this.active) this.apply(ctx, e); }
+  onUp(): void { this.active = false; }
+  onCancel(): void { this.active = false; }
+
+  drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
+    drawBrushCircle(hud, ctx.settings.sculpt.radius, [0.55, 0.85, 1]);
+  }
+
+  private apply(ctx: AppCtx, e: ToolEvent): void {
+    const { radius, strength } = ctx.settings.sculpt;
+    const press = (e.pressure || 0.7) * strength * 0.4;
+    const cursor = new THREE.Vector2(e.x, e.y);
+    const rect = ctx.canvas.getBoundingClientRect();
+
+    const targets = e.shift
+      ? ctx.scene.objects.filter((o) => !o.hide && !o.lock)
+      : [activeObject(ctx.scene)];
+
+    let changed = false;
+    for (const ob of targets) {
+      const m = gpLocalMatrix(ob);
+      const toScreen = (co: Vec3) => {
+        const v = new THREE.Vector3(...co).applyMatrix4(m).project(ctx.camera);
+        return new THREE.Vector2((v.x * 0.5 + 0.5) * rect.width, (-v.y * 0.5 + 0.5) * rect.height);
+      };
+      for (const layer of visibleEditableLayers(ob)) {
+        const frame = frameAt(layer, ctx.scene.frame);
+        if (!frame) continue;
+        for (const s of frame.strokes) {
+          const pts = s.points;
+          pts.forEach((p, i) => {
+            if (i === 0 || i === pts.length - 1) return; // matches SculptTool: endpoints held fixed
+            const d = toScreen(p.co).distanceTo(cursor);
+            const w = falloff(d, radius);
+            if (w <= 0) return;
+            const a = pts[i - 1].co, b = pts[i + 1].co;
+            const f = w * press;
+            p.co = [
+              p.co[0] + ((a[0] + b[0]) / 2 - p.co[0]) * f,
+              p.co[1] + ((a[1] + b[1]) / 2 - p.co[1]) * f,
+              p.co[2] + ((a[2] + b[2]) / 2 - p.co[2]) * f,
+            ];
+            changed = true;
+          });
+        }
+      }
+    }
+    if (changed) ctx.requestRender();
+  }
 }
 
 // ---------------------------------------------------------------- Tint tool

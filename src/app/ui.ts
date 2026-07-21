@@ -474,7 +474,9 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
   ],
   DRAW: [
-    ['draw', 'pencil', 'Draw (D)'], ['erase', 'eraser', 'Erase (E)'], ['fill', 'swatch', 'Fill (F)'],
+    ['draw', 'pencil', 'Draw (D)'], ['erase', 'eraser', 'Erase (E)'],
+    ['smooth', 'wave', 'Smooth — relaxes stroke points toward their neighbors (Sculpt mode\'s Smooth brush, usable here); Shift = every visible object, not just the active one'],
+    ['fill', 'swatch', 'Fill (F)'],
     ['tint', 'brush', 'Tint'], ['cutter', 'scissors', 'Cutter'], ['eyedropper', 'droplet', 'Eyedropper'],
     ['line', 'lineTool', 'Line'], ['polyline', 'polylineTool', 'Polyline'], ['arc', 'arcTool', 'Arc'],
     ['curve', 'curveTool', 'Curve'], ['box', 'square', 'Box'], ['circle', 'circle', 'Circle'],
