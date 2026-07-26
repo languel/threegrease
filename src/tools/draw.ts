@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { GPPoint, GPStroke, TGPaintCloud, Vec3, Vec4 } from '../core/types';
+import type { GPObject, GPPoint, GPStroke, TGPaintCloud, Vec3, Vec4 } from '../core/types';
 import {
   activeLayer, activeObject, createPoint, createStroke, ensureFrame, frameAt,
   genId, visibleEditableLayers,
@@ -34,8 +34,19 @@ export class DrawTool implements Tool {
   private stabPos: THREE.Vector2 | null = null;
   private startScreen: THREE.Vector2 | null = null;
   private guideCenter = new THREE.Vector2();
+  /** Shift+drag, decided once at pointerdown: smooth strokes under the
+   *  brush instead of drawing a new one — the sculpt Smooth brush, without
+   *  leaving the pencil tool (matches Blender's "hold Shift to smooth"
+   *  convention available on most brushes). */
+  private smoothing = false;
 
   onDown(ctx: AppCtx, e: ToolEvent): void {
+    if (e.shift) {
+      ctx.pushUndo();
+      this.smoothing = true;
+      this.smooth(ctx, e);
+      return;
+    }
     const target = drawTarget(ctx);
     if (!target) return;
     ctx.pushUndo();
@@ -55,12 +66,14 @@ export class DrawTool implements Tool {
   }
 
   onMove(ctx: AppCtx, e: ToolEvent): void {
+    if (this.smoothing) { this.smooth(ctx, e); return; }
     if (!this.stroke) return;
     this.addPoint(ctx, e);
     ctx.requestRender(this.layerId ?? undefined); // hot path: this layer only
   }
 
   onUp(ctx: AppCtx): void {
+    if (this.smoothing) { this.smoothing = false; ctx.refreshUI(); return; }
     if (!this.stroke) return;
     const b = ctx.settings.brush;
     if (this.stroke.points.length < 2) {
@@ -76,7 +89,15 @@ export class DrawTool implements Tool {
     ctx.refreshUI();
   }
 
-  onCancel(ctx: AppCtx): void { this.stroke = null; setStrokeExclusion(null); }
+  onCancel(ctx: AppCtx): void { this.smoothing = false; this.stroke = null; setStrokeExclusion(null); }
+
+  drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
+    if (this.smoothing) drawBrushCircle(hud, ctx.settings.sculpt.radius, [0.55, 0.85, 1]);
+  }
+
+  private smooth(ctx: AppCtx, e: ToolEvent): void {
+    if (applySmoothBrush(ctx, e, [activeObject(ctx.scene)])) ctx.requestRender();
+  }
 
   private addPoint(ctx: AppCtx, e: ToolEvent): void {
     if (!this.stroke) return;
@@ -262,6 +283,49 @@ export function splitRuns(s: GPStroke, keepMask: boolean[]): GPStroke[] {
  *  one (mirrors EraseTool's per-object local-matrix generalization above).
  *  Mesh/splat smoothing is a natural extension of the same per-object-kind
  *  loop pattern but isn't implemented yet — GP strokes only for now. */
+/** Shared by SmoothTool and DrawTool's Shift+drag-to-smooth: relax each
+ *  point of every stroke within `radius` screen px of the cursor toward
+ *  the midpoint of its neighbors (falloff-weighted, endpoints held fixed
+ *  — matches SculptTool's SMOOTH brush exactly). `targets` lets callers
+ *  decide scope (active object only, or every visible unlocked object). */
+function applySmoothBrush(ctx: AppCtx, e: ToolEvent, targets: GPObject[]): boolean {
+  const { radius, strength } = ctx.settings.sculpt;
+  const press = (e.pressure || 0.7) * strength * 0.4;
+  const cursor = new THREE.Vector2(e.x, e.y);
+  const rect = ctx.canvas.getBoundingClientRect();
+
+  let changed = false;
+  for (const ob of targets) {
+    const m = gpLocalMatrix(ob);
+    const toScreen = (co: Vec3) => {
+      const v = new THREE.Vector3(...co).applyMatrix4(m).project(ctx.camera);
+      return new THREE.Vector2((v.x * 0.5 + 0.5) * rect.width, (-v.y * 0.5 + 0.5) * rect.height);
+    };
+    for (const layer of visibleEditableLayers(ob)) {
+      const frame = frameAt(layer, ctx.scene.frame);
+      if (!frame) continue;
+      for (const s of frame.strokes) {
+        const pts = s.points;
+        pts.forEach((p, i) => {
+          if (i === 0 || i === pts.length - 1) return; // matches SculptTool: endpoints held fixed
+          const d = toScreen(p.co).distanceTo(cursor);
+          const w = falloff(d, radius);
+          if (w <= 0) return;
+          const a = pts[i - 1].co, b = pts[i + 1].co;
+          const f = w * press;
+          p.co = [
+            p.co[0] + ((a[0] + b[0]) / 2 - p.co[0]) * f,
+            p.co[1] + ((a[1] + b[1]) / 2 - p.co[1]) * f,
+            p.co[2] + ((a[2] + b[2]) / 2 - p.co[2]) * f,
+          ];
+          changed = true;
+        });
+      }
+    }
+  }
+  return changed;
+}
+
 export class SmoothTool implements Tool {
   id = 'smooth';
   cursor = 'none';
@@ -281,45 +345,10 @@ export class SmoothTool implements Tool {
   }
 
   private apply(ctx: AppCtx, e: ToolEvent): void {
-    const { radius, strength } = ctx.settings.sculpt;
-    const press = (e.pressure || 0.7) * strength * 0.4;
-    const cursor = new THREE.Vector2(e.x, e.y);
-    const rect = ctx.canvas.getBoundingClientRect();
-
     const targets = e.shift
       ? ctx.scene.objects.filter((o) => !o.hide && !o.lock)
       : [activeObject(ctx.scene)];
-
-    let changed = false;
-    for (const ob of targets) {
-      const m = gpLocalMatrix(ob);
-      const toScreen = (co: Vec3) => {
-        const v = new THREE.Vector3(...co).applyMatrix4(m).project(ctx.camera);
-        return new THREE.Vector2((v.x * 0.5 + 0.5) * rect.width, (-v.y * 0.5 + 0.5) * rect.height);
-      };
-      for (const layer of visibleEditableLayers(ob)) {
-        const frame = frameAt(layer, ctx.scene.frame);
-        if (!frame) continue;
-        for (const s of frame.strokes) {
-          const pts = s.points;
-          pts.forEach((p, i) => {
-            if (i === 0 || i === pts.length - 1) return; // matches SculptTool: endpoints held fixed
-            const d = toScreen(p.co).distanceTo(cursor);
-            const w = falloff(d, radius);
-            if (w <= 0) return;
-            const a = pts[i - 1].co, b = pts[i + 1].co;
-            const f = w * press;
-            p.co = [
-              p.co[0] + ((a[0] + b[0]) / 2 - p.co[0]) * f,
-              p.co[1] + ((a[1] + b[1]) / 2 - p.co[1]) * f,
-              p.co[2] + ((a[2] + b[2]) / 2 - p.co[2]) * f,
-            ];
-            changed = true;
-          });
-        }
-      }
-    }
-    if (changed) ctx.requestRender();
+    if (applySmoothBrush(ctx, e, targets)) ctx.requestRender();
   }
 }
 
