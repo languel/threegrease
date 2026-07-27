@@ -4,7 +4,7 @@
 // vertex overlays + transient tool previews in sync every frame. Nothing
 // here is scene data — overlays and previews are runtime-only.
 import * as THREE from 'three';
-import type { GPScene, TGPolyMesh, Vec3 } from '../core/types';
+import type { GPScene, TGPolyFace, TGPolyMesh, Vec3 } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 import { materialManager } from './materialmgr';
 
@@ -94,6 +94,23 @@ export function triangulateFace(coords: Vec3[]): [number, number, number][] {
  *  texture painting on a roughly-flat quilt, no persisted UV data needed.
  *  Shared by the live renderer (rebuildGeometry) and the scene exporter
  *  so painted textures line up the same way in both. */
+/** Per-face-CORNER UV lookup: the persisted `face.uv` written by an
+ *  unwrap (core/uvunwrap.ts) when present, else the dynamic planar
+ *  auto-projection below. `cornerIndex` indexes the face's boundary, which
+ *  is exactly what triangulateFace's returned indices refer to. Shared by
+ *  the renderer and the exporter so both agree. */
+export function polyFaceUV(pm: TGPolyMesh): (f: TGPolyFace, cornerIndex: number, co: Vec3) => [number, number] {
+  const auto = polyAutoUV(pm);
+  return (f, i, co) => {
+    // Length check, not just presence: a topology op (subdivide, split,
+    // extrude) can change a face's boundary without maintaining its UVs,
+    // which would silently index stale corners. A mismatched face falls
+    // back to the auto-projection instead of rendering garbage.
+    const uv = f.uv && f.uv.length === f.vertices.length ? f.uv[i] : undefined;
+    return uv ?? auto(co);
+  };
+}
+
 export function polyAutoUV(pm: TGPolyMesh): (co: Vec3) => [number, number] {
   const box = new THREE.Box3();
   for (const v of pm.vertices) box.expandByPoint(new THREE.Vector3(...v.co));
@@ -217,7 +234,7 @@ export class PolyMeshManager {
     const pos: number[] = [];
     entry.triFaceIds = [];
     const co = new Map(pm.vertices.map((v) => [v.id, v.co] as const));
-    const uvOf = polyAutoUV(pm);
+    const uvOf = polyFaceUV(pm);
 
     const uvs: number[] = [];
     for (const f of pm.faces) {
@@ -225,7 +242,9 @@ export class PolyMeshManager {
       if (boundary.length !== f.vertices.length || boundary.length < 3) continue;
       for (const [a, b, c] of triangulateFace(boundary)) {
         pos.push(...boundary[a], ...boundary[b], ...boundary[c]);
-        uvs.push(...uvOf(boundary[a]), ...uvOf(boundary[b]), ...uvOf(boundary[c]));
+        // triangulateFace's indices are into the face boundary, which is
+        // exactly what a persisted per-corner UV is keyed by
+        uvs.push(...uvOf(f, a, boundary[a]), ...uvOf(f, b, boundary[b]), ...uvOf(f, c, boundary[c]));
         entry.triFaceIds.push(f.id);
       }
     }

@@ -553,6 +553,12 @@ export interface TGPolyFace {
   id: number;
   vertices: number[];       // ordered boundary, >= 3 unique vertex ids
   select?: boolean;
+  /** Persisted UVs, one per boundary corner (parallel to `vertices`).
+   *  Per-CORNER rather than per-vertex so a vertex can carry different
+   *  UVs on either side of a seam. Absent = fall back to the dynamic
+   *  planar auto-projection (polyAutoUV), which is what every mesh used
+   *  before unwrapping existed. See core/uvunwrap.ts. */
+  uv?: [number, number][];
 }
 
 export interface TGPolyMesh {

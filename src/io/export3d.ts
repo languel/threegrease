@@ -10,7 +10,7 @@ import type { AppCtx } from '../tools/context';
 import { baseTextureSrc, frameAt, materialById } from '../core/gpdata';
 import { evaluateModifiers, remapTime } from '../modifiers/index';
 import { buildFillGeometry } from '../render/geometry';
-import { polyAutoUV, triangulateFace } from '../render/polymesh';
+import { polyFaceUV, triangulateFace } from '../render/polymesh';
 import { edgeFaceCount } from '../core/polymesh';
 import { worldMatrixOf } from '../tools/objects';
 import { primitiveGeometry } from '../render/meshes';
@@ -123,7 +123,7 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
     const pmTexture = baseTextureSrc(scene, pm);
     const color = new THREE.Color(pmColor[0], pmColor[1], pmColor[2]);
 
-    const uvOf = polyAutoUV(pm);
+    const uvOf = polyFaceUV(pm);
     const facePos: number[] = [];
     const faceUv: number[] = [];
     for (const f of pm.faces) {
@@ -131,7 +131,7 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
       if (boundary.length !== f.vertices.length || boundary.length < 3) continue;
       for (const [a, b, c] of triangulateFace(boundary)) {
         facePos.push(...boundary[a], ...boundary[b], ...boundary[c]);
-        faceUv.push(...uvOf(boundary[a]), ...uvOf(boundary[b]), ...uvOf(boundary[c]));
+        faceUv.push(...uvOf(f, a, boundary[a]), ...uvOf(f, b, boundary[b]), ...uvOf(f, c, boundary[c]));
       }
     }
     if (facePos.length) {

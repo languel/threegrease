@@ -102,6 +102,8 @@ import { StringSim } from '../solvers/strings';
 import { SplatManager } from '../splats/index';
 import { MeshManager, createMeshObject } from '../render/meshes';
 import { createPolyMesh, smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
+import type { UnwrapMode } from '../core/uvunwrap';
+import { unwrap } from '../core/uvunwrap';
 import { PolyMeshManager } from '../render/polymesh';
 import { PaintCloudManager, createPaintCloud } from '../render/paintclouds';
 import { setSplatPickSource } from '../tools/splatpick';
@@ -2347,6 +2349,29 @@ class App implements AppHandle {
     // (setTool targets the freshly selected mesh and refreshes the UI)
     if (this.ctx.settings.mode !== 'DRAW' && this.ctx.settings.mode !== 'EDIT') this.setMode('EDIT');
     this.setTool('polypen');
+  }
+
+  /** Persist UVs on an editable mesh. Lives here (not in the UI) because
+   *  Project-from-View needs the live camera + viewport to flatten along
+   *  the current view; core/uvunwrap stays three.js-free by taking a
+   *  caller-supplied object-local -> 0..1 screen mapping. */
+  unwrapPoly(id: number, mode: UnwrapMode): void {
+    const scene = this.ctx.scene;
+    const pm = scene.polyMeshes.find((p) => p.id === id);
+    if (!pm) return;
+    this.ctx.pushUndo();
+    if (mode === 'VIEW') {
+      const world = worldMatrixOf(scene, { kind: 'POLY', id });
+      const cam = this.ctx.camera;
+      unwrap(pm, 'VIEW', (co) => {
+        const p = new THREE.Vector3(...co).applyMatrix4(world).project(cam);
+        return [p.x * 0.5 + 0.5, p.y * 0.5 + 0.5];
+      });
+    } else {
+      unwrap(pm, mode);
+    }
+    this.ctx.requestRender();
+    this.ui.refresh();
   }
 
   /** Blender Add > Grease Pencil > Blank: new empty GP object at the 3D cursor. */

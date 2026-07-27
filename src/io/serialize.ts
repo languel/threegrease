@@ -82,6 +82,15 @@ export function deserializeScene(json: string): GPScene {
     pm.texture ??= null;
     if (pm.texture?.startsWith('blob:')) pm.texture = null; // session-only
     for (const v of pm.vertices ?? []) v.binding ??= null;
+    // persisted UVs must stay parallel to the face boundary; a truncated
+    // or malformed array degrades to the auto-projection rather than
+    // rendering garbage (same repair-don't-reject rule as the topology)
+    for (const f of pm.faces ?? []) {
+      if (!f.uv) continue;
+      const ok = Array.isArray(f.uv) && f.uv.length === f.vertices.length
+        && f.uv.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+      if (!ok) delete f.uv;
+    }
     sanitizePolyMesh(pm);
   }
   // painted splat clouds: default + drop malformed point arrays

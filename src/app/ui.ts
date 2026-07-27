@@ -4,6 +4,8 @@ import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, Li
 import type { MaterialBlend, TGMaterial, TextureSlotName, Vec3 } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
+import type { UnwrapMode } from '../core/uvunwrap';
+import { hasUV } from '../core/uvunwrap';
 import { createImage, createMaterialDB, ensureMaterial, imageById, materialById } from '../core/gpdata';
 import { ACTIONS, comboFromEvent, type Keymap } from './keymap';
 import { MODIFIERS, applyModifierToData, createModifier } from '../modifiers/index';
@@ -83,6 +85,8 @@ export interface AppHandle {
   splats: { errors: Map<number, string> };
   meshes: { errors: Map<number, string> };
   addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'EMPTY'): void;
+  /** Persist UVs on an editable mesh (App owns the camera for VIEW). */
+  unwrapPoly(id: number, mode: UnwrapMode): void;
   importModelFile(file: File): void;
   importImagePlane(file: File): void;
   setWidgetMode(mode: 'translate' | 'rotate' | 'scale'): void;
@@ -1952,6 +1956,22 @@ export class UI {
         el('div', { class: 'menu-header', text: 'Editable mesh' }),
         el('div', { class: 'row', text: `${p.vertices.length} verts · ${p.edges.length} edges · ${p.faces.length} faces` }),
         fieldRow('', checkbox('Draw target', p.drawTarget, (v) => { p.drawTarget = v; }, 'faces become Surface-placement drawing targets')),
+        el('div', { class: 'row' },
+          selectField('UV', hasUV(p) ? 'SET' : 'AUTO', [
+            ['AUTO', 'Auto (planar)'], ['SET', 'Unwrapped'],
+          ], () => { /* display only — use the Unwrap buttons below */ }),
+          btn('Unwrap…', () => {
+            const r = ctx.canvas.getBoundingClientRect();
+            popupMenu(r.left + 40, r.top + 40, [
+              { label: 'Project from view', do: () => this.app.unwrapPoly(p.id, 'VIEW') },
+              { label: 'Planar (dominant plane)', do: () => this.app.unwrapPoly(p.id, 'PLANAR') },
+              { label: 'Cube', do: () => this.app.unwrapPoly(p.id, 'BOX') },
+              { label: 'Cylinder', do: () => this.app.unwrapPoly(p.id, 'CYLINDER') },
+              { label: 'Sphere', do: () => this.app.unwrapPoly(p.id, 'SPHERE') },
+              { label: 'Reset (back to auto)', do: () => this.app.unwrapPoly(p.id, 'RESET') },
+            ]);
+          }, { title: 'persist UVs so painted textures stop sliding when the mesh changes' }),
+        ),
         ...this.materialEditor(ref),
       );
     } else if (ref.kind === 'SPLAT') {
