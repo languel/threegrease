@@ -7,7 +7,7 @@ import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { PLYExporter } from 'three/examples/jsm/exporters/PLYExporter.js';
 import type { AppCtx } from '../tools/context';
-import { frameAt } from '../core/gpdata';
+import { baseTextureSrc, frameAt, materialById } from '../core/gpdata';
 import { evaluateModifiers, remapTime } from '../modifiers/index';
 import { buildFillGeometry } from '../render/geometry';
 import { polyAutoUV, triangulateFace } from '../render/polymesh';
@@ -116,7 +116,12 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
     if (!pm.visible) continue;
     const matrix = worldMatrixOf(scene, { kind: 'POLY', id: pm.id });
     const co = new Map(pm.vertices.map((v) => [v.id, v.co] as const));
-    const color = new THREE.Color(pm.color[0], pm.color[1], pm.color[2]);
+    // the material datablock when assigned, else the legacy per-object look
+    const pmMat = materialById(scene, pm.materialId);
+    const pmColor = pmMat?.baseColor ?? pm.color;
+    const pmOpacity = pmMat?.opacity ?? pm.opacity;
+    const pmTexture = baseTextureSrc(scene, pm);
+    const color = new THREE.Color(pmColor[0], pmColor[1], pmColor[2]);
 
     const uvOf = polyAutoUV(pm);
     const facePos: number[] = [];
@@ -136,9 +141,9 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
       geo.applyMatrix4(matrix);
       geo.computeVertexNormals();
       const material = new THREE.MeshStandardMaterial({
-        color, side: THREE.DoubleSide, transparent: pm.opacity < 1, opacity: pm.opacity,
+        color, side: THREE.DoubleSide, transparent: pmOpacity < 1, opacity: pmOpacity,
       });
-      if (pm.texture) material.map = await loadTexture(pm.texture);
+      if (pmTexture) material.map = await loadTexture(pmTexture);
       const mesh = new THREE.Mesh(geo, material);
       mesh.name = pm.name;
       group.add(mesh);
@@ -184,11 +189,17 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
     const geo = primitiveGeometry(m.kind).clone();
     geo.applyMatrix4(worldMatrixOf(scene, { kind: 'MESH', id: m.id }));
     geo.computeVertexNormals();
-    const color = new THREE.Color(m.color[0], m.color[1], m.color[2]);
+    // the material datablock when assigned, else the legacy per-object look
+    const mMat = materialById(scene, m.materialId);
+    const mColor = mMat?.baseColor ?? m.color;
+    const mOpacity = mMat?.opacity ?? m.opacity;
+    const mTexture = baseTextureSrc(scene, m);
+    const twoSided = mMat ? mMat.doubleSided : !!m.doubleSided;
+    const color = new THREE.Color(mColor[0], mColor[1], mColor[2]);
     const material = new THREE.MeshStandardMaterial({
-      color, opacity: m.opacity, transparent: m.opacity < 1, side: m.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
+      color, opacity: mOpacity, transparent: mOpacity < 1, side: twoSided ? THREE.DoubleSide : THREE.FrontSide,
     });
-    if (m.texture) material.map = await loadTexture(m.texture);
+    if (mTexture) material.map = await loadTexture(mTexture);
     const mesh = new THREE.Mesh(geo, material);
     mesh.name = m.name;
     group.add(mesh);

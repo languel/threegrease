@@ -1,5 +1,5 @@
-import type { GPObject, GPScene } from '../core/types';
-import { bumpIdCounter, createDefaultCamera, genId } from '../core/gpdata';
+import type { GPObject, GPScene, TGMaterial, Vec3 } from '../core/types';
+import { bumpIdCounter, createDefaultCamera, createImage, createMaterialDB, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
 import { sanitizePolyMesh } from '../core/polymesh';
 
@@ -57,6 +57,12 @@ export function deserializeScene(json: string): GPScene {
     trig.parent ??= null;
     trig.constraints ??= [];
   }
+  // shared material/image datablocks (pre-datablock saves get theirs
+  // synthesized from the per-object flattened fields — see migrateMaterials
+  // below, which runs after meshes/polyMeshes are defaulted)
+  scene.images ??= [];
+  scene.materials ??= [];
+  scene.images = scene.images.filter((i) => !i.src.startsWith('blob:')); // session-only
   scene.splats ??= [];
   // object-URL sources don't survive reload
   scene.splats = scene.splats.filter((s) => !s.src.startsWith('blob:'));
@@ -140,8 +146,77 @@ export function deserializeScene(json: string): GPScene {
       }
     }
   }
-  bumpIdCounter(scene);
+  bumpIdCounter(scene); // ids must be safe before migrateMaterials mints any
+  migrateMaterials(scene);
   return scene;
+}
+
+/**
+ * Pre-datablock saves carried appearance as flattened per-object fields
+ * (`color/opacity/texture/unlit/doubleSided/wireframe`). Synthesize a shared
+ * TGMaterial for each mesh-family object that has no `materialId` yet,
+ * reproducing its look EXACTLY so loading an old scene changes nothing.
+ *
+ * Objects whose look is identical share one material (and identical texture
+ * dataURLs collapse to one image), which is the point of the datablock: a
+ * scene of 20 same-colored planes ends up with one material, not twenty.
+ */
+function migrateMaterials(scene: GPScene): void {
+  const imageBySrc = new Map<string, number>();
+  for (const img of scene.images) imageBySrc.set(img.src, img.id);
+  const materialByKey = new Map<string, number>();
+  for (const m of scene.materials) materialByKey.set(materialKey(m), m.id);
+
+  const imageFor = (src: string): number => {
+    const hit = imageBySrc.get(src);
+    if (hit !== undefined) return hit;
+    const img = createImage(`Image ${scene.images.length + 1}`, src);
+    scene.images.push(img);
+    imageBySrc.set(src, img.id);
+    return img.id;
+  };
+
+  const materialFor = (look: {
+    color: Vec3; opacity: number; texture?: string | null;
+    unlit?: boolean; doubleSided?: boolean; wireframe: boolean; name: string;
+  }): number => {
+    const mat = createMaterialDB(look.name, look.color);
+    mat.opacity = look.opacity;
+    mat.unlit = !!look.unlit;
+    mat.doubleSided = look.doubleSided !== false;
+    mat.wireframe = look.wireframe;
+    if (look.texture) {
+      mat.slots.base = {
+        imageId: imageFor(look.texture),
+        offset: [0, 0], scale: [1, 1], rotation: 0, factor: 1, enabled: true,
+      };
+    }
+    const key = materialKey(mat);
+    const hit = materialByKey.get(key);
+    if (hit !== undefined) return hit; // identical look already exists — share it
+    scene.materials.push(mat);
+    materialByKey.set(key, mat.id);
+    return mat.id;
+  };
+
+  for (const m of scene.meshes) {
+    // MODEL imports own their materials (from the GLTF/OBJ) — leave alone
+    if (m.materialId != null || m.kind === 'MODEL' || m.kind === 'EMPTY') continue;
+    m.materialId = materialFor({ ...m, name: m.name });
+  }
+  for (const pm of scene.polyMeshes) {
+    if (pm.materialId != null) continue;
+    pm.materialId = materialFor({ ...pm, name: pm.name });
+  }
+}
+
+/** Identity of a material's LOOK (not its id/name) — two objects that
+ *  looked the same before the migration end up sharing one datablock. */
+function materialKey(m: TGMaterial): string {
+  return JSON.stringify([
+    m.baseColor, m.opacity, m.roughness, m.metallic, m.emission, m.emissionStrength,
+    m.unlit, m.doubleSided, m.wireframe, m.blend, m.slots,
+  ]);
 }
 
 // ---- GP-object-level interchange ------------------------------------------

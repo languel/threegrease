@@ -1,5 +1,6 @@
 import type {
-  GPCamera, GPFrame, GPLayer, GPMaterial, GPObject, GPPoint, GPScene, GPStroke, Vec3, Vec4,
+  GPCamera, GPFrame, GPLayer, GPMaterial, GPObject, GPPoint, GPScene, GPStroke,
+  TGImage, TGMaterial, Vec3, Vec4,
 } from './types';
 import { defaultStyle } from './brushes';
 
@@ -9,6 +10,7 @@ export function bumpIdCounter(scene: GPScene): void {
   // keep id generator ahead of any loaded ids
   let max = 0;
   for (const ob of scene.objects) {
+    max = Math.max(max, ob.id);
     for (const l of ob.layers) {
       max = Math.max(max, l.id);
       for (const f of l.frames) for (const s of f.strokes) max = Math.max(max, s.id);
@@ -16,7 +18,114 @@ export function bumpIdCounter(scene: GPScene): void {
     for (const m of ob.modifiers) max = Math.max(max, m.id);
     for (const e of ob.effects) max = Math.max(max, e.id);
   }
+  // every other id-bearing collection, so genId() can't collide with a
+  // loaded scene's ids (this used to scan GP objects only)
+  for (const i of scene.images ?? []) max = Math.max(max, i.id);
+  for (const m of scene.materials ?? []) max = Math.max(max, m.id);
+  for (const m of scene.meshes ?? []) max = Math.max(max, m.id);
+  for (const p of scene.polyMeshes ?? []) max = Math.max(max, p.id);
+  for (const s of scene.splats ?? []) max = Math.max(max, s.id);
+  for (const c of scene.paintClouds ?? []) max = Math.max(max, c.id);
+  for (const st of scene.mmStreams ?? []) max = Math.max(max, st.id);
   nextId = Math.max(nextId, max + 1);
+}
+
+// ---- material / image datablocks -----------------------------------------
+
+export function createImage(name: string, src: string, baked = false): TGImage {
+  return { id: genId(), name, src, baked };
+}
+
+/** A material datablock. Named `createMaterialDB` because `createMaterial`
+ *  is the (unrelated, index-addressed) GP stroke material factory above. */
+export function createMaterialDB(name: string, baseColor: Vec3 = [0.62, 0.65, 0.72]): TGMaterial {
+  return {
+    id: genId(), name,
+    baseColor: [...baseColor] as Vec3,
+    opacity: 1, roughness: 0.9, metallic: 0,
+    emission: [0, 0, 0], emissionStrength: 0,
+    unlit: false, doubleSided: true, wireframe: false,
+    blend: 'OPAQUE', slots: {},
+  };
+}
+
+export function materialById(scene: GPScene, id: number | null | undefined): TGMaterial | undefined {
+  return id == null ? undefined : scene.materials.find((m) => m.id === id);
+}
+
+export function imageById(scene: GPScene, id: number | null | undefined): TGImage | undefined {
+  return id == null ? undefined : scene.images.find((i) => i.id === id);
+}
+
+/** The per-object appearance fields TGMesh and TGPolyMesh share — enough to
+ *  resolve or mint a material datablock without knowing which kind it is. */
+export interface MaterialTarget {
+  materialId?: number | null;
+  name: string;
+  color: Vec3;
+  opacity: number;
+  texture?: string | null;
+  unlit?: boolean;
+  doubleSided?: boolean;
+  wireframe: boolean;
+}
+
+/** Copy-on-write: mint a material datablock from an object's legacy
+ *  flattened fields the first time anything needs one, so pre-datablock
+ *  objects keep rendering untouched until they're actually edited. */
+export function ensureMaterial(scene: GPScene, target: MaterialTarget): TGMaterial {
+  const existing = materialById(scene, target.materialId);
+  if (existing) return existing;
+  const mat = createMaterialDB(target.name, target.color);
+  mat.opacity = target.opacity;
+  mat.unlit = !!target.unlit;
+  mat.doubleSided = target.doubleSided !== false;
+  mat.wireframe = target.wireframe;
+  if (target.texture) {
+    const img = createImage(`${target.name} texture`, target.texture);
+    scene.images.push(img);
+    mat.slots.base = {
+      imageId: img.id, offset: [0, 0], scale: [1, 1], rotation: 0, factor: 1, enabled: true,
+    };
+  }
+  scene.materials.push(mat);
+  target.materialId = mat.id;
+  return mat;
+}
+
+/** Current base-color image src for an object, whichever era it's from —
+ *  the material's base slot, else the legacy per-object texture field.
+ *  Texture painting seeds its canvas from this. */
+export function baseTextureSrc(scene: GPScene, target: MaterialTarget): string | null {
+  const mat = materialById(scene, target.materialId);
+  if (!mat) return target.texture ?? null;
+  const slot = mat.slots.base;
+  if (!slot) return null;
+  return imageById(scene, slot.imageId)?.src ?? null;
+}
+
+/** Write a dataURL into an object's base-color slot, reusing the slot's
+ *  existing image datablock when there is one (so repeated texture-paint
+ *  strokes update one image rather than piling up new ones). Used by
+ *  texture painting and by bake output. */
+export function setBaseTexture(scene: GPScene, target: MaterialTarget, src: string, baked = false): TGImage {
+  const mat = ensureMaterial(scene, target);
+  const slot = mat.slots.base;
+  const existing = slot ? imageById(scene, slot.imageId) : undefined;
+  if (existing) {
+    existing.src = src;
+    existing.baked = baked;
+    if (slot) slot.enabled = true;
+    return existing;
+  }
+  const img = createImage(`${target.name} texture`, src, baked);
+  scene.images.push(img);
+  mat.slots.base = {
+    imageId: img.id, offset: [0, 0], scale: [1, 1], rotation: 0, factor: 1, enabled: true,
+  };
+  // keep the legacy field in sync so exporters/older paths still see it
+  target.texture = src;
+  return img;
 }
 
 export function createPoint(co: Vec3, pressure = 1, strength = 1): GPPoint {
@@ -92,6 +201,8 @@ export function createScene(): GPScene {
     score: { cursors: [], triggers: [], attachments: [] },
     routes: [],
     attractors: [],
+    images: [],
+    materials: [],
     splats: [],
     meshes: [],
     polyMeshes: [],

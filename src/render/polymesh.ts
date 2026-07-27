@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import type { GPScene, TGPolyMesh, Vec3 } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
+import { materialManager } from './materialmgr';
 
 // ---- transient overlay state (topology tool -> renderer) -------------------
 // The tool writes hover/preview/edit-target here; the manager reads it each
@@ -132,7 +133,6 @@ const VERT_CAP = 4096; // instanced-handle capacity per mesh (sketch scale)
 export class PolyMeshManager {
   readonly group = new THREE.Group();
   private entries = new Map<number, Entry>();
-  private textures = new Map<string, THREE.Texture>();
   // transient preview objects (rebuilt from polyOverlay every frame)
   private previewLine: THREE.Line;
   private previewPoint: THREE.Mesh;
@@ -268,34 +268,24 @@ export class PolyMeshManager {
     const isEdit = polyOverlay.editMeshId === pm.id;
     const hover = polyOverlay.hover?.meshId === pm.id ? polyOverlay.hover : null;
 
-    // face material
+    // face material — the shared datablock when assigned, else this mesh's
+    // own legacy flattened fields (see render/materialmgr.ts)
+    const look = {
+      color: pm.color, opacity: pm.opacity, texture: pm.texture,
+      unlit: pm.unlit, doubleSided: pm.doubleSided, wireframe: pm.wireframe,
+    };
     const mat = entry.faceMesh.material as THREE.MeshStandardMaterial | THREE.MeshBasicMaterial;
-    if (entry.unlit !== !!pm.unlit) {
+    const wantUnlit = materialManager.wantsUnlit(scene, pm.materialId, look);
+    if (entry.unlit !== wantUnlit) {
       (mat as THREE.Material).dispose();
-      entry.faceMesh.material = pm.unlit
+      entry.faceMesh.material = wantUnlit
         ? new THREE.MeshBasicMaterial({ polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
         : new THREE.MeshStandardMaterial({ polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-      entry.unlit = !!pm.unlit;
+      entry.unlit = wantUnlit;
       entry.texSrc = null; // fresh material has no map yet — force reapply below
     }
     const fmat = entry.faceMesh.material as THREE.MeshStandardMaterial;
-    if (!entry.live) {
-      fmat.color.setRGB(...pm.color);
-      const src = pm.texture ?? null;
-      if (entry.texSrc !== src) {
-        fmat.map = src ? this.textureFor(src) : null;
-        if (src) fmat.color.setRGB(1, 1, 1); // don't tint the image
-        fmat.needsUpdate = true;
-        entry.texSrc = src;
-      }
-    } else {
-      fmat.color.setRGB(1, 1, 1); // texture-paint stroke in flight
-    }
-    fmat.wireframe = pm.wireframe;
-    fmat.side = pm.doubleSided !== false ? THREE.DoubleSide : THREE.FrontSide;
-    fmat.transparent = pm.opacity < 1 || !!fmat.map;
-    fmat.opacity = pm.opacity;
-    fmat.depthWrite = pm.opacity >= 0.99;
+    materialManager.apply(fmat, scene, pm.materialId, look, !!entry.live);
     // hovered face tint (edit mode)
     if (isEdit && hover?.dim === 2) fmat.emissive?.setRGB(0.12, 0.3, 0.38);
     else fmat.emissive?.setRGB(0, 0, 0);
@@ -416,16 +406,6 @@ export class PolyMeshManager {
    *  of this group is polluted by the unit-sized instanced vertex handles —
    *  size selection outlines from the DATA (vertices x world matrix). */
   rootFor(id: number): THREE.Object3D | null { return this.entries.get(id)?.group ?? null; }
-
-  private textureFor(src: string): THREE.Texture {
-    let tex = this.textures.get(src);
-    if (!tex) {
-      tex = new THREE.TextureLoader().load(src);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      this.textures.set(src, tex);
-    }
-    return tex;
-  }
 
   /** Texture painting on a quilt face: while a stroke is in flight the
    *  tool paints into an offscreen canvas and we show it live as a

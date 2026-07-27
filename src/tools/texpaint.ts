@@ -11,6 +11,7 @@
 // first hit); UV-less/EMPTY/locked targets are skipped.
 import * as THREE from 'three';
 import type { AppCtx } from './context';
+import { baseTextureSrc, materialById, setBaseTexture } from '../core/gpdata';
 import type { Tool, ToolEvent } from './toolsys';
 import type { MeshManager } from '../render/meshes';
 import type { PolyMeshManager } from '../render/polymesh';
@@ -72,13 +73,14 @@ export class TexturePaintTool implements Tool {
     canvas.width = TEX_SIZE;
     canvas.height = TEX_SIZE;
     const g = canvas.getContext('2d')!;
-    // start from the target's current look: its texture if present (drawn
-    // when the image decodes — stamps before that land on the base color),
-    // else a solid fill of the object color
-    const color = target && 'color' in target ? target.color : [0.7, 0.7, 0.7];
+    // start from the target's current look: its base-color texture if
+    // present (drawn when the image decodes — stamps before that land on
+    // the base color), else a solid fill of the material's base color
+    const mat = target ? materialById(ctx.scene, target.materialId) : undefined;
+    const color = mat ? mat.baseColor : (target && 'color' in target ? target.color : [0.7, 0.7, 0.7]);
     g.fillStyle = `rgb(${color.map((c) => Math.round(c * 255)).join(',')})`;
     g.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    const texture = target?.texture;
+    const texture = target ? baseTextureSrc(ctx.scene, target) : null;
     if (texture) {
       const img = new Image();
       img.onload = () => {
@@ -157,8 +159,10 @@ export class TexturePaintTool implements Tool {
       ? ctx.scene.meshes.find((x) => x.id === s.targetId)
       : ctx.scene.polyMeshes.find((x) => x.id === s.targetId);
     if (target) {
-      target.texture = s.canvas.toDataURL('image/png');
-      if ('unlit' in target) target.unlit ??= false;
+      // lands in the material's base-color slot (minting the material and
+      // image datablocks on first paint); setBaseTexture keeps the legacy
+      // `texture` field in sync for exporters
+      setBaseTexture(ctx.scene, target, s.canvas.toDataURL('image/png'));
     }
     this.endLive(s.kind, s.targetId);
     ctx.refreshUI();

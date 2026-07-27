@@ -1,7 +1,10 @@
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
+import type { MaterialBlend, TGMaterial, TextureSlotName, Vec3 } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
+import type { MaterialTarget } from '../core/gpdata';
+import { createImage, createMaterialDB, ensureMaterial, imageById, materialById } from '../core/gpdata';
 import { ACTIONS, comboFromEvent, type Keymap } from './keymap';
 import { MODIFIERS, applyModifierToData, createModifier } from '../modifiers/index';
 import { BRUSH_PRESETS } from '../core/brushes';
@@ -1685,6 +1688,178 @@ export class UI {
       dropZone, ...rows);
   }
 
+  // ---- shared material editor ---------------------------------------------
+
+  /** The per-object appearance fields both TGMesh and TGPolyMesh carry —
+   *  structurally compatible, so one editor serves both. */
+  private materialTargetOf(ref: ObjRef): MaterialTarget | null {
+    const { ctx } = this.app;
+    if (ref.kind === 'MESH') return ctx.scene.meshes.find((m) => m.id === ref.id) ?? null;
+    if (ref.kind === 'POLY') return ctx.scene.polyMeshes.find((p) => p.id === ref.id) ?? null;
+    return null;
+  }
+
+  /** Copy-on-write (see core/gpdata ensureMaterial): an object with no
+   *  material datablock gets one minted from its own legacy fields the
+   *  first time you edit anything, so old objects keep rendering untouched
+   *  until you actually change them. Undo is pushed only on that mint. */
+  private ensureMaterial(target: MaterialTarget): TGMaterial {
+    const { ctx } = this.app;
+    const existing = materialById(ctx.scene, target.materialId);
+    if (existing) return existing;
+    ctx.pushUndo();
+    return ensureMaterial(ctx.scene, target);
+  }
+
+  /** One texture slot row: image name, load/replace, clear, factor. */
+  private slotRow(target: MaterialTarget, name: TextureSlotName, label: string): HTMLElement {
+    const { ctx } = this.app;
+    const mat = materialById(ctx.scene, target.materialId);
+    const slot = mat?.slots[name];
+    const img = slot ? imageById(ctx.scene, slot.imageId) : undefined;
+    const load = () => this.filePick('image/*', (f) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const m = this.ensureMaterial(target);
+        const image = createImage(f.name || `Image ${ctx.scene.images.length + 1}`, String(reader.result));
+        ctx.scene.images.push(image);
+        m.slots[name] = {
+          imageId: image.id, offset: [0, 0], scale: [1, 1], rotation: 0, factor: 1, enabled: true,
+        };
+        ctx.requestRender();
+        this.refresh();
+      };
+      reader.readAsDataURL(f);
+    });
+    return el('div', { class: 'row' },
+      el('span', { class: 'grow', text: `${label}${img ? `: ${img.name}` : ''}` }),
+      ...(slot ? [
+        checkbox('', slot.enabled, (v) => {
+          const m = this.ensureMaterial(target);
+          if (m.slots[name]) m.slots[name]!.enabled = v;
+          ctx.requestRender();
+        }, 'use this texture'),
+        slider('', slot.factor, 0, 1, 0.01, (v) => {
+          const m = this.ensureMaterial(target);
+          if (m.slots[name]) m.slots[name]!.factor = v;
+          ctx.requestRender();
+        }, { def: 1, title: 'blend against the flat value' }),
+      ] : []),
+      btn(icon('photo'), load, { cls: 'icon-btn', title: img ? 'Replace image…' : 'Load image…' }),
+      ...(slot ? [btn(icon('xMark'), () => {
+        const m = this.ensureMaterial(target);
+        delete m.slots[name];
+        ctx.requestRender();
+        this.refresh();
+      }, { cls: 'icon-btn', title: 'Clear slot' })] : []),
+    );
+  }
+
+  /**
+   * Shared material editor for mesh-family objects. Materials are scene
+   * datablocks (scene.materials), so the picker here can point two objects
+   * at the same material and editing it updates both.
+   */
+  private materialEditor(ref: ObjRef): Node[] {
+    const { ctx } = this.app;
+    const target = this.materialTargetOf(ref);
+    if (!target) return [];
+    const mat = materialById(ctx.scene, target.materialId);
+    // display falls back to the object's own legacy fields until a
+    // datablock exists (ensureMaterial copies exactly these)
+    const view = {
+      baseColor: mat?.baseColor ?? target.color,
+      opacity: mat?.opacity ?? target.opacity,
+      roughness: mat?.roughness ?? 0.9,
+      metallic: mat?.metallic ?? 0,
+      emission: mat?.emission ?? ([0, 0, 0] as Vec3),
+      emissionStrength: mat?.emissionStrength ?? 0,
+      unlit: mat ? mat.unlit : !!target.unlit,
+      doubleSided: mat ? mat.doubleSided : target.doubleSided !== false,
+      wireframe: mat ? mat.wireframe : target.wireframe,
+      blend: mat?.blend ?? ('OPAQUE' as MaterialBlend),
+    };
+    const edit = (fn: (m: TGMaterial) => void) => {
+      fn(this.ensureMaterial(target));
+      ctx.requestRender();
+    };
+    const users = (id: number) =>
+      ctx.scene.meshes.filter((m) => m.materialId === id).length
+      + ctx.scene.polyMeshes.filter((p) => p.materialId === id).length;
+
+    const picker = selectField('Material',
+      String(target.materialId ?? ''),
+      [
+        ['', mat ? '(unassign)' : '(object settings)'],
+        ...ctx.scene.materials.map((m) => [String(m.id), `${m.name}${users(m.id) > 1 ? ` (${users(m.id)})` : ''}`] as [string, string]),
+      ],
+      (v) => {
+        ctx.pushUndo();
+        target.materialId = v ? Number(v) : null;
+        ctx.requestRender();
+        this.refresh();
+      });
+
+    return [
+      el('div', { class: 'menu-sep' }),
+      el('div', { class: 'menu-header', text: 'Material' }),
+      el('div', { class: 'row' },
+        picker,
+        btn(icon('plus'), () => {
+          ctx.pushUndo();
+          const m = createMaterialDB(`Material ${ctx.scene.materials.length + 1}`);
+          ctx.scene.materials.push(m);
+          target.materialId = m.id;
+          ctx.requestRender();
+          this.refresh();
+        }, { cls: 'icon-btn', title: 'New material' }),
+        ...(mat ? [btn(icon('duplicate'), () => {
+          ctx.pushUndo();
+          const copy: TGMaterial = JSON.parse(JSON.stringify(mat));
+          copy.id = genId();
+          copy.name = `${mat.name} copy`;
+          ctx.scene.materials.push(copy);
+          target.materialId = copy.id;
+          ctx.requestRender();
+          this.refresh();
+        }, { cls: 'icon-btn', title: 'Duplicate material (make single-user)' })] : []),
+      ),
+      ...(mat ? [fieldRow('Name', (() => {
+        const input = el('input', { type: 'text', value: mat.name, class: 'grow' }) as HTMLInputElement;
+        input.onchange = () => { mat.name = input.value; this.refresh(); };
+        return input;
+      })())] : []),
+      el('div', { class: 'row' },
+        colorField('Base', [...view.baseColor, 1], (rgb) => edit((m) => { m.baseColor = rgb; })),
+        slider('Opacity', view.opacity, 0.02, 1, 0.01, (v) => edit((m) => { m.opacity = v; })),
+      ),
+      el('div', { class: 'row' },
+        slider('Rough', view.roughness, 0, 1, 0.01, (v) => edit((m) => { m.roughness = v; }), { def: 0.9 }),
+        slider('Metal', view.metallic, 0, 1, 0.01, (v) => edit((m) => { m.metallic = v; }), { def: 0 }),
+      ),
+      el('div', { class: 'row' },
+        colorField('Emit', [...view.emission, 1], (rgb) => edit((m) => { m.emission = rgb; })),
+        slider('Strength', view.emissionStrength, 0, 5, 0.05, (v) => edit((m) => { m.emissionStrength = v; }), { def: 0 }),
+      ),
+      el('div', { class: 'row' },
+        checkbox('Unlit', view.unlit, (v) => edit((m) => { m.unlit = v; })),
+        checkbox('Two-sided', view.doubleSided, (v) => edit((m) => { m.doubleSided = v; })),
+        checkbox('Wireframe', view.wireframe, (v) => edit((m) => { m.wireframe = v; })),
+      ),
+      fieldRow('Blend', selectField('', view.blend, [
+        ['OPAQUE', 'Opaque'], ['BLEND', 'Alpha blend'], ['ADD', 'Additive'], ['MULTIPLY', 'Multiply'],
+      ] as [MaterialBlend, string][], (v) => edit((m) => { m.blend = v; }))),
+      el('div', { class: 'menu-header', text: 'Textures' }),
+      this.slotRow(target, 'base', 'Base color'),
+      this.slotRow(target, 'roughness', 'Roughness'),
+      this.slotRow(target, 'metallic', 'Metallic'),
+      this.slotRow(target, 'normal', 'Normal'),
+      this.slotRow(target, 'emission', 'Emission'),
+      this.slotRow(target, 'alpha', 'Alpha'),
+      this.slotRow(target, 'ao', 'Ambient occl.'),
+    ];
+  }
+
   /** Blender-lite per-object Properties + Material panel (single selection). */
   /**
    * Blender-lite multi-object transform: fields show the ACTIVE (last-
@@ -1755,32 +1930,7 @@ export class UI {
 
     if (ref.kind === 'MESH') {
       const m = ctx.scene.meshes.find((x) => x.id === ref.id)!;
-      const texFile = el('input', { type: 'file', accept: 'image/*' }) as HTMLInputElement;
-      texFile.style.display = 'none';
-      texFile.onchange = () => {
-        const f = texFile.files?.[0];
-        if (!f) return;
-        const reader = new FileReader();
-        reader.onload = () => { m.texture = String(reader.result); m.unlit = true; this.refresh(); };
-        reader.readAsDataURL(f);
-      };
       rows.push(
-        el('div', { class: 'menu-sep' }),
-        el('div', { class: 'menu-header', text: 'Material' }),
-        el('div', { class: 'row' },
-          colorField('Color', [...m.color, 1], (rgb) => { m.color = rgb; }),
-          slider('Opacity', m.opacity, 0.02, 1, 0.01, (v) => { m.opacity = v; }),
-        ),
-        el('div', { class: 'row' },
-          texFile,
-          btn(m.texture ? iconLabel('photo', 'replace texture…') : 'Load texture…', () => texFile.click()),
-          ...(m.texture ? [btn(icon('xMark'), () => { m.texture = null; this.refresh(); }, { cls: 'icon-btn', title: 'Clear texture' })] : []),
-        ),
-        el('div', { class: 'row' },
-          checkbox('Unlit', !!m.unlit, (v) => { m.unlit = v; }),
-          checkbox('Two-sided', m.doubleSided !== false, (v) => { m.doubleSided = v; }),
-          checkbox('Wireframe', m.wireframe, (v) => { m.wireframe = v; }),
-        ),
         el('div', { class: 'row' },
           selectField('Lock', m.billboard ?? 'NONE', [
             ['NONE', 'World'], ['FACE_VIEW', 'Face view'], ['CAMERA', 'Camera (HUD)'],
@@ -1791,6 +1941,9 @@ export class UI {
           class: 'row',
           text: 'Camera lock: Loc/Rot/Scale become a view-space offset (keep z negative for depth)',
         })] : []),
+        ...(m.kind === 'MODEL' || m.kind === 'EMPTY'
+          ? [] // MODEL owns its imported materials; EMPTY has no surface
+          : this.materialEditor(ref)),
       );
     } else if (ref.kind === 'POLY') {
       const p = ctx.scene.polyMeshes.find((x) => x.id === ref.id)!;
@@ -1798,12 +1951,8 @@ export class UI {
         el('div', { class: 'menu-sep' }),
         el('div', { class: 'menu-header', text: 'Editable mesh' }),
         el('div', { class: 'row', text: `${p.vertices.length} verts · ${p.edges.length} edges · ${p.faces.length} faces` }),
-        fieldRow('Color', colorField('', [...p.color, 1], (rgb) => { p.color = rgb; })),
-        fieldRow('Opacity', slider('', p.opacity, 0.02, 1, 0.01, (v) => { p.opacity = v; }, { def: 0.85 })),
-        fieldRow('', checkbox('Unlit', !!p.unlit, (v) => { p.unlit = v; })),
-        fieldRow('', checkbox('Two-sided', p.doubleSided !== false, (v) => { p.doubleSided = v; })),
-        fieldRow('', checkbox('Wireframe', p.wireframe, (v) => { p.wireframe = v; })),
         fieldRow('', checkbox('Draw target', p.drawTarget, (v) => { p.drawTarget = v; }, 'faces become Surface-placement drawing targets')),
+        ...this.materialEditor(ref),
       );
     } else if (ref.kind === 'SPLAT') {
       const s = ctx.scene.splats.find((x) => x.id === ref.id)!;

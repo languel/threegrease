@@ -6,6 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import type { GPScene, TGMesh, Vec3 } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
+import { materialManager } from './materialmgr';
 
 function vec3Eq(a: Vec3, b: Vec3): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
@@ -24,18 +25,7 @@ export function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
 export class MeshManager {
   readonly group = new THREE.Group();
   private entries = new Map<number, { root: THREE.Object3D; src?: string; kind: string; unlit?: boolean; originOffset: Vec3; live?: boolean }>();
-  private textures = new Map<string, THREE.Texture>();
   readonly errors = new Map<number, string>();
-
-  private textureFor(src: string): THREE.Texture {
-    let tex = this.textures.get(src);
-    if (!tex) {
-      tex = new THREE.TextureLoader().load(src);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      this.textures.set(src, tex);
-    }
-    return tex;
-  }
 
   /** Rebuild/update mesh objects to mirror scene.meshes (camera for view locks). */
   sync(scene: GPScene, camera?: THREE.Camera): void {
@@ -59,14 +49,19 @@ export class MeshManager {
         this.group.add(entry.root);
         this.entries.set(data.id, entry);
       }
-      // unlit toggles swap the material class on primitives
-      if (data.kind !== 'MODEL' && data.kind !== 'EMPTY' && entry.unlit !== !!data.unlit) {
+      // unlit toggles swap the material class on primitives (the flag comes
+      // from the material datablock when assigned, else the legacy field)
+      const wantUnlit = materialManager.wantsUnlit(scene, data.materialId, {
+        color: data.color, opacity: data.opacity, texture: data.texture,
+        unlit: data.unlit, doubleSided: data.doubleSided, wireframe: data.wireframe,
+      });
+      if (data.kind !== 'MODEL' && data.kind !== 'EMPTY' && entry.unlit !== wantUnlit) {
         const mesh = entry.root as THREE.Mesh;
         (mesh.material as THREE.Material)?.dispose?.();
-        mesh.material = data.unlit
+        mesh.material = wantUnlit
           ? new THREE.MeshBasicMaterial()
           : new THREE.MeshStandardMaterial();
-        entry.unlit = !!data.unlit;
+        entry.unlit = wantUnlit;
       }
       // Set Origin (primitives only, see objectops.ts meshLocalBounds): the
       // origin op writes translation + originOffset together so world-space
@@ -154,24 +149,23 @@ export class MeshManager {
       if (!mesh.isMesh || o.userData.emptyHelper) return;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       if (!mat || Array.isArray(mat)) return;
-      if (data.kind !== 'MODEL' && !live) {
-        mat.color.setRGB(...data.color);
-        const tex = data.texture ? this.textureFor(data.texture) : null;
-        if (mat.map !== tex) {
-          mat.map = tex;
-          if (tex) mat.color.setRGB(1, 1, 1); // don't tint the image
-          mat.needsUpdate = true;
-        }
-      } else if (live) {
-        // texture-paint stroke in flight: the tool owns the map (a
-        // CanvasTexture over its paint canvas) — don't fight it
-        mat.color.setRGB(1, 1, 1);
+      if (data.kind !== 'MODEL') {
+        // shared material datablock, falling back to this object's own
+        // legacy flattened fields when it has no materialId yet
+        materialManager.apply(mat, scene, data.materialId, {
+          color: data.color, opacity: data.opacity, texture: data.texture,
+          unlit: data.unlit, doubleSided: data.doubleSided, wireframe: data.wireframe,
+        }, !!live);
+      } else {
+        // MODEL imports own their materials (from the GLTF/OBJ); only the
+        // non-color display props are ours to set
+        if (live) mat.color.setRGB(1, 1, 1);
+        mat.wireframe = data.wireframe;
+        mat.side = data.doubleSided !== false ? THREE.DoubleSide : THREE.FrontSide;
+        mat.transparent = data.opacity < 1 || !!(mat.map);
+        mat.opacity = data.opacity;
+        mat.depthWrite = data.opacity >= 0.99;
       }
-      mat.wireframe = data.wireframe;
-      mat.side = data.doubleSided !== false ? THREE.DoubleSide : THREE.FrontSide;
-      mat.transparent = data.opacity < 1 || !!(mat.map);
-      mat.opacity = data.opacity;
-      mat.depthWrite = data.opacity >= 0.99;
       // selection feedback is the Box3Helper outline (App.syncSelectionGlyphs)
       // only, Blender-style — no whole-object color wash here.
     });
