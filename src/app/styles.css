@@ -133,7 +133,29 @@ input[type="checkbox"]:checked {
 }
 .panel.collapsed .panel-caret { transform: rotate(0deg); }
 .panel.collapsed > .body { display: none; }
-.panel > .body { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 5px; }
+/* Blender's two-column property layout. The body itself is the grid, and
+   .field-row uses display:contents so its label and control drop straight
+   into the body's columns — that is what makes EVERY label in the panel
+   share one column edge. (A per-row grid can't: each row sizes its own
+   label column, so they never line up.) Anything that isn't a field row
+   spans both columns and keeps its old full-width behaviour. */
+.panel > .body {
+  padding: 0 8px 8px;
+  display: grid; grid-template-columns: minmax(0, 4fr) 6fr;
+  align-items: center; gap: 5px 8px;
+}
+.panel > .body > * { grid-column: 1 / -1; min-width: 0; }
+.panel > .body > .field-row { display: contents; }
+.panel > .body > .field-row > .field-row-label { grid-column: 1; }
+.panel > .body > .field-row > :last-child { grid-column: 2; }
+.panel > .body > .field-row.full > * { grid-column: 1 / -1; }
+/* a lone checkbox/select dropped straight into a panel lines up with the
+   value column rather than starting at the panel edge */
+.panel > .body > label.inline, .panel > .body > select { grid-column: 2; }
+/* a select is intrinsically as wide as its longest option — left alone, one
+   long entry (a body-map address, a file name) widens the whole sidebar */
+.panel select { max-width: 100%; min-width: 0; }
+.panel .row { min-width: 0; }
 
 /* ---- Blender-style property row ----
    One row per parameter, laid out as a 2-column grid so the label column
@@ -142,20 +164,33 @@ input[type="checkbox"]:checked {
    connected .field-group of sub-fields). This is what keeps a whole
    panel's fields visually aligned instead of each row negotiating its
    own layout. */
+/* Outside a panel body (topbar, dialogs) a field row has no shared column
+   to join, so it stays an inline label+control pair sized to its content. */
 .field-row {
-  display: grid; grid-template-columns: minmax(0, max-content) 1fr;
-  align-items: center; column-gap: 8px;
+  display: inline-grid; grid-template-columns: max-content max-content;
+  align-items: center; column-gap: 6px;
 }
 .field-row.full { grid-template-columns: 1fr; }
+/* a blank label cell must not eat a gap out in the topbar, where a labelless
+   checkbox should still measure exactly as wide as the checkbox */
+.field-row.blank { column-gap: 0; }
+.panel > .body > .field-row.blank { column-gap: initial; }
 .field-row-label {
   color: var(--dim); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; text-align: right;
 }
 .field-row > :last-child { min-width: 0; }
-.field-row .numdrag-row, .field-row > select, .field-row > .list-item,
-.field-row > label.inline {
-  width: 100%; justify-content: flex-end;
-}
+/* in a panel the control owns the whole value column, Blender-style */
+.panel > .body > .field-row > .numdrag-row,
+.panel > .body > .field-row > select,
+.panel > .body > .field-row > .list-item,
+.panel > .body > .field-row > input[type="text"],
+.panel > .body > .field-row > input[type="color"],
+.panel > .body > .field-row > .field-group { width: 100%; }
+.panel > .body > .field-row > .numdrag-row .numdrag { flex: 1 1 auto; width: auto; }
+/* checkbox keeps its box hugging the left edge of the value column so a
+   column of checkboxes reads as a list, not a ragged right margin */
+.panel > .body > .field-row > label.inline { justify-content: flex-start; }
 /* connected sub-fields of ONE parameter (a range, a vector) — touching,
    no per-item outside label, mirrors Blender's Color Depth 8/16 toggle */
 .field-group {
@@ -168,6 +203,10 @@ input[type="checkbox"]:checked {
 .field-group > :first-child .numdrag { margin-left: 0; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
 .field-group > :last-child .numdrag { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
 .field-group .numdrag:hover, .field-group .numdrag:focus-within { position: relative; z-index: 1; }
+/* sub-fields are narrow: don't reserve arrow gutters on both sides or the
+   value ellipsizes to "0…". The arrows are absolutely positioned and only
+   fade in on hover, so they can overlay the value like Blender's do. */
+.field-group .numdrag-value { padding: 0 4px; }
 
 /* ---- Blender-style drag-number widget ----
    label OUTSIDE the box, right-justified immediately to its left; the box
@@ -387,7 +426,12 @@ button.props-tab.active { background: var(--panel); border-color: var(--border);
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 6px 0;
 }
-.pose-map-svg { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; }
+/* the body map is authored at a fixed pixel size; let it scale down to the
+   sidebar instead of pushing the panel wider than its column */
+.pose-map-svg {
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 6px;
+  max-width: 100%; height: auto;
+}
 .pose-map-edge { stroke: var(--dim); stroke-width: 2.5; }
 .pose-map-dot { fill: var(--accent2); stroke: var(--bg); stroke-width: 1.5; }
 /* combined body-map kind colors — declared before :hover/.picked below so

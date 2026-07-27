@@ -240,7 +240,6 @@ function dragNumber(label: string, value: number, onChange: (v: number) => void,
   const arrowR = el('span', { class: 'numdrag-arrow right', text: '›' });
   if (fillBar) box.append(fillBar);
   box.append(arrowL, valEl, arrowR);
-  if (label) row.append(el('span', { class: 'numdrag-label', text: label }));
   row.append(box);
   const wrap = box; // all interaction/event wiring below targets the box
 
@@ -352,7 +351,10 @@ function dragNumber(label: string, value: number, onChange: (v: number) => void,
     popupMenu(e.clientX, e.clientY, items);
   };
 
-  return row;
+  // A labelled number IS a property row — hand back the two-column form so
+  // it lines up with every other field in the panel. Unlabelled ones stay
+  // bare so they can be packed into a .field-group (vectors, ranges).
+  return label ? fieldRow(label, row) : row;
 }
 
 function slider(
@@ -375,7 +377,11 @@ function checkbox(label: string, value: boolean, onChange: (v: boolean) => void,
   input.onchange = () => onChange(input.checked);
   const el2 = el('label', { class: 'inline' }, input, label);
   if (title) el2.title = title;
-  return el2;
+  // A checkbox carries its own text, so its label cell stays blank — that
+  // is what drops it into the value column under the fields above it.
+  // (Blank label = zero-width column, so in a flex topbar this still
+  // renders as a plain inline checkbox.)
+  return fieldRow('', el2);
 }
 
 /** Icon-only checkbox (no visible text) with a hover tooltip. */
@@ -389,7 +395,7 @@ function iconCheckbox(iconEl: string | Node, title: string, value: boolean, onCh
 function colorField(label: string, rgba: number[], onChange: (rgb: [number, number, number]) => void): HTMLElement {
   const input = el('input', { type: 'color', value: rgbToHex(rgba) }) as HTMLInputElement;
   input.oninput = () => onChange(hexToRgb(input.value));
-  return el('label', { class: 'inline' }, label, input);
+  return label ? fieldRow(label, input) : input;
 }
 
 function selectField<T extends string>(
@@ -399,7 +405,7 @@ function selectField<T extends string>(
   for (const [v, text] of options) sel.append(el('option', { value: v, text }));
   sel.value = value;
   sel.onchange = () => onChange(sel.value as T);
-  return el('label', { class: 'inline' }, label, sel);
+  return label ? fieldRow(label, sel) : sel;
 }
 
 function rgbToHex(c: number[]): string {
@@ -440,6 +446,7 @@ function panel(title: string, ...children: (Node | string | PanelHint)[]): HTMLE
   const hint = children.find(isPanelHint)?.__panelHint;
   const kids = children.filter((c) => !isPanelHint(c)) as (Node | string)[];
   const body = el('div', { class: 'body' }, ...kids);
+  flattenFieldRows(body);
   const h = el('h3', hint ? { title: hint } : {}, el('span', { class: 'panel-caret', text: '▸' }), title);
   const root = el('div', { class: `panel${panelCollapsed()[title] ? ' collapsed' : ''}` }, h, body);
   h.onclick = () => {
@@ -468,11 +475,30 @@ function fieldRow(label: string, control: Node | Node[], opts: { full?: boolean 
   const controlNode = Array.isArray(control)
     ? el('div', { class: 'field-group' }, ...control)
     : control;
-  if (opts.full || !label) {
-    return el('div', { class: 'field-row full' }, controlNode);
-  }
-  return el('div', { class: 'field-row' },
+  if (opts.full) return el('div', { class: 'field-row full' }, controlNode);
+  // An EMPTY label still gets its (blank) label cell: that's what indents a
+  // lone checkbox into the value column, lined up under the fields above
+  // it, instead of letting it sprawl across the panel. Genuinely
+  // full-width things (button strips) must pass { full: true }.
+  return el('div', { class: `field-row${label ? '' : ' blank'}` },
     el('span', { class: 'field-row-label', text: label }), controlNode);
+}
+
+/**
+ * Panels group related fields with `.row` wrappers, which predate the
+ * two-column layout and pack 2-3 labelled widgets side by side — the thing
+ * that makes a panel read as a jumble. Now that the field factories return
+ * property rows, a `.row` of nothing but rows has no reason to exist:
+ * dissolve it so each field takes its own line and its label joins the
+ * shared label column. Mixed rows (a field next to a button) are left
+ * alone — there the horizontal packing is deliberate.
+ */
+function flattenFieldRows(body: HTMLElement): void {
+  for (const child of [...body.children]) {
+    const kids = [...child.children];
+    if (!child.classList.contains('row') || kids.length === 0) continue;
+    if (kids.every((k) => k.classList.contains('field-row'))) child.replaceWith(...kids);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1383,20 +1409,20 @@ export class UI {
       fieldRow('Subdivision style', selectField('', s.gridSubdivStyle, [
         ['dashed', 'Dashed'], ['solid', 'Solid'],
       ], (v) => { s.gridSubdivStyle = v as 'dashed' | 'solid'; this.app.rebuildGrid(); save(); })),
-      fieldRow('', checkbox('Auto color', !s.gridColor, (v) => {
+      checkbox('Auto color', !s.gridColor, (v) => {
         s.gridColor = v ? null : [...s.background];
         this.app.rebuildGrid(); save(); this.refresh();
-      }, 'grid color matches the background')),
+      }, 'grid color matches the background'),
       ...(s.gridColor ? [fieldRow('Color', colorField('', [...s.gridColor, 1], (rgb) => {
         s.gridColor = rgb; this.app.rebuildGrid(); save();
       }))] : []),
       el('div', { class: 'menu-header', text: 'Background' }),
       fieldRow('Color', colorField('', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); })),
       el('div', { class: 'menu-header', text: 'Helpers' }),
-      fieldRow('', checkbox('Plane helper', s.showPlaneHelper, (v) => { s.showPlaneHelper = v; save(); },
-        'wireframe square showing the plane strokes/splats/etc. are actually landing on right now')),
-      fieldRow('', checkbox('Depth line', s.showDepthHelper, (v) => { s.showDepthHelper = v; save(); },
-        'drop line + ring from the current placement point down to the ground plane')),
+      checkbox('Plane helper', s.showPlaneHelper, (v) => { s.showPlaneHelper = v; save(); },
+        'wireframe square showing the plane strokes/splats/etc. are actually landing on right now'),
+      checkbox('Depth line', s.showDepthHelper, (v) => { s.showDepthHelper = v; save(); },
+        'drop line + ring from the current placement point down to the ground plane'),
     );
   }
 
@@ -1500,9 +1526,8 @@ export class UI {
         ),
       ],
       rename: (v) => { m.name = v; },
-      after: m.select ? [el('div', { class: 'row' },
-        slider('Opacity', m.opacity, 0.05, 1, 0.01, (v) => { m.opacity = v; }),
-      )] : [],
+      // no inline Opacity here — the outliner is a tree, not a property
+      // editor; opacity lives in Properties with the rest of the material
     });
     for (const p of scene.polyMeshes) nodes.push({
       ref: { kind: 'POLY', id: p.id }, icon: icon('wireframe'), name: p.name,
@@ -1855,26 +1880,18 @@ export class UI {
         input.onchange = () => { mat.name = input.value; this.refresh(); };
         return input;
       })())] : []),
-      el('div', { class: 'row' },
-        colorField('Base', [...view.baseColor, 1], (rgb) => edit((m) => { m.baseColor = rgb; })),
-        slider('Opacity', view.opacity, 0.02, 1, 0.01, (v) => edit((m) => { m.opacity = v; })),
-      ),
-      el('div', { class: 'row' },
-        slider('Rough', view.roughness, 0, 1, 0.01, (v) => edit((m) => { m.roughness = v; }), { def: 0.9 }),
-        slider('Metal', view.metallic, 0, 1, 0.01, (v) => edit((m) => { m.metallic = v; }), { def: 0 }),
-      ),
-      el('div', { class: 'row' },
-        colorField('Emit', [...view.emission, 1], (rgb) => edit((m) => { m.emission = rgb; })),
-        slider('Strength', view.emissionStrength, 0, 5, 0.05, (v) => edit((m) => { m.emissionStrength = v; }), { def: 0 }),
-      ),
-      el('div', { class: 'row' },
-        checkbox('Unlit', view.unlit, (v) => edit((m) => { m.unlit = v; })),
-        checkbox('Two-sided', view.doubleSided, (v) => edit((m) => { m.doubleSided = v; })),
-        checkbox('Wireframe', view.wireframe, (v) => edit((m) => { m.wireframe = v; })),
-      ),
-      fieldRow('Blend', selectField('', view.blend, [
+      colorField('Base color', [...view.baseColor, 1], (rgb) => edit((m) => { m.baseColor = rgb; })),
+      slider('Opacity', view.opacity, 0.02, 1, 0.01, (v) => edit((m) => { m.opacity = v; })),
+      slider('Roughness', view.roughness, 0, 1, 0.01, (v) => edit((m) => { m.roughness = v; }), { def: 0.9 }),
+      slider('Metallic', view.metallic, 0, 1, 0.01, (v) => edit((m) => { m.metallic = v; }), { def: 0 }),
+      colorField('Emission', [...view.emission, 1], (rgb) => edit((m) => { m.emission = rgb; })),
+      slider('Strength', view.emissionStrength, 0, 5, 0.05, (v) => edit((m) => { m.emissionStrength = v; }), { def: 0 }),
+      selectField('Blend', view.blend, [
         ['OPAQUE', 'Opaque'], ['BLEND', 'Alpha blend'], ['ADD', 'Additive'], ['MULTIPLY', 'Multiply'],
-      ] as [MaterialBlend, string][], (v) => edit((m) => { m.blend = v; }))),
+      ] as [MaterialBlend, string][], (v) => edit((m) => { m.blend = v; })),
+      checkbox('Unlit', view.unlit, (v) => edit((m) => { m.unlit = v; })),
+      checkbox('Two-sided', view.doubleSided, (v) => edit((m) => { m.doubleSided = v; })),
+      checkbox('Wireframe', view.wireframe, (v) => edit((m) => { m.wireframe = v; })),
       el('div', { class: 'menu-header', text: 'Textures' }),
       this.slotRow(target, 'base', 'Base color'),
       this.slotRow(target, 'roughness', 'Roughness'),
@@ -1916,12 +1933,9 @@ export class UI {
       };
       rows.push(
         el('div', { class: 'row', text: `Editing sets that value on all ${refs.length} selected` }),
-        el('div', { class: 'row' }, 'Loc',
-          ...[0, 1, 2].map((i) => numField('', +t.translation[i].toFixed(3), (v) => setAxis('translation', i, v)))),
-        el('div', { class: 'row' }, 'Rot',
-          ...[0, 1, 2].map((i) => numField('', +t.rotation[i].toFixed(3), (v) => setAxis('rotation', i, v)))),
-        el('div', { class: 'row' }, 'Scale',
-          ...[0, 1, 2].map((i) => numField('', +t.scale[i].toFixed(3), (v) => setAxis('scale', i, v)))),
+        this.vecRow('Loc', () => t.translation.map((v) => +v.toFixed(3)), (i, v) => setAxis('translation', i, v)),
+        this.vecRow('Rot', () => t.rotation.map((v) => +v.toFixed(3)), (i, v) => setAxis('rotation', i, v)),
+        this.vecRow('Scale', () => t.scale.map((v) => +v.toFixed(3)), (i, v) => setAxis('scale', i, v)),
       );
     }
     return panel(`Object Properties — ${refs.length} selected`, ...rows);
@@ -1945,24 +1959,19 @@ export class UI {
         this.app.refreshWidget();
       };
       rows.push(
-        el('div', { class: 'row' }, 'Loc',
-          ...[0, 1, 2].map((i) => numField('', +t.translation[i].toFixed(3), (v) => { t.translation[i] = v; write(); }))),
-        el('div', { class: 'row' }, 'Rot',
-          ...[0, 1, 2].map((i) => numField('', +t.rotation[i].toFixed(3), (v) => { t.rotation[i] = v; write(); }))),
-        el('div', { class: 'row' }, 'Scale',
-          ...[0, 1, 2].map((i) => numField('', +t.scale[i].toFixed(3), (v) => { t.scale[i] = v; write(); }))),
+        this.vecRow('Loc', () => t.translation.map((v) => +v.toFixed(3)), (i, v) => { t.translation[i] = v; write(); }),
+        this.vecRow('Rot', () => t.rotation.map((v) => +v.toFixed(3)), (i, v) => { t.rotation[i] = v; write(); }),
+        this.vecRow('Scale', () => t.scale.map((v) => +v.toFixed(3)), (i, v) => { t.scale[i] = v; write(); }),
       );
     }
 
     if (ref.kind === 'MESH') {
       const m = ctx.scene.meshes.find((x) => x.id === ref.id)!;
       rows.push(
-        el('div', { class: 'row' },
-          selectField('Lock', m.billboard ?? 'NONE', [
-            ['NONE', 'World'], ['FACE_VIEW', 'Face view'], ['CAMERA', 'Camera (HUD)'],
-          ], (v) => { m.billboard = v as typeof m.billboard; this.refresh(); }),
-          checkbox('Draw target', m.drawTarget, (v) => { m.drawTarget = v; }),
-        ),
+        selectField('Lock', m.billboard ?? 'NONE', [
+          ['NONE', 'World'], ['FACE_VIEW', 'Face view'], ['CAMERA', 'Camera (HUD)'],
+        ], (v) => { m.billboard = v as typeof m.billboard; this.refresh(); }),
+        checkbox('Draw target', m.drawTarget, (v) => { m.drawTarget = v; }),
         ...(m.billboard === 'CAMERA' ? [el('div', {
           class: 'row',
           text: 'Camera lock: Loc/Rot/Scale become a view-space offset (keep z negative for depth)',
@@ -1977,7 +1986,7 @@ export class UI {
         el('div', { class: 'menu-sep' }),
         el('div', { class: 'menu-header', text: 'Editable mesh' }),
         el('div', { class: 'row', text: `${p.vertices.length} verts · ${p.edges.length} edges · ${p.faces.length} faces` }),
-        fieldRow('', checkbox('Draw target', p.drawTarget, (v) => { p.drawTarget = v; }, 'faces become Surface-placement drawing targets')),
+        checkbox('Draw target', p.drawTarget, (v) => { p.drawTarget = v; }, 'faces become Surface-placement drawing targets'),
         el('div', { class: 'row' },
           selectField('UV', hasUV(p) ? 'SET' : 'AUTO', [
             ['AUTO', 'Auto (planar)'], ['SET', 'Unwrapped'],
@@ -2021,8 +2030,8 @@ export class UI {
         ] : []),
         ...(l.kind === 'AMBIENT' ? [] : [
           el('div', { class: 'menu-header', text: 'Shadow' }),
-          fieldRow('', checkbox('Cast shadows', l.castShadow, (v) => { l.castShadow = v; this.refresh(); },
-            'off by default — each shadow-casting light costs an extra depth pass')),
+          checkbox('Cast shadows', l.castShadow, (v) => { l.castShadow = v; this.refresh(); },
+            'off by default — each shadow-casting light costs an extra depth pass'),
           ...(l.castShadow ? [
             fieldRow('Bias', numField('', l.shadowBias ?? -0.0005, (v) => { l.shadowBias = v; }, 0.0001, { def: -0.0005 })),
             fieldRow('Softness', slider('', l.shadowRadius ?? 2, 0, 10, 0.1, (v) => { l.shadowRadius = v; }, { def: 2 })),
@@ -2072,7 +2081,7 @@ export class UI {
     return panel('Brush — Advanced',
       fieldRow('Size unit', selectField('', st.unit, [['VIEW', 'View (px)'], ['SCENE', 'Scene (world)']],
         (v) => { st.unit = v as 'VIEW' | 'SCENE'; })),
-      fieldRow('', checkbox('Stamp', st.stamp, (v) => { st.stamp = v; })),
+      checkbox('Stamp', st.stamp, (v) => { st.stamp = v; }),
       fieldRow('Hardness', slider('', b.hardness, 0.05, 1, 0.01, (v) => { b.hardness = v; }, { def: 1, route: 'brush.hardness' })),
       fieldRow('Spacing', slider('', st.spacing, 0.03, 1, 0.01, (v) => { st.spacing = v; }, { def: 0.12 })),
       fieldRow('Angle', slider('', st.angle, -Math.PI, Math.PI, 0.05, (v) => { st.angle = v; }, { def: 0 })),
@@ -2083,7 +2092,7 @@ export class UI {
       fieldRow('Active smooth', slider('', b.activeSmooth, 0, 0.8, 0.02, (v) => { b.activeSmooth = v; }, { def: 0.2 })),
       fieldRow('Post smooth', slider('', b.postSmooth, 0, 1, 0.02, (v) => { b.postSmooth = v; }, { def: 0.3 })),
       fieldRow('Simplify', numField('', b.simplify, (v) => { b.simplify = Math.max(0, v); }, 0.001, { def: 0.002 })),
-      fieldRow('', checkbox('Stabilize', b.stabilize, (v) => { b.stabilize = v; this.refresh(); })),
+      checkbox('Stabilize', b.stabilize, (v) => { b.stabilize = v; this.refresh(); }),
       ...(b.stabilize ? [fieldRow('Radius', slider('', b.stabilizeRadius, 5, 120, 1, (v) => { b.stabilizeRadius = v; }, { def: 30 }))] : []),
       el('div', { class: 'menu-header', text: 'Texture-paint tip' }),
       (() => {
@@ -2149,7 +2158,7 @@ export class UI {
     const sel = listSelectedObjects(ctx.scene);
     return panel('Stencil',
       panelHint('Paint only lands where the mask passes. Works with texture, vertex, weight and splat painting.'),
-      fieldRow('', checkbox('Enabled', s.enabled, (v) => { s.enabled = v; this.refresh(); })),
+      checkbox('Enabled', s.enabled, (v) => { s.enabled = v; this.refresh(); }),
       fieldRow('Source', selectField('', s.source, [
         ['IMAGE', 'Image'], ['OBJECTS', 'Object silhouette'], ['VIDEO', 'Live camera'],
       ], (v) => { s.source = v as typeof s.source; this.refresh(); })),
@@ -2184,7 +2193,7 @@ export class UI {
         fieldRow('Offset Y', slider('', s.offset[1], -1, 1, 0.01, (v) => { s.offset[1] = v; }, { def: 0 })),
       ] : []),
       fieldRow('Threshold', slider('', s.threshold, 0, 0.99, 0.01, (v) => { s.threshold = v; }, { def: 0.5 })),
-      fieldRow('', checkbox('Invert', s.invert, (v) => { s.invert = v; })),
+      checkbox('Invert', s.invert, (v) => { s.invert = v; }),
     );
   }
 
@@ -2318,19 +2327,21 @@ export class UI {
     const m = ob.materials[ob.activeMaterial];
     const props: Node[] = [];
     if (m) {
+      // Blender's GP material layout: each of Stroke and Fill is a titled
+      // sub-section gated by its own checkbox, with colour / alpha / style
+      // as ordinary property rows underneath — not three widgets fighting
+      // for one line.
       props.push(
-        el('div', { class: 'row' },
-          checkbox('Stroke', m.showStroke, (v) => { m.showStroke = v; ctx.requestRender(); }),
-          colorField('', m.strokeColor, (rgb) => { m.strokeColor = [rgb[0], rgb[1], rgb[2], m.strokeColor[3]]; ctx.requestRender(); }),
-          slider('A', m.strokeColor[3], 0, 1, 0.01, (v) => { m.strokeColor[3] = v; ctx.requestRender(); }),
-        ),
+        el('div', { class: 'menu-header', text: 'Stroke' }),
+        checkbox('Show', m.showStroke, (v) => { m.showStroke = v; ctx.requestRender(); }),
+        colorField('Color', m.strokeColor, (rgb) => { m.strokeColor = [rgb[0], rgb[1], rgb[2], m.strokeColor[3]]; ctx.requestRender(); }),
+        slider('Alpha', m.strokeColor[3], 0, 1, 0.01, (v) => { m.strokeColor[3] = v; ctx.requestRender(); }),
         selectField('Line', m.lineMode, [['LINE', 'Line'], ['DOTS', 'Dots'], ['SQUARES', 'Squares']] as [LineMode, string][], (v) => { m.lineMode = v; ctx.requestRender(); }),
-        el('div', { class: 'row' },
-          checkbox('Fill', m.showFill, (v) => { m.showFill = v; ctx.requestRender(); }),
-          colorField('', m.fillColor, (rgb) => { m.fillColor = [rgb[0], rgb[1], rgb[2], m.fillColor[3]]; ctx.requestRender(); }),
-          slider('A', m.fillColor[3], 0, 1, 0.01, (v) => { m.fillColor[3] = v; ctx.requestRender(); }),
-        ),
-        selectField('Fill style', m.fillStyle, [['SOLID', 'Solid'], ['GRADIENT_LINEAR', 'Linear Gradient'], ['GRADIENT_RADIAL', 'Radial Gradient']] as [FillStyle, string][], (v) => { m.fillStyle = v; ctx.requestRender(); }),
+        el('div', { class: 'menu-header', text: 'Fill' }),
+        checkbox('Show', m.showFill, (v) => { m.showFill = v; ctx.requestRender(); }),
+        colorField('Color', m.fillColor, (rgb) => { m.fillColor = [rgb[0], rgb[1], rgb[2], m.fillColor[3]]; ctx.requestRender(); }),
+        slider('Alpha', m.fillColor[3], 0, 1, 0.01, (v) => { m.fillColor[3] = v; ctx.requestRender(); }),
+        selectField('Style', m.fillStyle, [['SOLID', 'Solid'], ['GRADIENT_LINEAR', 'Linear Gradient'], ['GRADIENT_RADIAL', 'Radial Gradient']] as [FillStyle, string][], (v) => { m.fillStyle = v; ctx.requestRender(); }),
       );
       if (m.fillStyle !== 'SOLID') {
         props.push(el('div', { class: 'row' },
@@ -2340,7 +2351,7 @@ export class UI {
       }
       props.push(checkbox('Holdout', m.holdout, (v) => { m.holdout = v; ctx.requestRender(); }));
       if (ctx.settings.mode === 'EDIT') {
-        props.push(btn('Assign to selected', () => ops.assignMaterial(ctx, ob.activeMaterial)));
+        props.push(fieldRow('', btn('Assign to selected', () => ops.assignMaterial(ctx, ob.activeMaterial)), { full: true }));
       }
     }
 
@@ -2642,7 +2653,7 @@ export class UI {
     const ob = activeObject(ctx.scene);
     const o = ob.onion;
     return panel('Onion Skinning',
-      fieldRow('', checkbox('Enabled', o.enabled, (v) => { o.enabled = v; ctx.requestRender(); })),
+      checkbox('Enabled', o.enabled, (v) => { o.enabled = v; ctx.requestRender(); }),
       fieldRow('Mode', selectField('', o.mode, [['KEYFRAMES', 'Keyframes'], ['FRAMES', 'Frames']], (v) => { o.mode = v; ctx.requestRender(); })),
       fieldRow('Before', numField('', o.before, (v) => { o.before = Math.max(0, Math.round(v)); ctx.requestRender(); }, 1)),
       fieldRow('After', numField('', o.after, (v) => { o.after = Math.max(0, Math.round(v)); ctx.requestRender(); }, 1)),
@@ -2680,11 +2691,9 @@ export class UI {
   private vecRow(
     label: string, get: () => number[], set: (i: number, v: number) => void, step = 0.1,
   ): HTMLElement {
-    const row = el('div', { class: 'row' }, label);
-    get().forEach((component, i) => {
-      row.append(numField('', component, (v) => set(i, v), step));
-    });
-    return row;
+    // one parameter, three sub-fields — a connected .field-group, so X/Y/Z
+    // read as one vector rather than three boxes that happen to be adjacent
+    return fieldRow(label, get().map((component, i) => numField('', component, (v) => set(i, v), step)));
   }
 
   /** Blender-style N-panel: item / view / cursor values, live + editable. */
@@ -3503,7 +3512,7 @@ export class UI {
           fieldRow('Phase', slider('', c.phase ?? 0, 0, 1, 0.001, (v) => { c.phase = v; }, { def: 0 })),
           fieldRow('Speed', numField('', c.speed ?? 0.2, (v) => { c.speed = v; }, 0.05, { def: 0.2 })),
           fieldRow('Loop', selectField('', c.loop ?? 'LOOP', [['LOOP', 'Loop'], ['PINGPONG', 'Ping-pong'], ['ONCE', 'Once']], (v) => { c.loop = v as typeof c.loop; })),
-          fieldRow('', checkbox('Orient', !!c.orient, (v) => { c.orient = v; })),
+          checkbox('Orient', !!c.orient, (v) => { c.orient = v; }),
         );
       } else if (c.type === 'FOLLOW_STREAM') {
         const streamSel = el('select') as HTMLSelectElement;
@@ -3537,7 +3546,7 @@ export class UI {
         rows.push(
           el('div', { class: 'row', text: `${shapeText} · probes: travelers + stream landmarks` }),
           fieldRow('Radius', numField('', c.radius ?? 0.25, (v) => { c.radius = Math.max(0.01, v); }, 0.05, { def: 0.25, min: 0.01 })),
-          fieldRow('', checkbox('Retrigger', c.retrigger !== false, (v) => { c.retrigger = v; })),
+          checkbox('Retrigger', c.retrigger !== false, (v) => { c.retrigger = v; }),
           el('div', { class: 'menu-header', text: 'On enter' }),
           this.msgEditor(c.messages ??= []),
           el('div', { class: 'menu-header', text: 'On leave' }),
