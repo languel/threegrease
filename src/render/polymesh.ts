@@ -205,6 +205,10 @@ export class PolyMeshManager {
       new THREE.MeshStandardMaterial({ polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
     );
     faceMesh.userData.polyId = pm.id;
+    // quilt faces participate in shadows like any other surface (per-light
+    // opt-in, so this is free until a light turns castShadow on)
+    faceMesh.castShadow = true;
+    faceMesh.receiveShadow = true;
     const edgeLines = new THREE.LineSegments(
       new THREE.BufferGeometry(),
       new THREE.LineBasicMaterial({ vertexColors: true, transparent: true }),

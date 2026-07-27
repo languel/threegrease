@@ -118,7 +118,7 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
-export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD'; id: number }
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT'; id: number }
 
 // ---- object constraints (Blender-style stack, evaluated every frame) ----
 
@@ -476,6 +476,41 @@ export interface TGMaterial {
   slots: Partial<Record<TextureSlotName, TGTextureSlot>>;
 }
 
+// ---- Lights ---------------------------------------------------------------
+// Lighting used to be two hardcoded objects in the App constructor, which
+// meant the PBR material channels (roughness/metallic/emission) had nothing
+// meaningful to respond to and shadows were impossible. Lights are now
+// ordinary scene objects: selectable, transformable, parentable, and
+// constrainable through the same ObjKind machinery as everything else.
+
+export interface TGLight {
+  id: number;
+  name: string;
+  /** AMBIENT ignores transform (it's uniform); SUN is directional and uses
+   *  only rotation; POINT/SPOT use translation. */
+  kind: 'AMBIENT' | 'SUN' | 'POINT' | 'SPOT';
+  color: Vec3;
+  intensity: number;
+  translation: Vec3;
+  rotation: Vec3;
+  /** POINT/SPOT falloff distance (0 = never falls off) */
+  distance?: number;
+  decay?: number;
+  /** SPOT cone */
+  angle?: number;
+  penumbra?: number;
+  castShadow: boolean;
+  shadowBias?: number;
+  shadowRadius?: number;
+  /** shadow map resolution (square); bigger = crisper but costlier */
+  shadowMapSize?: number;
+  visible: boolean;
+  select: boolean;
+  lock?: boolean;
+  parent?: ParentRef | null;
+  constraints?: TGConstraint[];
+}
+
 /** A mesh scene object: primitive solid, plane, or imported model —
  *  usable as a reference or as a Surface-placement draw target. */
 export interface TGMesh {
@@ -656,6 +691,8 @@ export interface GPScene {
   io: { wsUrl: string; midiInId: string | null; midiOutId: string | null };
   score: TGScore;
   routes: TGRoute[];
+  /** scene lights (migrated from the old hardcoded ambient + sun) */
+  lights: TGLight[];
   /** shared image datablocks (textures, brush tips, stencils, bake results) */
   images: TGImage[];
   /** shared material datablocks, referenced by mesh-family objects */

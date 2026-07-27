@@ -3,9 +3,9 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt } from '../core/gpdata';
+import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt } from '../core/gpdata';
 import { History } from '../core/history';
-import type { GPScene } from '../core/types';
+import type { GPScene, TGLight } from '../core/types';
 import { GPSceneRenderer, type EditorMode } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { defaultSettings, loadPrefs, savePrefs, snapIncrement, type AppCtx } from '../tools/context';
@@ -105,6 +105,7 @@ import { createPolyMesh, smoothPolyMesh, subdividePolyMesh } from '../core/polym
 import type { UnwrapMode } from '../core/uvunwrap';
 import { unwrap } from '../core/uvunwrap';
 import { PolyMeshManager } from '../render/polymesh';
+import { LightManager } from '../render/lights';
 import { PaintCloudManager, createPaintCloud } from '../render/paintclouds';
 import { setSplatPickSource } from '../tools/splatpick';
 import { setStencilObjectResolver, setStencilVideoSource } from '../tools/stencil';
@@ -214,6 +215,7 @@ class App implements AppHandle {
   readonly splats = new SplatManager();
   readonly meshes = new MeshManager();
   readonly polys = new PolyMeshManager();
+  readonly lights = new LightManager();
   readonly paints = new PaintCloudManager();
   readonly mmPoints = new StreamPointsManager();
   /** app-instance store handle — evals/automation must use THIS, not an
@@ -253,6 +255,10 @@ class App implements AppHandle {
       canvas: glCanvas, antialias: true, stencil: true, preserveDrawingBuffer: true,
     });
     this.glRenderer.setPixelRatio(window.devicePixelRatio);
+    // shadow maps are only rendered for lights that opt in (castShadow is
+    // off by default), so this costs nothing until a light asks for it
+    this.glRenderer.shadowMap.enabled = true;
+    this.glRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.01, 500);
     this.camera.position.set(0, 0.6, 6);
@@ -343,11 +349,10 @@ class App implements AppHandle {
     this.scene3.add(this.paints.group);
     this.scene3.add(this.mmPoints.group);
     mmCapture.onStatus = () => this.ui?.refresh();
-    // mesh objects use MeshStandardMaterial — GP shaders ignore lights
-    this.scene3.add(new THREE.AmbientLight(0xffffff, 0.9));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-    sun.position.set(3, -4, 6);
-    this.scene3.add(sun);
+    // mesh objects use MeshStandardMaterial — GP shaders ignore lights.
+    // Lights are scene data now (scene.lights, migrated from the two that
+    // used to be hardcoded here); LightManager mirrors them each frame.
+    this.scene3.add(this.lights.group);
 
     // object-mode transform widget
     this.scene3.add(this.widgetProxy);
@@ -2013,6 +2018,10 @@ class App implements AppHandle {
       { label: 'Editable Mesh', icon: 'wireframe', do: () => this.addPolyMeshObject(cursorAt) },
       { label: 'Empty', icon: 'target', do: () => this.addMeshObject('EMPTY', undefined, cursorAt) },
       { sep: true },
+      { label: 'Sun light', icon: 'boltCircle', do: () => this.addLight('SUN', cursorAt) },
+      { label: 'Point light', icon: 'boltCircle', do: () => this.addLight('POINT', cursorAt) },
+      { label: 'Spot light', icon: 'boltCircle', do: () => this.addLight('SPOT', cursorAt) },
+      { sep: true },
       { label: 'Traveler here', icon: 'cursorArrow', do: () => this.addTravelerObjectAt(hereAt, px.x, px.y), disabled: !strokeHit },
       { label: 'Trigger here', icon: 'boltCircle', do: () => this.addTriggerAt(hereAt) },
       { sep: true },
@@ -2359,6 +2368,20 @@ class App implements AppHandle {
     // (setTool targets the freshly selected mesh and refreshes the UI)
     if (this.ctx.settings.mode !== 'DRAW' && this.ctx.settings.mode !== 'EDIT') this.setMode('EDIT');
     this.setTool('polypen');
+  }
+
+  /** Add a light at the 3D cursor, selected and active like any other
+   *  object (lights are ordinary scene objects — see render/lights.ts). */
+  addLight(kind: TGLight['kind'], at?: [number, number, number]): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    const l = createLight(kind, undefined, at ?? [...scene.cursor]);
+    scene.lights.push(l);
+    deselectAllObjects(scene);
+    l.select = true;
+    this.setLastPicked({ kind: 'LIGHT', id: l.id });
+    this.refreshWidget();
+    this.ui.refresh();
   }
 
   /** Persist UVs on an editable mesh. Lives here (not in the UI) because
@@ -2942,6 +2965,8 @@ class App implements AppHandle {
     this.splats.sync(ctx.scene);
     this.meshes.sync(ctx.scene, this.nav.active);
     this.polys.sync(ctx.scene, this.nav.active);
+    this.lights.helpersVisible = !this.presentation && !this.infoOverlayHidden;
+    this.lights.sync(ctx.scene);
     this.paints.sync(ctx.scene, this.glRenderer.domElement.height);
     ctx.pickableMeshes = [
       ...ctx.scene.meshes

@@ -1543,6 +1543,25 @@ export class UI {
       ],
       rename: (v) => { pc.name = v; },
     });
+    for (const l of scene.lights) nodes.push({
+      ref: { kind: 'LIGHT', id: l.id }, icon: icon('boltCircle'), name: l.name,
+      selected: l.select, parent: l.parent,
+      onSelect: (e) => {
+        this.app.setLastPicked({ kind: 'LIGHT', id: l.id });
+        toggleSel((v) => { l.select = v; }, l.select, !!e?.shiftKey);
+      },
+      extras: [
+        el('span', { text: l.kind.toLowerCase(), title: 'light type' }),
+        ...(l.kind !== 'AMBIENT' ? [btn(l.castShadow ? icon('circle') : icon('dot'),
+          () => { l.castShadow = !l.castShadow; this.refresh(); },
+          { cls: 'icon-btn', title: 'Cast shadows' })] : []),
+        ...viewLockBtns(
+          !l.visible, (v) => { l.visible = !v; },
+          !!l.lock, (v) => { l.lock = v; },
+        ),
+      ],
+      rename: (v) => { l.name = v; },
+    });
     for (const s of scene.splats) nodes.push({
       ref: { kind: 'SPLAT', id: s.id }, icon: icon('sparkles'), name: s.name, selected: s.select,
       parent: s.parent,
@@ -1973,6 +1992,42 @@ export class UI {
           }, { title: 'persist UVs so painted textures stop sliding when the mesh changes' }),
         ),
         ...this.materialEditor(ref),
+      );
+    } else if (ref.kind === 'LIGHT') {
+      const l = ctx.scene.lights.find((x) => x.id === ref.id)!;
+      const spot = l.kind === 'SPOT';
+      const positional = l.kind === 'POINT' || spot;
+      rows.push(
+        el('div', { class: 'menu-sep' }),
+        el('div', { class: 'menu-header', text: 'Light' }),
+        fieldRow('Type', selectField('', l.kind, [
+          ['AMBIENT', 'Ambient'], ['SUN', 'Sun (directional)'], ['POINT', 'Point'], ['SPOT', 'Spot'],
+        ], (v) => { ctx.pushUndo(); l.kind = v as typeof l.kind; this.refresh(); })),
+        el('div', { class: 'row' },
+          colorField('Color', [...l.color, 1], (rgb) => { l.color = rgb; }),
+          slider('Power', l.intensity, 0, l.kind === 'POINT' || spot ? 200 : 5, 0.05,
+            (v) => { l.intensity = v; }, { def: l.kind === 'AMBIENT' ? 0.9 : l.kind === 'SUN' ? 1.4 : 20 }),
+        ),
+        ...(positional ? [
+          fieldRow('Distance', numField('', l.distance ?? 0, (v) => { l.distance = Math.max(0, v); }, 0.5, { def: 0 })),
+          fieldRow('Decay', slider('', l.decay ?? 2, 0, 4, 0.05, (v) => { l.decay = v; }, { def: 2 })),
+        ] : []),
+        ...(spot ? [
+          fieldRow('Cone', slider('', l.angle ?? Math.PI / 6, 0.05, Math.PI / 2, 0.01, (v) => { l.angle = v; }, { def: Math.PI / 6 })),
+          fieldRow('Penumbra', slider('', l.penumbra ?? 0.2, 0, 1, 0.01, (v) => { l.penumbra = v; }, { def: 0.2 })),
+        ] : []),
+        ...(l.kind === 'AMBIENT' ? [] : [
+          el('div', { class: 'menu-header', text: 'Shadow' }),
+          fieldRow('', checkbox('Cast shadows', l.castShadow, (v) => { l.castShadow = v; this.refresh(); },
+            'off by default — each shadow-casting light costs an extra depth pass')),
+          ...(l.castShadow ? [
+            fieldRow('Bias', numField('', l.shadowBias ?? -0.0005, (v) => { l.shadowBias = v; }, 0.0001, { def: -0.0005 })),
+            fieldRow('Softness', slider('', l.shadowRadius ?? 2, 0, 10, 0.1, (v) => { l.shadowRadius = v; }, { def: 2 })),
+            fieldRow('Map size', selectField('', String(l.shadowMapSize ?? 1024), [
+              ['512', '512'], ['1024', '1024'], ['2048', '2048'], ['4096', '4096'],
+            ], (v) => { l.shadowMapSize = Number(v); })),
+          ] : []),
+        ]),
       );
     } else if (ref.kind === 'SPLAT') {
       const s = ctx.scene.splats.find((x) => x.id === ref.id)!;

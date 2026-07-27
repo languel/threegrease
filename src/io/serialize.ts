@@ -1,5 +1,5 @@
 import type { GPObject, GPScene, TGMaterial, Vec3 } from '../core/types';
-import { bumpIdCounter, createDefaultCamera, createImage, createMaterialDB, genId } from '../core/gpdata';
+import { bumpIdCounter, createDefaultCamera, createImage, createMaterialDB, defaultLights, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
 import { sanitizePolyMesh } from '../core/polymesh';
 
@@ -62,6 +62,17 @@ export function deserializeScene(json: string): GPScene {
   // below, which runs after meshes/polyMeshes are defaulted)
   scene.images ??= [];
   scene.materials ??= [];
+  // pre-datablock saves had lighting hardcoded in the App constructor;
+  // seed the same two lights so an old scene looks identical
+  scene.lights ??= defaultLights();
+  for (const l of scene.lights) {
+    l.select ??= false;
+    l.lock ??= false;
+    l.visible ??= true;
+    l.parent ??= null;
+    l.constraints ??= [];
+    l.castShadow ??= false;
+  }
   scene.images = scene.images.filter((i) => !i.src.startsWith('blob:')); // session-only
   scene.splats ??= [];
   // object-URL sources don't survive reload

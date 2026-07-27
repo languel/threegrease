@@ -9,7 +9,7 @@ import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso, pointInPolygon } from './draw';
 
-export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD';
+export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT';
 export interface ObjRef { kind: ObjKind; id: number }
 
 export function gpIndexOf(scene: GPScene, id: number): number {
@@ -26,6 +26,7 @@ export function listSelected(scene: GPScene): ObjRef[] {
   for (const st of scene.mmStreams) if (st.select) out.push({ kind: 'STREAM', id: st.id });
   for (const p of scene.polyMeshes) if (p.select) out.push({ kind: 'POLY', id: p.id });
   for (const pc of scene.paintClouds) if (pc.select) out.push({ kind: 'PCLOUD', id: pc.id });
+  for (const l of scene.lights) if (l.select) out.push({ kind: 'LIGHT', id: l.id });
   return out;
 }
 
@@ -38,6 +39,7 @@ export function deselectAllObjects(scene: GPScene): void {
   for (const st of scene.mmStreams) st.select = false;
   for (const p of scene.polyMeshes) p.select = false;
   for (const pc of scene.paintClouds) pc.select = false;
+  for (const l of scene.lights) l.select = false;
 }
 
 function entityOf(scene: GPScene, ref: ObjRef):
@@ -49,6 +51,7 @@ function entityOf(scene: GPScene, ref: ObjRef):
   if (ref.kind === 'STREAM') return scene.mmStreams.find((st) => st.id === ref.id);
   if (ref.kind === 'POLY') return scene.polyMeshes.find((p) => p.id === ref.id);
   if (ref.kind === 'PCLOUD') return scene.paintClouds.find((pc) => pc.id === ref.id);
+  if (ref.kind === 'LIGHT') return scene.lights.find((l) => l.id === ref.id);
   return scene.meshes.find((m) => m.id === ref.id);
 }
 
@@ -103,6 +106,11 @@ export function getObjectTransform(scene: GPScene, ref: ObjRef): ObjTransform | 
     const pc = scene.paintClouds.find((x) => x.id === ref.id);
     return pc ? { translation: [...pc.translation], rotation: [...pc.rotation], scale: [...pc.scale] } : null;
   }
+  if (ref.kind === 'LIGHT') {
+    // lights have no scale; report unit so the transform UI/gizmo behaves
+    const l = scene.lights.find((x) => x.id === ref.id);
+    return l ? { translation: [...l.translation], rotation: [...l.rotation], scale: [1, 1, 1] } : null;
+  }
   const m = scene.meshes.find((x) => x.id === ref.id);
   return m ? { translation: [...m.translation], rotation: [...m.rotation], scale: [...m.scale] } : null;
 }
@@ -140,6 +148,9 @@ export function setObjectTransform(scene: GPScene, ref: ObjRef, t: ObjTransform)
   } else if (ref.kind === 'PCLOUD') {
     const pc = scene.paintClouds.find((x) => x.id === ref.id);
     if (pc) { pc.translation = [...t.translation]; pc.rotation = [...t.rotation]; pc.scale = [...t.scale]; }
+  } else if (ref.kind === 'LIGHT') {
+    const l = scene.lights.find((x) => x.id === ref.id);
+    if (l) { l.translation = [...t.translation]; l.rotation = [...t.rotation]; } // scale ignored
   } else {
     const m = scene.meshes.find((x) => x.id === ref.id);
     if (m) { m.translation = [...t.translation]; m.rotation = [...t.rotation]; m.scale = [...t.scale]; }
@@ -174,6 +185,8 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     scene.polyMeshes = scene.polyMeshes.filter((p) => p.id !== ref.id);
   } else if (ref.kind === 'PCLOUD') {
     scene.paintClouds = scene.paintClouds.filter((pc) => pc.id !== ref.id);
+  } else if (ref.kind === 'LIGHT') {
+    scene.lights = scene.lights.filter((l) => l.id !== ref.id);
   } else {
     scene.meshes = scene.meshes.filter((m) => m.id !== ref.id);
   }
@@ -189,6 +202,7 @@ export function allRefs(scene: GPScene): ObjRef[] {
     ...scene.mmStreams.map((st) => ({ kind: 'STREAM' as const, id: st.id })),
     ...scene.polyMeshes.map((p) => ({ kind: 'POLY' as const, id: p.id })),
     ...scene.paintClouds.map((pc) => ({ kind: 'PCLOUD' as const, id: pc.id })),
+    ...scene.lights.map((l) => ({ kind: 'LIGHT' as const, id: l.id })),
   ];
 }
 

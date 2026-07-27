@@ -1,6 +1,6 @@
 import type {
   GPCamera, GPFrame, GPLayer, GPMaterial, GPObject, GPPoint, GPScene, GPStroke,
-  TGImage, TGMaterial, Vec3, Vec4,
+  TGImage, TGLight, TGMaterial, Vec3, Vec4,
 } from './types';
 import { defaultStyle } from './brushes';
 
@@ -22,6 +22,7 @@ export function bumpIdCounter(scene: GPScene): void {
   // loaded scene's ids (this used to scan GP objects only)
   for (const i of scene.images ?? []) max = Math.max(max, i.id);
   for (const m of scene.materials ?? []) max = Math.max(max, m.id);
+  for (const l of scene.lights ?? []) max = Math.max(max, l.id);
   for (const m of scene.meshes ?? []) max = Math.max(max, m.id);
   for (const p of scene.polyMeshes ?? []) max = Math.max(max, p.id);
   for (const s of scene.splats ?? []) max = Math.max(max, s.id);
@@ -34,6 +35,43 @@ export function bumpIdCounter(scene: GPScene): void {
 
 export function createImage(name: string, src: string, baked = false): TGImage {
   return { id: genId(), name, src, baked };
+}
+
+export function createLight(kind: TGLight['kind'], name?: string, at: Vec3 = [3, -4, 6]): TGLight {
+  return {
+    id: genId(),
+    name: name ?? kind.charAt(0) + kind.slice(1).toLowerCase(),
+    kind,
+    color: [1, 1, 1],
+    intensity: kind === 'AMBIENT' ? 0.9 : kind === 'SUN' ? 1.4 : 20,
+    translation: [...at] as Vec3,
+    rotation: [0, 0, 0],
+    distance: 0,
+    decay: 2,
+    angle: Math.PI / 6,
+    penumbra: 0.2,
+    // shadows are off by default: they cost a depth pass per light, and
+    // the two migrated defaults must reproduce today's shadowless look
+    castShadow: false,
+    shadowBias: -0.0005,
+    shadowRadius: 2,
+    shadowMapSize: 1024,
+    visible: true,
+    select: false,
+    lock: false,
+    parent: null,
+    constraints: [],
+  };
+}
+
+/** The two lights that used to be hardcoded in the App constructor.
+ *  Reproduces the previous look exactly so migrating changes nothing. */
+export function defaultLights(): TGLight[] {
+  const amb = createLight('AMBIENT', 'Ambient');
+  amb.intensity = 0.9;
+  const sun = createLight('SUN', 'Sun', [3, -4, 6]);
+  sun.intensity = 1.4;
+  return [amb, sun];
 }
 
 /** A material datablock. Named `createMaterialDB` because `createMaterial`
@@ -201,6 +239,7 @@ export function createScene(): GPScene {
     score: { cursors: [], triggers: [], attachments: [] },
     routes: [],
     attractors: [],
+    lights: defaultLights(),
     images: [],
     materials: [],
     splats: [],

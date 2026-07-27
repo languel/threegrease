@@ -149,6 +149,10 @@ export class MeshManager {
       if (!mesh.isMesh || o.userData.emptyHelper) return;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       if (!mat || Array.isArray(mat)) return;
+      // shadows are per-light opt-in; meshes always participate so turning
+      // a light's castShadow on Just Works with no per-object setup
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       if (data.kind !== 'MODEL') {
         // shared material datablock, falling back to this object's own
         // legacy flattened fields when it has no materialId yet
