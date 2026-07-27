@@ -5,6 +5,7 @@ import type { MaterialBlend, TGMaterial, TextureSlotName, Vec3 } from '../core/t
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
+import type { BakeSource } from '../render/bake';
 import { hasUV } from '../core/uvunwrap';
 import { createImage, createMaterialDB, ensureMaterial, imageById, materialById } from '../core/gpdata';
 import { ACTIONS, comboFromEvent, type Keymap } from './keymap';
@@ -87,6 +88,8 @@ export interface AppHandle {
   addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'EMPTY'): void;
   /** Persist UVs on an editable mesh (App owns the camera for VIEW). */
   unwrapPoly(id: number, mode: UnwrapMode): void;
+  /** Bake a source onto the selected object's base-color texture. */
+  bakeToTexture(source: BakeSource, size?: number, margin?: number): void;
   importModelFile(file: File): void;
   importImagePlane(file: File): void;
   setWidgetMode(mode: 'translate' | 'rotate' | 'scale'): void;
@@ -1304,7 +1307,7 @@ export class UI {
       },
       {
         id: 'object', icon: 'cube', title: 'Object — transform · material',
-        build: () => [this.objectPropsPanel()],
+        build: () => [this.objectPropsPanel(), this.bakePanel()],
       },
       {
         id: 'brush', icon: 'brush', title: 'Brush & GP materials',
@@ -2104,6 +2107,38 @@ export class UI {
       })(),
     );
   }
+
+  /** Bake scene elements / strokes / shadows / live camera onto the
+   *  selected object's texture, through its UVs. See render/bake.ts. */
+  private bakePanel(): HTMLElement {
+    const { ctx } = this.app;
+    const ref = this.app.getLastPicked();
+    const bakeable = ref?.kind === 'MESH' || ref?.kind === 'POLY';
+    const name = ref && bakeable
+      ? (ref.kind === 'MESH' ? ctx.scene.meshes : ctx.scene.polyMeshes).find((o) => o.id === ref.id)?.name
+      : null;
+    const bake = (source: BakeSource) =>
+      this.app.bakeToTexture(source, this.bakeSize, this.bakeMargin);
+    return panel('Bake',
+      panelHint('Projects from the current view onto the selected object\'s UVs. Unwrap first for stable results.'),
+      el('div', { class: 'row', text: name ? `Target: ${name}` : 'Select a mesh or editable mesh' }),
+      fieldRow('Resolution', selectField('', String(this.bakeSize), [
+        ['512', '512'], ['1024', '1024'], ['2048', '2048'], ['4096', '4096'],
+      ], (v) => { this.bakeSize = Number(v); })),
+      fieldRow('Margin', slider('', this.bakeMargin, 0, 16, 1, (v) => { this.bakeMargin = Math.round(v); }, { def: 4 })),
+      el('div', { class: 'row' },
+        btn('Scene', () => bake('SCENE'), { title: 'everything visible, from this view' }),
+        btn('Strokes', () => bake('STROKES'), { title: 'GP strokes only' }),
+      ),
+      el('div', { class: 'row' },
+        btn('Shadows', () => bake('SHADOW'), { title: 'lighting/shadow only (needs a shadow-casting light)' }),
+        btn('Camera', () => bake('INPUT'), { title: 'the live camera frame (projection painting)' }),
+      ),
+    );
+  }
+
+  private bakeSize = 1024;
+  private bakeMargin = 4;
 
   /** Stencil masking for the paint tools — image / live camera / the
    *  silhouette of chosen objects. See tools/stencil.ts. */

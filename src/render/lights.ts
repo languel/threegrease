@@ -115,6 +115,10 @@ export class LightManager {
         // SpotLight/DirectionalLight aim at their .target; parenting the
         // target to the light's own root makes "points down -Z" true, so
         // the object's rotation drives the beam like every other object
+        // THREE.Light's constructor defaults .position to (0,1,0); leave it
+        // and the light sits a unit off its own root, which skews the
+        // light→target vector and makes rotation barely steer the beam.
+        light.position.set(0, 0, 0);
         const l = light as THREE.SpotLight;
         if (l.target) { l.target.position.set(0, 0, -1); root.add(l.target); }
         root.userData.lightId = data.id;

@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt } from '../core/gpdata';
+import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
 import { History } from '../core/history';
 import type { GPScene, TGLight } from '../core/types';
 import { GPSceneRenderer, type EditorMode } from '../render/GPSceneRenderer';
@@ -106,6 +106,8 @@ import type { UnwrapMode } from '../core/uvunwrap';
 import { unwrap } from '../core/uvunwrap';
 import { PolyMeshManager } from '../render/polymesh';
 import { LightManager } from '../render/lights';
+import type { BakeSource } from '../render/bake';
+import { bakeEngine } from '../render/bake';
 import { PaintCloudManager, createPaintCloud } from '../render/paintclouds';
 import { setSplatPickSource } from '../tools/splatpick';
 import { setStencilObjectResolver, setStencilVideoSource } from '../tools/stencil';
@@ -2370,6 +2372,48 @@ class App implements AppHandle {
     this.setTool('polypen');
   }
 
+  /**
+   * Bake a source (scene / strokes / shadows / live camera) onto the
+   * selected object's base-color texture, through its UVs. The result
+   * becomes an image datablock marked `baked`, so it persists with the
+   * scene and can be re-baked or hand-painted over afterwards.
+   */
+  bakeToTexture(source: BakeSource, size = 1024, margin = 4): void {
+    const ctx = this.ctx;
+    const ref = this.getLastPicked();
+    const target = ref?.kind === 'MESH' ? ctx.scene.meshes.find((m) => m.id === ref.id)
+      : ref?.kind === 'POLY' ? ctx.scene.polyMeshes.find((p) => p.id === ref.id)
+      : undefined;
+    if (!ref || !target) {
+      this.setStatusHint('Bake: select a mesh or editable mesh first');
+      return;
+    }
+    const root = ref.kind === 'POLY' ? this.polys.rootFor(ref.id) : this.meshes.rootFor(ref.id);
+    let mesh: THREE.Mesh | null = null;
+    root?.traverse((o) => { if (!mesh && (o as THREE.Mesh).isMesh) mesh = o as THREE.Mesh; });
+    if (!mesh) { this.setStatusHint('Bake: target has no renderable geometry'); return; }
+
+    // seed from the current texture so a bake adds to what's painted
+    const existingSrc = baseTextureSrc(ctx.scene, target);
+    const existing = existingSrc ? new Image() : null;
+    if (existing && existingSrc) existing.src = existingSrc;
+
+    const dataUrl = bakeEngine.bake(this.glRenderer, this.scene3, ctx.scene, {
+      source, camera: this.nav.active, target: mesh, size, margin,
+      input: source === 'INPUT' ? mmCapture.sourceEl ?? null : null,
+      existing,
+    }, this.gp.root);
+    if (!dataUrl) {
+      this.setStatusHint('Bake: target has no UVs — unwrap it first');
+      return;
+    }
+    ctx.pushUndo();
+    setBaseTexture(ctx.scene, target, dataUrl, true);
+    ctx.requestRender();
+    this.ui.refresh();
+    this.setStatusHint(`Baked ${source.toLowerCase()} to ${target.name}`);
+  }
+
   /** Add a light at the 3D cursor, selected and active like any other
    *  object (lights are ordinary scene objects — see render/lights.ts). */
   addLight(kind: TGLight['kind'], at?: [number, number, number]): void {
@@ -3165,9 +3209,23 @@ class App implements AppHandle {
     g.restore();
   }
 
+  /** Transient one-line message in the status bar (bake results, warnings)
+   *  — outlives a few frames then falls back to the mode hint. */
+  private statusHint: { text: string; until: number } | null = null;
+  setStatusHint(text: string, ms = 4000): void {
+    this.statusHint = { text, until: performance.now() + ms };
+  }
+
   private updateStatus(): void {
     const s = this.ctx.settings;
     const status = document.getElementById('status')!;
+    if (this.statusHint) {
+      if (performance.now() < this.statusHint.until) {
+        status.textContent = this.statusHint.text;
+        return;
+      }
+      this.statusHint = null;
+    }
     const hints: Record<string, string> = {
       OBJECT: 'LMB select (Shift extends) · widget or G/R/S mode · X delete · Add… for primitives/models · Shift+RMB drag cursor · RMB menu',
       DRAW: 'LMB draw · MMB orbit · RMB pan · Shift+RMB drag cursor · Tab edit mode',
