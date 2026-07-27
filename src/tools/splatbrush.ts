@@ -15,6 +15,7 @@ import type { Tool, ToolEvent } from './toolsys';
 import { screenToWorld } from './projection';
 import { worldMatrixOf, deselectAllObjects } from './objects';
 import { createPaintCloud, PAINT_STRIDE } from '../render/paintclouds';
+import { stencilMask } from './stencil';
 
 export class SplatPaintTool implements Tool {
   id = 'splatpaint';
@@ -50,6 +51,10 @@ export class SplatPaintTool implements Tool {
   }
 
   private deposit(ctx: AppCtx, e: ToolEvent): void {
+    // stencil gates deposits: below the mask threshold nothing lands, and
+    // partial mask scales the splat's alpha so edges feather
+    const mask = stencilMask.maskAt(ctx, e.x, e.y);
+    if (mask <= 0.001) return;
     const world = screenToWorld(ctx, e.clientX, e.clientY);
     if (!world) return;
     const pc = this.targetCloud(ctx);
@@ -65,7 +70,7 @@ export class SplatPaintTool implements Tool {
     const inv = worldMatrixOf(ctx.scene, { kind: 'PCLOUD', id: pc.id }).invert();
     p.applyMatrix4(inv);
     const [r, g, bl] = b.vertexColor;
-    pc.points.push(p.x, p.y, p.z, radius, r, g, bl, Math.max(0.02, b.strength));
+    pc.points.push(p.x, p.y, p.z, radius, r, g, bl, Math.max(0.02, b.strength * mask));
     pc.rev = (pc.rev + 1) % 1e9;
   }
 
@@ -97,6 +102,7 @@ export class SplatPaintTool implements Tool {
     ctx.pushUndo(); // one undo step per stroke (paint or erase)
     this.painting = true;
     this.erasing = e.ctrl;
+    stencilMask.begin(ctx); // one mask build per stroke
     this.lastPx = new THREE.Vector2(e.x, e.y);
     if (this.erasing) this.erase(ctx, e);
     else this.deposit(ctx, e);
@@ -121,5 +127,9 @@ export class SplatPaintTool implements Tool {
   onCancel(): void {
     this.painting = false;
     this.lastPx = null;
+  }
+
+  drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
+    stencilMask.drawHud(ctx, hud);
   }
 }

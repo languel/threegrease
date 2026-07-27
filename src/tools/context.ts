@@ -40,8 +40,31 @@ export interface Settings {
     simplify: number;        // epsilon world units
     vertexColor: Vec3;
     vertexColorFactor: number; // 0 = material color, >0 mixes vertex color while drawing
+    /** Texture-paint brush tip: an image datablock (scene.images) stamped
+     *  as the dab instead of the built-in soft radial gradient. Its
+     *  luminance is the alpha, so a grayscale tip works as-is. */
+    tipImageId?: number | null;
   };
   eraser: { mode: EraserMode; radius: number };
+  /** Blender-style stencil masking for the paint tools: paint only lands
+   *  where a screen-space mask passes. The mask comes from an image, the
+   *  live camera, or the rendered silhouette of chosen scene objects —
+   *  all three reduce to one screen-space mask (see tools/stencil.ts). */
+  stencil: {
+    enabled: boolean;
+    source: 'IMAGE' | 'OBJECTS' | 'VIDEO';
+    /** IMAGE source: which image datablock (scene.images) to mask with */
+    imageId: number | null;
+    /** OBJECTS source: paint only over (or, inverted, only off) these */
+    refs: { kind: string; id: number }[];
+    /** screen placement for IMAGE/VIDEO, in viewport fractions */
+    offset: [number, number];
+    scale: number;
+    rotation: number;
+    invert: boolean;
+    /** luminance/alpha cutoff below which the mask blocks paint */
+    threshold: number;
+  };
   fill: { simplify: number; scale: number };
   placement: PlacementMode;
   strokeTarget: StrokeTarget;  // which points of existing strokes anchor depth
@@ -197,6 +220,10 @@ export function defaultSettings(): Settings {
       vertexColor: [1, 0.4, 0.1], vertexColorFactor: 0,
     },
     eraser: { mode: 'POINT', radius: 24 },
+    stencil: {
+      enabled: false, source: 'IMAGE', imageId: null, refs: [],
+      offset: [0, 0], scale: 1, rotation: 0, invert: false, threshold: 0.5,
+    },
     fill: { simplify: 1.5, scale: 1 },
     placement: 'ORIGIN',
     strokeTarget: 'ALL',

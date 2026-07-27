@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import type { AppCtx } from './context';
 import { baseTextureSrc, materialById, setBaseTexture } from '../core/gpdata';
+import { stencilMask } from './stencil';
 import type { Tool, ToolEvent } from './toolsys';
 import type { MeshManager } from '../render/meshes';
 import type { PolyMeshManager } from '../render/polymesh';
@@ -25,6 +26,45 @@ export function setTexPaintMeshManager(m: MeshManager): void { meshMgr = m; }
 export function setTexPaintPolyManager(m: PolyMeshManager): void { polyMgr = m; }
 
 const raycaster = new THREE.Raycaster();
+
+// ---- brush tip images ------------------------------------------------------
+// A tip is an ordinary image datablock; its LUMINANCE is the dab alpha, so
+// grayscale tips work as-is and colored ones still read sensibly. Tinting
+// is cached per (src, color, size) because it happens on every dab.
+
+const tipDecoded = new Map<string, HTMLImageElement>();
+const tipTintCache = new Map<string, HTMLCanvasElement>();
+
+function tipImage(ctx: AppCtx): HTMLImageElement | null {
+  const id = ctx.settings.brush.tipImageId;
+  const img = id == null ? undefined : ctx.scene.images.find((i) => i.id === id);
+  if (!img) return null;
+  let el = tipDecoded.get(img.src);
+  if (!el) {
+    el = new Image();
+    el.src = img.src;
+    tipDecoded.set(img.src, el);
+  }
+  return el.complete && el.naturalWidth ? el : null;
+}
+
+/** The tip masked to `rgb`: draw the tip, then source-in a solid fill. */
+function tipTinted(tip: HTMLImageElement, rgb: string, size: number): HTMLCanvasElement {
+  const key = `${tip.src.length}:${tip.naturalWidth}:${rgb}:${size}`;
+  const hit = tipTintCache.get(key);
+  if (hit) return hit;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const g = c.getContext('2d')!;
+  g.drawImage(tip, 0, 0, size, size);
+  g.globalCompositeOperation = 'source-in';
+  g.fillStyle = `rgb(${rgb})`;
+  g.fillRect(0, 0, size, size);
+  if (tipTintCache.size > 32) tipTintCache.clear(); // bounded; sizes vary with pressure
+  tipTintCache.set(key, c);
+  return c;
+}
 
 type TargetKind = 'MESH' | 'POLY';
 
@@ -104,16 +144,29 @@ export class TexturePaintTool implements Tool {
     else polyMgr?.endLiveTexture(id);
   }
 
-  private stamp(ctx: AppCtx, s: Session, uv: THREE.Vector2, pressure: number): void {
+  private stamp(ctx: AppCtx, s: Session, uv: THREE.Vector2, pressure: number, mask = 1): void {
     const b = ctx.settings.brush;
     const radius = Math.max(1, (b.size / 2) * (TEX_SIZE / 512) * Math.max(0.2, pressure));
     const [r, g2, bl] = b.vertexColor;
+    const alpha = b.strength * mask; // stencil scales the dab, not the color
+    if (alpha <= 0.001) { s.lastUv = uv.clone(); return; }
+    const tip = tipImage(ctx);
+    const rgb = `${Math.round(r * 255)},${Math.round(g2 * 255)},${Math.round(bl * 255)}`;
     const draw = (u: number, v: number) => {
       const x = u * TEX_SIZE;
       const y = (1 - v) * TEX_SIZE; // canvas y is flipped vs UV
+      if (tip) {
+        // brush-tip image: its luminance is the dab's alpha, tinted with
+        // the paint color (draw the tip, then source-in the color)
+        const d = radius * 2;
+        s.g.save();
+        s.g.globalAlpha = alpha;
+        s.g.drawImage(tipTinted(tip, rgb, Math.max(2, Math.round(d))), x - radius, y - radius, d, d);
+        s.g.restore();
+        return;
+      }
       const grad = s.g.createRadialGradient(x, y, 0, x, y, radius);
-      const rgb = `${Math.round(r * 255)},${Math.round(g2 * 255)},${Math.round(bl * 255)}`;
-      grad.addColorStop(0, `rgba(${rgb},${b.strength})`);
+      grad.addColorStop(0, `rgba(${rgb},${alpha})`);
       grad.addColorStop(1, `rgba(${rgb},0)`);
       s.g.fillStyle = grad;
       s.g.beginPath();
@@ -137,8 +190,11 @@ export class TexturePaintTool implements Tool {
     const hit = this.hit(ctx, e);
     if (!hit) return;
     ctx.pushUndo(); // one undo step per stroke (texture dataURL snapshot)
+    // the stencil mask is built once per stroke and sampled per dab —
+    // for an OBJECTS stencil that's one silhouette render, not one per event
+    stencilMask.begin(ctx);
     this.session = this.beginSession(ctx, hit.kind, hit.targetId);
-    this.stamp(ctx, this.session, hit.uv, e.pressure || 1);
+    this.stamp(ctx, this.session, hit.uv, e.pressure || 1, stencilMask.maskAt(ctx, e.x, e.y));
   }
 
   onMove(ctx: AppCtx, e: ToolEvent): void {
@@ -148,7 +204,11 @@ export class TexturePaintTool implements Tool {
       this.session.lastUv = null; // brush left the surface: lift
       return;
     }
-    this.stamp(ctx, this.session, hit.uv, e.pressure || 1);
+    this.stamp(ctx, this.session, hit.uv, e.pressure || 1, stencilMask.maskAt(ctx, e.x, e.y));
+  }
+
+  drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
+    stencilMask.drawHud(ctx, hud);
   }
 
   onUp(ctx: AppCtx): void {

@@ -1309,7 +1309,7 @@ export class UI {
       {
         id: 'brush', icon: 'brush', title: 'Brush & GP materials',
         build: () => [
-          this.brushPanel(), this.materialsPanel(),
+          this.brushPanel(), this.stencilPanel(), this.materialsPanel(),
           ...(ctx.settings.mode === 'EDIT' ? [this.strokePanel(), this.editOpsPanel()] : []),
         ],
       },
@@ -2027,6 +2027,74 @@ export class UI {
       fieldRow('Simplify', numField('', b.simplify, (v) => { b.simplify = Math.max(0, v); }, 0.001, { def: 0.002 })),
       fieldRow('', checkbox('Stabilize', b.stabilize, (v) => { b.stabilize = v; this.refresh(); })),
       ...(b.stabilize ? [fieldRow('Radius', slider('', b.stabilizeRadius, 5, 120, 1, (v) => { b.stabilizeRadius = v; }, { def: 30 }))] : []),
+      el('div', { class: 'menu-header', text: 'Texture-paint tip' }),
+      (() => {
+        const tip = imageById(ctx.scene, b.tipImageId);
+        return el('div', { class: 'row' },
+          el('span', { class: 'grow', text: tip ? `Tip: ${tip.name}` : 'Tip: soft round (built-in)' }),
+          btn(icon('photo'), () => this.filePick('image/*', (f) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              ctx.pushUndo();
+              const img = createImage(f.name || 'Brush tip', String(reader.result));
+              ctx.scene.images.push(img);
+              b.tipImageId = img.id;
+              this.refresh();
+            };
+            reader.readAsDataURL(f);
+          }), { cls: 'icon-btn', title: 'Load a brush tip image (luminance = alpha)' }),
+          ...(tip ? [btn(icon('xMark'), () => { b.tipImageId = null; this.refresh(); },
+            { cls: 'icon-btn', title: 'Back to the built-in soft round tip' })] : []),
+        );
+      })(),
+    );
+  }
+
+  /** Stencil masking for the paint tools — image / live camera / the
+   *  silhouette of chosen objects. See tools/stencil.ts. */
+  private stencilPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const s = ctx.settings.stencil;
+    const img = imageById(ctx.scene, s.imageId);
+    const sel = listSelectedObjects(ctx.scene);
+    return panel('Stencil',
+      panelHint('Paint only lands where the mask passes. Works with texture, vertex, weight and splat painting.'),
+      fieldRow('', checkbox('Enabled', s.enabled, (v) => { s.enabled = v; this.refresh(); })),
+      fieldRow('Source', selectField('', s.source, [
+        ['IMAGE', 'Image'], ['OBJECTS', 'Object silhouette'], ['VIDEO', 'Live camera'],
+      ], (v) => { s.source = v as typeof s.source; this.refresh(); })),
+      ...(s.source === 'IMAGE' ? [
+        el('div', { class: 'row' },
+          el('span', { class: 'grow', text: img ? img.name : 'No image' }),
+          btn(icon('photo'), () => this.filePick('image/*', (f) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              ctx.pushUndo();
+              const image = createImage(f.name || 'Stencil', String(reader.result));
+              ctx.scene.images.push(image);
+              s.imageId = image.id;
+              this.refresh();
+            };
+            reader.readAsDataURL(f);
+          }), { cls: 'icon-btn', title: 'Load stencil image' }),
+        ),
+      ] : []),
+      ...(s.source === 'OBJECTS' ? [
+        el('div', { class: 'row', text: s.refs.length ? `${s.refs.length} object(s) as mask` : 'No mask objects set' }),
+        btn(`Use selected (${sel.length})`, () => {
+          ctx.pushUndo();
+          s.refs = sel.map((r) => ({ kind: r.kind, id: r.id }));
+          this.refresh();
+        }, { title: 'silhouette these objects from the current view' }),
+      ] : []),
+      ...(s.source !== 'OBJECTS' ? [
+        fieldRow('Scale', slider('', s.scale, 0.1, 4, 0.01, (v) => { s.scale = v; }, { def: 1 })),
+        fieldRow('Rotate', slider('', s.rotation, -Math.PI, Math.PI, 0.02, (v) => { s.rotation = v; }, { def: 0 })),
+        fieldRow('Offset X', slider('', s.offset[0], -1, 1, 0.01, (v) => { s.offset[0] = v; }, { def: 0 })),
+        fieldRow('Offset Y', slider('', s.offset[1], -1, 1, 0.01, (v) => { s.offset[1] = v; }, { def: 0 })),
+      ] : []),
+      fieldRow('Threshold', slider('', s.threshold, 0, 0.99, 0.01, (v) => { s.threshold = v; }, { def: 0.5 })),
+      fieldRow('', checkbox('Invert', s.invert, (v) => { s.invert = v; })),
     );
   }
 

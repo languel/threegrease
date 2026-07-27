@@ -107,6 +107,7 @@ import { unwrap } from '../core/uvunwrap';
 import { PolyMeshManager } from '../render/polymesh';
 import { PaintCloudManager, createPaintCloud } from '../render/paintclouds';
 import { setSplatPickSource } from '../tools/splatpick';
+import { setStencilObjectResolver, setStencilVideoSource } from '../tools/stencil';
 import { SplatPaintTool } from '../tools/splatbrush';
 import { TexturePaintTool, setTexPaintMeshManager, setTexPaintPolyManager } from '../tools/texpaint';
 import { PolyPenTool } from '../tools/polytool';
@@ -327,6 +328,15 @@ class App implements AppHandle {
     setSplatPickSource(this.splats);
     setTexPaintMeshManager(this.meshes);
     setTexPaintPolyManager(this.polys);
+    // stencil masking: the live camera frame, and ObjRef -> three.js root
+    // (App owns the managers that know that mapping)
+    setStencilVideoSource(() => mmCapture.sourceEl ?? null);
+    setStencilObjectResolver((refs) => refs
+      .map((r) => (r.kind === 'POLY' ? this.polys.rootFor(r.id)
+        : r.kind === 'MESH' ? this.meshes.rootFor(r.id)
+        : r.kind === 'GP' ? this.gp.objectGroups[gpIndexOf(this.ctx.scene, r.id)] ?? null
+        : null))
+      .filter((o): o is THREE.Object3D => !!o));
     this.scene3.add(this.splats.group);
     this.scene3.add(this.meshes.group);
     this.scene3.add(this.polys.group);

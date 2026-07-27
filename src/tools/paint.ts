@@ -6,6 +6,7 @@ import type { AppCtx } from './context';
 import { objectToScreen } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawBrushCircle, mixVertexColor } from './draw';
+import { stencilMask } from './stencil';
 
 /** Vertex-paint mode brushes: Draw / Blur / Average / Smear. */
 export class VertexPaintTool implements Tool {
@@ -20,6 +21,7 @@ export class VertexPaintTool implements Tool {
     this.active = true;
     this.last.set(e.x, e.y);
     this.smearColor = null;
+    stencilMask.begin(ctx); // one mask build per stroke
     this.apply(ctx, e);
   }
   onMove(ctx: AppCtx, e: ToolEvent): void {
@@ -27,6 +29,7 @@ export class VertexPaintTool implements Tool {
   }
   onUp(): void { this.active = false; }
   drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
+    stencilMask.drawHud(ctx, hud);
     drawBrushCircle(hud, ctx.settings.paint.radius, ctx.settings.brush.vertexColor);
   }
 
@@ -40,7 +43,10 @@ export class VertexPaintTool implements Tool {
       if (!frame) continue;
       for (const s of frame.strokes) {
         s.points.forEach((p, i) => {
-          const w = falloff(objectToScreen(ctx, p.co).distanceTo(cursor), radius);
+          const at = objectToScreen(ctx, p.co);
+          // stencil scales the brush weight per POINT (each is already
+          // projected to screen here, which is exactly where the mask lives)
+          const w = falloff(at.distanceTo(cursor), radius) * stencilMask.maskAt(ctx, at.x, at.y);
           if (w > 0) cb(p, w, s.points, i);
         });
       }
@@ -100,11 +106,13 @@ export class WeightPaintTool implements Tool {
   onDown(ctx: AppCtx, e: ToolEvent): void {
     ctx.pushUndo();
     this.active = true;
+    stencilMask.begin(ctx);
     this.apply(ctx, e);
   }
   onMove(ctx: AppCtx, e: ToolEvent): void { if (this.active) this.apply(ctx, e); }
   onUp(): void { this.active = false; }
   drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
+    stencilMask.drawHud(ctx, hud);
     drawBrushCircle(hud, ctx.settings.weight.radius, [0.3, 0.6, 1]);
   }
 
@@ -119,7 +127,8 @@ export class WeightPaintTool implements Tool {
       if (!frame) continue;
       for (const s of frame.strokes) {
         for (const p of s.points) {
-          const w = falloff(objectToScreen(ctx, p.co).distanceTo(cursor), radius);
+          const at = objectToScreen(ctx, p.co);
+          const w = falloff(at.distanceTo(cursor), radius) * stencilMask.maskAt(ctx, at.x, at.y);
           if (w > 0) p.weight = clamp(p.weight + (goal - p.weight) * w * press * 0.3, 0, 1);
         }
       }
