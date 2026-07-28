@@ -1,6 +1,6 @@
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
-import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle } from '../core/types';
+import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade } from '../core/types';
 import type { MaterialBlend, TGMaterial, TextureSlotName, Vec3 } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
@@ -2307,6 +2307,72 @@ export class UI {
     ctx.requestRender(); this.refresh();
   }
 
+  /**
+   * The mode-dependent rows under a GP material's Stroke/Fill Style. Shared
+   * because the two sides carry the same parameters under different field
+   * names — gradient gets a second colour, texture gets an image + how
+   * often it repeats + how much material colour survives it.
+   */
+  private shadeRows(m: GPMaterial, isFill: boolean): Node[] {
+    const { ctx } = this.app;
+    const mode = isFill ? m.fillStyle : (m.strokeShade ?? 'SOLID');
+    const rows: Node[] = [];
+    if (mode === 'GRADIENT_LINEAR' || mode === 'GRADIENT_RADIAL') {
+      if (!isFill) {
+        const c2 = m.strokeColor2 ?? m.strokeColor;
+        rows.push(
+          colorField('Color 2', c2, (rgb) => {
+            m.strokeColor2 = [rgb[0], rgb[1], rgb[2], c2[3]]; ctx.requestRender();
+          }),
+          slider('Alpha 2', c2[3], 0, 1, 0.01, (v) => {
+            m.strokeColor2 = [c2[0], c2[1], c2[2], v]; ctx.requestRender();
+          }),
+        );
+      }
+      return rows;
+    }
+    if (mode !== 'TEXTURE') return rows;
+
+    const imageId = isFill ? m.fillImageId : m.strokeImageId;
+    const img = imageById(ctx.scene, imageId);
+    const setImage = (id: number | null) => {
+      if (isFill) m.fillImageId = id; else m.strokeImageId = id;
+      ctx.requestRender();
+      this.refresh();
+    };
+    rows.push(fieldRow('Image', el('div', { class: 'field-group' },
+      selectField('', String(imageId ?? ''), [
+        ['', img ? '(none)' : 'pick an image…'],
+        ...ctx.scene.images.map((i) => [String(i.id), i.name] as [string, string]),
+      ], (v) => setImage(v ? Number(v) : null)),
+      btn(icon('photo'), () => {
+        this.filePick('image/*', (f) => {
+          const rd = new FileReader();
+          rd.onload = () => {
+            ctx.pushUndo();
+            const rec = createImage(f.name, String(rd.result));
+            ctx.scene.images.push(rec);
+            setImage(rec.id);
+          };
+          rd.readAsDataURL(f);
+        });
+      }, { cls: 'icon-btn', title: 'Load an image…' }),
+    )));
+    const uvFactor = (isFill ? m.fillUvFactor : m.strokeUvFactor) ?? 1;
+    const texBlend = (isFill ? m.fillTexBlend : m.strokeTexBlend) ?? 0;
+    rows.push(
+      slider('UV factor', uvFactor, 0.1, 40, 0.1, (v) => {
+        if (isFill) m.fillUvFactor = v; else m.strokeUvFactor = v;
+        ctx.requestRender();
+      }, { def: 1, title: 'how many times the texture repeats along the stroke / across the fill' }),
+      slider('Blend', texBlend, 0, 1, 0.01, (v) => {
+        if (isFill) m.fillTexBlend = v; else m.strokeTexBlend = v;
+        ctx.requestRender();
+      }, { def: 0, title: '0 = texture colour, 1 = material colour (alpha always masks)' }),
+    );
+    return rows;
+  }
+
   private materialsPanel(): HTMLElement {
     const { ctx } = this.app;
     const ob = activeObject(ctx.scene);
@@ -2333,17 +2399,26 @@ export class UI {
         colorField('Color', m.strokeColor, (rgb) => { m.strokeColor = [rgb[0], rgb[1], rgb[2], m.strokeColor[3]]; ctx.requestRender(); }),
         slider('Alpha', m.strokeColor[3], 0, 1, 0.01, (v) => { m.strokeColor[3] = v; ctx.requestRender(); }),
         selectField('Line', m.lineMode, [['LINE', 'Line'], ['DOTS', 'Dots'], ['SQUARES', 'Squares']] as [LineMode, string][], (v) => { m.lineMode = v; ctx.requestRender(); }),
+        selectField('Style', m.strokeShade ?? 'SOLID', [
+          ['SOLID', 'Solid'], ['GRADIENT_LINEAR', 'Gradient (along)'],
+          ['GRADIENT_RADIAL', 'Gradient (across)'], ['TEXTURE', 'Texture'],
+        ] as [StrokeShade, string][], (v) => { m.strokeShade = v; ctx.requestRender(); this.refresh(); }),
+        ...this.shadeRows(m, false),
         el('div', { class: 'menu-header', text: 'Fill' }),
         checkbox('Show', m.showFill, (v) => { m.showFill = v; ctx.requestRender(); }),
         colorField('Color', m.fillColor, (rgb) => { m.fillColor = [rgb[0], rgb[1], rgb[2], m.fillColor[3]]; ctx.requestRender(); }),
         slider('Alpha', m.fillColor[3], 0, 1, 0.01, (v) => { m.fillColor[3] = v; ctx.requestRender(); }),
-        selectField('Style', m.fillStyle, [['SOLID', 'Solid'], ['GRADIENT_LINEAR', 'Linear Gradient'], ['GRADIENT_RADIAL', 'Radial Gradient']] as [FillStyle, string][], (v) => { m.fillStyle = v; ctx.requestRender(); }),
+        selectField('Style', m.fillStyle, [
+          ['SOLID', 'Solid'], ['GRADIENT_LINEAR', 'Linear Gradient'],
+          ['GRADIENT_RADIAL', 'Radial Gradient'], ['TEXTURE', 'Texture'],
+        ] as [FillStyle, string][], (v) => { m.fillStyle = v; ctx.requestRender(); this.refresh(); }),
+        ...this.shadeRows(m, true),
       );
-      if (m.fillStyle !== 'SOLID') {
-        props.push(el('div', { class: 'row' },
+      if (m.fillStyle === 'GRADIENT_LINEAR' || m.fillStyle === 'GRADIENT_RADIAL') {
+        props.push(
           colorField('Color 2', m.fillColor2, (rgb) => { m.fillColor2 = [rgb[0], rgb[1], rgb[2], m.fillColor2[3]]; ctx.requestRender(); }),
           slider('Angle', m.gradientAngle, 0, Math.PI * 2, 0.05, (v) => { m.gradientAngle = v; ctx.requestRender(); }),
-        ));
+        );
       }
       props.push(checkbox('Holdout', m.holdout, (v) => { m.holdout = v; ctx.requestRender(); }));
       if (ctx.settings.mode === 'EDIT') {
