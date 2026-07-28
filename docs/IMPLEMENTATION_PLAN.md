@@ -2253,3 +2253,45 @@ notes, wire-art assist note, Constraints explainer).
   TGMesh.texture as a dataURL on release. Segment-filled stamps, pen
   pressure, starts from the mesh's current texture/color.
 Not verified live this pass (typecheck + build only per workflow).
+
+## NPR brushes: textured + gradient strokes and fills (atlas)
+
+Blender-style stroke/fill shading, and the change that finally unblocks
+per-stroke textures ("N8").
+
+**Why it was blocked.** A layer's strokes are merged into ONE geometry
+drawn by ONE shared `ShaderMaterial`. Every per-stroke parameter travels
+as a vertex attribute — there is no per-stroke uniform, so there was
+nowhere to hang a sampler. Splitting the batch per material would restore
+samplers but throw away the merge that keeps drawing cheap.
+
+**The fix** (`src/render/atlas.ts`): pack every image a GP material
+references into one 2048² atlas (shelf pack, tallest first, 2px gutters,
+512px cap per image), bind it once as `uAtlas`, and give each vertex its
+material's sub-rect as `aTexRect`. The shader tiles inside that rect with
+`fract()`, so a stroke still repeats its texture without bleeding into a
+neighbour's cell. Packing is async (images decode); a repack bumps a
+version and calls back into `markDirty()`, so geometry rebuilds with the
+new rects. `uHasAtlas` gates the sampler, and a TEXTURE material whose
+image hasn't packed yet falls back to Solid rather than vanishing.
+
+Data: `GPMaterial` gains `strokeShade` (Solid / Gradient along / Gradient
+across / Texture), `strokeColor2`, `strokeImageId/UvFactor/TexBlend` and
+the fill equivalents; `FillStyle` gains `TEXTURE`. All optional, all
+migrating to the plain solid ribbon these materials already drew. Named
+`StrokeShade` because `StrokeStyle` is already the baked per-stroke brush
+record.
+
+Geometry emits normalised arc length (`aArc`) so a texture travels down
+the ribbon rather than restarting per segment, plus `aColor2`/`aShade`/
+`aTexRect`. Vertex cost is ~12 extra floats — a known tradeoff of putting
+per-stroke data in attributes; revisit if it shows up in the perf pass.
+
+Gotchas hit:
+- `CanvasTexture` defaults to `flipY: true`, so rects measured from the
+  canvas top sampled the empty BOTTOM of the atlas and every textured
+  stroke discarded to nothing. The atlas sets `flipY = false` so canvas
+  space == UV space. Don't "simplify" that away.
+- A cyclic stroke's closing segment wraps its point index to 0; its arc
+  must read as 1.0 or the last segment ramps backwards through the whole
+  gradient.
