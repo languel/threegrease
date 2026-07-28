@@ -3010,6 +3010,10 @@ class App implements AppHandle {
     this.meshes.sync(ctx.scene, this.nav.active);
     this.polys.sync(ctx.scene, this.nav.active);
     this.lights.helpersVisible = !this.presentation && !this.infoOverlayHidden;
+    // selection tint only reads as selection in object mode, same gate the
+    // Box3 outlines use (syncSelectionGlyphs)
+    this.lights.selectionColor =
+      ctx.settings.mode === 'OBJECT' && !this.presentation ? this.highlightColor() : null;
     this.lights.sync(ctx.scene);
     this.paints.sync(ctx.scene, this.glRenderer.domElement.height);
     ctx.pickableMeshes = [

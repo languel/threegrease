@@ -94,6 +94,12 @@ export class LightManager {
   private entries = new Map<number, Entry>();
   /** helper glyphs hidden in presentation mode / when overlays are off */
   helpersVisible = true;
+  /** Selection tint for the wire glyph, set by the App from
+   *  settings.uiHighlight. A light has no surface for the usual Box3
+   *  outline to hug, so the glyph itself turns highlight-coloured — same
+   *  read as an outlined object, and how Blender marks a selected lamp. */
+  selectionColor: THREE.Color | null = null;
+  private tint = new THREE.Color();
 
   sync(scene: GPScene): void {
     // drop entries whose light is gone or changed kind (different class)
@@ -140,9 +146,11 @@ export class LightManager {
     light.color.setRGB(...data.color);
     light.intensity = data.intensity;
     helper.visible = this.helpersVisible;
+    if (data.select && this.selectionColor) this.tint.copy(this.selectionColor);
+    else this.tint.setRGB(...data.color);
     helper.traverse((o) => {
       const m = (o as THREE.Line).material as THREE.LineBasicMaterial | undefined;
-      if (m?.color) m.color.setRGB(...data.color);
+      if (m?.color) m.color.copy(this.tint);
     });
 
     if (light instanceof THREE.PointLight || light instanceof THREE.SpotLight) {
