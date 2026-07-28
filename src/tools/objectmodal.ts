@@ -150,8 +150,13 @@ export class ObjectModalTransform {
       const cam = ctx.camera;
       const upAx = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
       const rightAx = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-      const dx = (pointer.x - prev.x) * 0.008;
-      const dy = (pointer.y - prev.y) * 0.008;
+      // Both axes are negated: the near face of the object travels AGAINST
+      // the drag (drag right, the near face swings left), i.e. you push the
+      // far side around rather than dragging the surface under the cursor.
+      // The unnegated form — near face follows the pointer — read backwards
+      // in use, so don't "fix" these signs back without checking on screen.
+      const dx = -(pointer.x - prev.x) * 0.008;
+      const dy = -(pointer.y - prev.y) * 0.008;
       this.trackQ.premultiply(new THREE.Quaternion().setFromAxisAngle(upAx, dx))
         .premultiply(new THREE.Quaternion().setFromAxisAngle(rightAx, dy));
     }
