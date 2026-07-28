@@ -486,3 +486,50 @@ DRAW and EDIT toolbars, '6' jumps to the pen), snap-respecting drags,
 outliner pinned above the properties tabs, Constraints folded into the
 Modifiers tab, instructional rows converted to header tooltips.
 Verify doc: docs/verify/editable-generalized-mesh.md steps 1-81.
+
+## Session log (2026-07-27): materials, NPR brushes, stroke renderer
+
+Five material phases, then the brush/stroke work they enabled. Detail
+lives in IMPLEMENTATION_PLAN; this is the shape of it.
+
+**Materials (phases 1-5).** Shared `TGMaterial`/`TGImage` datablocks with
+PBR slots (`render/materialmgr.ts`, one image cache replacing two
+duplicate `textureFor` maps); persisted per-face-corner UVs plus unwrap
+operators (`core/uvunwrap.ts`); brush tips and stencil painting
+(`tools/stencil.ts` — image, live video, or an object silhouette rendered
+to an RT and read back); lights as first-class objects with shadows
+(`render/lights.ts`); and projection/texture baking (`render/bake.ts` —
+UV-space G-buffer, then reproject the source through the camera, then
+dilate so seams don't bake black).
+
+**NPR brushes.** `render/atlas.ts` packs every image a GP material samples
+into one atlas bound as `uAtlas`, with each vertex carrying its material's
+sub-rect — this is what unblocked per-stroke textures ("N8") without
+splitting the merged per-layer batch. Materials gained stroke/fill Style
+(Solid / Gradient / Texture). Brushes gained variation along the stroke
+driven by a chosen signal (random, curvature, draw speed, arc position),
+plus taper, and eight presets on top of the original five.
+
+**Stroke renderer rewrite.** LINE mode is now ONE miter-joined triangle
+strip instead of per-segment quads plus a disc at every point. See the
+CLAUDE.md gotchas — the short version is that the old topology overlapped
+itself everywhere, and strokes are translucent, so joins composited into
+visible beads.
+
+**Three bugs worth remembering**, all of which presented as something
+other than their cause:
+- A mouse reports `pressure` exactly 0.5 ("no sensor"), which was taken
+  literally and halved every stroke's width AND opacity. That is why
+  "opaque" strokes looked translucent, and it was also the entire reason
+  stroke self-overlap was visible — at true alpha 1 an overlap is
+  invisible for free.
+- `clonePoint` enumerates GPPoint's fields explicitly and the modifier
+  stack clones every stroke before rendering, so a new field reaches the
+  data model but silently never reaches geometry.
+- Exceeding the 16 vertex-attribute limit doesn't throw; the program
+  fails to link and nothing draws while the geometry looks correct.
+
+**Deploy.** `.github/workflows/pages.yml` publishes `dist/` to GitHub
+Pages on push to `main` (feature branches build but don't deploy).
+`vite.config.ts` uses `base: './'` so the bundle runs from any subpath;
+verified by serving a production build under `/threegrease/`.

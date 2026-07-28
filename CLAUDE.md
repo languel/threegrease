@@ -119,6 +119,23 @@ the browser console or automated evals:
   so cancel is detected via `pointerlockchange` + the `flyStopping` flag in
   `nav.ts` — don't remove that flag.
 
+- **Stroke shader attribute budget is full.** WebGL guarantees only 16
+  vertex attributes and the stroke shader is the entire per-stroke
+  parameter channel (a layer's strokes share one merged buffer and one
+  material). Scalars are PACKED — `aMisc` = (kind, hardness, unit, seed),
+  arc rides in `aCorner.z`. Exceeding the limit does NOT throw: the
+  program silently fails to link ("Too many attributes") and nothing
+  draws at all while the geometry looks perfect. Pack, don't add.
+- LINE strokes render as ONE miter-joined triangle strip, not per-segment
+  quads plus a disc per point. The old topology overlapped itself
+  everywhere, and since strokes are translucent every overlap composited
+  again and joins showed as bright beads. Don't reintroduce per-point
+  discs in LINE mode; the miter is clamped at 1.5x because an unbounded
+  one fires visible spikes off sharp corners.
+- A pointer with no pressure sensor reports `pressure` **exactly 0.5**
+  (Pointer Events spec) — that means "no data", not "half". Treating it
+  as real halved every mouse stroke's width and opacity. Only `pen`
+  carries real pressure (`App.toolEvent`).
 - Canvas planes are RETIRED: serialize.ts migrates them to PLANE mesh
   objects on load (ids preserved; attachments/routes rewritten). The
   canvas code paths remain but always see an empty list — don't build new
@@ -163,10 +180,9 @@ live source.
 
 Open items, current priority order:
 
-1. **N8 splat nibs** (paint with splats): needs a texture-atlas redesign
-   of the stroke shader first (the shared ShaderMaterial takes per-stroke
-   params via vertex attributes, not per-stroke samplers — see
-   IMPLEMENTATION_PLAN "N8"), then a Spark in-memory splat-construction
+1. **N8 splat nibs** (paint with splats): the texture-atlas prerequisite
+   is DONE (`src/render/atlas.ts` — one atlas bound as `uAtlas`, per-vertex
+   `aTexRect`), so what remains is the Spark in-memory splat-construction
    research spike (existing splat code only reads via `forEachSplat` for
    PLY export).
 2. **Perf pass** (before heavy scenes): incremental/dirty-region geometry

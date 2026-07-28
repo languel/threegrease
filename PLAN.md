@@ -140,7 +140,7 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
       SURFACE placement raycasts TGMesh/TGSplat draw targets
       (`ctx.surfaces`); canvas planes themselves are retired
 
-## NPR brush engine (the current focus)
+## NPR brush engine
 Goal: expressive natural-media brushes (ink, charcoal, marker, airbrush)
 rendered in real time. Approach: per-stroke baked style, stamp-based
 rendering along the stroke with procedural grain in the fragment shader.
@@ -148,8 +148,19 @@ rendering along the stroke with procedural grain in the fragment shader.
 - [x] Stroke style data (stamp mode, spacing, angle, aspect, jitter, grain)
 - [x] Stamp geometry emission + rotated/aspect quads + grain fragment
 - [x] Brush presets (Pen, Ink Rough, Marker, Charcoal, Airbrush) + UI
-- [ ] Later: texture-sampled stamps (image brushes), smudge/blend brushes,
-      paper grain overlay, buildup blending
+- [x] Textured strokes + fills via a shared image atlas (render/atlas.ts) —
+      one atlas bound as uAtlas, per-vertex sub-rect, so a merged per-layer
+      batch can still give every stroke its own texture (unblocks "N8")
+- [x] Stroke/fill Style: Solid, Gradient (along + across), Texture
+- [x] Variation along the stroke: random / curvature / draw speed (input
+      sampling density, baked before simplify destroys it) / arc position,
+      signed amounts for width + opacity, plus taper in/out
+- [x] 8 expressive presets: Pencil Soft/Hard, Ink Pooling, Brush Pen,
+      Chalk, Dry Brush, Fading Marker, Calligraphy
+- [x] Non-overlapping stroke geometry: one miter-joined strip per stroke
+      (was per-segment quads + a disc per point, which beaded at every join)
+- [ ] Later: smudge/blend brushes, paper grain overlay, buildup blending,
+      per-stroke overlap compositing (only matters below full opacity)
 
 ## Platform phases (docs/IMPLEMENTATION_PLAN.md) — status
 - [x] P0 NPR brushes · [x] P1 Blender interop · [x] P2 event bus/IO
