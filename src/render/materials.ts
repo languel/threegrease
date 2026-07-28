@@ -85,11 +85,18 @@ void main() {
     vec2 nPrev = vec2(-tPrev.y, tPrev.x);
     vec2 nNext = vec2(-tNext.y, tNext.x);
     vec2 m = nPrev + nNext;
-    if (length(m) < 1e-6) m = nNext;       // exact 180 degree reversal
+    // Near-reversal (a hairpin, or the jitter that noisy input produces at
+    // almost every point) leaves the miter direction ill-defined — the sum
+    // of the two normals cancels. Fall back to this segment's own normal
+    // instead of normalizing something that is essentially zero.
+    if (dot(tPrev, tNext) < -0.99 || length(m) < 1e-3) m = nNext;
     m = normalize(m);
-    // lengthen the offset so the join's OUTER edge stays on the ribbon
-    // boundary; clamped, or a hairpin turn would fire a spike to infinity
-    float miter = 1.0 / max(dot(m, nNext), 0.25);
+    // Lengthen the offset so the join's OUTER edge stays on the ribbon
+    // boundary — but CLAMP HARD. Unbounded, a sharp turn throws the vertex
+    // a long way from the stroke and draws a bright star; the old 4x limit
+    // was still 4 stroke-widths of spike, which is exactly what those
+    // stars were. 1.5 keeps the join continuous with no visible point.
+    float miter = min(1.0 / max(dot(m, nNext), 1e-3), 1.5);
     vec2 normal = m * miter;
     normal.x /= aspect;
     // px offset scales with 1/resolution and w; world offset with proj[1][1]
