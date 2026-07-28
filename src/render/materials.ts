@@ -3,20 +3,25 @@ import type { BlendMode } from '../core/types';
 import { gpAtlas } from './atlas';
 
 // Screen-space stroke ribbons with per-point radius/color/opacity.
-// Vertex kinds: 0 = segment quad corner, 1 = round dot (cap/join/dot-mode),
-// 2 = square dot, 3 = NPR stamp (rotated/squashed quad with grain).
+// Vertex kinds: 0 = miter-joined strip vertex, 1 = round dot (DOTS mode),
+// 2 = square dot, 3 = NPR stamp (rotated/squashed quad with grain),
+// 4 = half-disc end cap (the outward half only — a full disc would overlap
+//     the ribbon and re-create the bead artefact the strip exists to avoid).
 // aUnit: 0 = radius in px (VIEW), 1 = radius in world units (SCENE).
 // aStamp: (rotation offset, aspect, grain amount, grain scale).
 const strokeVert = /* glsl */ `
 attribute vec3 aDir;
-attribute vec2 aCorner;
+attribute vec3 aDirPrev;   // back to the previous point, for the miter join
+// ATTRIBUTE BUDGET: WebGL guarantees only 16 vertex attributes and this
+// shader is the whole per-stroke parameter channel (a layer's strokes share
+// one merged buffer and one material, so there is nowhere else to put
+// anything). Scalars are therefore PACKED, not given an attribute each —
+// adding a 16th slot silently fails to link with "Too many attributes".
+attribute vec3 aCorner;  // xy = quad corner, z = 0..1 along the arc
 attribute float aRadius;
 attribute vec4 aColor;
-attribute float aKind;
-attribute float aHardness;
-attribute float aUnit;
+attribute vec4 aMisc;    // x kind, y hardness, z unit (0 px / 1 world), w seed
 attribute vec4 aStamp;
-attribute float aSeed;
 // NPR shading, per-vertex because a layer's strokes share ONE material and
 // one merged buffer — there is nowhere else to put per-stroke parameters.
 attribute vec4 aColor2;
@@ -24,7 +29,6 @@ attribute vec3 aShade;   // x: mode (0 solid, 1 gradient-along, 2 gradient-acros
                          // y: uv factor (texture repeats along the stroke)
                          // z: texture/colour blend
 attribute vec4 aTexRect; // this material's sub-rect of the atlas (x, y, w, h)
-attribute float aArc;    // 0..1 along the stroke's arc length
 uniform vec2 uResolution;
 varying vec4 vColor;
 varying vec2 vUv;
@@ -39,31 +43,57 @@ varying float vArc;
 
 void main() {
   vColor = aColor;
-  vKind = aKind;
-  vHardness = aHardness;
+  vKind = aMisc.x;
+  vHardness = aMisc.y;
   vGrain = aStamp.zw;
-  vSeed = aSeed;
+  vSeed = aMisc.w;
   vColor2 = aColor2;
   vShade = aShade;
   vTexRect = aTexRect;
-  vArc = aArc;
+  vArc = aCorner.z;
   vec4 clipA = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   float aspect = uResolution.x / uResolution.y;
 
-  if (aKind < 0.5) {
-    // segment: aCorner.x = side (-1/1), aCorner.y = end (0 = A, 1 = B)
-    vec4 clipB = projectionMatrix * modelViewMatrix * vec4(position + aDir, 1.0);
-    vec4 clip = mix(clipA, clipB, aCorner.y);
-    vec2 ndcA = clipA.xy / clipA.w;
-    vec2 ndcB = clipB.xy / clipB.w;
-    vec2 dir = ndcB - ndcA;
-    dir.x *= aspect;
-    if (length(dir) < 1e-6) dir = vec2(1.0, 0.0);
-    dir = normalize(dir);
-    vec2 normal = vec2(-dir.y, dir.x);
+  if (aMisc.x < 0.5) {
+    // Strip vertex: ONE vertex pair per point, offset along the MITER of the
+    // two adjoining segments. Mitring here (rather than emitting per-segment
+    // quads on the CPU) is what keeps the ribbon free of overlap: the width
+    // is applied in screen space, so only the projected tangents give the
+    // correct offset direction, and those aren't known until now.
+    vec4 clip = clipA;
+    vec2 ndcC = clipA.xy / clipA.w;
+
+    vec2 tPrev = vec2(0.0);
+    if (dot(aDirPrev, aDirPrev) > 1e-12) {
+      vec4 clipP = projectionMatrix * modelViewMatrix * vec4(position - aDirPrev, 1.0);
+      tPrev = ndcC - clipP.xy / clipP.w;
+      tPrev.x *= aspect;
+    }
+    vec2 tNext = vec2(0.0);
+    if (dot(aDir, aDir) > 1e-12) {
+      vec4 clipB = projectionMatrix * modelViewMatrix * vec4(position + aDir, 1.0);
+      tNext = clipB.xy / clipB.w - ndcC;
+      tNext.x *= aspect;
+    }
+    // at the two ends only one side exists — reuse it so the cap sits square
+    if (length(tPrev) < 1e-6) tPrev = tNext;
+    if (length(tNext) < 1e-6) tNext = tPrev;
+    if (length(tPrev) < 1e-6) { tPrev = vec2(1.0, 0.0); tNext = tPrev; }
+    tPrev = normalize(tPrev);
+    tNext = normalize(tNext);
+
+    vec2 nPrev = vec2(-tPrev.y, tPrev.x);
+    vec2 nNext = vec2(-tNext.y, tNext.x);
+    vec2 m = nPrev + nNext;
+    if (length(m) < 1e-6) m = nNext;       // exact 180 degree reversal
+    m = normalize(m);
+    // lengthen the offset so the join's OUTER edge stays on the ribbon
+    // boundary; clamped, or a hairpin turn would fire a spike to infinity
+    float miter = 1.0 / max(dot(m, nNext), 0.25);
+    vec2 normal = m * miter;
     normal.x /= aspect;
     // px offset scales with 1/resolution and w; world offset with proj[1][1]
-    float amt = aUnit < 0.5
+    float amt = aMisc.z < 0.5
       ? (aRadius / uResolution.y) * 2.0 * clip.w
       : aRadius * projectionMatrix[1][1];
     clip.xy += normal * amt * aCorner.x;
@@ -71,9 +101,9 @@ void main() {
     gl_Position = clip;
   } else {
     vec4 clip = clipA;
-    vec2 corner = aCorner;
-    if (aKind > 2.5) {
-      // stamp: squash then rotate by (screen-space path direction + offset)
+    vec2 corner = aCorner.xy;
+    if (aMisc.x > 2.5) {
+      // stamp AND cap: squash then rotate by (screen-space path direction + offset)
       corner = vec2(corner.x, corner.y * aStamp.y);
       float pathAngle = 0.0;
       if (dot(aDir, aDir) > 1e-12) {
@@ -86,13 +116,13 @@ void main() {
       float c = cos(rot), s = sin(rot);
       corner = vec2(corner.x * c - corner.y * s, corner.x * s + corner.y * c);
     }
-    float amt = aUnit < 0.5
+    float amt = aMisc.z < 0.5
       ? (aRadius / uResolution.y) * 2.0 * clip.w
       : aRadius * projectionMatrix[1][1];
     vec2 off = corner * amt;
     off.x *= uResolution.y / uResolution.x;
     clip.xy += off;
-    vUv = aCorner;
+    vUv = aCorner.xy;
     gl_Position = clip;
   }
 }
@@ -128,6 +158,15 @@ void main() {
   if (vKind < 0.5) {
     alpha *= smoothstep(1.0, 1.0 - soft, abs(vUv.x));
   } else if (vKind < 1.5) {
+    float d = length(vUv);
+    if (d > 1.0) discard;
+    alpha *= smoothstep(1.0, 1.0 - soft, d);
+  } else if (vKind > 3.5) {
+    // end cap: keep only the OUTWARD half disc. The vertex stage rotated the
+    // quad so local +x points away from the stroke, and vUv is that
+    // pre-rotation space, so x < 0 is the half the ribbon already covers —
+    // drawing it would double-composite and put the bead back.
+    if (vUv.x < 0.0) discard;
     float d = length(vUv);
     if (d > 1.0) discard;
     alpha *= smoothstep(1.0, 1.0 - soft, d);

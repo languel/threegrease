@@ -187,9 +187,10 @@ export function buildStrokeGeometry(
   strokes: GPStroke[], materials: GPMaterial[], opts: BuildOptions,
 ): THREE.BufferGeometry | null {
   const pos: number[] = [], dir: number[] = [], corner: number[] = [];
-  const radius: number[] = [], color: number[] = [], kind: number[] = [], hard: number[] = [];
-  const unit: number[] = [], stampAttr: number[] = [], seedAttr: number[] = [];
-  const color2: number[] = [], shadeAttr: number[] = [], rectAttr: number[] = [], arcAttr: number[] = [];
+  const radius: number[] = [], color: number[] = [], misc: number[] = [];
+  const stampAttr: number[] = [];
+  const dirPrev: number[] = [];
+  const color2: number[] = [], shadeAttr: number[] = [], rectAttr: number[] = [];
   const index: number[] = [];
   let v = 0;
 
@@ -198,6 +199,8 @@ export function buildStrokeGeometry(
   // layer shares one buffer and one material
   let shade = shadeOf(materials[0] ?? ({} as GPMaterial), opts, false);
   let arc = 0; // 0..1 along the stroke, set per emission point
+  // direction back to the previous point, for the miter join (see below)
+  let backDir: Vec3 = [0, 0, 0];
 
   const pushVert = (
     p: Vec3, d: Vec3, cx: number, cy: number, r: number, c: Vec4, k: number, h: number,
@@ -205,18 +208,17 @@ export function buildStrokeGeometry(
   ) => {
     pos.push(p[0], p[1], p[2]);
     dir.push(d[0], d[1], d[2]);
-    corner.push(cx, cy);
+    dirPrev.push(backDir[0], backDir[1], backDir[2]);
+    // corner carries the arc coordinate as .z, and kind/hardness/unit/seed
+    // ride in one vec4 — see the attribute-budget note in materials.ts
+    corner.push(cx, cy, arc);
     radius.push(r);
     color.push(c[0], c[1], c[2], c[3]);
-    kind.push(k);
-    hard.push(h);
-    unit.push(u);
+    misc.push(k, h, u, seed);
     stampAttr.push(rot, aspect, grain, grainScale);
-    seedAttr.push(seed);
     color2.push(shade.color2[0], shade.color2[1], shade.color2[2], shade.color2[3]);
     shadeAttr.push(shade.code, shade.uvFactor, shade.texBlend);
     rectAttr.push(shade.rect[0], shade.rect[1], shade.rect[2], shade.rect[3]);
-    arcAttr.push(arc);
     return v++;
   };
 
@@ -256,39 +258,69 @@ export function buildStrokeGeometry(
       continue;
     }
 
-    const dotKind = mat.lineMode === 'DOTS' ? 1 : mat.lineMode === 'SQUARES' ? 2 : 1;
-    // dots at every point: caps + round joins in LINE mode, the whole stroke in DOTS/SQUARES
-    for (let i = 0; i < n; i++) {
+    if (mat.lineMode !== 'LINE') {
+      // DOTS / SQUARES: the mark IS the stamp at each point, so overlap is
+      // the intended look and a disc per point is correct here.
+      const dotKind = mat.lineMode === 'DOTS' ? 1 : 2;
+      for (let i = 0; i < n; i++) {
+        const p = s.points[i];
+        const c = colorAt(p, i);
+        if (c[3] <= 0.003) continue;
+        arc = arcs[i];
+        backDir = [0, 0, 0];
+        quad(p.co, [0, 0, 0], radiusOf(p, i), c, dotKind, s.hardness, u);
+      }
+      continue;
+    }
+
+    // ---- LINE: ONE continuous miter-joined strip -----------------------
+    // Two vertices per point, stitched into a strip. The old topology drew
+    // an independent quad per segment PLUS a full disc at every point as a
+    // join; because strokes are translucent (per-point strength alone puts
+    // alpha well under 1) every one of those overlaps composited again and
+    // the joins showed up as a string of bright beads down the stroke. A
+    // strip has no overlapping geometry at all, so alpha lands exactly once.
+    //
+    // The join is a miter computed in the VERTEX shader, because the ribbon
+    // is widened in screen space — the correct offset direction depends on
+    // the projected tangents, which aren't known here.
+    const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    const last = s.cyclic ? n : n - 1;
+    let prevL = -1, prevR = -1;
+    for (let k = 0; k <= last; k++) {
+      const i = k % n;
       const p = s.points[i];
       const c = colorAt(p, i);
-      if (c[3] <= 0.003) continue;
-      arc = arcs[i];
-      quad(p.co, [0, 0, 0], radiusOf(p, i), c, dotKind, s.hardness, u);
+      const r = radiusOf(p, i);
+      // neighbours, clamped at the ends (a zero-length direction makes the
+      // shader fall back to the other side's tangent)
+      const hasPrev = s.cyclic || i > 0;
+      const hasNext = s.cyclic || i < n - 1;
+      const pi = s.cyclic ? (i - 1 + n) % n : i - 1;
+      const ni = s.cyclic ? (i + 1) % n : i + 1;
+      backDir = hasPrev ? sub(p.co, s.points[pi].co) : [0, 0, 0];
+      const fwd: Vec3 = hasNext ? sub(s.points[ni].co, p.co) : [0, 0, 0];
+      // closing vertex of a cyclic stroke reads as the END of the arc, not
+      // the start, or the last span ramps backwards through the gradient
+      arc = k === n ? 1 : arcs[i];
+      const l = pushVert(p.co, fwd, -1, 0, r, c, 0, s.hardness, u);
+      const rr = pushVert(p.co, fwd, 1, 0, r, c, 0, s.hardness, u);
+      if (prevL >= 0) index.push(prevL, prevR, rr, prevL, rr, l);
+      prevL = l; prevR = rr;
     }
-    if (mat.lineMode !== 'LINE') continue;
 
-    const segCount = s.cyclic ? n : n - 1;
-    for (let i = 0; i < segCount; i++) {
-      const A = s.points[i], B = s.points[(i + 1) % n];
-      const d: Vec3 = [B.co[0] - A.co[0], B.co[1] - A.co[1], B.co[2] - A.co[2]];
-      const iB = (i + 1) % n;
-      const cA = colorAt(A, i);
-      const cB = colorAt(B, iB);
-      if (cA[3] <= 0.003 && cB[3] <= 0.003) continue;
-      const rA = radiusOf(A, i), rB = radiusOf(B, iB);
-      // arc differs across the quad: the A edge and the B edge sit at
-      // different points along the stroke, which is what lets a texture
-      // travel down the ribbon instead of repeating per segment
-      arc = arcs[i];
-      const i0 = pushVert(A.co, d, -1, 0, rA, cA, 0, s.hardness, u);
-      const i1 = pushVert(A.co, d, 1, 0, rA, cA, 0, s.hardness, u);
-      // a cyclic stroke's closing segment wraps the index back to point 0;
-      // its arc must read as the END of the stroke (1.0), not the start,
-      // or the last segment ramps backwards through the whole gradient
-      arc = i + 1 === n ? 1 : arcs[i + 1];
-      const i2 = pushVert(A.co, d, 1, 1, rB, cB, 0, s.hardness, u);
-      const i3 = pushVert(A.co, d, -1, 1, rB, cB, 0, s.hardness, u);
-      index.push(i0, i1, i2, i0, i2, i3);
+    // Round caps as HALF discs butted against the ends. A full disc would
+    // overlap the ribbon and bring back the bead it just removed.
+    if (!s.cyclic && n >= 2) {
+      const capAt = (i: number, outward: Vec3) => {
+        const c = colorAt(s.points[i], i);
+        if (c[3] <= 0.003) return;
+        arc = arcs[i];
+        backDir = [0, 0, 0];
+        quad(s.points[i].co, outward, radiusOf(s.points[i], i), c, 4, s.hardness, u);
+      };
+      capAt(0, sub(s.points[0].co, s.points[1].co));
+      capAt(n - 1, sub(s.points[n - 1].co, s.points[n - 2].co));
     }
   }
 
@@ -296,18 +328,15 @@ export function buildStrokeGeometry(
   const geom = new THREE.BufferGeometry();
   geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geom.setAttribute('aDir', new THREE.Float32BufferAttribute(dir, 3));
-  geom.setAttribute('aCorner', new THREE.Float32BufferAttribute(corner, 2));
+  geom.setAttribute('aDirPrev', new THREE.Float32BufferAttribute(dirPrev, 3));
+  geom.setAttribute('aCorner', new THREE.Float32BufferAttribute(corner, 3));
   geom.setAttribute('aRadius', new THREE.Float32BufferAttribute(radius, 1));
   geom.setAttribute('aColor', new THREE.Float32BufferAttribute(color, 4));
-  geom.setAttribute('aKind', new THREE.Float32BufferAttribute(kind, 1));
-  geom.setAttribute('aHardness', new THREE.Float32BufferAttribute(hard, 1));
-  geom.setAttribute('aUnit', new THREE.Float32BufferAttribute(unit, 1));
+  geom.setAttribute('aMisc', new THREE.Float32BufferAttribute(misc, 4));
   geom.setAttribute('aStamp', new THREE.Float32BufferAttribute(stampAttr, 4));
-  geom.setAttribute('aSeed', new THREE.Float32BufferAttribute(seedAttr, 1));
   geom.setAttribute('aColor2', new THREE.Float32BufferAttribute(color2, 4));
   geom.setAttribute('aShade', new THREE.Float32BufferAttribute(shadeAttr, 3));
   geom.setAttribute('aTexRect', new THREE.Float32BufferAttribute(rectAttr, 4));
-  geom.setAttribute('aArc', new THREE.Float32BufferAttribute(arcAttr, 1));
   geom.setIndex(index);
   geom.computeBoundingSphere();
   return geom;

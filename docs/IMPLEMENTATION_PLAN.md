@@ -2295,3 +2295,42 @@ Gotchas hit:
 - A cyclic stroke's closing segment wraps its point index to 0; its arc
   must read as 1.0 or the last segment ramps backwards through the whole
   gradient.
+
+## Stroke renderer: non-overlapping miter-joined ribbon
+
+**The bug.** LINE mode drew an independent quad per segment PLUS a full
+round disc at every point as a join/cap. Strokes are translucent — per-point
+`strength` alone puts vertex alpha well under 1 even with material alpha 1
+and layer opacity 1 — and the material is `transparent, depthWrite: false`.
+So every overlap composited again (`1-(1-a)^k`) and the joins showed as a
+string of bright beads down the stroke. A 20-point stroke emitted 156
+vertices, most of them overlapping.
+
+**The fix.** LINE mode is now ONE continuous triangle strip: two vertices
+per point, stitched span to span, so no geometry overlaps and alpha lands
+exactly once. The join is a miter computed in the VERTEX shader, because
+width is applied in screen space — only the projected tangents give the
+correct offset direction, so it can't be done on the CPU. `aDirPrev` carries
+the back-tangent; the miter length is `1/dot(m, n)` clamped at 4x so a
+hairpin can't fire a spike to infinity. Same stroke: 48 vertices.
+
+End caps are HALF discs (kind 4), rotated so local +x faces outward, with
+the inner half discarded in the fragment — a full disc would overlap the
+ribbon and put the bead straight back.
+
+DOTS/SQUARES and stamped brushes are unchanged: there the mark IS the stamp
+at each point, so overlap is the intended look.
+
+**Attribute budget (important).** WebGL guarantees only 16 vertex
+attributes, and this shader is the entire per-stroke parameter channel — a
+layer's strokes share one merged buffer and one material, so everything
+per-stroke has to be an attribute. Adding `aDirPrev` pushed past the limit
+and the program silently failed to link with "Too many attributes (aArc)":
+geometry was perfect, nothing drew. Scalars are now PACKED —
+`aMisc = (kind, hardness, unit, seed)` and the arc coordinate rides in
+`aCorner.z`. Before adding another attribute, pack into an existing one.
+
+**Still outstanding:** a stroke that crosses ITSELF still double-composites
+at the crossing, because that's genuine geometric self-overlap rather than a
+topology artefact. Fixing it needs per-stroke render-to-texture with max
+blending, which is a bigger change.
