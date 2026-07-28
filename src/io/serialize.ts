@@ -165,6 +165,18 @@ export function deserializeScene(json: string): GPScene {
         for (const s of f.strokes) s.style ??= defaultStyle();
       }
     }
+    // NPR stroke shading: every field defaults to the plain solid ribbon
+    // these materials already drew, so an old scene is pixel-identical
+    for (const m of ob.materials) {
+      m.strokeShade ??= 'SOLID';
+      m.strokeColor2 ??= [...m.strokeColor];
+      m.strokeImageId ??= null;
+      m.strokeUvFactor ??= 1;
+      m.strokeTexBlend ??= 0;
+      m.fillImageId ??= null;
+      m.fillUvFactor ??= 1;
+      m.fillTexBlend ??= 0;
+    }
   }
   bumpIdCounter(scene); // ids must be safe before migrateMaterials mints any
   migrateMaterials(scene);

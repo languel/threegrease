@@ -26,7 +26,14 @@ export interface StrokeStyle {
   grain: number;            // 0..1 procedural noise masking
   grainScale: number;       // noise frequency
 }
-export type FillStyle = 'SOLID' | 'GRADIENT_LINEAR' | 'GRADIENT_RADIAL';
+export type FillStyle = 'SOLID' | 'GRADIENT_LINEAR' | 'GRADIENT_RADIAL' | 'TEXTURE';
+/** How a stroke's ribbon is coloured. Blender GP offers Solid|Texture here;
+ *  GRADIENT_* are ours — they ramp along the stroke's arc length (LINEAR)
+ *  or across its width (RADIAL), which is what makes a pencil read as
+ *  pressed-hard-in-the-middle rather than a flat band.
+ *  NB: `StrokeStyle` is already taken by the baked per-stroke brush record
+ *  above — this is the MATERIAL's shading mode, hence the different name. */
+export type StrokeShade = 'SOLID' | 'GRADIENT_LINEAR' | 'GRADIENT_RADIAL' | 'TEXTURE';
 
 export interface GPStroke {
   id: number;
@@ -84,6 +91,21 @@ export interface GPMaterial {
   fillColor2: Vec4;        // gradient secondary
   gradientAngle: number;   // radians, linear gradient direction
   holdout: boolean;
+  // ---- NPR stroke shading (all optional: absent = plain SOLID, the
+  //      look every pre-existing material had) --------------------------
+  strokeShade?: StrokeShade;
+  strokeColor2?: Vec4;      // gradient secondary, along/across the stroke
+  strokeImageId?: number | null;
+  /** Texture repeats along the stroke's arc length. 1 = stretch the image
+   *  once end to end; higher tiles it, which is what gives a dry pencil its
+   *  repeating tooth instead of one smeared copy. */
+  strokeUvFactor?: number;
+  /** 0 = texture replaces the colour, 1 = colour untouched. Blender's
+   *  "Blend" slider on a textured stroke. */
+  strokeTexBlend?: number;
+  fillImageId?: number | null;
+  fillUvFactor?: number;
+  fillTexBlend?: number;
 }
 
 // ---- Modifiers ----------------------------------------------------------

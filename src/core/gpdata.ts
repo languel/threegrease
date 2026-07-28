@@ -196,6 +196,9 @@ export function createMaterial(name: string, stroke: Vec4, fill?: Vec4): GPMater
     name, showStroke: true, strokeColor: stroke, lineMode: 'LINE',
     showFill: !!fill, fillColor: fill ?? [0.5, 0.5, 0.5, 1],
     fillStyle: 'SOLID', fillColor2: [1, 1, 1, 1], gradientAngle: 0, holdout: false,
+    strokeShade: 'SOLID', strokeColor2: [...stroke] as Vec4,
+    strokeImageId: null, strokeUvFactor: 1, strokeTexBlend: 0,
+    fillImageId: null, fillUvFactor: 1, fillTexBlend: 0,
   };
 }
 
