@@ -118,6 +118,9 @@ export interface AppHandle {
   run(action: string): void;
   setLastPicked(ref: import('../tools/objects').ObjRef): void;
   getLastPicked(): import('../tools/objects').ObjRef | null;
+  /** World-space bounding-box size (Blender's "Dimensions") for the
+   *  N-panel's Extents row. Null if the object has no root yet. */
+  objectExtents(ref: import('../tools/objects').ObjRef): [number, number, number] | null;
   pickObject(cb: (ref: import('../tools/objects').ObjRef | null) => void): void;
   newScene(): void;
   viewAll(): void;
@@ -2786,7 +2789,22 @@ export class UI {
     return fieldRow(label, get().map((component, i) => numField('', component, (v) => set(i, v), step)));
   }
 
-  /** Blender-style N-panel: item / view / cursor values, live + editable. */
+  /** Read-only bounding-box size line (Blender's Item panel "Dimensions"),
+   *  derived from the same world-space AABB the selection outline draws —
+   *  see App.objectExtents. Plain text, not a numdrag: the box is a
+   *  DERIVED value (world AABB of the actual geometry), so an interactive
+   *  control here would either silently no-op or need to back-solve a
+   *  scale change from a typed size, which is more than "a display". */
+  private extentsRow(ref: ObjRef): Node | null {
+    const size = this.app.objectExtents(ref);
+    if (!size) return null;
+    return fieldRow('Extents', el('span', { text: size.map((v) => v.toFixed(3)).join('  ×  ') }));
+  }
+
+  /** Blender-style N-panel: item / view / cursor values, live + editable.
+   *  Built from the same panel() sections the sidebar uses (Properties,
+   *  Bake, etc.) so it gets identical two-column label alignment for free
+   *  instead of a hand-rolled layout that only sort-of matches. */
   rebuildInspector(): void {
     const { ctx } = this.app;
     const ob = activeObject(ctx.scene);
@@ -2795,7 +2813,7 @@ export class UI {
       this.inspectorEl = el('div', { id: 'inspector' });
       document.getElementById('viewport')!.append(this.inspectorEl);
     }
-    const body: Node[] = [];
+    const sections: HTMLElement[] = [];
 
     // --- Item: selection median (edit-family modes) + object transform ---
     const selected: { co: [number, number, number] }[] = [];
@@ -2809,13 +2827,14 @@ export class UI {
     }
     if (selected.length) {
       const median = [0, 1, 2].map((i) => selected.reduce((a, p) => a + p.co[i], 0) / selected.length);
-      body.push(el('h3', { text: `Median (${selected.length} pts)` }));
-      body.push(this.vecRow('', () => median.map((v) => +v.toFixed(3)), (i, v) => {
-        ctx.pushUndo();
-        const d = v - median[i];
-        for (const p of selected) p.co[i] += d;
-        ctx.requestRender();
-      }));
+      sections.push(panel(`Median (${selected.length} pts)`,
+        this.vecRow('', () => median.map((v) => +v.toFixed(3)), (i, v) => {
+          ctx.pushUndo();
+          const d = v - median[i];
+          for (const p of selected) p.co[i] += d;
+          ctx.requestRender();
+        }),
+      ));
     }
     // OBJECT mode: show the actually-selected object (any kind), not just
     // the active GP object — the N-panel used to always read GP1 even with
@@ -2827,48 +2846,51 @@ export class UI {
       const activeRef = (picked && refs.some((r) => r.kind === picked.kind && r.id === picked.id)) ? picked : refs[0];
       if (activeRef) {
         const t = getObjectTransform(ctx.scene, activeRef);
-        body.push(el('h3', { text: `Object: ${objectName(ctx.scene, activeRef)} (${activeRef.kind})${refs.length > 1 ? ` +${refs.length - 1}` : ''}` }));
+        const rows: Node[] = [];
         if (t) {
-          body.push(
+          rows.push(
             this.vecRow('Loc', () => t.translation.map((v) => +v.toFixed(3)), (i, v) => { t.translation[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }),
             this.vecRow('Rot', () => t.rotation.map((v) => +v.toFixed(3)), (i, v) => { t.rotation[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }),
             this.vecRow('Scale', () => t.scale.map((v) => +v.toFixed(3)), (i, v) => { t.scale[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }, 0.05),
           );
         }
+        const extents = this.extentsRow(activeRef);
+        if (extents) rows.push(extents);
+        sections.push(panel(`Object: ${objectName(ctx.scene, activeRef)} (${activeRef.kind})${refs.length > 1 ? ` +${refs.length - 1}` : ''}`, ...rows));
       } else {
-        body.push(el('h3', { text: 'Object' }));
-        body.push(el('div', { class: 'row', text: 'select one or more objects' }));
+        sections.push(panel('Object', el('div', { class: 'row', text: 'select one or more objects' })));
       }
     } else {
-      body.push(el('h3', { text: `Object: ${ob.name}` }));
-      body.push(
+      const ref: ObjRef = { kind: 'GP', id: ob.id };
+      const extents = this.extentsRow(ref);
+      sections.push(panel(`Object: ${ob.name}`,
         this.vecRow('Loc', () => ob.translation.map((v) => +v.toFixed(3)), (i, v) => { ob.translation[i] = v; ctx.requestRender(); }),
         this.vecRow('Rot', () => ob.rotation.map((v) => +v.toFixed(3)), (i, v) => { ob.rotation[i] = v; ctx.requestRender(); }),
         this.vecRow('Scale', () => ob.scale.map((v) => +v.toFixed(3)), (i, v) => { ob.scale[i] = v; ctx.requestRender(); }, 0.05),
-      );
+        ...(extents ? [extents] : []),
+      ));
     }
 
     // --- View ---
-    body.push(el('h3', { text: 'View' }));
     const vp = ctx.camera.position;
-    body.push(el('div', { class: 'row', text: `Viewport: ${vp.x.toFixed(2)}, ${vp.y.toFixed(2)}, ${vp.z.toFixed(2)}` }));
-    body.push(el('h3', { text: `Camera: ${cam.name}` }));
-    body.push(
+    sections.push(panel('View',
+      el('div', { class: 'row', text: `Viewport: ${vp.x.toFixed(2)}, ${vp.y.toFixed(2)}, ${vp.z.toFixed(2)}` }),
+    ));
+    sections.push(panel(`Camera: ${cam.name}`,
       this.vecRow('Loc', () => cam.translation.map((v) => +v.toFixed(3)), (i, v) => { cam.translation[i] = v; ctx.requestRender(); }),
       this.vecRow('Rot', () => cam.rotation.map((v) => +v.toFixed(3)), (i, v) => { cam.rotation[i] = v; ctx.requestRender(); }),
-      el('div', { class: 'row' },
-        numField('FOV', +cam.fov.toFixed(1), (v) => { cam.fov = Math.min(140, Math.max(5, v)); ctx.requestRender(); }, 1, { def: 50, min: 5, max: 140, route: 'camera.0.fov' }),
-      ),
-    );
+      numField('FOV', +cam.fov.toFixed(1), (v) => { cam.fov = Math.min(140, Math.max(5, v)); ctx.requestRender(); }, 1, { def: 50, min: 5, max: 140, route: 'camera.0.fov' }),
+    ));
 
     // --- Cursor ---
-    body.push(el('h3', { text: '3D Cursor' }));
-    body.push(this.vecRow('', () => ctx.scene.cursor.map((v) => +v.toFixed(3)), (i, v) => {
-      ctx.scene.cursor[i] = v;
-      ctx.requestRender();
-    }));
+    sections.push(panel('3D Cursor',
+      this.vecRow('', () => ctx.scene.cursor.map((v) => +v.toFixed(3)), (i, v) => {
+        ctx.scene.cursor[i] = v;
+        ctx.requestRender();
+      }),
+    ));
 
-    this.inspectorEl.replaceChildren(...body);
+    this.inspectorEl.replaceChildren(...sections);
   }
 
   // ------------------------------------------------------- command palette

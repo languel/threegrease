@@ -2541,6 +2541,36 @@ class App implements AppHandle {
     for (const vert of pm.vertices) box.expandByPoint(v.set(...vert.co).applyMatrix4(world));
   }
 
+  /** World-space AABB of `ref`'s actual geometry, for any object kind.
+   *  Shared by the selection outline (syncSelectionGlyphs) and the
+   *  N-panel's Dimensions readout, so both agree on what "the bounding
+   *  box" means — same empty-mesh/POLY/matrix-only-object special cases. */
+  private computeObjectBox(ref: ObjRef): THREE.Box3 | null {
+    const scene = this.ctx.scene;
+    const root = this.objectRoot(ref);
+    if (!root) return null;
+    const box = new THREE.Box3();
+    const isEmptyMesh = ref.kind === 'MESH' && scene.meshes.find((m) => m.id === ref.id)?.kind === 'EMPTY';
+    if (ref.kind === 'POLY') this.polyDataBox(ref, box);
+    else if (!isEmptyMesh) box.setFromObject(root);
+    if (isEmptyMesh || box.isEmpty()) {
+      const center = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
+      const size = ref.kind === 'GP' || ref.kind === 'POLY' || isEmptyMesh ? 0.15 : 1;
+      box.setFromCenterAndSize(center, new THREE.Vector3(size, size, size));
+    }
+    return box;
+  }
+
+  /** World-space bounding-box size (Blender's Item panel "Dimensions"),
+   *  for the N-panel. Public because ui.ts only sees App through
+   *  AppHandle. */
+  objectExtents(ref: ObjRef): [number, number, number] | null {
+    const box = this.computeObjectBox(ref);
+    if (!box) return null;
+    const size = box.getSize(new THREE.Vector3());
+    return [size.x, size.y, size.z];
+  }
+
   /** Visual feedback for TRIGGER zones: on enter (highlight color) or
    *  leave (gray) the carrier's outline flashes and fades over ~450ms. */
   private updateZoneFlashes(now: number): void {
@@ -2627,19 +2657,8 @@ class App implements AppHandle {
         entry = { box, helper, dot };
         this.selHelpers.set(key, entry);
       }
-      const isEmptyMesh = ref.kind === 'MESH' && scene.meshes.find((m) => m.id === ref.id)?.kind === 'EMPTY';
-      if (ref.kind === 'POLY') this.polyDataBox(ref, entry.box);
-      else if (!isEmptyMesh) entry.box.setFromObject(root);
-      if (isEmptyMesh || entry.box.isEmpty()) {
-        // matrix-driven objects (streams/triggers/empties) keep .position
-        // at 0 or have no surface geometry of their own — use the
-        // data-model world matrix for a small Blender-"empty"-style
-        // marker rather than a full unit cube (a genuinely empty GP/poly
-        // object, with no strokes/vertices yet, gets the same treatment).
-        const center = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
-        const size = ref.kind === 'GP' || ref.kind === 'POLY' || isEmptyMesh ? 0.15 : 1;
-        entry.box.setFromCenterAndSize(center, new THREE.Vector3(size, size, size));
-      }
+      const box = this.computeObjectBox(ref);
+      if (box) entry.box.copy(box);
       const meshKind = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id)?.kind : undefined;
       const realEdges = meshKind ? meshEdgePositions(root, meshKind) : null;
       entry.helper.geometry.setPositions(realEdges ?? boxEdgePositions(entry.box));

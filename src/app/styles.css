@@ -315,17 +315,15 @@ button:hover .hi, .icon-btn:hover .hi, button.active .hi { opacity: 1; }
 .tl-transport { width: 28px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
 
+/* A stack of the same .panel sections the sidebar uses (Properties, Bake,
+   etc.) — reusing that component, rather than a hand-rolled layout, is
+   what keeps this floating overlay's label/field alignment identical to
+   the sidebar instead of drifting out of sync with it over time. */
 #inspector {
-  position: absolute; top: 8px; right: 8px; width: 235px;
-  background: rgba(36, 36, 40, 0.92); border: 1px solid var(--border);
-  border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 4px;
+  position: absolute; top: 8px; right: 8px; width: 260px;
+  display: flex; flex-direction: column; gap: 6px;
   max-height: calc(100% - 120px); overflow-y: auto;
 }
-#inspector h3 {
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--dim); margin-top: 4px;
-}
-#inspector input[type="number"] { width: 52px; }
 #app.presentation #inspector { display: none; }
 
 #settings-overlay {
