@@ -208,9 +208,11 @@ export function createObject(name: string): GPObject {
     id: genId(),
     name, layers: [layer], activeLayerId: layer.id,
     materials: [
-      createMaterial('Black', [0.05, 0.05, 0.05, 1]),
-      createMaterial('Red', [0.85, 0.12, 0.09, 1]),
+      createMaterial('Stroke Black', [0.05, 0.05, 0.05, 1]),
+      createMaterial('Stroke Red', [0.85, 0.12, 0.09, 1]),
       createMaterial('Fill White', [0.05, 0.05, 0.05, 1], [0.95, 0.95, 0.95, 1]),
+      createMaterial('Stroke White', [0.95, 0.95, 0.95, 1]),
+      createMaterial('Stroke Blue', [0.13, 0.35, 0.85, 1]),
     ],
     activeMaterial: 0, modifiers: [], effects: [],
     translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],

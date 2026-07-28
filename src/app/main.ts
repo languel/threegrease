@@ -1624,10 +1624,15 @@ class App implements AppHandle {
    *  panel already styles against, so the whole app re-themes at once. */
   applyThemeColors(): void {
     const s = this.ctx.settings;
+    const clamp255 = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
     const toHex = (c: [number, number, number]) =>
-      `#${c.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('')}`;
+      `#${c.map(clamp255).map((v) => v.toString(16).padStart(2, '0')).join('')}`;
     document.documentElement.style.setProperty('--accent', toHex(s.uiAccent));
-    document.documentElement.style.setProperty('--accent2', toHex(s.uiHighlight));
+    // --accent2 carries real alpha (rgba, not hex) so every existing CSS
+    // rule that reads it — backgrounds, borders, fills — goes translucent
+    // for free, no per-rule changes needed.
+    const [r, g, b] = s.uiHighlight.map(clamp255);
+    document.documentElement.style.setProperty('--accent2', `rgba(${r}, ${g}, ${b}, ${s.uiHighlightAlpha})`);
   }
 
   /** Selection-outline color (three.js side): mirrors uiHighlight, active
@@ -2604,6 +2609,7 @@ class App implements AppHandle {
         const vp = document.getElementById('viewport');
         const mat = new LineMaterial({
           color: this.highlightColor().getHex(), linewidth: 2, // px, screen-space
+          opacity: this.ctx.settings.uiHighlightAlpha,
           depthTest: false, transparent: true, resolution: new THREE.Vector2(vp?.clientWidth || 1, vp?.clientHeight || 1),
         });
         const helper = new LineSegments2(new LineSegmentsGeometry(), mat);
@@ -2612,6 +2618,7 @@ class App implements AppHandle {
         geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
         const dot = new THREE.Points(geo, new THREE.PointsMaterial({
           color: this.highlightColor(), size: 7, sizeAttenuation: false, depthTest: false, transparent: true,
+          opacity: this.ctx.settings.uiHighlightAlpha,
         }));
         dot.renderOrder = 1000;
         this.selGlyphs.add(helper, dot);
@@ -2636,6 +2643,8 @@ class App implements AppHandle {
       entry.helper.geometry.setPositions(realEdges ?? boxEdgePositions(entry.box));
       const isActive = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
       entry.helper.material.color.copy(this.highlightColor());
+      entry.helper.material.opacity = this.ctx.settings.uiHighlightAlpha;
+      (entry.dot.material as THREE.PointsMaterial).opacity = this.ctx.settings.uiHighlightAlpha;
       entry.helper.material.linewidth = isActive ? 2.5 : 1.5;
       worldMatrixOf(scene, ref).decompose(
         entry.dot.position, new THREE.Quaternion(), new THREE.Vector3());

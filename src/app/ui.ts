@@ -2986,6 +2986,9 @@ export class UI {
         colorField('Highlight', [...s.uiHighlight, 1], (rgb) => {
           s.uiHighlight = rgb; this.app.applyThemeColors(); this.app.refreshWidget(); save();
         }),
+        slider('Highlight alpha', s.uiHighlightAlpha, 0, 1, 0.01, (v) => {
+          s.uiHighlightAlpha = v; this.app.applyThemeColors(); this.app.refreshWidget(); save();
+        }, { def: 0.5 }),
       ),
     );
 

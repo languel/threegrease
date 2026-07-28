@@ -113,6 +113,12 @@ export interface Settings {
    *  against `background`. */
   uiAccent: Vec3;
   uiHighlight: Vec3;
+  /** highlight opacity 0..1 — applied to both --accent2 (CSS, as rgba) and
+   *  the three.js selection outline/dot materials, which are already
+   *  transparent:true for exactly this. uiAccent has no alpha counterpart:
+   *  it drives opaque buttons/checkboxes where translucency would look
+   *  like a rendering bug rather than a style choice. */
+  uiHighlightAlpha: number;
   gridColor: Vec3 | null;
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
@@ -162,7 +168,7 @@ const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'background', 'snap',
-  'uiAccent', 'uiHighlight', 'gridColor',
+  'uiAccent', 'uiHighlight', 'uiHighlightAlpha', 'gridColor',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -254,7 +260,8 @@ export function defaultSettings(): Settings {
     invertTrackpadOrbit: false,
     showGizmo: false,
     uiAccent: [0.31, 0.55, 1],
-    uiHighlight: [1, 0.48, 0],
+    uiHighlight: [0.522, 0.522, 0.522],   // gray(133)
+    uiHighlightAlpha: 0.5,
     gridColor: null,
     upAxis: 'Z',
     showAxes: false,
