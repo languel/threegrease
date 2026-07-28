@@ -112,13 +112,19 @@ export interface Settings {
    *  three.js selection glyph colors. gridColor null = auto-contrast
    *  against `background`. */
   uiAccent: Vec3;
+  /** accent opacity 0..1 — --accent (CSS) is emitted as rgba() using this. */
+  uiAccentAlpha: number;
   uiHighlight: Vec3;
   /** highlight opacity 0..1 — applied to both --accent2 (CSS, as rgba) and
    *  the three.js selection outline/dot materials, which are already
-   *  transparent:true for exactly this. uiAccent has no alpha counterpart:
-   *  it drives opaque buttons/checkboxes where translucency would look
-   *  like a rendering bug rather than a style choice. */
+   *  transparent:true for exactly this. */
   uiHighlightAlpha: number;
+  /** selection tint for the ACTIVE (last-picked) object — a distinct color,
+   *  not a lerp of uiHighlight: THREE.Color.lerp interpolates in linear
+   *  light and visibly over-brightens midtones, so the active object needs
+   *  its own authored color rather than a brightened highlight. Shares
+   *  uiHighlightAlpha (opacity stays the same; only the hue shifts). */
+  uiHighlightActive: Vec3;
   gridColor: Vec3 | null;
   upAxis: 'Z' | 'Y';        // world up convention: Z-up (Blender) or Y-up (three.js)
   showAxes: boolean;
@@ -168,7 +174,7 @@ const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'background', 'snap',
-  'uiAccent', 'uiHighlight', 'uiHighlightAlpha', 'gridColor',
+  'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -259,9 +265,11 @@ export function defaultSettings(): Settings {
     trackpadNav: true,
     invertTrackpadOrbit: false,
     showGizmo: false,
-    uiAccent: [0.31, 0.55, 1],
-    uiHighlight: [0.522, 0.522, 0.522],   // gray(133)
+    uiAccent: [0.522, 0.522, 0.522],           // gray(133)
+    uiAccentAlpha: 0.5,
+    uiHighlight: [1, 0.502, 0],                // rgb(255,128,0)
     uiHighlightAlpha: 0.5,
+    uiHighlightActive: [1, 0.784, 0],          // rgb(255,200,0) — a touch more yellow
     gridColor: null,
     upAxis: 'Z',
     showAxes: false,

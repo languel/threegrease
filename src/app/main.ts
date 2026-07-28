@@ -1621,27 +1621,29 @@ class App implements AppHandle {
   }
 
   /** Push uiAccent/uiHighlight to the CSS custom properties every DOM
-   *  panel already styles against, so the whole app re-themes at once. */
+   *  panel already styles against, so the whole app re-themes at once.
+   *  Both carry real alpha (rgba, not hex) so every existing CSS rule that
+   *  reads them — backgrounds, borders, fills — goes translucent for free,
+   *  no per-rule changes needed. */
   applyThemeColors(): void {
     const s = this.ctx.settings;
     const clamp255 = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-    const toHex = (c: [number, number, number]) =>
-      `#${c.map(clamp255).map((v) => v.toString(16).padStart(2, '0')).join('')}`;
-    document.documentElement.style.setProperty('--accent', toHex(s.uiAccent));
-    // --accent2 carries real alpha (rgba, not hex) so every existing CSS
-    // rule that reads it — backgrounds, borders, fills — goes translucent
-    // for free, no per-rule changes needed.
-    const [r, g, b] = s.uiHighlight.map(clamp255);
-    document.documentElement.style.setProperty('--accent2', `rgba(${r}, ${g}, ${b}, ${s.uiHighlightAlpha})`);
+    const rgba = (c: [number, number, number], a: number) => {
+      const [r, g, b] = c.map(clamp255);
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    };
+    document.documentElement.style.setProperty('--accent', rgba(s.uiAccent, s.uiAccentAlpha));
+    document.documentElement.style.setProperty('--accent2', rgba(s.uiHighlight, s.uiHighlightAlpha));
   }
 
-  /** Selection-outline color (three.js side): mirrors uiHighlight, active
-   *  object gets a lightened variant, matching the old fixed 0xffb454. */
-  highlightColor(_active = false): THREE.Color {
-    // always the exact set color - THREE.Color.lerp interpolates in linear
-    // light and visibly over-brightens midtones, so active/target objects
-    // are distinguished by line width (see syncSelectionGlyphs), not tint.
-    return srgbColor(this.ctx.settings.uiHighlight);
+  /** Selection-outline color (three.js side): mirrors uiHighlight, the
+   *  ACTIVE (last-picked) object gets a distinct authored color
+   *  (uiHighlightActive) rather than a brightened uiHighlight —
+   *  THREE.Color.lerp interpolates in linear light and visibly
+   *  over-brightens midtones, so active/target objects need their own hue,
+   *  not an interpolated one. Opacity is shared (uiHighlightAlpha). */
+  highlightColor(active = false): THREE.Color {
+    return srgbColor(active ? this.ctx.settings.uiHighlightActive : this.ctx.settings.uiHighlight);
   }
 
   // --------------------------------------------------------- object mode
@@ -2642,7 +2644,8 @@ class App implements AppHandle {
       const realEdges = meshKind ? meshEdgePositions(root, meshKind) : null;
       entry.helper.geometry.setPositions(realEdges ?? boxEdgePositions(entry.box));
       const isActive = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
-      entry.helper.material.color.copy(this.highlightColor());
+      entry.helper.material.color.copy(this.highlightColor(isActive));
+      (entry.dot.material as THREE.PointsMaterial).color.copy(this.highlightColor(isActive));
       entry.helper.material.opacity = this.ctx.settings.uiHighlightAlpha;
       (entry.dot.material as THREE.PointsMaterial).opacity = this.ctx.settings.uiHighlightAlpha;
       entry.helper.material.linewidth = isActive ? 2.5 : 1.5;

@@ -2983,12 +2983,18 @@ export class UI {
       el('div', { class: 'menu-header', text: 'Theme' }),
       el('div', { class: 'row' },
         colorField('Accent', [...s.uiAccent, 1], (rgb) => { s.uiAccent = rgb; this.app.applyThemeColors(); save(); }),
+        slider('Accent alpha', s.uiAccentAlpha, 0, 1, 0.01, (v) => {
+          s.uiAccentAlpha = v; this.app.applyThemeColors(); save();
+        }, { def: 0.5 }),
         colorField('Highlight', [...s.uiHighlight, 1], (rgb) => {
           s.uiHighlight = rgb; this.app.applyThemeColors(); this.app.refreshWidget(); save();
         }),
         slider('Highlight alpha', s.uiHighlightAlpha, 0, 1, 0.01, (v) => {
           s.uiHighlightAlpha = v; this.app.applyThemeColors(); this.app.refreshWidget(); save();
         }, { def: 0.5 }),
+        colorField('Highlight (active)', [...s.uiHighlightActive, 1], (rgb) => {
+          s.uiHighlightActive = rgb; this.app.refreshWidget(); save();
+        }),
       ),
     );
 
