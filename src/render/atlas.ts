@@ -114,6 +114,11 @@ export class TextureAtlas {
 
       this.texture?.dispose();
       const tex = new THREE.CanvasTexture(canvas);
+      // Rects are measured from the canvas TOP-left. three.js flips textures
+      // on upload by default, which would put row 0 at v=1 and make every
+      // rect sample the empty bottom of the atlas — i.e. alpha 0, and every
+      // textured stroke silently discards. Keep canvas space == UV space.
+      tex.flipY = false;
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.minFilter = THREE.LinearFilter;  // no mips: neighbours would bleed
       tex.magFilter = THREE.LinearFilter;

@@ -9,6 +9,48 @@ export interface BuildOptions {
   /** onion-skin style override: replace color, scale opacity */
   colorOverride?: { color: Vec3; opacity: number };
   background: Vec3;        // for holdout materials
+  /** Where a material's image sits in the shared atlas. Injected rather
+   *  than imported so this stays a pure geometry builder. Returning null
+   *  (no atlas yet, image still decoding) degrades to untextured. */
+  atlasRect?: (imageId: number | null | undefined) => [number, number, number, number] | null;
+}
+
+const SHADE_CODE: Record<string, number> = {
+  SOLID: 0, GRADIENT_LINEAR: 1, GRADIENT_RADIAL: 2, TEXTURE: 3,
+};
+const NO_RECT: [number, number, number, number] = [0, 0, 0, 0];
+
+/** Per-stroke NPR shading, resolved once per material. A TEXTURE material
+ *  whose image hasn't packed yet falls back to SOLID so it draws as a plain
+ *  ribbon instead of vanishing. */
+function shadeOf(mat: GPMaterial, opts: BuildOptions, isFill: boolean) {
+  const styleName = isFill ? mat.fillStyle : (mat.strokeShade ?? 'SOLID');
+  let code = SHADE_CODE[styleName] ?? 0;
+  const imageId = isFill ? mat.fillImageId : mat.strokeImageId;
+  let rect = code === 3 ? opts.atlasRect?.(imageId) ?? null : null;
+  if (code === 3 && !rect) { code = 0; rect = null; }
+  return {
+    code,
+    rect: rect ?? NO_RECT,
+    uvFactor: (isFill ? mat.fillUvFactor : mat.strokeUvFactor) ?? 1,
+    texBlend: (isFill ? mat.fillTexBlend : mat.strokeTexBlend) ?? 0,
+    color2: (isFill ? mat.fillColor2 : mat.strokeColor2 ?? mat.strokeColor),
+  };
+}
+
+/** Cumulative arc length per point, normalised 0..1 over the whole stroke —
+ *  the coordinate a texture repeats along and a gradient ramps over. */
+function arcLengths(s: GPStroke): number[] {
+  const pts = s.points;
+  const out = new Array<number>(pts.length).fill(0);
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1].co, b = pts[i].co;
+    total += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    out[i] = total;
+  }
+  if (total > 1e-9) for (let i = 0; i < out.length; i++) out[i] /= total;
+  return out;
 }
 
 function pointColor(
@@ -45,8 +87,15 @@ export function buildStrokeGeometry(
   const pos: number[] = [], dir: number[] = [], corner: number[] = [];
   const radius: number[] = [], color: number[] = [], kind: number[] = [], hard: number[] = [];
   const unit: number[] = [], stampAttr: number[] = [], seedAttr: number[] = [];
+  const color2: number[] = [], shadeAttr: number[] = [], rectAttr: number[] = [], arcAttr: number[] = [];
   const index: number[] = [];
   let v = 0;
+
+  // per-stroke shading, set once before that stroke emits: these are
+  // constant across a stroke but must go out per-vertex, since the whole
+  // layer shares one buffer and one material
+  let shade = shadeOf(materials[0] ?? ({} as GPMaterial), opts, false);
+  let arc = 0; // 0..1 along the stroke, set per emission point
 
   const pushVert = (
     p: Vec3, d: Vec3, cx: number, cy: number, r: number, c: Vec4, k: number, h: number,
@@ -62,6 +111,10 @@ export function buildStrokeGeometry(
     unit.push(u);
     stampAttr.push(rot, aspect, grain, grainScale);
     seedAttr.push(seed);
+    color2.push(shade.color2[0], shade.color2[1], shade.color2[2], shade.color2[3]);
+    shadeAttr.push(shade.code, shade.uvFactor, shade.texBlend);
+    rectAttr.push(shade.rect[0], shade.rect[1], shade.rect[2], shade.rect[3]);
+    arcAttr.push(arc);
     return v++;
   };
 
@@ -81,6 +134,8 @@ export function buildStrokeGeometry(
     if (!mat || !mat.showStroke) continue;
     const n = s.points.length;
     if (n === 0) continue;
+    shade = shadeOf(mat, opts, false);
+    const arcs = arcLengths(s);
     const style = s.style;
     const isScene = style?.unit === 'SCENE';
     const u = isScene ? 1 : 0;
@@ -89,7 +144,7 @@ export function buildStrokeGeometry(
         (s.lineWidth * p.pressure + (isScene ? 0 : opts.thicknessOffset)) * 0.5);
 
     if (style?.stamp) {
-      buildStamps(s, mat, opts, u, quad);
+      buildStamps(s, mat, opts, u, quad, (a) => { arc = a; });
       continue;
     }
 
@@ -99,6 +154,7 @@ export function buildStrokeGeometry(
       const p = s.points[i];
       const c = pointColor(mat, p.vertexColor, p.strength, opts, false);
       if (c[3] <= 0.003) continue;
+      arc = arcs[i];
       quad(p.co, [0, 0, 0], radiusOf(p), c, dotKind, s.hardness, u);
     }
     if (mat.lineMode !== 'LINE') continue;
@@ -111,8 +167,16 @@ export function buildStrokeGeometry(
       const cB = pointColor(mat, B.vertexColor, B.strength, opts, false);
       if (cA[3] <= 0.003 && cB[3] <= 0.003) continue;
       const rA = radiusOf(A), rB = radiusOf(B);
+      // arc differs across the quad: the A edge and the B edge sit at
+      // different points along the stroke, which is what lets a texture
+      // travel down the ribbon instead of repeating per segment
+      arc = arcs[i];
       const i0 = pushVert(A.co, d, -1, 0, rA, cA, 0, s.hardness, u);
       const i1 = pushVert(A.co, d, 1, 0, rA, cA, 0, s.hardness, u);
+      // a cyclic stroke's closing segment wraps the index back to point 0;
+      // its arc must read as the END of the stroke (1.0), not the start,
+      // or the last segment ramps backwards through the whole gradient
+      arc = i + 1 === n ? 1 : arcs[i + 1];
       const i2 = pushVert(A.co, d, 1, 1, rB, cB, 0, s.hardness, u);
       const i3 = pushVert(A.co, d, -1, 1, rB, cB, 0, s.hardness, u);
       index.push(i0, i1, i2, i0, i2, i3);
@@ -131,6 +195,10 @@ export function buildStrokeGeometry(
   geom.setAttribute('aUnit', new THREE.Float32BufferAttribute(unit, 1));
   geom.setAttribute('aStamp', new THREE.Float32BufferAttribute(stampAttr, 4));
   geom.setAttribute('aSeed', new THREE.Float32BufferAttribute(seedAttr, 1));
+  geom.setAttribute('aColor2', new THREE.Float32BufferAttribute(color2, 4));
+  geom.setAttribute('aShade', new THREE.Float32BufferAttribute(shadeAttr, 3));
+  geom.setAttribute('aTexRect', new THREE.Float32BufferAttribute(rectAttr, 4));
+  geom.setAttribute('aArc', new THREE.Float32BufferAttribute(arcAttr, 1));
   geom.setIndex(index);
   geom.computeBoundingSphere();
   return geom;
@@ -147,14 +215,18 @@ function buildStamps(
   s: GPStroke, mat: GPMaterial, opts: BuildOptions, u: number,
   quad: (p: Vec3, d: Vec3, r: number, c: Vec4, k: number, h: number,
     u?: number, rot?: number, aspect?: number, grain?: number, grainScale?: number, seed?: number) => void,
+  setArc: (a: number) => void,
 ): void {
   const style = s.style;
   const pts = s.points;
   const n = pts.length;
   const rnd = seededRandom(s.id * 7919 + 17);
-  const emit = (co: Vec3, tangent: Vec3, pressure: number, strength: number, vcol: Vec4, idx: number) => {
+  const emit = (
+    co: Vec3, tangent: Vec3, pressure: number, strength: number, vcol: Vec4, idx: number, arc = 0,
+  ) => {
     const c = pointColor(mat, vcol, strength, opts, false);
     if (c[3] <= 0.003) return;
+    setArc(arc);
     const width = Math.max(1e-4, s.lineWidth * pressure);
     const r = width * 0.5;
     const jr = (rnd() - 0.5) * style.jitter * Math.PI;
@@ -173,12 +245,13 @@ function buildStamps(
       const p = pts[i];
       const prev = pts[Math.max(0, i - 1)], next = pts[Math.min(n - 1, i + 1)];
       const t: Vec3 = [next.co[0] - prev.co[0], next.co[1] - prev.co[1], next.co[2] - prev.co[2]];
-      emit(p.co, t, p.pressure, p.strength, p.vertexColor, i);
+      emit(p.co, t, p.pressure, p.strength, p.vertexColor, i, n > 1 ? i / (n - 1) : 0);
     }
     return;
   }
 
   // SCENE units: arc-length walk
+  const arcs = arcLengths(s);
   const step = Math.max(1e-4, style.spacing * s.lineWidth);
   let carried = 0;
   let stampIdx = 0;
@@ -196,7 +269,10 @@ function buildStamps(
       const st = A.strength + (B.strength - A.strength) * t;
       const vc: Vec4 = [0, 1, 2, 3].map((k) =>
         A.vertexColor[k] + (B.vertexColor[k] - A.vertexColor[k]) * t) as Vec4;
-      emit(co, d, pr, st, vc, stampIdx++);
+      // interpolate the normalised arc between this segment's endpoints, so
+      // a texture keeps travelling smoothly across segment boundaries
+      const aA = arcs[i], aB = i + 1 === n ? 1 : arcs[i + 1];
+      emit(co, d, pr, st, vc, stampIdx++, aA + (aB - aA) * t);
       t += step / len;
     }
     carried = (1 - (t - step / len)) * len; // distance left after last stamp
@@ -209,6 +285,7 @@ export function buildFillGeometry(
 ): THREE.BufferGeometry | null {
   const pos: number[] = [], color: number[] = [], color2: number[] = [];
   const grad: number[] = [], uv: number[] = [];
+  const fillTex: number[] = [], rectAttr: number[] = [];
   const index: number[] = [];
   let v = 0;
 
@@ -247,16 +324,21 @@ export function buildFillGeometry(
       ? c1
       : [c2raw[0], c2raw[1], c2raw[2], c2raw[3] * opts.layerOpacity * strengthAvg];
     if (c1[3] <= 0.003 && c2[3] <= 0.003) continue;
-    const style = mat.holdout || opts.colorOverride ? 0
-      : mat.fillStyle === 'GRADIENT_LINEAR' ? 1 : mat.fillStyle === 'GRADIENT_RADIAL' ? 2 : 0;
+    // holdout punches a background-coloured hole and onion skins are
+    // recoloured wholesale — neither should pick up gradients or textures
+    const flat = mat.holdout || opts.colorOverride;
+    const shade = shadeOf(mat, opts, true);
+    const style = flat ? 0 : shade.code;
 
     const base = v;
     for (let i = 0; i < proj.length; i++) {
       pos.push(pts[i][0], pts[i][1], pts[i][2]);
       color.push(c1[0], c1[1], c1[2], c1[3]);
       color2.push(c2[0], c2[1], c2[2], c2[3]);
-      grad.push(style, mat.gradientAngle, 0);
+      grad.push(style, mat.gradientAngle, shade.texBlend);
       uv.push((proj[i].x - minX) / sx, (proj[i].y - minY) / sy);
+      fillTex.push(shade.uvFactor, 0, 0);
+      rectAttr.push(shade.rect[0], shade.rect[1], shade.rect[2], shade.rect[3]);
       v++;
     }
     for (const t of tris) index.push(base + t[0], base + t[1], base + t[2]);
@@ -269,6 +351,8 @@ export function buildFillGeometry(
   geom.setAttribute('aColor2', new THREE.Float32BufferAttribute(color2, 4));
   geom.setAttribute('aGrad', new THREE.Float32BufferAttribute(grad, 3));
   geom.setAttribute('aUv', new THREE.Float32BufferAttribute(uv, 2));
+  geom.setAttribute('aFillTex', new THREE.Float32BufferAttribute(fillTex, 3));
+  geom.setAttribute('aTexRect', new THREE.Float32BufferAttribute(rectAttr, 4));
   geom.setIndex(index);
   geom.computeBoundingSphere();
   return geom;

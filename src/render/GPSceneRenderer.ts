@@ -3,6 +3,7 @@ import type { GPLayer, GPObject, GPScene, GPStroke, Vec3 } from '../core/types';
 import { frameAt, keyframeIndexAt } from '../core/gpdata';
 import { evaluateModifiers, remapTime } from '../modifiers/index';
 import { buildFillGeometry, buildStrokeGeometry, type BuildOptions } from './geometry';
+import { gpAtlas } from './atlas';
 import { makeFillMaterial, makeStrokeMaterial } from './materials';
 
 export type EditorMode = 'OBJECT' | 'DRAW' | 'EDIT' | 'SCULPT' | 'VERTEX' | 'WEIGHT';
@@ -49,6 +50,12 @@ export class GPSceneRenderer {
   }
 
   update(scene: GPScene, state: RenderState): void {
+    // Brush textures live in one shared atlas. Packing is async (images
+    // decode), so a repack marks everything dirty and we rebuild then —
+    // materials read the atlas at construction, and geometry bakes each
+    // material's sub-rect into its vertices.
+    gpAtlas.setOnReady(() => this.markDirty());
+    gpAtlas.sync(scene);
     if (!this.needsRebuild) return;
 
     // masked layers depend on their mask sources
@@ -134,6 +141,7 @@ export class GPSceneRenderer {
       tint: layer.tint,
       thicknessOffset: layer.thicknessOffset,
       background: state.background,
+      atlasRect: (id) => gpAtlas.rectOf(id),
     };
     const meshes = this.buildLayerMeshes(strokes, ob, layer, opts, order + 4, entry);
     if (layer.useMask && layer.maskLayerIds.length) {
@@ -206,6 +214,7 @@ export class GPSceneRenderer {
       const strokes = evaluateModifiers(kf.strokes, ob, maskLayer, scene.frame, kf.frameNumber);
       const opts: BuildOptions = {
         layerOpacity: 1, tint: [0, 0, 0, 0], thicknessOffset: 0, background: state.background,
+        atlasRect: (id) => gpAtlas.rectOf(id),
       };
       for (const geomBuilder of [buildFillGeometry, buildStrokeGeometry]) {
         const geom = geomBuilder(strokes, ob.materials, opts);
@@ -264,6 +273,7 @@ export class GPSceneRenderer {
         tint: [0, 0, 0, 0],
         thicknessOffset: layer.thicknessOffset,
         background: [0, 0, 0],
+        atlasRect: (id) => gpAtlas.rectOf(id),
         colorOverride: { color: g.isBefore ? colorBefore : colorAfter, opacity: opacity * fade },
       };
       const meshes = this.buildLayerMeshes(kf.strokes, ob, layer, opts, order, entry);
