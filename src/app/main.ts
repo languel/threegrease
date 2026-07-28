@@ -808,7 +808,13 @@ class App implements AppHandle {
     const rect = this.ctx.canvas.getBoundingClientRect();
     return {
       x: e.clientX - rect.left, y: e.clientY - rect.top,
-      pressure: e.pointerType === 'pen' ? e.pressure : (e.pressure || 0.5),
+      // A device with NO pressure sensor reports exactly 0.5 while the
+      // button is down (Pointer Events spec) — that is "no data", not "half
+      // pressure". Passing it through made every mouse stroke draw at half
+      // width AND half opacity with Strength at 1.0, which is why opaque
+      // strokes looked translucent and piled up visibly where they crossed.
+      // Only a pen carries real pressure; everything else means "full".
+      pressure: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 1,
       shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey,
       clientX: e.clientX, clientY: e.clientY,
     };
