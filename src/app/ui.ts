@@ -25,8 +25,8 @@ import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
 import { exportPaintCloudPly } from '../render/paintclouds';
 import type { ConstraintType, TGConstraint } from '../core/types';
 import {
-  getObjectTransform, listSelected as listSelectedObjects, objectName, selectionPivot,
-  setObjectTransform, setParentKeepWorld, type ObjRef,
+  deselectAllObjects, getObjectTransform, listSelected as listSelectedObjects, objectName,
+  selectionPivot, setObjectTransform, setParentKeepWorld, type ObjRef,
 } from '../tools/objects';
 import {
   applyObjectTransformPartial, clearObjectTransform, geometryToOrigin, mirrorObject,
@@ -1441,16 +1441,12 @@ export class UI {
       // be unselected from the outliner: clicking it just re-selected
       // the same thing)
       const solelySelected = cur && listSelectedObjects(scene).length === 1;
-      if (!shift) {
-        for (const o of scene.objects) o.select = false;
-        for (const c of scene.canvases) c.select = false;
-        for (const s of scene.splats) s.select = false;
-        for (const m of scene.meshes) m.select = false;
-        for (const t of scene.score.triggers) t.select = false;
-        for (const st of scene.mmStreams) st.select = false;
-        for (const p of scene.polyMeshes) p.select = false;
-        for (const pc of scene.paintClouds) pc.select = false;
-      }
+      // use the shared clear, NOT a hand-rolled loop: this one silently
+      // missed scene.lights when lights became objects, so clicking a
+      // light left the others selected — and with two selected the
+      // solely-selected test below never fired, making lights impossible
+      // to unselect from the outliner at all
+      if (!shift) deselectAllObjects(scene);
       apply(shift ? !cur : !solelySelected);
       ctx.syncCanvases();
       ctx.requestRender();
