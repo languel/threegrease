@@ -159,7 +159,7 @@ function primitiveLocalBounds(kind: TGMesh['kind']): THREE.Box3 | null {
   switch (kind) {
     case 'PLANE': return new THREE.Box3(new THREE.Vector3(-1, -1, 0), new THREE.Vector3(1, 1, 0));
     case 'BOX': return new THREE.Box3(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5));
-    case 'SPHERE': return new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
+    case 'SPHERE': return new THREE.Box3(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5));
     case 'CYLINDER': return new THREE.Box3(new THREE.Vector3(-0.5, -0.6, -0.5), new THREE.Vector3(0.5, 0.6, 0.5));
     default: return null; // MODEL
   }

@@ -16,7 +16,11 @@ export function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
   switch (kind) {
     case 'PLANE': return new THREE.PlaneGeometry(2, 2);
     case 'BOX': return new THREE.BoxGeometry(1, 1, 1);
-    case 'SPHERE': return new THREE.SphereGeometry(1, 32, 24);
+    // radius 0.5 = diameter 1, matching BOX's 1-unit edge and CYLINDER's
+    // 1-unit diameter (radius 0.5 below) — a "unit sphere" here means
+    // matching its sibling primitives' default footprint, not literally
+    // radius 1 (which made it visibly 2x the size of the default box).
+    case 'SPHERE': return new THREE.SphereGeometry(0.5, 32, 24);
     case 'CYLINDER': return new THREE.CylinderGeometry(0.5, 0.5, 1.2, 24);
     default: return new THREE.BoxGeometry(1, 1, 1);
   }
