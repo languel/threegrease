@@ -16,7 +16,7 @@ export function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
   switch (kind) {
     case 'PLANE': return new THREE.PlaneGeometry(2, 2);
     case 'BOX': return new THREE.BoxGeometry(1, 1, 1);
-    case 'SPHERE': return new THREE.SphereGeometry(0.6, 32, 24);
+    case 'SPHERE': return new THREE.SphereGeometry(1, 32, 24);
     case 'CYLINDER': return new THREE.CylinderGeometry(0.5, 0.5, 1.2, 24);
     default: return new THREE.BoxGeometry(1, 1, 1);
   }
