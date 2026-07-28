@@ -11,9 +11,26 @@ export interface GPPoint {
   vertexColor: Vec4;   // alpha 0 = "use material color"
   select: boolean;
   weight: number;      // single vertex-group weight (softness)
+  /** 0..1 input-sample density at this point, baked while drawing: 1 where
+   *  the pointer moved slowly and left dense samples, 0 where it was flung.
+   *  Baked because simplifyStroke deletes the points that carry the
+   *  evidence — it cannot be recovered from the stroke afterwards. */
+  density?: number;
 }
 
 export type LineMode = 'LINE' | 'DOTS' | 'SQUARES';
+
+/**
+ * What drives a brush's variation ALONG the stroke. This is the difference
+ * between a dead uniform ribbon and something with handwriting in it.
+ * - RANDOM     seeded noise along the arc — grit, dry media
+ * - CURVATURE  how hard the stroke turns here — ink pooling in the corners
+ * - DENSITY    how densely the INPUT was sampled before simplification,
+ *              i.e. how slowly it was drawn. Must be baked at draw time:
+ *              simplifyStroke throws the evidence away.
+ * - ARC        plain position along the stroke, for deliberate ramps
+ */
+export type VaryMode = 'NONE' | 'RANDOM' | 'CURVATURE' | 'DENSITY' | 'ARC';
 
 /** Baked per-stroke brush appearance (NPR engine). Never read live brush settings at render time. */
 export interface StrokeStyle {
@@ -25,6 +42,16 @@ export interface StrokeStyle {
   jitter: number;           // 0..1 positional/rotational randomness
   grain: number;            // 0..1 procedural noise masking
   grainScale: number;       // noise frequency
+  // ---- variation along the stroke (optional; absent = the old uniform
+  //      ribbon, so every existing stroke renders unchanged) -----------
+  varyMode?: VaryMode;
+  varyRadius?: number;      // 0..1 how much the signal thins the width
+  varyStrength?: number;    // 0..1 how much it fades the alpha
+  varyScale?: number;       // RANDOM frequency, in cycles along the stroke
+  /** Fraction of the stroke over which width ramps up from the start /
+   *  down into the end. A real brush lifts off; a straight ribbon doesn't. */
+  taperIn?: number;
+  taperOut?: number;
 }
 export type FillStyle = 'SOLID' | 'GRADIENT_LINEAR' | 'GRADIENT_RADIAL' | 'TEXTURE';
 /** How a stroke's ribbon is coloured. Blender GP offers Solid|Texture here;

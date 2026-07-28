@@ -298,7 +298,15 @@ export function ensureFrame(layer: GPLayer, frame: number, autoKey: boolean): GP
 // ---- cloning ---------------------------------------------------------------
 
 export function clonePoint(p: GPPoint): GPPoint {
-  return { co: [...p.co] as Vec3, pressure: p.pressure, strength: p.strength, vertexColor: [...p.vertexColor] as Vec4, select: p.select, weight: p.weight };
+  // NB: this enumerates fields explicitly, so anything added to GPPoint must
+  // be added HERE too. The modifier stack clones every stroke before the
+  // renderer sees it, so a field missed here is a field that silently never
+  // reaches geometry (`density` did exactly that).
+  return {
+    co: [...p.co] as Vec3, pressure: p.pressure, strength: p.strength,
+    vertexColor: [...p.vertexColor] as Vec4, select: p.select, weight: p.weight,
+    density: p.density,
+  };
 }
 export function cloneStroke(s: GPStroke): GPStroke {
   return {

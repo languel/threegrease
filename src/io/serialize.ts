@@ -162,7 +162,18 @@ export function deserializeScene(json: string): GPScene {
   for (const ob of scene.objects) {
     for (const layer of ob.layers) {
       for (const f of layer.frames) {
-        for (const s of f.strokes) s.style ??= defaultStyle();
+        for (const s of f.strokes) {
+          s.style ??= defaultStyle();
+          // strokes saved before per-stroke variation existed: no signal, no
+          // taper, so they rebuild as the uniform ribbons they were. Points
+          // keep `density` undefined, which varyFactors reads as fully dense.
+          s.style.varyMode ??= 'NONE';
+          s.style.varyRadius ??= 0;
+          s.style.varyStrength ??= 0;
+          s.style.varyScale ??= 4;
+          s.style.taperIn ??= 0;
+          s.style.taperOut ??= 0;
+        }
       }
     }
     // NPR stroke shading: every field defaults to the plain solid ribbon

@@ -34,6 +34,12 @@ export class DrawTool implements Tool {
   private stabPos: THREE.Vector2 | null = null;
   private startScreen: THREE.Vector2 | null = null;
   private guideCenter = new THREE.Vector2();
+  /** Screen-space gap to the previous raw sample, one per point pushed.
+   *  Normalised into GPPoint.density on release — this is the "how densely
+   *  did they actually draw it" signal, and it only exists here, before
+   *  simplifyStroke removes the points that embody it. */
+  private gaps: number[] = [];
+  private lastRaw: THREE.Vector2 | null = null;
   /** Shift+drag, decided once at pointerdown: smooth strokes under the
    *  brush instead of drawing a new one — the sculpt Smooth brush, without
    *  leaving the pencil tool (matches Blender's "hold Shift to smooth"
@@ -57,6 +63,8 @@ export class DrawTool implements Tool {
     target.frame.strokes.push(s);
     this.stroke = s;
     this.layerId = target.layer.id;
+    this.gaps = [];
+    this.lastRaw = null;
     setStrokeExclusion(s.id);
     this.stabPos = new THREE.Vector2(e.x, e.y);
     this.startScreen = null;
@@ -79,6 +87,9 @@ export class DrawTool implements Tool {
     if (this.stroke.points.length < 2) {
       // keep single dots — Blender does
     } else {
+      // bake density BEFORE simplify: the surviving points keep their value,
+      // but the gaps that define it are about to be thrown away
+      this.bakeDensity();
       smoothPoints(this.stroke.points, b.postSmooth, b.postSmoothSteps);
       smoothAttr(this.stroke.points, 'pressure', b.postSmooth * 0.5);
       if (b.simplify > 0) simplifyStroke(this.stroke, b.simplify);
@@ -93,6 +104,29 @@ export class DrawTool implements Tool {
 
   drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
     if (this.smoothing) drawBrushCircle(hud, ctx.settings.sculpt.radius, [0.55, 0.85, 1]);
+  }
+
+  /**
+   * Turn the raw per-sample gaps into GPPoint.density, 0..1, where 1 is the
+   * densest sampling in this stroke (slowest movement) and 0 the sparsest.
+   * Normalised per stroke rather than against an absolute speed so the
+   * signal means the same thing regardless of screen size, DPI or how fast
+   * the person draws in general — it's about variation WITHIN the mark.
+   */
+  private bakeDensity(): void {
+    if (!this.stroke) return;
+    const pts = this.stroke.points;
+    const gaps = this.gaps;
+    if (pts.length !== gaps.length || pts.length < 2) return;
+    // gap[0] is a placeholder (no previous sample) — use its neighbour
+    gaps[0] = gaps[1];
+    let lo = Infinity, hi = 0;
+    for (const g of gaps) { lo = Math.min(lo, g); hi = Math.max(hi, g); }
+    const span = hi - lo;
+    for (let i = 0; i < pts.length; i++) {
+      // invert: a SMALL gap means dense sampling, so density -> 1
+      pts[i].density = span < 1e-6 ? 1 : 1 - (gaps[i] - lo) / span;
+    }
   }
 
   private smooth(ctx: AppCtx, e: ToolEvent): void {
@@ -126,6 +160,10 @@ export class DrawTool implements Tool {
     if (b.vertexColorFactor > 0) {
       p.vertexColor = [b.vertexColor[0], b.vertexColor[1], b.vertexColor[2], b.vertexColorFactor];
     }
+    // raw input gap BEFORE any smoothing/simplification: small gap = the
+    // pointer was crawling = dense sampling here
+    this.gaps.push(this.lastRaw ? px.distanceTo(this.lastRaw) : 0);
+    this.lastRaw = px.clone();
     const pts = this.stroke.points;
     // active smoothing on the tail
     if (pts.length >= 2 && b.activeSmooth > 0) {

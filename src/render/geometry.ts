@@ -38,6 +38,108 @@ function shadeOf(mat: GPMaterial, opts: BuildOptions, isFill: boolean) {
   };
 }
 
+/**
+ * Per-point variation signal in 0..1, plus the taper envelope, collapsed
+ * into one multiplier per point for radius and one for alpha.
+ *
+ * The point of this is that a stroke shouldn't be uniform: real media vary
+ * along the mark. The signal chooses WHAT varies it, `varyRadius` /
+ * `varyStrength` choose how much, and taper handles the lift-off at the
+ * ends that a plain ribbon never has.
+ */
+function varyFactors(s: GPStroke, arcs: number[]): { radius: number[]; alpha: number[] } {
+  const st = s.style;
+  const n = s.points.length;
+  const mode = st?.varyMode ?? 'NONE';
+  const vr = st?.varyRadius ?? 0;
+  const va = st?.varyStrength ?? 0;
+  const tin = st?.taperIn ?? 0;
+  const tout = st?.taperOut ?? 0;
+  const radius = new Array<number>(n).fill(1);
+  const alpha = new Array<number>(n).fill(1);
+  if (mode === 'NONE' && vr === 0 && va === 0 && tin === 0 && tout === 0) return { radius, alpha };
+
+  const freq = Math.max(0.5, st?.varyScale ?? 4);
+  const noiseAt = (t: number): number => {
+    // cheap value noise over the arc: lattice + smoothstep, seeded per stroke
+    const x = t * freq;
+    const i0 = Math.floor(x), f = x - i0;
+    const h = (k: number) => {
+      const v = Math.sin((k + 1) * 127.1 + s.id * 311.7) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    const u = f * f * (3 - 2 * f);
+    return h(i0) * (1 - u) + h(i0 + 1) * u;
+  };
+
+  for (let i = 0; i < n; i++) {
+    let sig = 1;
+    if (mode === 'RANDOM') {
+      sig = noiseAt(arcs[i]);
+    } else if (mode === 'ARC') {
+      sig = arcs[i];
+    } else if (mode === 'DENSITY') {
+      // strokes drawn before this existed have no baked density; treat as
+      // fully dense so they render exactly as they used to
+      sig = s.points[i].density ?? 1;
+    } else if (mode === 'CURVATURE') {
+      const a = s.points[Math.max(0, i - 1)].co;
+      const b = s.points[i].co;
+      const c = s.points[Math.min(n - 1, i + 1)].co;
+      const v1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      const v2 = [c[0] - b[0], c[1] - b[1], c[2] - b[2]];
+      const l1 = Math.hypot(...v1), l2 = Math.hypot(...v2);
+      if (l1 < 1e-9 || l2 < 1e-9) sig = 0;
+      else {
+        const dot = (v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]) / (l1 * l2);
+        // Normalise against 30°, not 180°: adjacent points in a smoothed
+        // stroke turn by a few degrees at most, so dividing by PI would
+        // leave the signal near zero and the effect invisible.
+        const ang = Math.acos(Math.max(-1, Math.min(1, dot)));
+        sig = Math.min(1, ang / (Math.PI / 6));
+      }
+    }
+    // Positive amount THINS where the signal is weak (fast = thin pencil).
+    // Negative amount GROWS where the signal is strong (ink pooling in a
+    // corner, a calligraphic nib fattening through a turn) — the two read
+    // as opposite intents, so one signed control covers both.
+    radius[i] = vr >= 0 ? 1 - vr * (1 - sig) : 1 + -vr * sig;
+    alpha[i] = va >= 0 ? 1 - va * (1 - sig) : 1 + -va * sig;
+
+    const t = arcs[i];
+    if (tin > 0) {
+      const e = Math.min(1, t / tin);
+      radius[i] *= e; alpha[i] *= 0.35 + 0.65 * e;
+    }
+    if (tout > 0) {
+      const e = Math.min(1, (1 - t) / tout);
+      radius[i] *= e; alpha[i] *= 0.35 + 0.65 * e;
+    }
+    // a stroke must never invert or vanish outright; taper still reaches
+    // near-zero at the very tip, which is the point of it
+    radius[i] = Math.max(0.02, radius[i]);
+    alpha[i] = Math.max(0, Math.min(1.5, alpha[i]));
+  }
+  return { radius, alpha };
+}
+
+/** Sample a per-point factor at an arbitrary arc position. Stamps are laid
+ *  down between points, not on them, so they have to interpolate the
+ *  variation rather than index it. */
+function varyAt(t: number, factors: number[], arcs: number[]): number {
+  const n = factors.length;
+  if (n === 0) return 1;
+  if (t <= arcs[0]) return factors[0];
+  for (let i = 1; i < n; i++) {
+    if (t <= arcs[i]) {
+      const span = arcs[i] - arcs[i - 1];
+      const f = span < 1e-9 ? 0 : (t - arcs[i - 1]) / span;
+      return factors[i - 1] + (factors[i] - factors[i - 1]) * f;
+    }
+  }
+  return factors[n - 1];
+}
+
 /** Cumulative arc length per point, normalised 0..1 over the whole stroke —
  *  the coordinate a texture repeats along and a gradient ramps over. */
 function arcLengths(s: GPStroke): number[] {
@@ -136,15 +238,21 @@ export function buildStrokeGeometry(
     if (n === 0) continue;
     shade = shadeOf(mat, opts, false);
     const arcs = arcLengths(s);
+    const vary = varyFactors(s, arcs);
     const style = s.style;
     const isScene = style?.unit === 'SCENE';
     const u = isScene ? 1 : 0;
-    const radiusOf = (p: GPStroke['points'][number]) =>
+    const radiusOf = (p: GPStroke['points'][number], i: number) =>
       Math.max(isScene ? 1e-4 : 0.1,
-        (s.lineWidth * p.pressure + (isScene ? 0 : opts.thicknessOffset)) * 0.5);
+        (s.lineWidth * p.pressure * vary.radius[i] + (isScene ? 0 : opts.thicknessOffset)) * 0.5);
+    // alpha variation rides on top of the material/strength colour
+    const colorAt = (p: GPStroke['points'][number], i: number): Vec4 => {
+      const c = pointColor(mat, p.vertexColor, p.strength, opts, false);
+      return vary.alpha[i] === 1 ? c : [c[0], c[1], c[2], c[3] * vary.alpha[i]];
+    };
 
     if (style?.stamp) {
-      buildStamps(s, mat, opts, u, quad, (a) => { arc = a; });
+      buildStamps(s, mat, opts, u, quad, (a) => { arc = a; }, vary, arcs);
       continue;
     }
 
@@ -152,10 +260,10 @@ export function buildStrokeGeometry(
     // dots at every point: caps + round joins in LINE mode, the whole stroke in DOTS/SQUARES
     for (let i = 0; i < n; i++) {
       const p = s.points[i];
-      const c = pointColor(mat, p.vertexColor, p.strength, opts, false);
+      const c = colorAt(p, i);
       if (c[3] <= 0.003) continue;
       arc = arcs[i];
-      quad(p.co, [0, 0, 0], radiusOf(p), c, dotKind, s.hardness, u);
+      quad(p.co, [0, 0, 0], radiusOf(p, i), c, dotKind, s.hardness, u);
     }
     if (mat.lineMode !== 'LINE') continue;
 
@@ -163,10 +271,11 @@ export function buildStrokeGeometry(
     for (let i = 0; i < segCount; i++) {
       const A = s.points[i], B = s.points[(i + 1) % n];
       const d: Vec3 = [B.co[0] - A.co[0], B.co[1] - A.co[1], B.co[2] - A.co[2]];
-      const cA = pointColor(mat, A.vertexColor, A.strength, opts, false);
-      const cB = pointColor(mat, B.vertexColor, B.strength, opts, false);
+      const iB = (i + 1) % n;
+      const cA = colorAt(A, i);
+      const cB = colorAt(B, iB);
       if (cA[3] <= 0.003 && cB[3] <= 0.003) continue;
-      const rA = radiusOf(A), rB = radiusOf(B);
+      const rA = radiusOf(A, i), rB = radiusOf(B, iB);
       // arc differs across the quad: the A edge and the B edge sit at
       // different points along the stroke, which is what lets a texture
       // travel down the ribbon instead of repeating per segment
@@ -216,6 +325,8 @@ function buildStamps(
   quad: (p: Vec3, d: Vec3, r: number, c: Vec4, k: number, h: number,
     u?: number, rot?: number, aspect?: number, grain?: number, grainScale?: number, seed?: number) => void,
   setArc: (a: number) => void,
+  vary: { radius: number[]; alpha: number[] },
+  arcs: number[],
 ): void {
   const style = s.style;
   const pts = s.points;
@@ -225,9 +336,11 @@ function buildStamps(
     co: Vec3, tangent: Vec3, pressure: number, strength: number, vcol: Vec4, idx: number, arc = 0,
   ) => {
     const c = pointColor(mat, vcol, strength, opts, false);
+    const fade = varyAt(arc, vary.alpha, arcs);
+    if (fade < 1) c[3] *= fade;
     if (c[3] <= 0.003) return;
     setArc(arc);
-    const width = Math.max(1e-4, s.lineWidth * pressure);
+    const width = Math.max(1e-4, s.lineWidth * pressure * varyAt(arc, vary.radius, arcs));
     const r = width * 0.5;
     const jr = (rnd() - 0.5) * style.jitter * Math.PI;
     // positional jitter perpendicular-ish to the path, in world units (SCENE)
@@ -250,8 +363,7 @@ function buildStamps(
     return;
   }
 
-  // SCENE units: arc-length walk
-  const arcs = arcLengths(s);
+  // SCENE units: arc-length walk (arcs comes from the caller now)
   const step = Math.max(1e-4, style.spacing * s.lineWidth);
   let carried = 0;
   let stampIdx = 0;

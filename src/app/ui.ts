@@ -1,6 +1,6 @@
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
-import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade } from '../core/types';
+import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
 import type { MaterialBlend, TGMaterial, TextureSlotName, Vec3 } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
@@ -2090,6 +2090,21 @@ export class UI {
       fieldRow('Simplify', numField('', b.simplify, (v) => { b.simplify = Math.max(0, v); }, 0.001, { def: 0.002 })),
       checkbox('Stabilize', b.stabilize, (v) => { b.stabilize = v; this.refresh(); }),
       ...(b.stabilize ? [fieldRow('Radius', slider('', b.stabilizeRadius, 5, 120, 1, (v) => { b.stabilizeRadius = v; }, { def: 30 }))] : []),
+      el('div', { class: 'menu-header', text: 'Variation along the stroke' }),
+      panelHint('What makes a mark read as drawn rather than extruded. The signal picks WHAT varies; the amounts pick how much. Negative amounts grow with the signal instead of shrinking (ink pooling in a corner).'),
+      selectField('Signal', st.varyMode ?? 'NONE', [
+        ['NONE', 'None'], ['RANDOM', 'Random'], ['CURVATURE', 'Curvature'],
+        ['DENSITY', 'Draw speed'], ['ARC', 'Along stroke'],
+      ] as [VaryMode, string][], (v) => { st.varyMode = v; this.refresh(); }),
+      ...((st.varyMode ?? 'NONE') === 'NONE' ? [] : [
+        slider('Width', st.varyRadius ?? 0, -1, 1, 0.01, (v) => { st.varyRadius = v; }, { def: 0 }),
+        slider('Opacity', st.varyStrength ?? 0, -1, 1, 0.01, (v) => { st.varyStrength = v; }, { def: 0 }),
+        ...((st.varyMode === 'RANDOM')
+          ? [slider('Scale', st.varyScale ?? 4, 1, 40, 0.5, (v) => { st.varyScale = v; }, { def: 4 })]
+          : []),
+      ]),
+      slider('Taper in', st.taperIn ?? 0, 0, 0.5, 0.01, (v) => { st.taperIn = v; }, { def: 0 }),
+      slider('Taper out', st.taperOut ?? 0, 0, 0.5, 0.01, (v) => { st.taperOut = v; }, { def: 0 }),
       el('div', { class: 'menu-header', text: 'Texture-paint tip' }),
       (() => {
         const tip = imageById(ctx.scene, b.tipImageId);
