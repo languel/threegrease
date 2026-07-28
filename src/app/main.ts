@@ -3070,6 +3070,7 @@ class App implements AppHandle {
         background: ctx.settings.background,
         playing: this.player.playing || this.presentation, // also hides onion in presentation
         selectMode: ctx.settings.selectMode,
+        castShadows: ctx.settings.gpCastShadows,
         });
       } catch (err) {
         console.error('GP rebuild failed:', err);

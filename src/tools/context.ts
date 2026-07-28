@@ -120,6 +120,10 @@ export interface Settings {
    *  strokes/splats/etc. actually land on right now (the active sticky
    *  standing plane while mid-stroke, else the plain Plane setting's
    *  resolution) — see App.updatePlaneHelper. */
+  /** GP strokes/fills occlude light from shadow-casting lamps. Only has an
+   *  effect when some light actually casts (off by default), so leaving this
+   *  on costs nothing until you ask for shadows. */
+  gpCastShadows: boolean;
   showPlaneHelper: boolean;
   /** debug aid: a yellow line dropping straight from the CURRENT
    *  placement point (wherever a stroke point would actually land if
@@ -157,7 +161,7 @@ export function snapIncrement(s: Settings): number {
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
-  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'showPlaneHelper', 'showDepthHelper', 'background', 'snap',
+  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'background', 'snap',
   'uiAccent', 'uiHighlight', 'gridColor',
 ] as const;
 
@@ -254,6 +258,7 @@ export function defaultSettings(): Settings {
     gridColor: null,
     upAxis: 'Z',
     showAxes: false,
+    gpCastShadows: true,
     showPlaneHelper: false,
     showDepthHelper: false,
     snap: { enabled: false, mode: 'INCREMENT', strokeScope: 'ANY' },

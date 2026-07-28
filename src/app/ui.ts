@@ -1418,6 +1418,10 @@ export class UI {
       }))] : []),
       el('div', { class: 'menu-header', text: 'Background' }),
       fieldRow('Color', colorField('', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); })),
+      el('div', { class: 'menu-header', text: 'Shading' }),
+      checkbox('Strokes cast shadows', s.gpCastShadows, (v) => {
+        s.gpCastShadows = v; save(); this.app.ctx.requestRender();
+      }, 'GP strokes and fills occlude light — only visible once a light has Cast shadows on'),
       el('div', { class: 'menu-header', text: 'Helpers' }),
       checkbox('Plane helper', s.showPlaneHelper, (v) => { s.showPlaneHelper = v; save(); },
         'wireframe square showing the plane strokes/splats/etc. are actually landing on right now'),

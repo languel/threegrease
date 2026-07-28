@@ -2334,3 +2334,33 @@ geometry was perfect, nothing drew. Scalars are now PACKED —
 at the crossing, because that's genuine geometric self-overlap rather than a
 topology artefact. Fixing it needs per-stroke render-to-texture with max
 blending, which is a bigger change.
+
+## GP strokes cast shadows
+
+A stroke's WIDTH only exists in the vertex shader — the geometry is the
+bare centreline, expanded in screen space at draw time. three.js's stock
+depth material would therefore rasterise a zero-width line and the stroke
+would cast nothing at all. Strokes get a `customDepthMaterial` built from
+the SAME vertex shader (`makeStrokeDepthMaterial`), so the caster is the
+same ribbon the camera sees.
+
+The shading maths is factored into a `strokeShade()` GLSL function shared
+by the colour and depth passes. That is deliberate: if the depth pass
+computed alpha differently, a textured brush would cast a solid shadow
+instead of its broken tooth. The depth pass discards below
+`uAlphaTest` (0.35) so a faint stroke doesn't throw a full-strength shadow.
+
+three.js swaps in the light's camera for projectionMatrix/modelViewMatrix
+during the shadow pass, so the expansion lands in the light's projection
+for free. SCENE-unit strokes (world-space width) are exact. VIEW-unit
+strokes are sized in screen pixels, which has no world meaning from a
+light's point of view — those are approximated against the shadow map's
+resolution, which reads correctly at typical framings but is not
+physically right. Draw in SCENE units when shadows matter.
+
+Fills need no custom caster: they are ordinary triangles.
+
+Gated on `settings.gpCastShadows` (default on, persisted, Scene panel).
+Leaving it on is free until some light actually has Cast shadows enabled,
+which is off by default. Toggling forces a GP rebuild, because the caster
+material is attached at mesh-construction time.

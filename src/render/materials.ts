@@ -159,7 +159,10 @@ float vnoise(vec2 p) {
     mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
-void main() {
+// Shape + colour of a stroke fragment. Factored out because the SHADOW pass
+// has to reach exactly the same alpha: if the depth pass disagreed, a
+// textured brush would cast a solid shadow instead of its broken tooth.
+void strokeShade(out vec3 outRgb, out float outAlpha) {
   float alpha = vColor.a;
   float soft = max(1.0 - vHardness, 0.001);
   if (vKind < 0.5) {
@@ -208,6 +211,13 @@ void main() {
     alpha *= tex.a;  // the texture's alpha always carves the stroke — that
                      // is what gives a dry pencil its broken tooth
   }
+  outRgb = rgb;
+  outAlpha = alpha;
+}
+
+void main() {
+  vec3 rgb; float alpha;
+  strokeShade(rgb, alpha);
   if (alpha <= 0.003) discard;
   gl_FragColor = vec4(rgb, alpha);
 }
@@ -277,6 +287,57 @@ void main() {
 function bindAtlas(mat: THREE.ShaderMaterial): void {
   mat.uniforms.uAtlas.value = gpAtlas.texture;
   mat.uniforms.uHasAtlas.value = gpAtlas.texture ? 1 : 0;
+}
+
+/**
+ * Shadow-caster shaders for strokes.
+ *
+ * A stroke's WIDTH only exists in the vertex shader — the geometry is the
+ * bare centreline, expanded in screen space at draw time. So three.js's
+ * stock depth material would rasterise a zero-width line and the stroke
+ * would cast no shadow at all. The depth pass therefore has to run the
+ * identical expansion, which it gets by reusing strokeVert verbatim plus
+ * the one varying the depth packing needs.
+ *
+ * three.js swaps in the light's camera for projectionMatrix/modelViewMatrix
+ * during the shadow pass, so the expansion lands in the light's projection
+ * automatically. SCENE-unit strokes (world-space width) are exact; VIEW-unit
+ * strokes are in "screen pixels", which has no world meaning from a light's
+ * point of view — those are approximated against the shadow map's own
+ * resolution, which reads correctly at typical framings.
+ */
+const strokeDepthVert = strokeVert
+  .replace('varying float vArc;', 'varying float vArc;\nvarying vec2 vHighPrecisionZW;')
+  .replace(/\}\s*$/, '  vHighPrecisionZW = gl_Position.zw;\n}\n');
+
+// same varyings + strokeShade() as the colour pass; only the output differs
+const strokeDepthFrag = strokeFrag
+  .replace('varying float vArc;', 'varying float vArc;\nvarying vec2 vHighPrecisionZW;\nuniform float uAlphaTest;')
+  .replace(/void main\(\) \{[\s\S]*$/, `#include <packing>
+void main() {
+  vec3 rgb; float alpha;
+  strokeShade(rgb, alpha);
+  // a stroke only occludes where it is actually opaque enough to read as
+  // ink; below the threshold it lets light through rather than casting a
+  // full-strength shadow it never earned
+  if (alpha < uAlphaTest) discard;
+  float fragCoordZ = 0.5 * vHighPrecisionZW[0] / vHighPrecisionZW[1] + 0.5;
+  gl_FragColor = packDepthToRGBA(fragCoordZ);
+}
+`);
+
+/** Depth material matching a stroke material, for `mesh.customDepthMaterial`. */
+export function makeStrokeDepthMaterial(resolution: THREE.Vector2): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    vertexShader: strokeDepthVert,
+    fragmentShader: strokeDepthFrag,
+    uniforms: {
+      uResolution: { value: resolution },
+      uAtlas: { value: null }, uHasAtlas: { value: 0 },
+      uAlphaTest: { value: 0.35 },
+    },
+    side: THREE.DoubleSide,
+  });
 }
 
 export function applyBlendMode(mat: THREE.Material, mode: BlendMode): void {

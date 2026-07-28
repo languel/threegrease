@@ -4,7 +4,7 @@ import { frameAt, keyframeIndexAt } from '../core/gpdata';
 import { evaluateModifiers, remapTime } from '../modifiers/index';
 import { buildFillGeometry, buildStrokeGeometry, type BuildOptions } from './geometry';
 import { gpAtlas } from './atlas';
-import { makeFillMaterial, makeStrokeMaterial } from './materials';
+import { makeFillMaterial, makeStrokeDepthMaterial, makeStrokeMaterial } from './materials';
 
 export type EditorMode = 'OBJECT' | 'DRAW' | 'EDIT' | 'SCULPT' | 'VERTEX' | 'WEIGHT';
 
@@ -13,6 +13,9 @@ export interface RenderState {
   background: Vec3;
   playing: boolean;
   selectMode: 'POINT' | 'STROKE';
+  /** Let GP strokes and fills occlude light. Off costs nothing; on adds a
+   *  shadow-map pass over the GP geometry per shadow-casting light. */
+  castShadows: boolean;
 }
 
 interface LayerCacheEntry {
@@ -49,7 +52,15 @@ export class GPSceneRenderer {
     entry.group.clear();
   }
 
+  /** mirrors RenderState.castShadows; a change forces a full rebuild
+   *  because the caster material is attached at mesh-construction time */
+  private castShadows = false;
+
   update(scene: GPScene, state: RenderState): void {
+    if (state.castShadows !== this.castShadows) {
+      this.castShadows = state.castShadows;
+      this.markDirty();
+    }
     // Brush textures live in one shared atlas. Packing is async (images
     // decode), so a repack marks everything dirty and we rebuild then —
     // materials read the atlas at construction, and geometry bakes each
@@ -181,6 +192,9 @@ export class GPSceneRenderer {
     if (fillGeom) {
       const mat = makeFillMaterial(layer.blendMode);
       const mesh = new THREE.Mesh(fillGeom, mat);
+      // fills are plain triangles — the stock depth material already
+      // rasterises them correctly, no custom caster needed
+      mesh.castShadow = this.castShadows;
       mesh.renderOrder = order;
       mesh.applyMatrix4(layerMatrix);
       mesh.frustumCulled = false;
@@ -191,6 +205,14 @@ export class GPSceneRenderer {
     if (strokeGeom) {
       const mat = makeStrokeMaterial(this.resolution, layer.blendMode);
       const mesh = new THREE.Mesh(strokeGeom, mat);
+      if (this.castShadows) {
+        // a stroke's width lives in the vertex shader, so it needs a depth
+        // material that runs the same expansion — see makeStrokeDepthMaterial
+        const depthMat = makeStrokeDepthMaterial(this.resolution);
+        mesh.customDepthMaterial = depthMat;
+        mesh.castShadow = true;
+        entry.disposables.push(depthMat);
+      }
       mesh.renderOrder = order + 1;
       mesh.applyMatrix4(layerMatrix);
       mesh.frustumCulled = false;
