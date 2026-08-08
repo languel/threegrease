@@ -333,6 +333,9 @@ class App implements AppHandle {
     this.scene3.add(this.canvasGroup);
     this.scene3.add(this.scoreGroup);
     this.splats.init(this.glRenderer);
+    // the splat engine is imported lazily (see splats/index.ts); it resolves
+    // between frames, so nothing else would mark the scene dirty afterwards
+    this.splats.onLoaded = () => this.ctx.requestRender();
     setSplatPickSource(this.splats);
     setTexPaintMeshManager(this.meshes);
     setTexPaintPolyManager(this.polys);
