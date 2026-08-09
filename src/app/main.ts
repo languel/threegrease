@@ -1586,12 +1586,17 @@ class App implements AppHandle {
       const minorGeo = new THREE.BufferGeometry();
       minorGeo.setAttribute('position', new THREE.Float32BufferAttribute(minorPos, 3));
       if (s.gridSubdivStyle === 'dashed') {
-        // dash pattern scales with the MAJOR step (the grid unit), not the
-        // subdivision spacing: dash = gap = step/16, so the period still
-        // tiles each major cell evenly and the dashes stay aligned with
-        // the grid at any subdivision count (finer default per user pref)
+        // Fixed period (step/16) tiled evenly ONLY at subdiv=2 by
+        // coincidence — at any other subdivision count, a minor cell
+        // (step/subdiv wide) doesn't hold a whole number of dash+gap
+        // periods, so the pattern falls out of phase cell to cell.
+        // Target: exactly 2*subdiv dash+gap periods per minor cell, i.e.
+        // per-cell period length = (step/subdiv) / (2*subdiv), and each
+        // dash/gap is half that: step / (4*subdiv^2). subdiv=2 -> step/16,
+        // matching the old constant exactly; subdiv=3 -> step/36, etc.
+        const period = step / (4 * subdiv * subdiv);
         const dashMat = new THREE.LineDashedMaterial({
-          color: sub, transparent: true, dashSize: step / 16, gapSize: step / 16,
+          color: sub, transparent: true, dashSize: period, gapSize: period,
         });
         const minorLines = new THREE.LineSegments(minorGeo, dashMat);
         minorLines.computeLineDistances(); // required per-object for dashing
