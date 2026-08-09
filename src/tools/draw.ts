@@ -66,6 +66,9 @@ export class DrawTool implements Tool {
     this.gaps = [];
     this.lastRaw = null;
     setStrokeExclusion(s.id);
+    // let the renderer freeze this layer's already-committed strokes for the
+    // duration of the gesture — only this stroke changes from here
+    ctx.gp.setActiveStroke(target.layer.id, s.id);
     this.stabPos = new THREE.Vector2(e.x, e.y);
     this.startScreen = null;
     const c = objectToScreen(ctx, [ctx.scene.cursor[0], ctx.scene.cursor[1], ctx.scene.cursor[2]]);
@@ -96,11 +99,19 @@ export class DrawTool implements Tool {
     }
     this.stroke = null;
     setStrokeExclusion(null);
+    // onUp mutates the finished stroke (smooth/simplify), so the frozen
+    // prefix has to go before the rebuild that follows
+    ctx.gp.clearActiveStroke();
     ctx.requestRender();
     ctx.refreshUI();
   }
 
-  onCancel(ctx: AppCtx): void { this.smoothing = false; this.stroke = null; setStrokeExclusion(null); }
+  onCancel(ctx: AppCtx): void {
+    this.smoothing = false;
+    this.stroke = null;
+    setStrokeExclusion(null);
+    ctx.gp.clearActiveStroke();
+  }
 
   drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
     if (this.smoothing) drawBrushCircle(hud, ctx.settings.sculpt.radius, [0.55, 0.85, 1]);

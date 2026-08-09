@@ -37,9 +37,41 @@ export class GPSceneRenderer {
   readonly objectGroups: THREE.Group[] = [];
   private layerCache = new Map<number, LayerCacheEntry>();
 
+  /**
+   * The stroke currently being drawn, if any (set by DrawTool).
+   *
+   * This is what makes incremental rebuilds SAFE rather than a guess.
+   * While a stroke is in progress the draw tool only ever appends points to
+   * that one stroke — every earlier stroke in the layer is provably
+   * unchanged — so their geometry can be built once and reused for the rest
+   * of the gesture instead of rebuilt on every pointermove. Without that
+   * invariant we'd need a per-stroke revision counter to know what changed;
+   * with it, "everything before the active stroke is frozen" is guaranteed
+   * by the only code path that can be running.
+   */
+  private activeStroke: { layerId: number; strokeId: number } | null = null;
+  /** Committed-prefix geometry, reused across a gesture. Keyed by layer. */
+  private headCache = new Map<number, { strokeId: number; count: number; geom: THREE.BufferGeometry }>();
+
+  setActiveStroke(layerId: number, strokeId: number): void {
+    this.activeStroke = { layerId, strokeId };
+  }
+
+  /** End of gesture: drop the frozen prefix so the next build is normal. */
+  clearActiveStroke(): void {
+    this.activeStroke = null;
+    for (const c of this.headCache.values()) c.geom.dispose();
+    this.headCache.clear();
+  }
+
   markDirty(layerId?: number): void {
-    if (layerId === undefined) this.dirtyAll = true;
-    else this.dirtyLayers.add(layerId);
+    if (layerId === undefined) {
+      this.dirtyAll = true;
+      // a global invalidation can change anything, including the strokes
+      // the frozen prefix assumed were stable
+      for (const c of this.headCache.values()) c.geom.dispose();
+      this.headCache.clear();
+    } else this.dirtyLayers.add(layerId);
   }
 
   get needsRebuild(): boolean { return this.dirtyAll || this.dirtyLayers.size > 0; }
@@ -201,6 +233,55 @@ export class GPSceneRenderer {
       entry.disposables.push(fillGeom, mat);
       meshes.push(mesh);
     }
+    // ---- incremental path -------------------------------------------
+    // While a stroke is being drawn, split the layer into a frozen prefix
+    // (every committed stroke — rebuilt once for the whole gesture) and the
+    // live stroke (rebuilt per frame, one stroke's worth of work). Costs one
+    // extra draw call and saves rebuilding the entire layer per pointermove.
+    //
+    // Gated on there being NO modifiers: a modifier stack can rewrite the
+    // whole list from the whole list (Array duplicates, Build reveals by
+    // total length, Time remaps), so the prefix is only independent of the
+    // live stroke when nothing is transforming them together.
+    const live = this.activeStroke;
+    const canSplit = !!live && live.layerId === layer.id
+      && ob.modifiers.length === 0 && strokes.length > 1
+      && strokes[strokes.length - 1].id === live.strokeId;
+
+    if (canSplit) {
+      const head = strokes.slice(0, -1);
+      const tail = strokes.slice(-1);
+      const cached = this.headCache.get(layer.id);
+      let headGeom = cached && cached.strokeId === live!.strokeId && cached.count === head.length
+        ? cached.geom : null;
+      if (!headGeom) {
+        cached?.geom.dispose();
+        headGeom = buildStrokeGeometry(head, ob.materials, opts) ?? undefined as unknown as THREE.BufferGeometry;
+        if (headGeom) this.headCache.set(layer.id, { strokeId: live!.strokeId, count: head.length, geom: headGeom });
+        else this.headCache.delete(layer.id);
+      }
+      // the cache outlives this entry's disposables — it is freed by
+      // clearActiveStroke()/markDirty(), NOT with the layer group
+      for (const g of [headGeom, buildStrokeGeometry(tail, ob.materials, opts)]) {
+        if (!g) continue;
+        const mat = makeStrokeMaterial(this.resolution, layer.blendMode);
+        const mesh = new THREE.Mesh(g, mat);
+        if (this.castShadows) {
+          const depthMat = makeStrokeDepthMaterial(this.resolution);
+          mesh.customDepthMaterial = depthMat;
+          mesh.castShadow = true;
+          entry.disposables.push(depthMat);
+        }
+        mesh.renderOrder = order + 1;
+        mesh.applyMatrix4(layerMatrix);
+        mesh.frustumCulled = false;
+        entry.disposables.push(mat);
+        if (g !== headGeom) entry.disposables.push(g); // tail is per-frame
+        meshes.push(mesh);
+      }
+      return meshes;
+    }
+
     const strokeGeom = buildStrokeGeometry(strokes, ob.materials, opts);
     if (strokeGeom) {
       const mat = makeStrokeMaterial(this.resolution, layer.blendMode);
