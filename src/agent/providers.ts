@@ -44,10 +44,13 @@ const PROVIDERS: Record<string, ProviderDef> = Object.freeze({
   },
   unsloth: {
     id: 'unsloth', label: 'Unsloth', protocol: 'openai', local: true,
-    defaultUrl: 'http://localhost:8001', credentialLabel: 'API key (optional)',
+    defaultUrl: 'http://localhost:8888', credentialLabel: 'Unsloth API key',
     instructions:
-      'Unsloth\'s OpenAI-compatible local server (usually llama-server on 8001). Enter the base URL without '
-      + '/v1. Accepts a placeholder key such as sk-no-key-required.',
+      '"unsloth studio" (unsloth.ai) is the fine-tuning GUI and speaks its own JWT-authenticated API — NOT '
+      + 'this. Load/serve a model from it, then Settings \u2192 API \u2192 Create to mint a key; that exposes an '
+      + 'OpenAI-compatible /v1/chat/completions via llama-server, which is what this connects to. The key is '
+      + 'REQUIRED (sk-unsloth-\u2026), unlike most local servers here. Studio\'s documented example launches on '
+      + '`-p 8888`, but it prints the actual endpoint on start \u2014 check that if this port is wrong.',
   },
   'openai-compatible': {
     id: 'openai-compatible', label: 'OpenAI-compatible (custom)', protocol: 'openai', local: true,

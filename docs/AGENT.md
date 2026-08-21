@@ -216,7 +216,7 @@ text-only model that calls it chokes on the result.
 | local | Ollama | ollama | `http://localhost:11434` | — |
 | local | LM Studio | openai | `http://localhost:1234` | — |
 | local | oMLX (Apple Silicon) | openai | `http://localhost:8000` | optional |
-| local | Unsloth | openai | `http://localhost:8001` | optional |
+| local | Unsloth | openai | `http://localhost:8888` | required (sk-unsloth-…) |
 | local | OpenAI-compatible (vLLM, llama.cpp, LiteLLM…) | openai | custom | optional |
 | hosted | Claude (Anthropic) | anthropic | `https://api.anthropic.com` | required |
 | hosted | OpenAI | openai | `https://api.openai.com` | required |
