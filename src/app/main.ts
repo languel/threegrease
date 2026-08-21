@@ -131,6 +131,7 @@ import type { CanvasPlane } from '../core/types';
 import type { AgentHost } from '../agent/types';
 import { setAgentCommandLister } from '../agent/tools';
 import { AgentRpc } from '../agent/rpc';
+import { AgentPanel } from '../agent/panel';
 
 const DEFAULT_TOOL: Record<EditorMode, string> = {
   OBJECT: 'object-select', DRAW: 'draw', EDIT: 'select',
@@ -192,6 +193,8 @@ class App implements AppHandle {
   private interpTool = new InterpolateTool();
   /** Out-of-process agent link (MCP/ACP relays). Idle until connected. */
   agentRpc!: AgentRpc;
+  /** In-app chat session — owns its transcript across UI refreshes. */
+  agent!: AgentPanel;
   private nav!: Navigation;
   private navDrag: { mode: 'orbit' | 'pan' | 'dolly'; x: number; y: number } | null = null;
   private canvasGroup = new THREE.Group();
@@ -424,6 +427,7 @@ class App implements AppHandle {
     // RPC link stays idle until the user points it at a relay (Agent panel).
     setAgentCommandLister(() => this.commands.all().map((c) => ({ id: c.id, title: c.title })));
     this.agentRpc = new AgentRpc(this.agentHost());
+    this.agent = new AgentPanel(this.agentHost(), this.agentRpc);
 
     // event IO (P2): MIDI is async and optional; WS connects if configured
     midi.init().then((ok) => {

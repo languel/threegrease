@@ -72,6 +72,21 @@ const TAG_INSTRUCTIONS = [
   'One block per call. Emit nothing else in that block. After the results come back, continue.',
 ].join('\n');
 
+/** The {mediaType, base64} envelope view.screenshot returns, if that's what
+ *  this is. */
+function asImage(result: unknown): { mediaType: string; base64: string } | null {
+  if (!result || typeof result !== 'object') return null;
+  const r = result as Record<string, unknown>;
+  return typeof r.base64 === 'string' && typeof r.mediaType === 'string'
+    ? { mediaType: r.mediaType, base64: r.base64 } : null;
+}
+
+/** Keep a megabyte of base64 out of the UI transcript too. */
+function summarize(result: unknown): unknown {
+  const img = asImage(result);
+  return img ? `<${img.mediaType}, ${Math.round(img.base64.length / 1024)}KB>` : result;
+}
+
 export class AgentSession {
   messages: ChatMessage[] = [];
   running = false;
@@ -100,7 +115,10 @@ export class AgentSession {
     this.abort = new AbortController();
     const { signal } = this.abort;
 
-    const tools: ToolDef[] = toolCatalog(true);
+    // Only offer the screenshot tool when the user has said this model can
+    // see. A text-only local model will otherwise call it, and the image that
+    // comes back is at best wasted context and at worst a template error.
+    const tools: ToolDef[] = toolCatalog(this.settings.sendScreenshot);
     const content: ContentPart[] = [{ kind: 'text', text: userText }];
     if (this.settings.sendScreenshot) {
       try {
@@ -145,7 +163,30 @@ export class AgentSession {
         for (const call of calls) {
           emit({ kind: 'tool-call', call });
           const res = runTool(this.host, call.name, call.args);
-          emit({ kind: 'tool-result', call, ok: res.ok, result: res.ok ? res.result : res.error });
+          emit({ kind: 'tool-result', call, ok: res.ok, result: res.ok ? summarize(res.result) : res.error });
+
+          // An image result must NOT be stringified into the tool message.
+          // Doing so pushes ~500KB of base64 into the transcript as text: it
+          // is useless to the model, it dominates the context window, and it
+          // broke Ollama's chat template outright. Acknowledge it as text and
+          // deliver the pixels as a real image part, which is the only shape
+          // every provider accepts (tool messages are text-only on OpenAI and
+          // Gemini, so the image cannot ride inside the result).
+          const image = asImage(res.result);
+          if (res.ok && image) {
+            this.messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: 'Screenshot captured; the image follows in the next message.',
+            });
+            this.messages.push({
+              role: 'user',
+              content: [
+                { kind: 'text', text: `Result of ${call.name}:` },
+                { kind: 'image', mediaType: image.mediaType, base64: image.base64 },
+              ],
+            });
+            continue;
+          }
           this.messages.push({
             role: 'tool',
             toolCallId: call.id,

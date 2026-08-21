@@ -5,6 +5,7 @@ import type { MaterialBlend, TGMaterial, TextureSlotName, Vec3 } from '../core/t
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
+import { PROVIDER_LIST, getProvider } from '../agent/providers';
 import type { BakeSource } from '../render/bake';
 import { hasUV } from '../core/uvunwrap';
 import { createImage, createMaterialDB, ensureMaterial, imageById, materialById } from '../core/gpdata';
@@ -118,6 +119,8 @@ export interface AppHandle {
   run(action: string): void;
   setLastPicked(ref: import('../tools/objects').ObjRef): void;
   getLastPicked(): import('../tools/objects').ObjRef | null;
+  /** Agent chat + tool session (owns its own transcript across refreshes). */
+  agent: import('../agent/panel').AgentPanel;
   /** World-space bounding-box size (Blender's "Dimensions") for the
    *  N-panel's Extents row. Null if the object has no root yet. */
   objectExtents(ref: import('../tools/objects').ObjRef): [number, number, number] | null;
@@ -1368,6 +1371,10 @@ export class UI {
       {
         id: 'solvers', icon: 'variable', title: 'Solvers — splats · string art · wire art',
         build: () => [this.splatsPanel(), this.solverPanel()],
+      },
+      {
+        id: 'agent', icon: 'sparkles', title: 'Agent — chat, tools, MCP/ACP link',
+        build: () => [this.agentPanel(), this.agentLinkPanel()],
       },
     ];
 
@@ -3996,6 +4003,131 @@ export class UI {
       el('div', { class: 'menu-header', text: 'Rigs (object ← address)' }),
       el('div', { class: 'row' }, 'Address prefix', prefixInput),
       ...(rigRows.length ? rigRows : [el('div', { class: 'row', text: 'none yet' })]),
+    );
+  }
+
+  // ------------------------------------------------------------- agent
+
+  /** Chat with a model that can drive the scene through the tool registry. */
+  private agentPanel(): HTMLElement {
+    const agent = this.app.agent;
+    const st = agent.state;
+    const p = getProvider(st.settings.provider);
+    // Re-render through UI.refresh so the transcript survives (the panel owns
+    // its own state; this container is rebuilt like every other panel).
+    agent.setRerender(() => { if (this.propsTab === 'agent') this.refresh(); });
+
+    const transcript = el('div', { class: 'agent-log' });
+    for (const e of st.transcript) {
+      const row = el('div', { class: `agent-msg agent-${e.role}${e.ok === false ? ' agent-failed' : ''}` });
+      if (e.role === 'tool') {
+        row.append(el('span', { class: 'agent-tool-mark', text: e.ok === false ? '✕' : e.ok ? '✓' : '·' }),
+          el('span', { text: ` ${e.text}` }));
+      } else {
+        row.append(el('span', { text: e.text }));
+      }
+      transcript.append(row);
+    }
+    if (!st.transcript.length) {
+      transcript.append(el('div', { class: 'agent-empty', text: 'Ask the model to draw, inspect, or rearrange the scene. It calls the same tools MCP exposes.' }));
+    }
+    // keep the newest turn in view across refreshes
+    requestAnimationFrame(() => { transcript.scrollTop = transcript.scrollHeight; });
+
+    const input = el('textarea', {
+      class: 'agent-input', rows: '3',
+      placeholder: st.busy ? 'Working…' : 'Draw a spiral staircase…',
+    }) as HTMLTextAreaElement;
+    input.value = st.draft;
+    input.disabled = st.busy;
+    input.oninput = () => agent.setDraft(input.value);
+    input.onkeydown = (e) => {
+      e.stopPropagation();  // the app owns nearly every bare key
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void agent.send(input.value); }
+    };
+
+    const providerOpts = PROVIDER_LIST.map((d) =>
+      [d.id, `${d.local ? '● ' : ''}${d.label}`] as [string, string]);
+
+    return panel('Agent',
+      panelHint('Local providers need no key. Keys entered here are stored in this browser only — treat this as a development convenience, not a secret store.'),
+      selectField('Provider', st.settings.provider, providerOpts, (v) => agent.update({ provider: v })),
+      fieldRow('Base URL', (() => {
+        const i = el('input', { type: 'text', class: 'grow', value: st.settings.urls[p.id] ?? p.defaultUrl }) as HTMLInputElement;
+        i.onchange = () => agent.setUrl(i.value);
+        i.onkeydown = (e) => e.stopPropagation();
+        return i;
+      })()),
+      ...(p.credentialLabel ? [fieldRow(p.credentialLabel, (() => {
+        const i = el('input', { type: 'password', class: 'grow', value: st.settings.keys[p.id] ?? '' }) as HTMLInputElement;
+        i.onchange = () => agent.setKey(i.value);
+        i.onkeydown = (e) => e.stopPropagation();
+        return i;
+      })())] : []),
+      fieldRow('Model', el('div', { class: 'field-group' },
+        (() => {
+          if (st.models.length) {
+            return selectField('', st.settings.model || st.models[0],
+              st.models.map((m: string) => [m, m] as [string, string]), (v) => agent.update({ model: v }));
+          }
+          const i = el('input', { type: 'text', class: 'grow', value: st.settings.model, placeholder: p.defaultModel ?? 'model id' }) as HTMLInputElement;
+          i.onchange = () => agent.update({ model: i.value });
+          i.onkeydown = (e) => e.stopPropagation();
+          return i;
+        })(),
+        btn(icon('rotate'), () => { void agent.refreshModels(); }, { cls: 'icon-btn', title: 'Fetch model list from the provider' }),
+      )),
+      ...(st.modelError ? [el('div', { class: 'row agent-error', text: st.modelError })] : []),
+      el('div', { class: 'menu-header', text: p.label }),
+      el('div', { class: 'row agent-note', text: p.instructions }),
+
+      el('div', { class: 'menu-header', text: 'Conversation' }),
+      transcript,
+      fieldRow('', input, { full: true }),
+      fieldRow('', el('div', { class: 'row' },
+        btn(st.busy ? 'Stop' : 'Send', () => {
+          if (st.busy) agent.cancel();
+          else void agent.send(input.value);
+        }, { cls: st.busy ? '' : 'primary', title: st.busy ? 'Cancel the running turn' : 'Send (Cmd/Ctrl+Enter)' }),
+        btn('Clear', () => agent.clear(), { title: 'Clear the transcript and the model\'s memory of it' }),
+        btn(icon('duplicate'), () => { void navigator.clipboard?.writeText(agent.asText()); },
+          { cls: 'icon-btn', title: 'Copy transcript' }),
+      ), { full: true }),
+
+      el('div', { class: 'menu-header', text: 'Behaviour' }),
+      slider('Temperature', st.settings.temperature, 0, 2, 0.05, (v) => agent.update({ temperature: v }), { def: 0.7 }),
+      numField('Max steps', st.settings.maxSteps, (v) => agent.update({ maxSteps: Math.max(1, Math.round(v)) }), 1,
+        { def: 12, title: 'How many tool rounds one turn may take before stopping' }),
+      numField('Max tokens', st.settings.maxTokens, (v) => agent.update({ maxTokens: Math.max(256, Math.round(v)) }), 256, { def: 4096 }),
+      checkbox('Send viewport screenshot', st.settings.sendScreenshot,
+        (v) => agent.update({ sendScreenshot: v }),
+        'Attach a render of the viewport to each message. Vision-capable models only.'),
+    );
+  }
+
+  /** Out-of-process agents (Claude Code, Zed) reach the same tools via relay. */
+  private agentLinkPanel(): HTMLElement {
+    const agent = this.app.agent;
+    const rpc = agent.rpc;
+    const status = rpc.status;
+    const url = rpc.url || 'ws://localhost:8787';
+    const input = el('input', { type: 'text', class: 'grow', value: url }) as HTMLInputElement;
+    input.onkeydown = (e) => e.stopPropagation();
+    return panel('Agent link (MCP / ACP)',
+      panelHint('Lets Claude Code or Zed drive this scene. Start the relay with: node agent/relay.js'),
+      fieldRow('Status', el('span', {
+        class: `agent-status agent-status-${status}`,
+        text: status === 'open' ? 'connected' : status === 'connecting' ? 'connecting…' : 'off',
+      })),
+      fieldRow('Relay', input),
+      fieldRow('', el('div', { class: 'row' },
+        btn(status === 'off' ? 'Connect' : 'Disconnect', () => {
+          if (status === 'off') rpc.connect(input.value.trim());
+          else rpc.disconnect();
+          this.refresh();
+        }, { cls: status === 'off' ? 'primary' : '' }),
+      ), { full: true }),
+      el('div', { class: 'row agent-note', text: 'Then register the bridge: claude mcp add threegrease -- node ' + 'agent/mcp-server.js' }),
     );
   }
 
