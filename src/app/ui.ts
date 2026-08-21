@@ -805,6 +805,11 @@ export class UI {
     menu('Help', [
       { label: 'Command palette…', action: 'palette' },
       { label: 'Keyboard shortcuts…', action: 'settings' },
+      { sep: true },
+      { header: 'Agent' },
+      { label: 'Using the agent…', do: () => this.openAgentHelp() },
+      { label: 'Open Agent panel', do: () => this.openTab('agent') },
+      { sep: true },
       { label: 'About (GitHub)', do: () => window.open('https://github.com/languel/threegrease', '_blank') },
     ]);
   }
@@ -2958,6 +2963,106 @@ export class UI {
   // ------------------------------------------------------------ settings
 
   settingsOpen = false;
+
+  // -------------------------------------------------------- agent help
+
+  private agentHelpOpen = false;
+
+  /**
+   * Compact "how do I use this" for the agent interface, reachable from
+   * Help. Deliberately not a copy of docs/AGENT.md — this covers the three
+   * things someone needs in the moment (get a model talking, connect an
+   * external editor, know what to ask for) and links out for the rest.
+   */
+  openAgentHelp(): void {
+    if (this.agentHelpOpen) return;
+    this.agentHelpOpen = true;
+
+    const overlay = el('div', { id: 'settings-overlay' });
+    const close = () => {
+      this.agentHelpOpen = false;
+      overlay.remove();
+      window.removeEventListener('keydown', escClose, true);
+    };
+    const escClose = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    };
+    window.addEventListener('keydown', escClose, true);
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+    /** A shell/JSON snippet with a copy button — these are the fiddly bits
+     *  people get wrong, so make them one click rather than a transcription. */
+    const snippet = (text: string) => el('div', { class: 'help-snip' },
+      el('code', { text }),
+      btn(icon('duplicate'), () => { void navigator.clipboard?.writeText(text); },
+        { cls: 'icon-btn', title: 'Copy' }),
+    );
+    /** A prompt example that can be dropped straight into the panel. */
+    const example = (text: string) => {
+      const row = el('div', { class: 'help-example' },
+        el('span', { text }),
+        btn('Try', () => {
+          close();
+          this.openTab('agent');
+          this.app.agent.setDraft(text);
+          this.refresh();
+        }, { title: 'Put this in the Agent composer' }),
+      );
+      return row;
+    };
+    const para = (text: string) => el('p', { class: 'help-p', text });
+
+    const dialog = el('div', { id: 'settings-dialog' },
+      el('div', { class: 'row spread' },
+        el('h2', { text: 'Using the agent' }),
+        btn(icon('xMark'), close, { cls: 'icon-btn' }),
+      ),
+
+      el('div', { class: 'panel' },
+        el('h3', { text: '1 · Chat inside threegrease' }),
+        el('div', { class: 'body help-body' },
+          para('Start a local model server, then open the Agent tab in the sidebar, pick a provider (local ones need no key) and hit the refresh icon by Model to list what is installed.'),
+          snippet('ollama serve'),
+          para('Pick a tool-capable model — small ones ignore the tool API. Known-good: llama3.1+, qwen2.5-coder, qwen3, mistral-nemo.'),
+          btn('Open the Agent panel', () => { close(); this.openTab('agent'); }, { cls: 'primary' }),
+        )),
+
+      el('div', { class: 'panel' },
+        el('h3', { text: '2 · Or drive it from Claude Code / Zed' }),
+        el('div', { class: 'body help-body' },
+          para('External agents reach the same tools through a small relay. Start it once:'),
+          snippet('cd agent && npm install && node relay.js'),
+          para('Then connect this tab: Agent tab → Agent link → Connect. Register the bridge with Claude Code:'),
+          snippet('claude mcp add threegrease -- node "$PWD/agent/mcp-server.js"'),
+          para('For Zed (ACP), point its agent server at:'),
+          snippet('node "$PWD/agent/acp-server.js"'),
+        )),
+
+      el('div', { class: 'panel' },
+        el('h3', { text: '3 · What to ask for' }),
+        el('div', { class: 'body help-body' },
+          para('Give it a goal, not coordinates — it computes the geometry. The world is Z-up, so the ground plane is XY and Z is height; say "standing up" or "flat on the ground" when it matters.'),
+          example('What is in the scene right now?'),
+          example('Draw a five-pointed star centred at the origin, lying flat on the ground, about 2 units across. One closed stroke.'),
+          example('Draw a spiral staircase: 24 steps rising 3 units over two full turns, each step a short horizontal stroke.'),
+          example('Draw three vertical strokes standing up from the ground at x = -1, 0 and 1, each 2 units tall.'),
+          example('List the materials, then set material 1 to a red-to-yellow linear gradient.'),
+          example('Add a box at the origin and a sun light above it, then frame everything from the front.'),
+          para('Weaker prompts: "make it look nicer" (no target to hit) and freehand representational drawing — parametric and structural work is where models are actually good.'),
+        )),
+
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Good to know' }),
+        el('div', { class: 'body help-body' },
+          para('Undo works, but per tool call, not per prompt — a request that draws 24 strokes takes 24 undos to unwind. Save before a big ask.'),
+          para('Vision: turn on "Send viewport screenshot" to let the model see its own work. It is off by default because a text-only model that receives an image will fail.'),
+          para('API keys typed into the panel are kept in this browser only — a development convenience, not a secret store. Prefer local providers.'),
+          btn('Full documentation (docs/AGENT.md)', () => window.open('https://github.com/languel/threegrease/blob/agentic/docs/AGENT.md', '_blank')),
+        )),
+    );
+    overlay.append(dialog);
+    document.body.append(overlay);
+  }
 
   openSettings(): void {
     if (this.settingsOpen) return;

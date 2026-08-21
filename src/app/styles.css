@@ -485,3 +485,32 @@ button.props-tab.active { background: var(--panel); border-color: var(--border);
 .agent-status-connecting { color: var(--accent2); font-style: normal; }
 .agent-status-off { color: var(--dim); }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ---- agent help dialog ----
+   Prose-heavy, unlike every other panel: relax the two-column property grid
+   back to a plain stack so paragraphs and snippets run full width. */
+/* align-items:center is inherited from `.panel > .body` and centres every
+   child once this becomes a flex column — snippets and buttons must run
+   full width like the prose they sit between. */
+#settings-dialog .help-body {
+  display: flex; flex-direction: column; align-items: stretch; gap: 7px;
+}
+#settings-dialog .help-body > button { align-self: flex-start; }
+.help-p { color: var(--dim); font-size: 11px; line-height: 1.5; }
+.help-snip {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+  padding: 5px 6px;
+}
+.help-snip code {
+  flex: 1; min-width: 0; overflow-x: auto; white-space: pre;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
+  user-select: text; -webkit-user-select: text;   /* meant to be copied */
+}
+.help-example {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 11px; line-height: 1.4; color: var(--text);
+  padding: 4px 6px; border-radius: 4px; background: var(--panel);
+}
+.help-example button { flex-shrink: 0; }
+.help-example:hover { background: #33333a; }
