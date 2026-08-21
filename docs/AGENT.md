@@ -1,5 +1,7 @@
 # Agent interface
 
+*threegrease is branded **3𝜻** in the app UI; both names refer to the same project.*
+
 Drive a threegrease scene from a language model — either the built-in chat
 panel, or an external agent (Claude Code, Claude Desktop, Zed) over MCP/ACP.
 

@@ -654,7 +654,7 @@ export class UI {
     const { ctx } = this.app;
     const bar = $('menubar');
     bar.replaceChildren();
-    bar.append(el('span', { class: 'app-title', text: 'threegrease' }));
+    bar.append(el('span', { class: 'app-title', text: '3𝜻', title: 'threegrease' }));
 
     type Item = { label: string; action?: string; do?: () => void; check?: boolean }
       | { sep: true } | { header: string };

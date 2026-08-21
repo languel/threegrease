@@ -1,5 +1,7 @@
 # threegrease — Product Requirements
 
+*In-app branding: **3𝜻**.*
+
 *A platform for pedagogy and interactive art practice, built on an
 expressive 3D drawing core. Owner: languel. Drafted 2026-07-06.*
 

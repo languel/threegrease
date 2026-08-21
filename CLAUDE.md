@@ -1,5 +1,8 @@
 # threegrease — agent/contributor guide
 
+> Branded in the UI as **3𝜻**; threegrease stays the working project/repo
+> name until it's ready to formally rename.
+
 > **Start here, then read `docs/HANDOFF.md` (full technical handoff),
 > `docs/PRD.md` (product vision & requirements), and
 > `docs/IMPLEMENTATION_PLAN.md` (phased build plan with acceptance tests).

@@ -1,5 +1,8 @@
 # threegrease
 
+*Also carrying the mark **3𝜻** — the working project name is still threegrease
+while the app matures; 3𝜻 is the branding it's growing into.*
+
 A feature-complete implementation of **Blender Grease Pencil** in **three.js** —
 the foundation for an interactive action-painting lab.
 
