@@ -40,32 +40,78 @@ session detects that and falls back to a fenced-JSON tag protocol, but native
 tool calling is far more reliable. Known-good locally: `llama3.1+`,
 `qwen2.5-coder`, `qwen3`, `mistral-nemo`.
 
-## Quick start — Claude Code / Claude Desktop (MCP)
+## Quick start — external agents (MCP)
+
+Every client runs the **same bridge**; only the registration syntax differs.
+Start the relay once and connect the tab, then register with whichever client
+you use.
 
 ```bash
 cd agent && npm install
 node relay.js                    # leave running
 ```
 
-Enable the link in the app: **Agent tab → Agent link → Connect**
-(default `ws://localhost:8787`). Then register the bridge:
+In the app: **Agent tab → Agent link → Connect** (default `ws://localhost:8787`).
+
+Then register `agent/mcp-server.js`. Run these from the repo root so `$PWD`
+resolves — every client needs an **absolute** path.
+
+**Claude Code and Codex** take the same `--` form:
 
 ```bash
-claude mcp add threegrease -- node /absolute/path/to/agent/mcp-server.js
+claude mcp add threegrease -- node "$PWD/agent/mcp-server.js"
+codex  mcp add threegrease -- node "$PWD/agent/mcp-server.js"
 ```
 
-or in `.mcp.json` / `claude_desktop_config.json`:
+**Hermes** names the command and its arguments explicitly:
+
+```bash
+hermes mcp add threegrease --command node --args "$PWD/agent/mcp-server.js"
+```
+
+**opencode** prompts for the details:
+
+```bash
+opencode mcp add threegrease
+```
+
+…or add it to `~/.config/opencode/opencode.json` directly. Note the shape
+differs from everyone else's: the key is `mcp` (not `mcpServers`), entries
+need `"type": "local"`, and `command` is an **array**, not a string:
+
+```json
+{ "mcp": {
+    "threegrease": {
+      "type": "local",
+      "command": ["node", "/abs/path/agent/mcp-server.js"],
+      "enabled": true } } }
+```
+
+**Config-file clients** — Claude Desktop, Cursor, and most others — share one
+JSON shape, in `claude_desktop_config.json`, `~/.cursor/mcp.json`, or a
+project `.mcp.json`:
 
 ```json
 { "mcpServers": {
     "threegrease": { "command": "node", "args": ["/abs/path/agent/mcp-server.js"] } } }
 ```
 
-Claude now sees every threegrease tool and can draw into the open tab.
+Verify the connection with `claude mcp list`, `codex mcp list`,
+`hermes mcp list`, or `opencode mcp list` — the tools only appear while a
+threegrease tab is connected to the relay, since the bridge fetches them live.
 
-## Quick start — Zed (ACP)
+## Quick start — editors (ACP)
 
-Same relay, then point Zed's agent server at `node /abs/path/agent/acp-server.js`.
+Same relay, different bridge — point the editor at `agent/acp-server.js`:
+
+```bash
+node /abs/path/agent/acp-server.js
+```
+
+Zed reaches it through its agent-server setting. opencode and Hermes are
+themselves ACP agents (`opencode acp`, `hermes acp`), so for those, prefer the
+MCP route above — that gives them threegrease's tools, rather than putting two
+agents on the same wire.
 
 `acp-server.js` deliberately embeds **no LLM**: it exposes the same tool
 surface for the editor's own model to drive, so there is one tool registry and
