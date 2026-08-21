@@ -18,6 +18,11 @@ npm run typecheck    # tsc --noEmit — run before committing
 npm run build        # typecheck + vite build
 ```
 
+```bash
+cd agent && npm install && node relay.js   # MCP/ACP bridge (docs/AGENT.md)
+node agent/selftest.js                     # end-to-end agent bridge check
+```
+
 No test suite. Verification is done in the browser (see "Testing" below).
 
 ## Architecture (data-driven, one directional flow)
@@ -58,6 +63,8 @@ Key invariants:
 | `src/tools/` | per-mode tools. `toolsys.ts` (Tool interface + manager), `projection.ts` (screen↔world, drawing planes, STROKE-placement depth snapping), `context.ts` (Settings + AppCtx) |
 | `src/anim/` | playback (`player.ts`), stroke interpolation (`interpolate.ts`), camera eval/keys (`camera.ts`) |
 | `src/app/` | `main.ts` (App class: three setup, input routing, render loop), `ui.ts` (ALL DOM panels), `nav.ts` (views/gizmo/fly/ortho), `keymap.ts` (rebindable shortcuts), `styles.css` |
+| `src/agent/` | LLM agent interface — `tools.ts` (the ONE tool registry), `providers.ts` (local + hosted), `session.ts` (agent loop), `rpc.ts` (WS JSON-RPC), `panel.ts` (chat state). See `docs/AGENT.md` |
+| `agent/` | Node bridges: `relay.js`, `mcp-server.js`, `acp-server.js`, `selftest.js` |
 
 ## UI conventions (for UI-focused work)
 
@@ -119,6 +126,13 @@ the browser console or automated evals:
   so cancel is detected via `pointerlockchange` + the `flyStopping` flag in
   `nav.ts` — don't remove that flag.
 
+- Agent tools (`src/agent/tools.ts`) are the SINGLE registry behind the
+  in-app chat, MCP and ACP — adding one there exposes it to Claude Code
+  and Zed with no Node-side change. `mutates: true` gets pushUndo +
+  requestRender from the dispatcher; never open-code either in a handler.
+  Image tool results must NOT be stringified into a tool message (~500KB
+  of base64 breaks chat templates) — the session converts them to a real
+  image part instead.
 - **Stroke shader attribute budget is full.** WebGL guarantees only 16
   vertex attributes and the stroke shader is the entire per-stroke
   parameter channel (a layer's strokes share one merged buffer and one
