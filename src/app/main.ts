@@ -6,7 +6,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
 import { History } from '../core/history';
 import type { GPScene, TGLight } from '../core/types';
-import { GPSceneRenderer, type EditorMode } from '../render/GPSceneRenderer';
+import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { defaultSettings, loadPrefs, savePrefs, snapIncrement, type AppCtx } from '../tools/context';
 import { ToolManager, type ToolEvent } from '../tools/toolsys';
@@ -128,6 +128,9 @@ import { Navigation } from './nav';
 import type { OrthoPane, PaneId, PaneRect } from './quadview';
 import { computePaneRects, createOrthoPanes, relockOrthoPane, syncOrthoFrustum } from './quadview';
 import type { CanvasPlane } from '../core/types';
+import type { AgentHost } from '../agent/types';
+import { setAgentCommandLister } from '../agent/tools';
+import { AgentRpc } from '../agent/rpc';
 
 const DEFAULT_TOOL: Record<EditorMode, string> = {
   OBJECT: 'object-select', DRAW: 'draw', EDIT: 'select',
@@ -187,6 +190,8 @@ class App implements AppHandle {
   private selGlyphs = new THREE.Group();
   private selHelpers = new Map<string, { box: THREE.Box3; helper: LineSegments2; dot: THREE.Points }>();
   private interpTool = new InterpolateTool();
+  /** Out-of-process agent link (MCP/ACP relays). Idle until connected. */
+  agentRpc!: AgentRpc;
   private nav!: Navigation;
   private navDrag: { mode: 'orbit' | 'pan' | 'dolly'; x: number; y: number } | null = null;
   private canvasGroup = new THREE.Group();
@@ -415,6 +420,11 @@ class App implements AppHandle {
     tg.execute = (q: string, args?: string) => this.commands.execute(q, args);
     (window as unknown as Record<string, unknown>).__tg = this; // debug/scripting handle; __tg.execute() = agent API
 
+    // agent interface: tools reach the command palette through this, and the
+    // RPC link stays idle until the user points it at a relay (Agent panel).
+    setAgentCommandLister(() => this.commands.all().map((c) => ({ id: c.id, title: c.title })));
+    this.agentRpc = new AgentRpc(this.agentHost());
+
     // event IO (P2): MIDI is async and optional; WS connects if configured
     midi.init().then((ok) => {
       if (ok) {
@@ -542,6 +552,54 @@ class App implements AppHandle {
       this.ctx.pushUndo();
       this.ctx.replaceScene(s);
     } catch { /* cancelled */ }
+  }
+
+  /**
+   * The narrow App surface the agent tools are allowed to use. Deliberately
+   * a separate object rather than passing `this`: it makes the blast radius
+   * of a tool explicit and keeps tools/ from reaching into UI internals.
+   */
+  agentHost(): AgentHost {
+    return {
+      ctx: this.ctx,
+      execute: (q, args) => this.commands.execute(q, args),
+      setMode: (m) => this.setMode(m),
+      setTool: (id) => this.setTool(id),
+      snapView: (v) => this.snapView(v),
+      addMeshObject: (kind, src, at) => this.addMeshObject(kind, src, at),
+      addGPObject: () => this.addGPObject(),
+      addLight: (kind, at) => this.addLight(kind, at),
+      screenshot: () => this.screenshotBase64(),
+      viewAll: () => this.viewAll(),
+      refreshWidget: () => this.refreshWidget(),
+    };
+  }
+
+  /** RenderState for GPSceneRenderer.update — shared by the frame loop and
+   *  the agent screenshot so the two can't drift apart. */
+  private renderState(): RenderState {
+    const ctx = this.ctx;
+    return {
+      mode: this.presentation ? 'DRAW' : ctx.settings.mode,
+      background: ctx.settings.background,
+      playing: this.player.playing || this.presentation, // also hides onion in presentation
+      selectMode: ctx.settings.selectMode,
+      castShadows: ctx.settings.gpCastShadows,
+    };
+  }
+
+  /** Viewport as a base64 PNG (no data: prefix) — the agent's vision channel.
+   *
+   *  Draws once before reading. preserveDrawingBuffer makes the backbuffer
+   *  readable, but a tool that just mutated the scene returns before the next
+   *  rAF, so reading without this would hand the model a frame that predates
+   *  its own edit. The tradeoff is that this direct draw skips the per-object
+   *  screen-space FX pass (which the rAF loop composites separately), so an
+   *  object with effects enabled appears unaffected in the capture. */
+  screenshotBase64(): string {
+    this.gp.update(this.ctx.scene, this.renderState());
+    this.glRenderer.render(this.scene3, this.nav.active);
+    return this.ctx.canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
   }
 
   exportPng(): void {
@@ -3104,13 +3162,7 @@ class App implements AppHandle {
 
     if (this.gp.needsRebuild) {
       try {
-        this.gp.update(ctx.scene, {
-        mode: this.presentation ? 'DRAW' : ctx.settings.mode,
-        background: ctx.settings.background,
-        playing: this.player.playing || this.presentation, // also hides onion in presentation
-        selectMode: ctx.settings.selectMode,
-        castShadows: ctx.settings.gpCastShadows,
-        });
+        this.gp.update(ctx.scene, this.renderState());
       } catch (err) {
         console.error('GP rebuild failed:', err);
       }
