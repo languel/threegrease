@@ -34,13 +34,13 @@ const PROVIDERS: Record<string, ProviderDef> = Object.freeze({
       'LM Studio\'s OpenAI-compatible server on port 1234. Start the local server in LM Studio; enable CORS '
       + 'if you opened threegrease from another origin. No API key needed.',
   },
-  mlx: {
-    id: 'mlx', label: 'MLX (Apple Silicon)', protocol: 'openai', local: true,
-    defaultUrl: 'http://localhost:8080', credentialLabel: 'API key (optional)',
+  omlx: {
+    id: 'omlx', label: 'oMLX (Apple Silicon)', protocol: 'openai', local: true,
+    defaultUrl: 'http://localhost:8000', credentialLabel: 'API key (optional)',
     instructions:
-      'Apple-Silicon local inference over an OpenAI-compatible server — mlx_lm.server (default port 8080) or '
-      + 'mlx-omni-server (10240). Enter the base URL without /v1. Fast on M-series; tool support depends on '
-      + 'the model.',
+      'oMLX (omlx.ai) — a local MLX inference server for Apple Silicon, OpenAI/Anthropic-compatible. Run '
+      + '`omlx serve --model-dir ~/models`; it listens on :8000 with the OpenAI API under /v1 by default, no '
+      + 'key required unless the server was started with --api-key. Enter the base URL without /v1.',
   },
   unsloth: {
     id: 'unsloth', label: 'Unsloth', protocol: 'openai', local: true,

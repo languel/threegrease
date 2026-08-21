@@ -31,7 +31,7 @@ to Claude Code and Zed with no change on the Node side.**
 
 ## Quick start — in-app chat
 
-1. Run a local model server, e.g. `ollama serve` (or LM Studio, MLX, Unsloth).
+1. Run a local model server, e.g. `ollama serve` (or LM Studio, oMLX, Unsloth).
 2. Open the **Agent** tab (sparkles icon) in the properties sidebar.
 3. Pick a provider — local ones are listed first and need no key.
 4. Click the refresh icon beside **Model** to list installed models.
@@ -215,7 +215,7 @@ text-only model that calls it chokes on the result.
 |---|---|---|---|---|
 | local | Ollama | ollama | `http://localhost:11434` | — |
 | local | LM Studio | openai | `http://localhost:1234` | — |
-| local | MLX (Apple Silicon) | openai | `http://localhost:8080` | optional |
+| local | oMLX (Apple Silicon) | openai | `http://localhost:8000` | optional |
 | local | Unsloth | openai | `http://localhost:8001` | optional |
 | local | OpenAI-compatible (vLLM, llama.cpp, LiteLLM…) | openai | custom | optional |
 | hosted | Claude (Anthropic) | anthropic | `https://api.anthropic.com` | required |
