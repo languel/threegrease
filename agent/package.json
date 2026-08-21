@@ -1,0 +1,15 @@
+{
+  "name": "threegrease-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "MCP + ACP bridges into a running threegrease tab",
+  "scripts": {
+    "relay": "node relay.js",
+    "mcp": "node mcp-server.js",
+    "acp": "node acp-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  }
+}
