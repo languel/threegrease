@@ -108,6 +108,7 @@ import { PolyMeshManager } from '../render/polymesh';
 import { LightManager } from '../render/lights';
 import { ActorManager } from '../render/actors';
 import { createHumanoid, resetPose } from '../actor/skeleton';
+import { autoRig } from '../actor/rig';
 import { actorSolver } from '../actor/solver';
 import { actorRig } from '../actor/rig';
 import type { BakeSource } from '../render/bake';
@@ -235,6 +236,18 @@ class App implements AppHandle {
   readonly polys = new PolyMeshManager();
   readonly lights = new LightManager();
   readonly actors = new ActorManager();
+  /**
+   * The app's OWN module singletons, for browser-eval tests.
+   *
+   * Importing these from an eval is not reliable: after any HMR update vite
+   * serves modules at "?t=..." URLs, so `await import('/src/mm/streams.ts')`
+   * hands back a SECOND instance with its own `streamStore`. Frames pushed
+   * into it are invisible to the running app, and the symptom is silent —
+   * the feature simply does nothing. Reach them through here instead.
+   */
+  readonly sys = {
+    streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
+  };
   readonly paints = new PaintCloudManager();
   readonly mmPoints = new StreamPointsManager();
   /** app-instance store handle — evals/automation must use THIS, not an

@@ -1497,6 +1497,8 @@ export class UI {
           title: 'how hard capture pulls the joints — below 1 the body lags, which reads as weight' }),
         slider('Smoothing', rig.smoothing, 0, 0.95, 0.01, (v) => { rig.smoothing = v; }, { def: 0.35,
           title: 'exponential smoothing on the captured targets — capture is noisy' }),
+        checkbox('Match size', rig.matchScale, (v) => { rig.matchScale = v; },
+          'rescale the captured body to this actor\u2019s size, about the performer\u2019s feet — without it a tall performer stretches the character and lifts it off the ground'),
       ]),
       ...(rig.mode !== 'NONE' && rig.mode !== 'MANUAL' && !rig.bindings.length ? [
         fieldRow('', el('div', { class: 'hint', text: 'No bindings yet — pick a stream and Auto-bind.' })),

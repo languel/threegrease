@@ -42,9 +42,16 @@ function limbSpecs(s: number, side: string): JointSpec[] {
 
 const SPINE_SPECS: JointSpec[] = [
   { name: 'hips', at: [0, 0, 0.530], radius: 0.075, mass: 3 },
-  { name: 'spine', at: [0, 0, 0.625], radius: 0.070, mass: 2 },
-  { name: 'chest', at: [0, 0, 0.735], radius: 0.078, mass: 2.5 },
-  { name: 'neck', at: [0, 0, 0.833], radius: 0.038 },
+  { name: 'spine', at: [0, 0, 0.665], radius: 0.070, mass: 2 },
+  // `chest` sits ON the shoulder line, not below it. Anatomically it is
+  // the sternum/clavicle level rather than the mid-chest, and that is
+  // deliberate: capture models have no chest point, so it binds to the
+  // MIDPOINT OF THE SHOULDERS. If the rest position were lower, the
+  // captured chest->shoulder direction would be horizontal while ours
+  // pointed up, and angle retargeting would shorten the figure every
+  // frame — it measurably did, costing ~0.5 units of height.
+  { name: 'chest', at: [0, 0, 0.806], radius: 0.072, mass: 2.5 },
+  { name: 'neck', at: [0, 0, 0.851], radius: 0.038 },
   { name: 'head', at: [0, 0, 0.900], radius: 0.078, mass: 1.2 },
 ];
 
