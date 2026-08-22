@@ -1,0 +1,193 @@
+// Actors (scene.actors) -> three.js mannequin meshes + joint handles.
+//
+// Same lifecycle as MeshManager/LightManager: sync() reconciles entries
+// against the data every frame and only rebuilds when the SKELETON changes
+// (joint/bone counts), because the pose changes constantly and rebuilding
+// geometry per frame for that would be absurd. Posing is therefore pure
+// transform updates on pre-built unit primitives:
+//
+//   - a limb is a unit cylinder scaled to the bone's length and oriented
+//     along it, so a pose costs one quaternion per bone
+//   - a joint is a unit sphere, translated only
+//
+// The stick overlay and the joint handles are drawn unlit and on top, so a
+// rig stays visible and clickable while you are working inside a solid
+// mannequin.
+import * as THREE from 'three';
+import type { GPScene, TGActor } from '../core/types';
+import { worldMatrixOf } from '../tools/objects';
+import { materialManager } from './materialmgr';
+
+/** unit cylinder along +Y, which is what setFromUnitVectors expects to
+ *  rotate onto an arbitrary bone direction */
+const UP = new THREE.Vector3(0, 1, 0);
+
+interface Entry {
+  root: THREE.Group;
+  limbs: THREE.Mesh[];
+  joints: THREE.Mesh[];
+  sticks: THREE.LineSegments;
+  jointCount: number;
+  boneCount: number;
+  unlit: boolean;
+}
+
+export class ActorManager {
+  readonly group = new THREE.Group();
+  private entries = new Map<number, Entry>();
+  /** shared geometry: every limb/joint is the same unit primitive */
+  private limbGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
+  private jointGeo = new THREE.SphereGeometry(1, 12, 8);
+  /** tint applied to selected actors, set by the App like LightManager's */
+  selectionColor: THREE.Color | null = null;
+  /** joint handles are hidden in presentation mode along with other gizmos */
+  handlesVisible = true;
+
+  sync(scene: GPScene): void {
+    for (const [id, entry] of this.entries) {
+      const data = scene.actors.find((a) => a.id === id);
+      if (!data || data.joints.length !== entry.jointCount || data.bones.length !== entry.boneCount) {
+        this.group.remove(entry.root);
+        this.dispose(entry);
+        this.entries.delete(id);
+      }
+    }
+    for (const actor of scene.actors) {
+      let entry = this.entries.get(actor.id);
+      if (!entry) {
+        entry = this.build(actor);
+        this.group.add(entry.root);
+        this.entries.set(actor.id, entry);
+      }
+      this.pose(scene, actor, entry);
+    }
+  }
+
+  private build(actor: TGActor): Entry {
+    const root = new THREE.Group();
+    root.userData.actorId = actor.id;
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0 });
+    const limbs: THREE.Mesh[] = [];
+    for (const bone of actor.bones) {
+      const m = new THREE.Mesh(this.limbGeo, mat);
+      m.visible = bone.radius > 0;
+      m.castShadow = true;
+      m.receiveShadow = true;
+      m.userData.actorId = actor.id;
+      m.userData.boneId = bone.id;
+      root.add(m);
+      limbs.push(m);
+    }
+    const joints: THREE.Mesh[] = [];
+    for (const j of actor.joints) {
+      const m = new THREE.Mesh(this.jointGeo, mat);
+      m.castShadow = true;
+      m.userData.actorId = actor.id;
+      m.userData.jointId = j.id;
+      root.add(m);
+      joints.push(m);
+    }
+    // stick overlay: one segment per bone, depth-tested off so the rig
+    // reads through the body it drives
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(actor.bones.length * 6), 3));
+    const sticks = new THREE.LineSegments(
+      geo, new THREE.LineBasicMaterial({ color: 0xffb24d, depthTest: false, transparent: true, opacity: 0.95 }),
+    );
+    sticks.renderOrder = 900;
+    root.add(sticks);
+    return {
+      root, limbs, joints, sticks,
+      jointCount: actor.joints.length, boneCount: actor.bones.length, unlit: false,
+    };
+  }
+
+  private pose(scene: GPScene, actor: TGActor, entry: Entry): void {
+    const { root } = entry;
+    root.visible = actor.visible;
+    root.matrixAutoUpdate = false;
+    root.matrix.copy(worldMatrixOf(scene, { kind: 'ACTOR', id: actor.id }));
+    root.matrixWorldNeedsUpdate = true;
+    if (!actor.visible) return;
+
+    const wantUnlit = materialManager.wantsUnlit(scene, actor.materialId, {
+      color: actor.color, opacity: actor.opacity, wireframe: false,
+    });
+    if (entry.unlit !== wantUnlit) {
+      const old = entry.limbs[0]?.material as THREE.Material | undefined;
+      const next = wantUnlit ? new THREE.MeshBasicMaterial() : new THREE.MeshStandardMaterial();
+      for (const m of entry.limbs) m.material = next;
+      for (const m of entry.joints) m.material = next;
+      old?.dispose();
+      entry.unlit = wantUnlit;
+    }
+    const mat = entry.limbs[0]?.material as THREE.MeshStandardMaterial | undefined;
+    if (mat) {
+      materialManager.apply(mat, scene, actor.materialId, {
+        color: actor.color, opacity: actor.opacity, wireframe: false,
+      });
+      if (this.selectionColor && actor.select) mat.color.copy(this.selectionColor);
+    }
+
+    const showLimbs = actor.shape === 'CAPSULE' || actor.shape === 'BOTH';
+    const showSticks = actor.shape === 'STICK' || actor.shape === 'BOTH';
+    const idx = new Map(actor.joints.map((j, i) => [j.id, i]));
+    const a = new THREE.Vector3(); const b = new THREE.Vector3(); const dir = new THREE.Vector3();
+    const stick = entry.sticks.geometry.getAttribute('position') as THREE.BufferAttribute;
+
+    for (let i = 0; i < actor.bones.length; i++) {
+      const bone = actor.bones[i];
+      const ia = idx.get(bone.a); const ib = idx.get(bone.b);
+      const mesh = entry.limbs[i];
+      if (ia === undefined || ib === undefined) { mesh.visible = false; continue; }
+      a.fromArray(actor.pose[ia]); b.fromArray(actor.pose[ib]);
+      dir.subVectors(b, a);
+      const len = dir.length();
+      mesh.visible = showLimbs && bone.radius > 0 && len > 1e-6;
+      if (mesh.visible) {
+        mesh.position.copy(a).addScaledVector(dir, 0.5);
+        mesh.scale.set(bone.radius, len, bone.radius);
+        mesh.quaternion.setFromUnitVectors(UP, dir.clone().divideScalar(len));
+      }
+      // braces (radius 0) are simulation-only and stay out of the overlay
+      const on = showSticks && bone.radius > 0;
+      stick.setXYZ(i * 2, a.x, a.y, a.z);
+      stick.setXYZ(i * 2 + 1, on ? b.x : a.x, on ? b.y : a.y, on ? b.z : a.z);
+    }
+    stick.needsUpdate = true;
+    entry.sticks.geometry.computeBoundingSphere();
+    entry.sticks.visible = showSticks && this.handlesVisible;
+
+    for (let i = 0; i < actor.joints.length; i++) {
+      const j = actor.joints[i];
+      const mesh = entry.joints[i];
+      mesh.position.fromArray(actor.pose[i]);
+      // A pinned joint reads bigger: that is the one bit of rig state you
+      // need to see at a glance while performing. In stick mode the handles
+      // shrink hard — at body scale they swallow the very lines they are
+      // supposed to annotate.
+      const base = showLimbs ? 0.55 : 0.3;
+      mesh.scale.setScalar(j.radius * (j.pin ? base * 1.7 : base));
+      mesh.visible = showLimbs || showSticks;
+    }
+  }
+
+  /** Root object for an actor, so picking can map a hit back to it. */
+  rootFor(id: number): THREE.Object3D | null { return this.entries.get(id)?.root ?? null; }
+
+  /** Every actor's meshes, for viewport picking. */
+  pickTargets(scene: GPScene): THREE.Object3D[] {
+    const out: THREE.Object3D[] = [];
+    for (const a of scene.actors) {
+      const e = this.entries.get(a.id);
+      if (e && a.visible && !a.lock) out.push(e.root);
+    }
+    return out;
+  }
+
+  private dispose(entry: Entry): void {
+    (entry.limbs[0]?.material as THREE.Material | undefined)?.dispose?.();
+    entry.sticks.geometry.dispose();
+    (entry.sticks.material as THREE.Material).dispose();
+  }
+}

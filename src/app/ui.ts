@@ -53,12 +53,15 @@ import { interpolateFrame, interpolateSequence } from '../anim/interpolate';
 import * as ops from '../tools/editops';
 import { selectAll, selectLinked, selectMoreLess } from '../tools/select';
 import { icon, type IconName } from './icons';
+import { autoRig } from '../actor/rig';
 
 export interface AppHandle {
   ctx: AppCtx;
   /** the scene's environment/IBL manager — the World panel reads its
    *  load status, since an image or video source resolves asynchronously */
   world: { status: 'ok' | 'loading' | 'error'; error: string };
+  addActor(at?: [number, number, number]): void;
+  resetActor(id: number): void;
   setMode(mode: EditorMode): void;
   setShading(mode: ViewportShading): void;
   setTool(id: string): void;
@@ -759,6 +762,8 @@ export class UI {
       { label: 'Cylinder', do: () => this.app.addMeshObject('CYLINDER') },
       { label: 'Empty', do: () => this.app.addMeshObject('EMPTY') },
       { sep: true },
+      { label: 'Actor (mannequin)', do: () => this.app.addActor() },
+      { sep: true },
       { label: 'Model…', do: () => this.filePick('.glb,.gltf,.obj', (f) => this.app.importModelFile(f)) },
       { sep: true },
       { label: 'Grease Pencil (blank)', do: () => this.app.addGPObject() },
@@ -1380,6 +1385,10 @@ export class UI {
         ],
       },
       {
+        id: 'actor', icon: 'actor', title: 'Actor — mannequin, physics & rigging',
+        build: () => [this.actorPanel()],
+      },
+      {
         id: 'mods', icon: 'wrench', title: 'Modifiers, effects & constraints',
         build: () => [this.modifiersPanel(), this.effectsPanel(), this.constraintsPanel()],
       },
@@ -1425,6 +1434,88 @@ export class UI {
     const outliner = el('div', { class: 'sidebar-outliner' }, this.objectsPanel());
     const tabsRow = el('div', { class: 'sidebar-tabsrow' }, strip, content);
     side.append(outliner, tabsRow);
+  }
+
+  /** Actor tab: the mannequin's shape, its physics, and its rig.
+   *  Everything here is per-actor, so it needs one selected. */
+  private actorPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const scene = ctx.scene;
+    const picked = this.app.getLastPicked();
+    const actor = scene.actors.find((a) => a.select)
+      ?? (picked?.kind === 'ACTOR' ? scene.actors.find((a) => a.id === picked.id) : undefined);
+    if (!actor) {
+      return panel('Actor',
+        el('div', { class: 'row', text: 'Select an actor, or add one from the Add menu.' }),
+        fieldRow('', btn('Add actor', () => this.app.addActor()), { full: true }));
+    }
+    const touch = () => ctx.requestRender();
+    const ph = actor.physics;
+    const rig = actor.rig;
+    const streamOpts: [string, string][] = [
+      ['', '(none)'],
+      ...scene.mmStreams.map((st) => [String(st.id), `${st.name} · ${st.kind.toLowerCase()}`] as [string, string]),
+    ];
+
+    return panel(`Actor — ${actor.name}`,
+      el('div', { class: 'menu-header', text: 'Look' }),
+      fieldRow('Shape', selectField('', actor.shape, [
+        ['BOTH', 'Body + rig'], ['CAPSULE', 'Body only'], ['STICK', 'Rig only'],
+      ], (v) => { actor.shape = v; touch(); })),
+      fieldRow('Color', colorField('', [...actor.color, 1], (rgb) => { actor.color = rgb; touch(); })),
+      slider('Opacity', actor.opacity, 0, 1, 0.01, (v) => { actor.opacity = v; touch(); }, { def: 1 }),
+
+      el('div', { class: 'menu-header', text: 'Physics' }),
+      checkbox('Simulate', ph.enabled, (v) => { ctx.pushUndo(); ph.enabled = v; touch(); this.refresh(); },
+        'run the ragdoll — gravity, bones, joint limits, floor'),
+      slider('Gravity', ph.gravity, 0, 30, 0.1, (v) => { ph.gravity = v; }, { def: 9.81 }),
+      slider('Damping', ph.damping, 0.8, 1, 0.001, (v) => { ph.damping = v; }, { def: 0.98,
+        title: 'velocity kept per step — lower is more like moving through syrup' }),
+      slider('Tone', ph.tone, 0, 0.5, 0.005, (v) => { ph.tone = v; }, { def: 0.06,
+        title: 'muscle tone: pull back toward the rest pose. 0 = a bag of bones' }),
+      slider('Iterations', ph.iterations, 1, 24, 1, (v) => { ph.iterations = Math.round(v); }, { def: 8,
+        title: 'constraint passes per step — more is stiffer and slower' }),
+      checkbox('Floor', ph.floor, (v) => { ph.floor = v; }, 'collide with the ground plane'),
+
+      el('div', { class: 'menu-header', text: 'Rig' }),
+      fieldRow('Mode', selectField('', rig.mode, [
+        ['NONE', 'None (free ragdoll)'],
+        ['MARKERS', 'Markers — 1:1 landmarks'],
+        ['ANGLES', 'Angles — retarget directions'],
+        ['IK', 'IK — end effectors'],
+        ['MANUAL', 'Manual — drag / routes only'],
+      ], (v) => { ctx.pushUndo(); rig.mode = v; touch(); this.refresh(); })),
+      fieldRow('Stream', selectField('', String(rig.streamId ?? ''), streamOpts,
+        (v) => { rig.streamId = v ? Number(v) : null; this.refresh(); })),
+      ...(rig.mode === 'NONE' || rig.mode === 'MANUAL' ? [] : [
+        fieldRow('', btn(`Auto-bind (${rig.bindings.length} joints)`, () => {
+          ctx.pushUndo();
+          rig.bindings = autoRig(actor, rig.streamId);
+          this.refresh();
+        }, { title: 'Bind joints to the standard 33-point pose landmarks by name' }), { full: true }),
+        slider('Strength', rig.strength, 0, 1, 0.01, (v) => { rig.strength = v; }, { def: 1,
+          title: 'how hard capture pulls the joints — below 1 the body lags, which reads as weight' }),
+        slider('Smoothing', rig.smoothing, 0, 0.95, 0.01, (v) => { rig.smoothing = v; }, { def: 0.35,
+          title: 'exponential smoothing on the captured targets — capture is noisy' }),
+      ]),
+      ...(rig.mode !== 'NONE' && rig.mode !== 'MANUAL' && !rig.bindings.length ? [
+        fieldRow('', el('div', { class: 'hint', text: 'No bindings yet — pick a stream and Auto-bind.' })),
+      ] : []),
+
+      el('div', { class: 'menu-header', text: 'Pose' }),
+      fieldRow('', el('div', { class: 'row' },
+        btn('Reset pose', () => this.app.resetActor(actor.id),
+          { title: 'Back to the T-pose, and clear the simulation velocity' }),
+        btn(actor.joints.some((j) => j.pin) ? 'Unpin all' : 'Pin all', () => {
+          ctx.pushUndo();
+          const anyPinned = actor.joints.some((j) => j.pin);
+          for (const j of actor.joints) j.pin = !anyPinned;
+          touch(); this.refresh();
+        }, { title: 'A pinned joint is held in place — the rest of the body hangs off it' }),
+      ), { full: true }),
+      el('div', { class: 'hint', text: `${actor.joints.length} joints · ${actor.bones.filter((b) => b.radius > 0).length} bones · ${actor.limits.length} limits` }),
+      panelHint('Joints are particles and bones are distance constraints, so capture, dragging and physics all drive one solver.'),
+    );
   }
 
   /** Scene tab: the world — what surrounds the scene and lights it.
@@ -1716,6 +1807,25 @@ export class UI {
         ),
       ],
       rename: (v) => { pc.name = v; },
+    });
+    for (const a of scene.actors) nodes.push({
+      ref: { kind: 'ACTOR', id: a.id }, icon: icon('actor'), name: a.name,
+      selected: a.select, parent: a.parent,
+      onSelect: (e) => {
+        this.app.setLastPicked({ kind: 'ACTOR', id: a.id });
+        toggleSel((v) => { a.select = v; }, a.select, !!e?.shiftKey);
+      },
+      extras: [
+        el('span', { text: a.rig.mode === 'NONE' ? '' : a.rig.mode.toLowerCase(), title: 'rig mode' }),
+        btn(a.physics.enabled ? icon('boltCircle') : icon('dot'),
+          () => { a.physics.enabled = !a.physics.enabled; this.refresh(); },
+          { cls: 'icon-btn', title: 'Simulate (ragdoll physics)' }),
+        ...viewLockBtns(
+          !a.visible, (v) => { a.visible = !v; },
+          !!a.lock, (v) => { a.lock = v; },
+        ),
+      ],
+      rename: (v) => { a.name = v; },
     });
     for (const l of scene.lights) nodes.push({
       ref: { kind: 'LIGHT', id: l.id }, icon: icon('boltCircle'), name: l.name,

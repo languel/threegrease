@@ -106,6 +106,10 @@ import type { UnwrapMode } from '../core/uvunwrap';
 import { unwrap } from '../core/uvunwrap';
 import { PolyMeshManager } from '../render/polymesh';
 import { LightManager } from '../render/lights';
+import { ActorManager } from '../render/actors';
+import { createHumanoid, resetPose } from '../actor/skeleton';
+import { actorSolver } from '../actor/solver';
+import { actorRig } from '../actor/rig';
 import type { BakeSource } from '../render/bake';
 import { bakeEngine } from '../render/bake';
 import { PaintCloudManager, createPaintCloud } from '../render/paintclouds';
@@ -230,6 +234,7 @@ class App implements AppHandle {
   readonly meshes = new MeshManager();
   readonly polys = new PolyMeshManager();
   readonly lights = new LightManager();
+  readonly actors = new ActorManager();
   readonly paints = new PaintCloudManager();
   readonly mmPoints = new StreamPointsManager();
   /** app-instance store handle — evals/automation must use THIS, not an
@@ -370,6 +375,7 @@ class App implements AppHandle {
     // Lights are scene data now (scene.lights, migrated from the two that
     // used to be hardcoded here); LightManager mirrors them each frame.
     this.scene3.add(this.lights.group);
+    this.scene3.add(this.actors.group);
 
     // object-mode transform widget
     this.scene3.add(this.widgetProxy);
@@ -2141,6 +2147,7 @@ class App implements AppHandle {
       { label: 'Cylinder', icon: 'cylinder', do: () => this.addMeshObject('CYLINDER', undefined, cursorAt) },
       { label: 'Editable Mesh', icon: 'wireframe', do: () => this.addPolyMeshObject(cursorAt) },
       { label: 'Empty', icon: 'target', do: () => this.addMeshObject('EMPTY', undefined, cursorAt) },
+      { label: 'Actor (mannequin)', icon: 'actor', do: () => this.addActor(cursorAt) },
       { sep: true },
       { label: 'Sun light', icon: 'boltCircle', do: () => this.addLight('SUN', cursorAt) },
       { label: 'Point light', icon: 'boltCircle', do: () => this.addLight('POINT', cursorAt) },
@@ -2474,6 +2481,41 @@ class App implements AppHandle {
     const id = Date.now() % 1e9;
     this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, at ?? [...this.ctx.scene.cursor], src));
     this.meshes.sync(this.ctx.scene);
+    this.ui.refresh();
+  }
+
+  /** Add Actor: the default mannequin, standing at the 3D cursor. Built
+   *  for the scene's up axis so it is upright either way, and selected on
+   *  arrival so the properties panel lands on its rig. */
+  addActor(at?: [number, number, number]): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    const id = Date.now() % 1e9;
+    const actor = createHumanoid(id, `Actor ${scene.actors.length + 1}`,
+      this.ctx.settings.upAxis === 'Z');
+    actor.translation = at ?? [...scene.cursor];
+    scene.actors.push(actor);
+    deselectAllObjects(scene);
+    actor.select = true;
+    this.setLastPicked({ kind: 'ACTOR', id });
+    if (this.ctx.settings.mode !== 'OBJECT') this.setMode('OBJECT');
+    this.actors.sync(scene);
+    this.refreshWidget();
+    this.ui.openTab('actor');
+    this.ui.refresh();
+    this.ctx.requestRender();
+  }
+
+  /** Drop an actor back to its T-pose and clear the simulation's velocity
+   *  (otherwise the ragdoll keeps whatever momentum it had). */
+  resetActor(id: number): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === id);
+    if (!actor) return;
+    this.ctx.pushUndo();
+    resetPose(actor);
+    actorSolver.reset(id);
+    actorRig.reset(id);
+    this.ctx.requestRender();
     this.ui.refresh();
   }
 
@@ -3160,6 +3202,16 @@ class App implements AppHandle {
     // Box3 outlines use (syncSelectionGlyphs)
     this.lights.selectionColor =
       ctx.settings.mode === 'OBJECT' && !this.presentation ? this.highlightColor() : null;
+    // Actors: the rig turns this frame's capture/route data into joint
+    // goals, then the solver runs physics+kinematics over them. Both must
+    // happen AFTER the stream engine (they read this frame's landmarks) and
+    // BEFORE the constraint engine (which may move the actor as a whole).
+    actorRig.update(ctx.scene, dt);
+    if (actorSolver.update(ctx.scene, dt, ctx.settings.upAxis === 'Z')) ctx.requestRender();
+    this.actors.handlesVisible = !this.presentation && !this.infoOverlayHidden;
+    this.actors.selectionColor =
+      ctx.settings.mode === 'OBJECT' && !this.presentation ? this.highlightColor() : null;
+    this.actors.sync(ctx.scene);
     this.lights.sync(ctx.scene);
     // Blender semantics: Solid/Wireframe are modelling views lit by a fixed
     // studio environment, so the scene's own lamps are held back until

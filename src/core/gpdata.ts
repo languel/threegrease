@@ -272,6 +272,7 @@ export function createScene(): GPScene {
     mediamime: { prefix: '/mp', rigs: [] },
     mmStreams: [],
     clips: [],
+    actors: [],
   };
 }
 

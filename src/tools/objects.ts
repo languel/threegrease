@@ -9,7 +9,7 @@ import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso, pointInPolygon } from './draw';
 
-export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT';
+export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR';
 export interface ObjRef { kind: ObjKind; id: number }
 
 export function gpIndexOf(scene: GPScene, id: number): number {
@@ -27,6 +27,7 @@ export function listSelected(scene: GPScene): ObjRef[] {
   for (const p of scene.polyMeshes) if (p.select) out.push({ kind: 'POLY', id: p.id });
   for (const pc of scene.paintClouds) if (pc.select) out.push({ kind: 'PCLOUD', id: pc.id });
   for (const l of scene.lights) if (l.select) out.push({ kind: 'LIGHT', id: l.id });
+  for (const a of scene.actors) if (a.select) out.push({ kind: 'ACTOR', id: a.id });
   return out;
 }
 
@@ -40,6 +41,7 @@ export function deselectAllObjects(scene: GPScene): void {
   for (const p of scene.polyMeshes) p.select = false;
   for (const pc of scene.paintClouds) pc.select = false;
   for (const l of scene.lights) l.select = false;
+  for (const a of scene.actors) a.select = false;
 }
 
 function entityOf(scene: GPScene, ref: ObjRef):
@@ -52,6 +54,7 @@ function entityOf(scene: GPScene, ref: ObjRef):
   if (ref.kind === 'POLY') return scene.polyMeshes.find((p) => p.id === ref.id);
   if (ref.kind === 'PCLOUD') return scene.paintClouds.find((pc) => pc.id === ref.id);
   if (ref.kind === 'LIGHT') return scene.lights.find((l) => l.id === ref.id);
+  if (ref.kind === 'ACTOR') return scene.actors.find((a) => a.id === ref.id);
   return scene.meshes.find((m) => m.id === ref.id);
 }
 
@@ -111,6 +114,10 @@ export function getObjectTransform(scene: GPScene, ref: ObjRef): ObjTransform | 
     const l = scene.lights.find((x) => x.id === ref.id);
     return l ? { translation: [...l.translation], rotation: [...l.rotation], scale: [1, 1, 1] } : null;
   }
+  if (ref.kind === 'ACTOR') {
+    const a = scene.actors.find((x) => x.id === ref.id);
+    return a ? { translation: [...a.translation], rotation: [...a.rotation], scale: [...a.scale] } : null;
+  }
   const m = scene.meshes.find((x) => x.id === ref.id);
   return m ? { translation: [...m.translation], rotation: [...m.rotation], scale: [...m.scale] } : null;
 }
@@ -151,6 +158,11 @@ export function setObjectTransform(scene: GPScene, ref: ObjRef, t: ObjTransform)
   } else if (ref.kind === 'LIGHT') {
     const l = scene.lights.find((x) => x.id === ref.id);
     if (l) { l.translation = [...t.translation]; l.rotation = [...t.rotation]; } // scale ignored
+  } else if (ref.kind === 'ACTOR') {
+    // The pose is actor-LOCAL, so moving the actor carries the whole
+    // ragdoll with it and the solver never sees the move at all.
+    const a = scene.actors.find((x) => x.id === ref.id);
+    if (a) { a.translation = [...t.translation]; a.rotation = [...t.rotation]; a.scale = [...t.scale]; }
   } else {
     const m = scene.meshes.find((x) => x.id === ref.id);
     if (m) { m.translation = [...t.translation]; m.rotation = [...t.rotation]; m.scale = [...t.scale]; }
@@ -187,6 +199,8 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     scene.paintClouds = scene.paintClouds.filter((pc) => pc.id !== ref.id);
   } else if (ref.kind === 'LIGHT') {
     scene.lights = scene.lights.filter((l) => l.id !== ref.id);
+  } else if (ref.kind === 'ACTOR') {
+    scene.actors = scene.actors.filter((a) => a.id !== ref.id);
   } else {
     scene.meshes = scene.meshes.filter((m) => m.id !== ref.id);
   }
@@ -203,6 +217,7 @@ export function allRefs(scene: GPScene): ObjRef[] {
     ...scene.polyMeshes.map((p) => ({ kind: 'POLY' as const, id: p.id })),
     ...scene.paintClouds.map((pc) => ({ kind: 'PCLOUD' as const, id: pc.id })),
     ...scene.lights.map((l) => ({ kind: 'LIGHT' as const, id: l.id })),
+    ...scene.actors.map((a) => ({ kind: 'ACTOR' as const, id: a.id })),
   ];
 }
 

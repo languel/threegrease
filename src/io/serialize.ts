@@ -68,6 +68,25 @@ export function deserializeScene(json: string): GPScene {
   // synthesized from the per-object flattened fields — see migrateMaterials
   // below, which runs after meshes/polyMeshes are defaulted)
   scene.images ??= [];
+  // actors postdate most saves; an empty list is the correct migration
+  scene.actors ??= [];
+  for (const a of scene.actors) {
+    a.select ??= false;
+    a.lock ??= false;
+    a.visible ??= true;
+    a.parent ??= null;
+    a.constraints ??= [];
+    a.limits ??= [];
+    a.shape ??= 'BOTH';
+    // a pose shorter than the joint list means the skeleton changed under
+    // an old save — fill from rest rather than leaving holes the solver
+    // would read as NaN
+    a.pose ??= [];
+    for (let i = 0; i < a.joints.length; i++) {
+      a.pose[i] ??= [...a.joints[i].rest];
+    }
+    a.pose.length = a.joints.length;
+  }
   scene.materials ??= [];
   // pre-world saves had a flat background colour and no IBL; seed a SOLID
   // world carrying that same colour so an old scene renders identically

@@ -167,7 +167,7 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
-export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT'; id: number }
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR'; id: number }
 
 // ---- object constraints (Blender-style stack, evaluated every frame) ----
 
@@ -715,6 +715,147 @@ export interface TGAttractor {
 export type RouteMapMode = 'RAW' | 'SCALE' | 'CLAMP' | 'WRAP';
 
 /** Bind incoming events to a scene/settings property. */
+// ---- Actors: rigged characters (ragdoll / mannequin) ----------------------
+//
+// The skeleton is POSITIONAL, not rotational: a joint is a particle with a
+// position, a bone is a distance constraint between two of them. That one
+// choice is what lets a single solver serve all four things an actor has to
+// do — ragdoll physics (verlet + PBD projection), 1:1 marker capture (pin a
+// particle straight to a landmark), angle retargeting (set bone DIRECTIONS,
+// keep our own limb lengths), and IK (FABRIK works on joint positions
+// directly). A rotational skeleton would need a conversion for three of the
+// four. Bone rotations are DERIVED for display, never stored.
+//
+// Positions live in ACTOR-LOCAL space so the actor's own transform (and any
+// parent's) moves the whole character without disturbing the simulation —
+// attach an actor to a moving platform and the ragdoll rides it. Gravity is
+// rotated into that space each step.
+
+export interface TGJoint {
+  id: number;
+  name: string;
+  /** rest ("T-pose") position, actor-local */
+  rest: Vec3;
+  /** heavier joints win a distance projection against lighter ones; 0 = */
+  /** immovable (the classic PBD infinite-mass pin) */
+  mass: number;
+  /** held at its driven/rest position instead of simulated */
+  pin: boolean;
+  /** display + collision radius */
+  radius: number;
+  select?: boolean;
+}
+
+export interface TGBone {
+  id: number;
+  name: string;
+  /** joint ids; `a` is the parent end for display and angle limits */
+  a: number;
+  b: number;
+  /** 0..1 — how hard the distance constraint pulls back to rest length */
+  stiffness: number;
+  /** limb thickness for the mannequin capsule (0 = no visible limb) */
+  radius: number;
+}
+
+/** Angular limit at the joint shared by two bones, in degrees. Keeps a
+ *  ragdoll from folding an elbow backwards without needing full rotational
+ *  joints: it is projected as a positional correction on the far ends. */
+export interface TGJointLimit {
+  bone: number;      // the child bone
+  parent: number;    // the bone it hinges off
+  min: number;       // smallest allowed angle between them (degrees)
+  max: number;
+}
+
+/** How incoming data becomes a pose. Each mode is a different answer to
+ *  "the performer is not the same shape as the character". */
+export type RigMode =
+  /** free ragdoll — physics only */
+  | 'NONE'
+  /** 1:1 — every mapped joint is pinned straight to its landmark. Exact,
+   *  but inherits the performer's proportions and any capture jitter. */
+  | 'MARKERS'
+  /** directions only — each bone points the way the captured limb points,
+   *  but keeps the ACTOR's length. Retargets across body shapes. */
+  | 'ANGLES'
+  /** a few landmarks (hands/feet/head) as IK goals; the rest is solved */
+  | 'IK'
+  /** no automatic input — drag joints, or drive them from routes */
+  | 'MANUAL';
+
+/** One joint's input binding: which stream landmark drives it.
+ *  `landmark2` averages two landmarks, which is how the joints a capture
+ *  model does not actually have (hips, chest, neck — all midpoints between
+ *  a left/right pair) get bound without a special case per joint. */
+export interface TGRigBinding {
+  joint: number;
+  streamId: number | null;
+  landmark: number;
+  landmark2?: number | null;
+  /** 0..1 blend toward the captured value */
+  weight: number;
+}
+
+export interface TGRig {
+  mode: RigMode;
+  /** default stream for bindings that don't name their own */
+  streamId: number | null;
+  bindings: TGRigBinding[];
+  /** MARKERS/IK: how hard a pinned joint is pulled to its target (0..1) */
+  strength: number;
+  /** exponential smoothing on captured targets, 0 = raw, 1 = frozen */
+  smoothing: number;
+  /** ANGLES: scale the actor to the performer's overall size */
+  matchScale: boolean;
+  /** joints whose captured landmark is missing/low-confidence fall back to
+   *  simulation rather than snapping to the origin */
+  minConfidence: number;
+}
+
+export interface TGActorPhysics {
+  enabled: boolean;
+  /** world units/s^2 along -up */
+  gravity: number;
+  /** velocity retained per step (verlet drag) */
+  damping: number;
+  /** PBD projection passes — more = stiffer, slower */
+  iterations: number;
+  /** pull unpinned joints back toward the rest pose; this is what keeps a
+   *  ragdoll from collapsing into a heap and reads as muscle tone */
+  tone: number;
+  /** collide joints with the z=0 (or y=0) ground plane */
+  floor: boolean;
+  /** keep bones from passing through each other */
+  selfCollide: boolean;
+}
+
+export interface TGActor {
+  id: number;
+  name: string;
+  joints: TGJoint[];
+  bones: TGBone[];
+  limits: TGJointLimit[];
+  /** current pose: actor-local joint positions, index-aligned with joints.
+   *  Persisted (this IS the character's pose); velocity is not. */
+  pose: Vec3[];
+  rig: TGRig;
+  physics: TGActorPhysics;
+  /** draw solid limb capsules, or just the stick skeleton */
+  shape: 'CAPSULE' | 'STICK' | 'BOTH';
+  color: Vec3;
+  opacity: number;
+  visible: boolean;
+  select: boolean;
+  lock?: boolean;
+  parent?: ParentRef | null;
+  constraints?: TGConstraint[];
+  translation: Vec3;
+  rotation: Vec3;
+  scale: Vec3;
+  materialId?: number | null;
+}
+
 export interface TGRoute {
   id: number;
   enabled: boolean;
@@ -800,4 +941,6 @@ export interface GPScene {
   mmStreams: MMStream[];
   /** recorded point clips (mm streams / object trajectories) */
   clips: TGClip[];
+  /** rigged characters (ragdoll / mannequin), see actor/ */
+  actors: TGActor[];
 }
