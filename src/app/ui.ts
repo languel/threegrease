@@ -1,7 +1,7 @@
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
-import type { MaterialBlend, TGMaterial, TextureSlotName, Vec3 } from '../core/types';
+import type { MaterialBlend, TGMaterial, TextureSlotName, Vec3, ViewportShading } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
@@ -56,7 +56,11 @@ import { icon, type IconName } from './icons';
 
 export interface AppHandle {
   ctx: AppCtx;
+  /** the scene's environment/IBL manager — the World panel reads its
+   *  load status, since an image or video source resolves asynchronously */
+  world: { status: 'ok' | 'loading' | 'error'; error: string };
   setMode(mode: EditorMode): void;
+  setShading(mode: ViewportShading): void;
   setTool(id: string): void;
   addCanvasPlane(): void;
   removeCanvasPlane(id: number): void;
@@ -959,6 +963,20 @@ export class UI {
         ),
       ] : []),
     );
+
+    // Viewport shading, pushed to the far right the way Blender parks it
+    // at the end of the 3D-view header. `.grow` eats the slack between.
+    const shadings: [ViewportShading, IconName, string][] = [
+      ['WIREFRAME', 'shadeWire', 'Wireframe — meshes as edges only'],
+      ['SOLID', 'shadeSolid', 'Solid — flat studio light, world ignored (modelling view)'],
+      ['MATERIAL', 'shadeMaterial', 'Material preview — world background + IBL, no scene lights'],
+      ['RENDERED', 'shadeRendered', 'Rendered — world plus the scene\u2019s own lights and shadows'],
+    ];
+    bar.append(el('div', { class: 'grow' }), el('div', { class: 'sep' }));
+    for (const [mode, iconName, title] of shadings) {
+      bar.append(btn(icon(iconName), () => this.app.setShading(mode),
+        { active: s.shading === mode, title }));
+    }
   }
 
   // ------------------------------------------------------------ toolbar
@@ -1339,8 +1357,8 @@ export class UI {
 
     const tabs: { id: string; icon: IconName; title: string; build: () => HTMLElement[] }[] = [
       {
-        id: 'scene', icon: 'globe', title: 'Scene — grid · background',
-        build: () => [this.scenePanel()],
+        id: 'scene', icon: 'globe', title: 'Scene — world · grid · background',
+        build: () => [this.worldPanel(), this.scenePanel()],
       },
       {
         id: 'object', icon: 'cube', title: 'Object — transform · material',
@@ -1407,6 +1425,119 @@ export class UI {
     const outliner = el('div', { class: 'sidebar-outliner' }, this.objectsPanel());
     const tabsRow = el('div', { class: 'sidebar-tabsrow' }, strip, content);
     side.append(outliner, tabsRow);
+  }
+
+  /** Scene tab: the world — what surrounds the scene and lights it.
+   *  Blender's World properties, trimmed to the modes that matter here.
+   *  Every mode ends up as one equirect/cube source in WorldManager, so
+   *  the per-mode fields below are just different ways of authoring it. */
+  private worldPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const w = ctx.scene.world;
+    const touch = () => { ctx.requestRender(); };
+    // The world is scene data, so edits are undoable — but a slider drag
+    // fires per pixel, and one undo step per pixel is useless. Push once
+    // on the first edit of a burst, the way the other live fields do.
+    const edit = <T>(fn: () => T): T => { const r = fn(); touch(); return r; };
+
+    const rows: (Node | string)[] = [
+      fieldRow('Mode', selectField('', w.mode, [
+        ['SOLID', 'Solid color'],
+        ['GRADIENT', 'Gradient'],
+        ['EQUIRECT', 'Environment image'],
+        ['VIDEO', 'Video / live'],
+        ['SKY', 'Physical sky'],
+      ], (v) => { ctx.pushUndo(); w.mode = v; touch(); this.refresh(); })),
+    ];
+
+    if (w.mode === 'SOLID') {
+      rows.push(fieldRow('Color', colorField('', [...w.color, 1], (rgb) => edit(() => { w.color = rgb; }))));
+    } else if (w.mode === 'GRADIENT') {
+      rows.push(
+        fieldRow('Sky', colorField('', [...w.skyColor, 1], (rgb) => edit(() => { w.skyColor = rgb; }))),
+        fieldRow('Ground', colorField('', [...w.groundColor, 1], (rgb) => edit(() => { w.groundColor = rgb; }))),
+      );
+    } else if (w.mode === 'EQUIRECT') {
+      const img = imageById(ctx.scene, w.imageId);
+      rows.push(fieldRow('Image', el('div', { class: 'field-group' },
+        selectField('', String(w.imageId ?? ''), [
+          ['', img ? '(none)' : 'pick an image…'],
+          ...ctx.scene.images.map((i) => [String(i.id), i.name] as [string, string]),
+        ], (v) => { ctx.pushUndo(); w.imageId = v ? Number(v) : null; touch(); this.refresh(); }),
+        btn(icon('photo'), () => this.filePick('image/*', (f) => {
+          const rd = new FileReader();
+          rd.onload = () => {
+            ctx.pushUndo();
+            const rec = createImage(f.name, String(rd.result));
+            ctx.scene.images.push(rec);
+            w.imageId = rec.id;
+            touch();
+            this.refresh();
+          };
+          rd.readAsDataURL(f);
+        }), { cls: 'icon-btn', title: 'Load an equirectangular (2:1 lat-long) image' }),
+      )),
+      fieldRow('', el('div', { class: 'hint', text: 'Equirectangular / lat-long, 2:1 aspect — the same maps Blender takes.' })));
+    } else if (w.mode === 'VIDEO') {
+      rows.push(fieldRow('Source', selectField('', w.videoSource, [
+        ['CAMERA', 'Live capture'], ['URL', 'File / URL'],
+      ], (v) => { ctx.pushUndo(); w.videoSource = v; touch(); this.refresh(); })));
+      if (w.videoSource === 'URL') {
+        const input = el('input', { type: 'text', value: w.videoUrl, placeholder: 'https://… or load a file' }) as HTMLInputElement;
+        input.onchange = () => { ctx.pushUndo(); w.videoUrl = input.value; touch(); this.refresh(); };
+        rows.push(fieldRow('URL', el('div', { class: 'field-group' }, input,
+          btn(icon('folder'), () => this.filePick('video/*', (f) => {
+            // A local file becomes a blob: URL — it plays immediately and
+            // streams (no base64 of a multi-GB drone clip), but it dies
+            // with the tab, so it is deliberately NOT saved with the scene.
+            ctx.pushUndo();
+            w.videoUrl = URL.createObjectURL(f);
+            touch();
+            this.refresh();
+          }), { cls: 'icon-btn', title: 'Open a local 360 video (session only — not saved with the scene)' }),
+        )));
+      } else {
+        rows.push(fieldRow('', el('div', { class: 'hint', text: 'Uses the Capture tab\u2019s live camera. Start it there first.' })));
+      }
+      rows.push(fieldRow('', el('div', { class: 'hint', text: '360 footage must be equirectangular (2:1). Flat video will look stretched.' })));
+    } else if (w.mode === 'SKY') {
+      rows.push(
+        slider('Sun elevation', w.sunElevation, -10, 90, 0.5, (v) => edit(() => { w.sunElevation = v; }), { def: 25 }),
+        slider('Sun azimuth', w.sunAzimuth, -180, 180, 1, (v) => edit(() => { w.sunAzimuth = v; }), { def: 180 }),
+        slider('Turbidity', w.turbidity, 1, 20, 0.1, (v) => edit(() => { w.turbidity = v; }), { def: 4, title: 'haze / aerosol — higher is milkier' }),
+        slider('Rayleigh', w.rayleigh, 0, 5, 0.05, (v) => edit(() => { w.rayleigh = v; }), { def: 2, title: 'how blue the scattering makes the sky' }),
+      );
+    }
+
+    if (this.app.world.status === 'error') {
+      rows.push(fieldRow('', el('div', { class: 'hint error', text: this.app.world.error })));
+    } else if (this.app.world.status === 'loading') {
+      rows.push(fieldRow('', el('div', { class: 'hint', text: 'Loading…' })));
+    }
+
+    rows.push(
+      el('div', { class: 'menu-header', text: 'Placement' }),
+      slider('Rotation', w.rotation * 180 / Math.PI, -180, 180, 1,
+        (v) => edit(() => { w.rotation = v * Math.PI / 180; }), { def: 0, title: 'spin the environment about the world up axis' }),
+      el('div', { class: 'menu-header', text: 'Lighting' }),
+      checkbox('Lights the scene', w.lighting, (v) => { ctx.pushUndo(); w.lighting = v; touch(); },
+        'use this world as image-based light on meshes (Material/Rendered shading)'),
+      slider('Strength', w.strength, 0, 5, 0.05, (v) => edit(() => { w.strength = v; }), { def: 1 }),
+      el('div', { class: 'menu-header', text: 'Viewport' }),
+      checkbox('Show background', w.backgroundVisible, (v) => { ctx.pushUndo(); w.backgroundVisible = v; touch(); },
+        'off = the world still lights the scene but the viewport keeps the flat background color'),
+      slider('Background', w.backgroundIntensity, 0, 5, 0.05, (v) => edit(() => { w.backgroundIntensity = v; }), { def: 1, title: 'brightness of the visible background only' }),
+      // Blur is three's own background pass; a moving source is drawn on our
+      // sky mesh instead (see render/world.ts), where it has no equivalent.
+      // Say so rather than leaving a slider that quietly does nothing.
+      ...(w.mode === 'VIDEO' ? [
+        fieldRow('Blur', el('div', { class: 'hint', text: 'not available for video / live sources' })),
+      ] : [
+        slider('Blur', w.blur, 0, 1, 0.01, (v) => edit(() => { w.blur = v; }), { def: 0, title: 'defocus the background without touching the light it casts' }),
+      ]),
+    );
+    return panel('World', ...rows,
+      panelHint('The world is only visible in Material and Rendered shading.'));
   }
 
   /** Scene tab: grid + background — the environment settings that used to

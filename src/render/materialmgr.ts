@@ -191,7 +191,14 @@ export class MaterialManager {
     const mat = materialId == null ? undefined : scene.materials.find((m) => m.id === materialId);
     if (mat) this.applyMaterial(target, scene, mat, live);
     else this.applyLegacy(target, legacy, live);
+    // Viewport shading is a VIEW override, applied last so it wins over the
+    // material's own wireframe flag without mutating the datablock — leaving
+    // the mode restores exactly what the material asked for.
+    if (this.shading === 'WIREFRAME') target.wireframe = true;
   }
+
+  /** Current viewport shading, pushed in by App each frame. */
+  shading: import('../core/types').ViewportShading = 'RENDERED';
 
   dispose(): void {
     for (const { tex } of this.textures.values()) tex.dispose();

@@ -71,6 +71,13 @@ const PATHS: Record<string, string> = {
   duplicate: 'M8.25 8.25v-1.5A2.25 2.25 0 0 1 10.5 4.5h6.75A2.25 2.25 0 0 1 19.5 6.75v6.75a2.25 2.25 0 0 1-2.25 2.25h-1.5M8.25 8.25H6a2.25 2.25 0 0 0-2.25 2.25v6.75A2.25 2.25 0 0 0 6 19.5h6.75a2.25 2.25 0 0 0 2.25-2.25v-1.5M8.25 8.25h4.5a2.25 2.25 0 0 1 2.25 2.25v4.5',
   cylinder: 'M4.5 6.75c0-1.243 3.358-2.25 7.5-2.25s7.5 1.007 7.5 2.25-3.358 2.25-7.5 2.25-7.5-1.007-7.5-2.25ZM4.5 6.75v10.5c0 1.243 3.358 2.25 7.5 2.25s7.5-1.007 7.5-2.25V6.75',
   globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 0c-2.485 0-4.5-4.03-4.5-9s2.015-9 4.5-9 4.5 4.03 4.5 9-2.015 9-4.5 9ZM3.6 9h16.8M3.6 15h16.8',
+  // Viewport shading — four spheres that differ the way Blender's do:
+  // wire (latitudes visible through the ball), solid (plain), material
+  // (a terminator dividing it), rendered (plain plus light rays).
+  shadeWire: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 0c-2.485 0-4.5-4.03-4.5-9s2.015-9 4.5-9 4.5 4.03 4.5 9-2.015 9-4.5 9ZM3.6 9h16.8M3.6 15h16.8M12 3v18',
+  shadeSolid: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',
+  shadeMaterial: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm-6.36-2.64a9 9 0 0 0 12.72-12.72',
+  shadeRendered: 'M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Zm0-15.75V4.5m0 15v2.25M2.25 12H4.5m15 0h2.25M5.11 5.11l1.59 1.59m10.6 10.6 1.59 1.59m0-13.78-1.59 1.59M6.7 17.3l-1.59 1.59',
 };
 
 export type IconName = keyof typeof PATHS;

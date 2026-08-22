@@ -1,6 +1,6 @@
 import type {
   GPCamera, GPFrame, GPLayer, GPMaterial, GPObject, GPPoint, GPScene, GPStroke,
-  TGImage, TGLight, TGMaterial, Vec3, Vec4,
+  TGImage, TGLight, TGMaterial, TGWorld, Vec3, Vec4,
 } from './types';
 import { defaultStyle } from './brushes';
 
@@ -233,6 +233,23 @@ export function activeCam(scene: GPScene): GPCamera {
   return scene.cameras[scene.activeCamera] ?? scene.cameras[0];
 }
 
+/** Blender-ish default world: a flat dark background, no IBL. Matches what
+ *  the app looked like before the world existed, so an old scene migrated
+ *  forward renders identically until someone changes it. */
+export function createWorld(): TGWorld {
+  return {
+    mode: 'SOLID',
+    color: [0.11, 0.11, 0.12],
+    skyColor: [0.32, 0.42, 0.58], groundColor: [0.15, 0.13, 0.12],
+    imageId: null,
+    videoSource: 'CAMERA', videoUrl: '',
+    sunElevation: 25, sunAzimuth: 180, turbidity: 2, rayleigh: 1,
+    rotation: 0, strength: 1,
+    backgroundVisible: true, backgroundIntensity: 1, blur: 0,
+    lighting: false,
+  };
+}
+
 export function createScene(): GPScene {
   return {
     objects: [createObject('Pencil1')], activeObject: 0,
@@ -246,6 +263,7 @@ export function createScene(): GPScene {
     attractors: [],
     lights: defaultLights(),
     images: [],
+    world: createWorld(),
     materials: [],
     splats: [],
     meshes: [],

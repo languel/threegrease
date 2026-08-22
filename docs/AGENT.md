@@ -233,12 +233,14 @@ in the `PROVIDERS` registry in `providers.ts`, not new transport code.
 
 ## Tools
 
-Run `tools/list`, or ask the model, for the live set. Currently 20:
+Run `tools/list`, or ask the model, for the live set. Currently 21:
 
 - **Query** — `scene.summary`, `scene.strokes`, `scene.materials`, `view.screenshot`
 - **Draw** — `stroke.create`, `stroke.delete`, `stroke.transform`
 - **Objects** — `object.create`, `object.transform`, `object.delete`, `object.select`
 - **Style** — `material.update`, `brush.set`, `layer.create`, `layer.update`
+- **World** — `world.set` (environment mode + colours/image/video/sky,
+  rotation, IBL strength, and viewport shading)
 - **App** — `app.command`, `app.commands`, `app.set_mode`, `view.set`, `scene.set_frame`
 
 `app.command` reaches the whole command palette by fuzzy match, so anything

@@ -2364,3 +2364,69 @@ Gated on `settings.gpCastShadows` (default on, persisted, Scene panel).
 Leaving it on is free until some light actually has Cast shadows enabled,
 which is off by default. Toggling forces a GP rebuild, because the caster
 material is attached at mesh-construction time.
+
+## Viewport shading + scene world (env maps, 360 video)
+
+Blender's World properties and its four viewport-shading buttons, trimmed
+to what an action-painting lab actually needs. The motivating case was 360
+drone footage as a live environment.
+
+**Data.** `TGWorld` on `GPScene` (`scene.world`), JSON-serializable like
+everything else. Five modes — `SOLID`, `GRADIENT`, `EQUIRECT`, `VIDEO`,
+`SKY` — plus shared placement (rotation), lighting (on/off + strength) and
+viewport (background visible/intensity/blur) controls. Shading itself is a
+*view* preference (`settings.shading`), not scene data: it persists in
+prefs, is not undoable, and is exposed as `ViewportShading`.
+
+**One source, two consumers.** `src/render/world.ts` (`WorldManager`)
+funnels every mode into a single equirect (or cube) texture, which drives
+both `scene.background` and, through PMREM, `scene.environment`. Nothing
+downstream needs to know which mode produced it. The source is rebuilt only
+when `keyOf()` changes, so `update()` is cheap to call every frame.
+
+Solid/Wireframe deliberately ignore the world and light from a fixed studio
+ramp — that is the point of Blender's Solid mode, a stable modelling view.
+Material and Rendered both show the world; Rendered additionally turns on
+the scene's own lights (`lights.group.visible`).
+
+**Five traps, all of which presented as "everything is black":**
+
+- `PMREMGenerator` picks its cube resolution from `image.width / 4`. The
+  synthetic ramps were 2px wide, asking for a half-pixel cube; the result
+  was a 336x2 sliver that lit every mesh pure black. Hence `RAMP_W = 256`
+  — width the content does not need but PMREM does.
+- A `<video>` element reports `width`/`height` **0** (the real size is
+  `videoWidth`/`videoHeight`). Feeding one to PMREM yields a zero-height
+  atlas, which compiles to `CUBEUV_MAX_MIP = Infinity`; the fragment
+  shader then fails to build and the *entire viewport* goes black, meshes
+  included. IBL is now derived from a fixed 256x128 scratch canvas, which
+  fixes the sizing and is much cheaper than PMREM-ing 4K footage anyway.
+- `scene.background` cannot carry a moving equirect at all. three converts
+  one to a cube **once** and caches it (`WebGLCubeMaps`), and skips the
+  conversion entirely while `image.height` is 0. Video worlds therefore
+  get their own inside-out sphere (`syncSkyMesh`) pinned to the camera.
+  Its pole must be re-framed about X *after* the spin about object Y —
+  spinning about Z instead tips the pole onto the horizon.
+- three always puts an equirect's zenith at world **+Y**, so in this app's
+  Z-up world the environment lands on its side unless re-framed. Both
+  `backgroundRotation` and `environmentRotation` are Eulers three negates
+  and applies to the lookup direction, so the spin sign is inverted
+  relative to the image.
+- `Sky` outputs open-ended Preetham radiance and three's own example pairs
+  it with ACES tone mapping. This app uses `NoToneMapping`, and tone
+  mapping is skipped for render targets regardless, so the capture clipped
+  to flat white; it is scaled in-shader before capture instead. The scale
+  is inlined as a literal because three generates uniform declarations
+  only for its built-in materials — adding one to a `ShaderMaterial`'s
+  `uniforms` without declaring it in the GLSL fails to compile.
+
+**Verification.** Orientation was measured, not assumed: a lat-long test
+card with a longitude marker and a horizon band, rendered through both the
+static and the video path, sweeping Rotation over 360 degrees. The two
+agree to within codec noise, which is also how `SKY_LON_OFFSET` was found
+to be 0.
+
+**Not covered.** Background blur is a property of three's own background
+pass, so it does not apply to the video sky mesh; the UI says so rather
+than leaving a dead slider. The live-capture (`CAMERA`) branch shares the
+video path but has not been exercised end to end.

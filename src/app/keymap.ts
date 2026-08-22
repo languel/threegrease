@@ -77,6 +77,8 @@ export const ACTIONS: ActionDef[] = [
   { id: 'viewAll', label: 'Frame all (view fit)', combo: 'home', category: 'View' },
   { id: 'centerCursorViewAll', label: 'Center cursor & frame all', combo: 'shift+c', category: 'View' },
   { id: 'quadView', label: 'Toggle Quad View', combo: 'ctrl+alt+q', category: 'View' },
+  { id: 'cycleShading', label: 'Cycle viewport shading', combo: 'z', category: 'View' },
+  { id: 'cycleShadingBack', label: 'Cycle viewport shading (back)', combo: 'shift+z', category: 'View' },
 ];
 
 const STORAGE_KEY = 'threegrease.keymap';

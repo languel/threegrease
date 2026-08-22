@@ -111,6 +111,9 @@ export interface Settings {
    *  highlight (selection outlines) drive both CSS custom properties and
    *  three.js selection glyph colors. gridColor null = auto-contrast
    *  against `background`. */
+  /** Viewport shading mode (Blender's four buttons). Affects mesh-family
+   *  objects; GP strokes are unlit by design and only change in WIREFRAME. */
+  shading: import('../core/types').ViewportShading;
   uiAccent: Vec3;
   /** accent opacity 0..1 — --accent (CSS) is emitted as rgba() using this. */
   uiAccentAlpha: number;
@@ -174,7 +177,7 @@ const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'background', 'snap',
-  'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
+  'shading', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -265,6 +268,7 @@ export function defaultSettings(): Settings {
     trackpadNav: true,
     invertTrackpadOrbit: false,
     showGizmo: false,
+    shading: 'RENDERED',
     uiAccent: [0.522, 0.522, 0.522],           // gray(133)
     uiAccentAlpha: 0.5,
     uiHighlight: [1, 0.502, 0],                // rgb(255,128,0)

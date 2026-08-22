@@ -34,6 +34,7 @@ export interface AgentHost {
   /** Fuzzy command execution — the pre-existing string automation surface. */
   execute(query: string, args?: string): { ok: boolean; id?: string; result?: unknown; error?: string };
   setMode(mode: import('../render/GPSceneRenderer').EditorMode): void;
+  setShading(mode: import('../core/types').ViewportShading): void;
   setTool(id: string): void;
   snapView(view: 'FRONT' | 'BACK' | 'RIGHT' | 'LEFT' | 'TOP' | 'BOTTOM'): void;
   addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'EMPTY', src?: string, at?: [number, number, number]): void;

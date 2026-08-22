@@ -725,6 +725,46 @@ export interface TGRoute {
   mapping: { inMin: number; inMax: number; outMin: number; outMax: number; mode: RouteMapMode };
 }
 
+/** How the viewport shades mesh-family objects. GP strokes are unlit by
+ *  design and look the same in every mode except WIREFRAME. Mirrors
+ *  Blender's four viewport shading buttons. */
+export type ViewportShading = 'WIREFRAME' | 'SOLID' | 'MATERIAL' | 'RENDERED';
+
+/** Where the world's environment image comes from.
+ *  EQUIRECT/VIDEO both expect an EQUIRECTANGULAR (2:1 lat-long) projection —
+ *  the format 360 cameras and drones export. */
+export type WorldMode = 'SOLID' | 'GRADIENT' | 'EQUIRECT' | 'VIDEO' | 'SKY';
+
+/** Scene world: what you see behind everything, and what lights it (IBL).
+ *  One equirect texture drives both, which is why every mode ultimately
+ *  renders to that shape — see render/world.ts. */
+export interface TGWorld {
+  mode: WorldMode;
+  /** SOLID, and the fallback whenever a source is missing or still loading */
+  color: Vec3;
+  /** GRADIENT: up and down colours */
+  skyColor: Vec3;
+  groundColor: Vec3;
+  /** EQUIRECT: an image datablock (scene.images) holding a lat-long map */
+  imageId: number | null;
+  /** VIDEO: live capture, or a file/URL the browser can play */
+  videoSource: 'CAMERA' | 'URL';
+  videoUrl: string;
+  /** SKY (three.js physical sky) */
+  sunElevation: number;   // degrees above the horizon
+  sunAzimuth: number;     // degrees
+  turbidity: number;
+  rayleigh: number;
+  /** shared controls */
+  rotation: number;            // radians about the world up axis
+  strength: number;            // IBL intensity
+  backgroundVisible: boolean;  // false = light the scene but keep the flat bg
+  backgroundIntensity: number;
+  blur: number;                // 0..1 background blur
+  /** Light objects from the world. Off = background only, no IBL. */
+  lighting: boolean;
+}
+
 export interface GPScene {
   objects: GPObject[];
   activeObject: number;
@@ -744,6 +784,8 @@ export interface GPScene {
   lights: TGLight[];
   /** shared image datablocks (textures, brush tips, stencils, bake results) */
   images: TGImage[];
+  /** environment: background + image-based lighting */
+  world: TGWorld;
   /** shared material datablocks, referenced by mesh-family objects */
   materials: TGMaterial[];
   splats: TGSplat[];

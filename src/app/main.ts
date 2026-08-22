@@ -5,7 +5,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
 import { History } from '../core/history';
-import type { GPScene, TGLight } from '../core/types';
+import type { GPScene, TGLight, ViewportShading } from '../core/types';
 import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { defaultSettings, loadPrefs, savePrefs, snapIncrement, type AppCtx } from '../tools/context';
@@ -132,6 +132,8 @@ import type { AgentHost } from '../agent/types';
 import { setAgentCommandLister } from '../agent/tools';
 import { AgentRpc } from '../agent/rpc';
 import { AgentPanel } from '../agent/panel';
+import { WorldManager } from '../render/world';
+import { materialManager } from '../render/materialmgr';
 
 const DEFAULT_TOOL: Record<EditorMode, string> = {
   OBJECT: 'object-select', DRAW: 'draw', EDIT: 'select',
@@ -195,6 +197,8 @@ class App implements AppHandle {
   agentRpc!: AgentRpc;
   /** In-app chat session — owns its transcript across UI refreshes. */
   agent!: AgentPanel;
+  /** Environment: background + image-based lighting. */
+  world!: WorldManager;
   private nav!: Navigation;
   private navDrag: { mode: 'orbit' | 'pan' | 'dolly'; x: number; y: number } | null = null;
   private canvasGroup = new THREE.Group();
@@ -429,6 +433,13 @@ class App implements AppHandle {
     this.agentRpc = new AgentRpc(this.agentHost());
     this.agent = new AgentPanel(this.agentHost(), this.agentRpc);
 
+    // environment: one equirect source drives background + IBL. The live
+    // capture element is injected rather than imported so render/world.ts
+    // stays independent of the capture stack.
+    this.world = new WorldManager(this.glRenderer);
+    this.world.liveSource = () => mmCapture.sourceEl ?? null;
+    this.world.onChange = () => this.ui.refresh();
+
     // event IO (P2): MIDI is async and optional; WS connects if configured
     midi.init().then((ok) => {
       if (ok) {
@@ -568,6 +579,7 @@ class App implements AppHandle {
       ctx: this.ctx,
       execute: (q, args) => this.commands.execute(q, args),
       setMode: (m) => this.setMode(m),
+      setShading: (m) => this.setShading(m),
       setTool: (id) => this.setTool(id),
       snapView: (v) => this.snapView(v),
       addMeshObject: (kind, src, at) => this.addMeshObject(kind, src, at),
@@ -1304,6 +1316,8 @@ class App implements AppHandle {
       case 'newScene': this.newScene(); break;
       case 'viewAll': this.viewAll(); break;
       case 'quadView': this.toggleQuadView(); break;
+      case 'cycleShading': this.cycleShading(1); break;
+      case 'cycleShadingBack': this.cycleShading(-1); break;
       case 'parentSet': {
         if (ctx.settings.mode !== 'OBJECT') break;
         const active = this.objectPick.lastPicked;
@@ -1588,9 +1602,34 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** Viewport shading (Blender's four header buttons). This is a VIEW
+   *  preference, not scene data, so it is not undoable and persists in
+   *  prefs — the world it reveals is the scene's, the choice to look at
+   *  it is the user's. */
+  setShading(mode: ViewportShading): void {
+    this.ctx.settings.shading = mode;
+    this.savePrefs();
+    // meshes swap wireframe/lit state and GP re-evaluates against the new
+    // environment, so both halves of the pipeline need a rebuild
+    this.gp.markDirty();
+    this.ui.refresh();
+    this.ctx.requestRender();
+  }
+
+  /** Cycle shading forward (Z with no menu — Blender's shortcut). */
+  cycleShading(dir: 1 | -1 = 1): void {
+    const order: ViewportShading[] = ['WIREFRAME', 'SOLID', 'MATERIAL', 'RENDERED'];
+    const i = order.indexOf(this.ctx.settings.shading);
+    this.setShading(order[(i + dir + order.length) % order.length]);
+  }
+
   setBackground(rgb: [number, number, number]): void {
     this.ctx.settings.background = rgb;
-    (this.scene3.background as THREE.Color).copy(srgbColor(rgb));
+    // The world owns scene3.background (it may be an equirect texture, not a
+    // Color — the old unconditional `as THREE.Color` cast would throw once a
+    // 360 environment is active). Keep the SOLID world in step and let
+    // WorldManager.update apply it on the next frame.
+    this.ctx.scene.world.color = [...rgb];
     this.rebuildGrid(); // auto grid color tracks background unless overridden
     this.gp.markDirty();
   }
@@ -3122,6 +3161,13 @@ class App implements AppHandle {
     this.lights.selectionColor =
       ctx.settings.mode === 'OBJECT' && !this.presentation ? this.highlightColor() : null;
     this.lights.sync(ctx.scene);
+    // Blender semantics: Solid/Wireframe are modelling views lit by a fixed
+    // studio environment, so the scene's own lamps are held back until
+    // Material/Rendered. Material shows the world but still ignores lamps;
+    // only Rendered is the full scene.
+    this.lights.group.visible = ctx.settings.shading === 'RENDERED';
+    materialManager.shading = ctx.settings.shading;
+    this.world.update(this.scene3, ctx.scene, ctx.settings.shading, ctx.settings.upAxis === 'Z');
     this.paints.sync(ctx.scene, this.glRenderer.domElement.height);
     ctx.pickableMeshes = [
       ...ctx.scene.meshes

@@ -55,6 +55,10 @@ body {
   background: var(--panel); border-bottom: 1px solid var(--border);
   flex-wrap: wrap; min-height: 34px;
 }
+/* Spacer that shoves the viewport-shading cluster to the far right, the
+   way Blender parks it at the end of the 3D-view header. Zero basis so it
+   never widens the bar on its own — it only eats slack. */
+#topbar > .grow { flex: 1 1 0; min-width: 0; }
 #middle { flex: 1; display: flex; min-height: 0; }
 #toolbar {
   width: 44px; background: var(--panel); border-right: 1px solid var(--border);
@@ -270,6 +274,9 @@ input[type="checkbox"]:checked {
 .ctxmenu-item:hover { background: var(--accent); color: #fff; }
 .ctxmenu-item:hover .ctxmenu-hint { color: #dce7ff; }
 .ctxmenu-hint { color: var(--dim); font-size: 10px; }
+/* Explanatory line inside a panel: quieter than a field, wraps freely. */
+.hint { color: var(--dim); font-size: 10px; line-height: 1.4; }
+.hint.error { color: #ff8a6a; }
 .ctxmenu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 .row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .row.spread { justify-content: space-between; }

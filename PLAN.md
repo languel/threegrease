@@ -130,6 +130,17 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
       frustum gizmos, keys on timeline
 - [x] Settings dialog with preferences + rebindable shortcuts (localStorage)
 
+### World & viewport shading
+- [x] Viewport shading modes (Wireframe / Solid / Material / Rendered),
+      topbar buttons + `Z` / `Shift+Z` to cycle
+- [x] World panel (Scene tab): solid colour, gradient, equirectangular
+      image, video / live capture, three.js physical sky
+- [x] Environment lighting (IBL) with strength, plus background
+      visibility / intensity / blur and rotation about the world up axis
+- [x] 360 video environments, including live IBL from the footage
+- [ ] Environment texture node graph (Blender-style mapping/coords)
+- [ ] HDR/EXR loading (currently LDR images only)
+
 ### Blender parity gaps spotted in use (reference screenshots 2026-07-06)
 - [x] Drawing Plane: "Cursor" option (plane through the 3D cursor)
 - [x] Surface placement: Offset distance (project-onto-selected pending)

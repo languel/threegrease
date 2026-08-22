@@ -1,5 +1,5 @@
 import type { GPObject, GPScene, TGMaterial, Vec3 } from '../core/types';
-import { bumpIdCounter, createDefaultCamera, createImage, createMaterialDB, defaultLights, genId } from '../core/gpdata';
+import { bumpIdCounter, createDefaultCamera, createImage, createMaterialDB, createWorld, defaultLights, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
 import { sanitizePolyMesh } from '../core/polymesh';
 
@@ -7,7 +7,14 @@ const FORMAT = 'threegrease-scene';
 const VERSION = 3; // v3: MediaMime rigs + trigger select/parent (P11)
 
 export function serializeScene(scene: GPScene): string {
-  return JSON.stringify({ format: FORMAT, version: VERSION, scene }, null, 0);
+  // A blob: URL is a handle into THIS tab's memory — saving one produces a
+  // scene that silently fails to load its environment video on any other
+  // machine, or even in the same browser tomorrow. Drop it and let the
+  // world fall back; a real http(s) URL is saved as given.
+  const world = scene.world?.videoUrl?.startsWith('blob:')
+    ? { ...scene.world, videoUrl: '' } : scene.world;
+  return JSON.stringify(
+    { format: FORMAT, version: VERSION, scene: { ...scene, world } }, null, 0);
 }
 
 export function deserializeScene(json: string): GPScene {
@@ -62,6 +69,21 @@ export function deserializeScene(json: string): GPScene {
   // below, which runs after meshes/polyMeshes are defaulted)
   scene.images ??= [];
   scene.materials ??= [];
+  // pre-world saves had a flat background colour and no IBL; seed a SOLID
+  // world carrying that same colour so an old scene renders identically
+  scene.world ??= { ...createWorld(), color: [0.11, 0.11, 0.12] };
+  // forward-compat: a world saved before a field existed
+  const w = scene.world;
+  w.mode ??= 'SOLID';
+  w.skyColor ??= [0.32, 0.42, 0.58];
+  w.groundColor ??= [0.15, 0.13, 0.12];
+  w.imageId ??= null;
+  w.videoSource ??= 'CAMERA';
+  w.videoUrl ??= '';
+  w.sunElevation ??= 25; w.sunAzimuth ??= 180; w.turbidity ??= 2; w.rayleigh ??= 1;
+  w.rotation ??= 0; w.strength ??= 1;
+  w.backgroundVisible ??= true; w.backgroundIntensity ??= 1; w.blur ??= 0;
+  w.lighting ??= false;
   // pre-datablock saves had lighting hardcoded in the App constructor;
   // seed the same two lights so an old scene looks identical
   scene.lights ??= defaultLights();

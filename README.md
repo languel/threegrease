@@ -86,6 +86,17 @@ npm run dev     # open http://localhost:5199
   Blender-lite per-object Material panel — color, opacity, texture,
   unlit, two-sided, wireframe, world/face-view/camera lock, draw-target
   flag. Old canvas planes migrate automatically into these.
+- **World & viewport shading** (Scene tab): the environment behind the
+  scene and the light it casts. Pick a flat colour, a sky/ground gradient,
+  an equirectangular (2:1 lat-long) image, a **360 video** — a file, a URL,
+  or the live camera — or a physical sky with a movable sun. Whatever you
+  choose lights the meshes too, with strength, rotation, and background
+  visibility/brightness/blur as separate controls. The four shading
+  buttons at the right of the topbar (or `Z` / `Shift+Z`) switch between
+  Wireframe, Solid (a fixed studio light, world ignored — the modelling
+  view), Material (world, no scene lights), and Rendered (world + lights
+  + shadows). Local video opens as a session-only handle, so a saved
+  scene keeps the settings but not the file.
 - **Magnet snapping** (`Shift+Tab` or 🧲 in the topbar, works in every
   mode): one setting drives point moves (Edit `G/R/S`), the object
   translate widget (Object mode), and the 3D cursor drag (`Shift+RMB`).
@@ -133,6 +144,7 @@ defaults — open Settings (`,`) to rebind any of them.
 | `Ctrl+C/V` `Ctrl+Z` | copy/paste, undo |
 | `Ctrl+S` / `Ctrl+O` | save / open scene |
 | `Home` / `Shift+C` | frame all / center cursor & frame all |
+| `Z` / `Shift+Z` | cycle viewport shading forward / back |
 | `I` / `Shift+I` | insert / remove keyframe |
 | `Space` `←→` `↑↓` | play, step frame, jump keyframe |
 | MMB / RMB | orbit / pan · `Shift+RMB` drag-place the 3D cursor (snaps per the magnet) · plain `RMB` opens the object context menu |

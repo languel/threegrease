@@ -60,7 +60,7 @@ Key invariants:
 | Path | What lives there |
 | --- | --- |
 | `src/core/` | data model (`types.ts`), CRUD helpers (`gpdata.ts`), math (`mathutil.ts`), undo (`history.ts`) |
-| `src/render/` | stroke shader (`materials.ts`), geometry builders (`geometry.ts`), scene sync (`GPSceneRenderer.ts`) |
+| `src/render/` | stroke shader (`materials.ts`), geometry builders (`geometry.ts`), scene sync (`GPSceneRenderer.ts`), environment/IBL (`world.ts`) |
 | `src/modifiers/` | the 14 GP modifiers — pure functions `strokes → strokes` |
 | `src/fx/` | 9 screen-space visual effects (ping-pong pass pipeline) |
 | `src/tools/` | per-mode tools. `toolsys.ts` (Tool interface + manager), `projection.ts` (screen↔world, drawing planes, STROKE-placement depth snapping), `context.ts` (Settings + AppCtx) |
@@ -181,6 +181,32 @@ the browser console or automated evals:
   during that same pass (FOLLOW_PATH objects + legacy score cursors).
   Legacy `score.cursors`/`score.triggers` are a SEPARATE system that
   still runs in parallel; don't assume one implies the other.
+- The scene **world** (`scene.world`, `src/render/world.ts`) funnels every
+  mode — solid, gradient, equirect image, 360 video, physical sky — into
+  ONE texture that drives both `scene.background` and, via PMREM,
+  `scene.environment`. Viewport shading (`settings.shading`) is a VIEW
+  pref, not scene data: Solid/Wireframe ignore the world and use a fixed
+  studio light; only Material/Rendered show it. Four things here all fail
+  as an entirely black viewport, meshes included, and none of them throw:
+  - `PMREMGenerator` sizes its cube from `image.width / 4`, so a 2px-wide
+    ramp yields a degenerate atlas that lights everything black. Keep the
+    synthetic maps 256 wide even though the content doesn't need it.
+  - A `<video>` element reports `width`/`height` **0** — the real size is
+    `videoWidth`/`videoHeight`. PMREM on one gives a zero-height atlas →
+    `CUBEUV_MAX_MIP = Infinity` → the fragment shader fails to LINK, and
+    a failed link paints nothing while logging only to the console.
+  - `scene.background` can't carry a MOVING equirect: three converts it to
+    a cube once, caches it, and skips the conversion while `image.height`
+    is 0. Video worlds use their own inside-out sphere instead — spin it
+    about object Y (the pole), then re-frame about X for the up-axis;
+    spinning about Z tips the pole onto the horizon.
+  - three always puts an equirect's zenith at world **+Y**, so a Z-up
+    scene needs the env re-framed. `backgroundRotation`/`environmentRotation`
+    are Eulers three NEGATES and applies to the lookup direction, so the
+    spin sign is inverted relative to the image.
+  Also: `DataTexture` defaults `flipY:false`, so row 0 is v=0, which
+  `equirectUv` maps to `dir.y = -1` — fill these maps NADIR-first or the
+  sky renders upside down.
 - Background-tab rAF throttle (see Testing above) applies to constraint
   verification too — drive `constraintEngine.update(...)` and
   `score.update(...)` manually in a loop rather than awaiting wall-clock

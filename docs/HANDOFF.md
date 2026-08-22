@@ -533,3 +533,29 @@ other than their cause:
 Pages on push to `main` (feature branches build but don't deploy).
 `vite.config.ts` uses `base: './'` so the bundle runs from any subpath;
 verified by serving a production build under `/threegrease/`.
+
+## Session log (2026-08-22): viewport shading + scene world
+
+Blender's four viewport-shading modes and a World panel. Detail in
+IMPLEMENTATION_PLAN.md under "Viewport shading + scene world".
+
+- `TGWorld` on `GPScene` with five modes: solid colour, gradient,
+  equirectangular image, video/live, and three's physical sky. One source
+  feeds both the background and (via PMREM) the IBL.
+- `settings.shading` (`WIREFRAME`/`SOLID`/`MATERIAL`/`RENDERED`) with
+  buttons at the right end of the topbar and `Z` / `Shift+Z` to cycle.
+  Solid and Wireframe use a fixed studio light and ignore the world.
+- 360 video works, including as image-based light (re-derived at 2.5Hz
+  from a downscaled scratch canvas). Local files open as `blob:` URLs,
+  which `serializeScene` strips so a saved scene never carries a dead
+  handle.
+- New agent tool `world.set` (rotation in degrees on the wire, radians in
+  the model) — reaches MCP/ACP for free, like every other tool.
+
+**The lesson from this one:** four separate bugs all presented as a black
+viewport, and none of them was where the black was. Three came down to
+three.js sizing something from `image.width`/`image.height` — values that
+are 0 on a `<video>` element and near-zero on a 2px ramp — and the fourth
+was a shader that failed to compile, which does not throw. When the whole
+viewport goes black, check the console for a shader link failure before
+suspecting the thing you just changed.

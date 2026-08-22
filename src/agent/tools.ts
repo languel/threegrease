@@ -581,6 +581,66 @@ export const AGENT_TOOLS: AgentTool[] = [
     },
   },
   {
+    name: 'world.set',
+    description: 'Set the scene world (environment): background mode, colours, '
+      + 'environment image or 360 video, sky parameters, rotation, and how '
+      + 'strongly it lights the scene. Only the fields you pass are changed.',
+    inputSchema: obj({
+      mode: str('SOLID (flat colour), GRADIENT (sky/ground), EQUIRECT (a 2:1 '
+        + 'lat-long image from scene.images), VIDEO (360 footage or live '
+        + 'capture), SKY (physical sky model).',
+      { enum: ['SOLID', 'GRADIENT', 'EQUIRECT', 'VIDEO', 'SKY'] }),
+      color: vec3('SOLID background colour, linear 0..1.'),
+      skyColor: vec3('GRADIENT colour at the zenith, linear 0..1.'),
+      groundColor: vec3('GRADIENT colour at the nadir, linear 0..1.'),
+      imageId: num('EQUIRECT: id of an image in scene.images.'),
+      videoSource: str('VIDEO source.', { enum: ['CAMERA', 'URL'] }),
+      videoUrl: str('VIDEO url when videoSource is URL.'),
+      sunElevation: num('SKY: sun height in degrees above the horizon.'),
+      sunAzimuth: num('SKY: sun compass direction in degrees.'),
+      turbidity: num('SKY: haze, 1..20.'),
+      rayleigh: num('SKY: blueness of the scattering, 0..5.'),
+      rotation: num('Spin of the environment about the world up axis, in degrees.'),
+      strength: num('How strongly the world lights the scene (IBL multiplier).'),
+      lighting: bool('Whether the world lights the scene at all.'),
+      backgroundVisible: bool('Whether the world is drawn behind the scene.'),
+      backgroundIntensity: num('Brightness of the visible background only.'),
+      blur: num('Background defocus, 0..1. Ignored for VIDEO.'),
+      shading: str('Viewport shading. The world is only VISIBLE in MATERIAL '
+        + 'and RENDERED; SOLID and WIREFRAME use a fixed studio light.',
+      { enum: ['WIREFRAME', 'SOLID', 'MATERIAL', 'RENDERED'] }),
+    }),
+    mutates: true,
+    handler: (host, args) => {
+      const w = host.ctx.scene.world;
+      const setNum = (k: 'sunElevation' | 'sunAzimuth' | 'turbidity' | 'rayleigh'
+        | 'strength' | 'backgroundIntensity' | 'blur' | 'imageId') => {
+        if (args[k] !== undefined) (w as unknown as Record<string, unknown>)[k] = Number(args[k]);
+      };
+      const setBool = (k: 'lighting' | 'backgroundVisible') => {
+        if (args[k] !== undefined) w[k] = !!args[k];
+      };
+      const setVec = (k: 'color' | 'skyColor' | 'groundColor') => {
+        const v = args[k];
+        if (Array.isArray(v) && v.length === 3) w[k] = v.map(Number) as [number, number, number];
+      };
+      if (args.mode) w.mode = args.mode as typeof w.mode;
+      if (args.videoSource) w.videoSource = args.videoSource as typeof w.videoSource;
+      if (args.videoUrl !== undefined) w.videoUrl = String(args.videoUrl);
+      // degrees on the wire, radians in the model — an LLM reasons about
+      // "turn it 90 degrees", not about 1.5707963
+      if (args.rotation !== undefined) w.rotation = Number(args.rotation) * Math.PI / 180;
+      for (const k of ['sunElevation', 'sunAzimuth', 'turbidity', 'rayleigh',
+        'strength', 'backgroundIntensity', 'blur', 'imageId'] as const) setNum(k);
+      for (const k of ['lighting', 'backgroundVisible'] as const) setBool(k);
+      for (const k of ['color', 'skyColor', 'groundColor'] as const) setVec(k);
+      if (args.shading) {
+        host.setShading(args.shading as import('../core/types').ViewportShading);
+      }
+      return { world: w, shading: host.ctx.settings.shading };
+    },
+  },
+  {
     name: 'scene.set_frame',
     description: 'Move the playhead to a frame.',
     inputSchema: obj({ frame: num('Frame number.') }, ['frame']),
