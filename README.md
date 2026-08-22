@@ -86,6 +86,24 @@ npm run dev     # open http://localhost:5199
   Blender-lite per-object Material panel — color, opacity, texture,
   unlit, two-sided, wireframe, world/face-view/camera lock, draw-target
   flag. Old canvas planes migrate automatically into these.
+- **Actors** (Add ▸ Actor, then the Actor tab): a rigged mannequin you can
+  throw around, pose by hand, or drive from a webcam. The skeleton is
+  *positional* — joints are particles, bones are distance constraints — so
+  one solver covers ragdoll physics, motion capture and IK. **Simulate**
+  turns on gravity and joint limits; **Tone** is muscle tone (0 collapses
+  into a heap, the default holds a stance). Four ways to drive it:
+  - **Markers** — every joint pinned 1:1 to a capture landmark. Exact.
+  - **Angles** — copies bone *directions* but keeps the character's own
+    limb lengths, so a tall performer can drive a short character.
+  - **IK** — wrists, ankles and head as goals; the limbs are solved.
+  - **Manual** — the Actor Pose tool (Object mode toolbar): drag any joint
+    and the rest of the body follows through the bones; Shift+click pins a
+    joint so the rest hangs off it. MIDI/OSC can drive joints too, via
+    `actor.<id>.joint.<name>.<x|y|z>` routes.
+
+  Auto-bind maps joints to the standard 33-point pose model by name, and
+  **Match size** rescales the captured body to your character so it never
+  stretches or floats.
 - **World & viewport shading** (Scene tab): the environment behind the
   scene and the light it casts. Pick a flat colour, a sky/ground gradient,
   an equirectangular (2:1 lat-long) image, a **360 video** — a file, a URL,

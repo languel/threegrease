@@ -66,6 +66,7 @@ Key invariants:
 | `src/tools/` | per-mode tools. `toolsys.ts` (Tool interface + manager), `projection.ts` (screen↔world, drawing planes, STROKE-placement depth snapping), `context.ts` (Settings + AppCtx) |
 | `src/anim/` | playback (`player.ts`), stroke interpolation (`interpolate.ts`), camera eval/keys (`camera.ts`) |
 | `src/app/` | `main.ts` (App class: three setup, input routing, render loop), `ui.ts` (ALL DOM panels), `nav.ts` (views/gizmo/fly/ortho), `keymap.ts` (rebindable shortcuts), `styles.css` |
+| `src/actor/` | rigged characters — skeleton (`skeleton.ts`), physics/kinematics (`solver.ts`), auto-rigging (`rig.ts`) |
 | `src/agent/` | LLM agent interface — `tools.ts` (the ONE tool registry), `providers.ts` (local + hosted), `session.ts` (agent loop), `rpc.ts` (WS JSON-RPC), `panel.ts` (chat state). See `docs/AGENT.md` |
 | `agent/` | Node bridges: `relay.js`, `mcp-server.js`, `acp-server.js`, `selftest.js` |
 
@@ -124,6 +125,13 @@ the browser console or automated evals:
   `location.reload()` first if files changed mid-session. Also NEVER
   `import('/node_modules/...')` in an eval — vite re-optimizes deps and
   silently reloads the page mid-test (state loss looks like a heisenbug).
+- **In an eval, reach module singletons through `window.__tg.sys`, never
+  through `import()`.** After ANY file is edited in a session vite serves
+  modules at `?t=<stamp>` URLs, so `await import('/src/mm/streams.ts')`
+  returns a SECOND instance of the module with its OWN `streamStore` /
+  `actorSolver` / etc. Writes into it are invisible to the running app and
+  nothing throws — the feature under test just silently does nothing.
+  `App.sys` re-exports the app's own instances for exactly this.
 - Fly mode (Blender semantics): `~` starts, Enter/click accepts, Esc
   teleports back to the start pose. Pointer lock swallows the Esc keydown,
   so cancel is detected via `pointerlockchange` + the `flyStopping` flag in
@@ -211,6 +219,31 @@ the browser console or automated evals:
   verification too — drive `constraintEngine.update(...)` and
   `score.update(...)` manually in a loop rather than awaiting wall-clock
   frames when testing FOLLOW_PATH/TRIGGER behavior headlessly.
+
+- **Actors** (`scene.actors`, `src/actor/`) are rigged characters whose
+  skeleton is POSITIONAL: a joint is a particle, a bone is a distance
+  constraint. That is what lets ONE solver do ragdoll physics, 1:1 marker
+  capture, angle retargeting and IK (FABRIK is native to positions).
+  Rotations are DERIVED for display, never stored. Things to know:
+  - Nothing writes `actor.pose` directly. Rigs, the pose tool and MIDI/OSC
+    routes all push `JointTarget`s into `actorSolver`, so the body answers
+    with physics instead of the joint tearing off the skeleton. A pinned
+    joint has zero inverse mass, which is what makes a pinned wrist DRAG
+    the arm rather than the arm dragging the wrist.
+  - Positions are ACTOR-LOCAL, so the object transform (and any parent's)
+    carries the whole ragdoll. Gravity is rotated into that space; steps
+    run at a fixed 1/120 so stiffness does not track the frame rate.
+  - `physics.tone` (pull toward the rest pose) is the difference between a
+    character and a heap: at 0 it collapses, at ~0.06 it holds a stance.
+  - Joint NAMES are the auto-rig table's keys and match the MediaPipe pose
+    vocabulary deliberately. `chest` sits ON the shoulder line because it
+    binds to the shoulder MIDPOINT (a pose model has no chest point); if
+    its rest position were anatomically lower, angle retargeting would
+    shorten the figure every frame. `neck` is intentionally unbound.
+  - `rig.matchScale` rescales captured data to the actor about the
+    PERFORMER'S FEET before any mode sees it. Without it every mode
+    inherits the performer's dimensions — MARKERS stretches bones, IK
+    leaves the character floating.
 
 ## Where to pick up (roadmap, rough priority)
 

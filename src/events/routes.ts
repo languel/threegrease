@@ -5,6 +5,7 @@ import type { AppCtx } from '../tools/context';
 import type { TGRoute } from '../core/types';
 import { activeObject } from '../core/gpdata';
 import { bus, addressMatches, type TGEvent } from './bus';
+import { actorSolver } from '../actor/solver';
 
 interface ResolvedTarget {
   set(v: number): void;
@@ -18,6 +19,8 @@ interface ResolvedTarget {
  *   layer.<id>.opacity|thicknessOffset      object.opacity? (no)
  *   modifier.<id>.<numeric param>           effect.<id>.<numeric param>
  *   cursor.<id>.speed|phase|rate            trigger.<id>.radius
+ *   actor.<id>.joint.<name>.<x|y|z>         actor.<id>.gravity|tone|damping
+ *   actor.<id>.strength|smoothing|opacity   actor.<id>.tx..rz
  *   camera.<index>.fov                      canvas.<id>.tx|ty|tz|rx|ry|rz
  *   cursor3d.x|y|z (the 3D cursor)          frame (scene frame number)
  */
@@ -96,6 +99,43 @@ export function resolveTarget(ctx: AppCtx, path: string): ResolvedTarget | null 
         rz: () => ({ set: (v) => { canvas.rotation[2] = num(v); }, dirty: 'canvas' }),
       };
       return map[seg[2]]?.() ?? null;
+    }
+    case 'actor': {
+      const actor = scene.actors.find((a) => a.id === Number(seg[1]));
+      if (!actor) return null;
+      // actor.<id>.joint.<name>.<x|y|z> — a joint GOAL, not a pose write.
+      // Routed values go through the same target queue as capture and the
+      // pose tool, so a knob moves a hand and the arm follows it; writing
+      // the pose here would tear the joint off the skeleton instead.
+      if (seg[2] === 'joint') {
+        const index = actor.joints.findIndex((j) => j.name === seg[3]);
+        if (index < 0) return null;
+        const axis = { x: 0, y: 1, z: 2 }[seg[4] as 'x' | 'y' | 'z'];
+        if (axis === undefined) return null;
+        return {
+          set: (v) => {
+            const pos = [...actor.pose[index]] as [number, number, number];
+            pos[axis] = num(v);
+            actorSolver.addTarget(actor.id, { index, pos, weight: 1 });
+          },
+          dirty: 'render',
+        };
+      }
+      const fields: Record<string, () => ResolvedTarget> = {
+        gravity: () => ({ set: (v) => { actor.physics.gravity = num(v); }, dirty: 'none' }),
+        damping: () => ({ set: (v) => { actor.physics.damping = Math.max(0, Math.min(1, num(v))); }, dirty: 'none' }),
+        tone: () => ({ set: (v) => { actor.physics.tone = Math.max(0, Math.min(1, num(v))); }, dirty: 'none' }),
+        strength: () => ({ set: (v) => { actor.rig.strength = Math.max(0, Math.min(1, num(v))); }, dirty: 'none' }),
+        smoothing: () => ({ set: (v) => { actor.rig.smoothing = Math.max(0, Math.min(0.99, num(v))); }, dirty: 'none' }),
+        opacity: () => ({ set: (v) => { actor.opacity = Math.max(0, Math.min(1, num(v))); }, dirty: 'render' }),
+        tx: () => ({ set: (v) => { actor.translation[0] = num(v); }, dirty: 'render' }),
+        ty: () => ({ set: (v) => { actor.translation[1] = num(v); }, dirty: 'render' }),
+        tz: () => ({ set: (v) => { actor.translation[2] = num(v); }, dirty: 'render' }),
+        rx: () => ({ set: (v) => { actor.rotation[0] = num(v); }, dirty: 'render' }),
+        ry: () => ({ set: (v) => { actor.rotation[1] = num(v); }, dirty: 'render' }),
+        rz: () => ({ set: (v) => { actor.rotation[2] = num(v); }, dirty: 'render' }),
+      };
+      return fields[seg[2]]?.() ?? null;
     }
     case 'attractor': {
       const at = scene.attractors.find((a) => a.id === Number(seg[1]));

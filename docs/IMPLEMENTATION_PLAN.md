@@ -2430,3 +2430,102 @@ to be 0.
 pass, so it does not apply to the video sky mesh; the UI says so rather
 than leaving a dead slider. The live-capture (`CAMERA`) branch shares the
 video path but has not been exercised end to end.
+
+## Actors: rigged characters (ragdoll + capture rigging)
+
+A new subproject: characters that can be thrown around, posed by hand, or
+driven live from motion capture, MIDI/OSC or an agent.
+
+**The one decision everything follows from: the skeleton is POSITIONAL.**
+A joint is a particle with a position; a bone is a distance constraint
+between two of them. Rotations are derived for display and never stored.
+The alternative — a rotational skeleton with a quaternion per bone — is
+the conventional choice, and it is the wrong one here, because three of
+the four things an actor has to do would each need their own conversion:
+
+| need | positional | rotational |
+| --- | --- | --- |
+| ragdoll | verlet + PBD, directly | convert, simulate, convert back |
+| 1:1 capture | pin the particle | solve rotations from positions |
+| angle retarget | direction × our length | native |
+| IK | FABRIK is native | needs a positional solve anyway |
+
+**Nothing writes the pose.** Rigs, the pose tool and route drivers all
+push `JointTarget`s into the solver, so every input arrives through one
+door and the body answers with physics — a captured wrist DRAGS the arm
+rather than teleporting it. Inverse-mass weighting is what makes that read
+correctly: a pinned joint has zero inverse mass, so a bone's whole
+correction lands on the other end.
+
+Positions are actor-LOCAL, so the object transform (and any parent's)
+carries the ragdoll — an actor can ride a moving platform. Gravity is
+rotated into that space per step, and steps run at a fixed 1/120: a
+ragdoll integrated on a variable frame time changes stiffness whenever the
+frame rate does, so the same character would behave differently on a fast
+machine.
+
+`physics.tone` — a gentle pull back toward the rest pose — is the
+parameter that decides whether you have a character or a heap. Measured
+head height (rest 1.62): 0.16 at tone 0, 1.61 at the 0.06 default.
+
+### The rig modes, and what went wrong
+
+Joint names match the MediaPipe pose vocabulary on purpose: that is what
+lets `autoRig()` bind from a name table with no user input. Joints the
+capture model lacks bind to the MIDPOINT of a left/right pair.
+
+Verified against a synthetic performer at 1.8 and 2.6 units, arms raised.
+Three real modelling errors surfaced, none of which threw:
+
+- **`chest` was anatomically correct and therefore wrong.** It binds to
+  the shoulder midpoint — the only torso point a pose model offers — but
+  its rest position sat below the shoulder line. The captured
+  chest→shoulder direction was horizontal where ours pointed up, so angle
+  retargeting shortened the figure every frame, ~0.5 units of height. The
+  joint now sits ON the shoulder line, where the data says it is.
+- **`neck` bound to that same midpoint**, so a 1:1 pin collapsed the bone
+  between chest and neck. It is now deliberately unbound.
+- **Every mode inherited the performer's DIMENSIONS.** `matchScale` now
+  rescales captured data to the actor before any mode sees it, about the
+  PERFORMER'S FEET — scaling about the hips or the origin fixes the size
+  but slides the character off the spot they are standing on. This is what
+  fixed MARKERS stretching bones 16% and IK floating the character half a
+  metre off the ground.
+
+Final numbers, same character, performer 44% taller (rest 0.022 / 1.62 /
+0.292 / 0.437):
+
+```
+              footZ   headZ   upperArm  thigh
+  MARKERS 1.8  0.054   1.624   0.278     0.437
+  MARKERS 2.6  0.057   1.659   0.278     0.437
+  ANGLES  2.6  0.060   1.656   0.280     0.437
+  IK      2.6  0.054   1.663   0.280     0.437
+```
+
+ANGLES also falls back to a bone's own rest direction when either end is
+untracked, so unbound joints keep the actor's shape instead of collapsing.
+
+### Live control
+
+- **Actor Pose tool** (Object mode toolbar): drag a joint in the
+  camera-facing plane through it; Shift+click pins. The dragged joint is
+  pinned for the duration of the drag — without that the bones pull it out
+  from under the cursor and the drag feels like elastic.
+- **Routes**: `actor.<id>.joint.<name>.<x|y|z>` plus gravity/tone/damping/
+  strength/smoothing/opacity and the object transform.
+- **Agent**: `actor.create`, `actor.rig`, `actor.pose`.
+
+### Testing note that cost real time
+
+`await import('/src/mm/streams.ts')` in a browser eval returns a SECOND
+instance of the module once vite is serving `?t=` URLs (which it is after
+any edit in the session). Frames pushed into its `streamStore` are
+invisible to the running app, nothing errors, and the rig simply does
+nothing. `App.sys` now re-exports the app's own singletons; use it.
+
+### Not done
+
+Self-collision between limbs, pose keyframing, skinned meshes, foot
+locking (feet still slide), and hand/face rigs from the HAND_*/FACE
+streams.

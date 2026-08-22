@@ -521,6 +521,7 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['object-select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
     ['object-select-lasso', 'lasso', 'Lasso select'],
     ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
+    ['actorpose', 'actor', 'Pose actor — drag a joint (the body follows through physics); Shift+click pins/unpins it'],
   ],
   DRAW: [
     ['draw', 'pencil', 'Draw (D)'], ['erase', 'eraser', 'Erase (E)'],

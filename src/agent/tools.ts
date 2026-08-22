@@ -21,6 +21,8 @@ import {
 import { listSelected, objectName, getObjectTransform, setObjectTransform, deleteObject } from '../tools/objects';
 import type { ObjRef } from '../tools/objects';
 import { BRUSH_PRESETS } from '../core/brushes';
+import { autoRig } from '../actor/rig';
+import { actorSolver } from '../actor/solver';
 
 // ---- schema helpers -------------------------------------------------------
 
@@ -88,7 +90,8 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'scene.summary',
     description:
       'Compact overview of the whole scene: mode, frame, GP objects with their layers and stroke counts, '
-      + 'meshes, lights, materials, and the active selection. Start here — it is small enough to read in full '
+      + 'meshes, lights, materials, actors, capture streams, and the active selection. Start here — it is '
+      + 'small enough to read in full '
       + 'and tells you the ids every other tool needs.',
     inputSchema: obj({}),
     handler: ({ ctx }) => {
@@ -121,6 +124,13 @@ export const AGENT_TOOLS: AgentTool[] = [
           id: l.id, name: l.name, kind: l.kind, intensity: r3(l.intensity), castShadow: l.castShadow,
         })),
         splats: s.splats.map((x) => ({ id: x.id, name: x.name })),
+        actors: s.actors.map((a) => ({
+          id: a.id, name: a.name, rig: a.rig.mode, streamId: a.rig.streamId,
+          simulating: a.physics.enabled, joints: a.joints.map((j) => j.name),
+        })),
+        streams: s.mmStreams.map((st) => ({
+          id: st.id, name: st.name, kind: st.kind, source: st.source,
+        })),
         selection: listSelected(s).map((r) => ({ kind: r.kind, id: r.id, name: objectName(s, r) })),
       };
     },
@@ -578,6 +588,120 @@ export const AGENT_TOOLS: AgentTool[] = [
       if (args.view) host.snapView(args.view as 'FRONT');
       if (args.frameAll) host.viewAll();
       return { view: args.view ?? null, framed: !!args.frameAll };
+    },
+  },
+  {
+    name: 'actor.create',
+    description: 'Add a rigged mannequin (an "actor") to the scene, standing '
+      + 'at a position. Returns its id and joint names.',
+    inputSchema: obj({
+      at: vec3('Where to stand it (defaults to the 3D cursor).'),
+    }),
+    mutates: true,
+    handler: (host, args) => {
+      const at = Array.isArray(args.at) && args.at.length === 3
+        ? args.at.map(Number) as [number, number, number] : undefined;
+      host.addActor(at);
+      const actor = host.ctx.scene.actors[host.ctx.scene.actors.length - 1];
+      return actor
+        ? { id: actor.id, name: actor.name, joints: actor.joints.map((j) => j.name) }
+        : { error: 'actor was not created' };
+    },
+  },
+  {
+    name: 'actor.rig',
+    description: 'Configure an actor: ragdoll physics, and how it is driven. '
+      + 'Rig modes — MARKERS pins each joint to its capture landmark 1:1 '
+      + '(exact, inherits the performer\u2019s proportions); ANGLES copies bone '
+      + 'directions but keeps the actor\u2019s own limb lengths (retargets across '
+      + 'body shapes); IK uses wrists/ankles/head as goals; MANUAL leaves it '
+      + 'to dragging and routes; NONE is a free ragdoll. Only the fields you '
+      + 'pass are changed.',
+    inputSchema: obj({
+      id: num('Actor id (from actor.create or scene.summary).'),
+      mode: str('Rig mode.', { enum: ['NONE', 'MARKERS', 'ANGLES', 'IK', 'MANUAL'] }),
+      streamId: num('MediaMime stream to drive it from.'),
+      autoBind: bool('Bind joints to the standard 33-point pose landmarks by name.'),
+      strength: num('How hard capture pulls the joints, 0..1.'),
+      smoothing: num('Smoothing on captured targets, 0..0.95.'),
+      matchSize: bool('Rescale the captured body to this actor\u2019s size.'),
+      simulate: bool('Run ragdoll physics.'),
+      gravity: num('Gravity, world units/s^2.'),
+      tone: num('Muscle tone 0..0.5 — pull back toward the rest pose. 0 collapses.'),
+      damping: num('Velocity retained per step, 0.8..1.'),
+      floor: bool('Collide with the ground plane.'),
+      shape: str('How it draws.', { enum: ['CAPSULE', 'STICK', 'BOTH'] }),
+      resetPose: bool('Return to the T-pose and clear the simulation velocity.'),
+    }, ['id']),
+    mutates: true,
+    handler: (host, args) => {
+      const actor = host.ctx.scene.actors.find((a) => a.id === Number(args.id));
+      if (!actor) return { error: `no actor with id ${args.id}` };
+      const { rig, physics } = actor;
+      if (args.mode) rig.mode = args.mode as typeof rig.mode;
+      if (args.streamId !== undefined) rig.streamId = Number(args.streamId);
+      if (args.strength !== undefined) rig.strength = Number(args.strength);
+      if (args.smoothing !== undefined) rig.smoothing = Number(args.smoothing);
+      if (args.matchSize !== undefined) rig.matchScale = !!args.matchSize;
+      if (args.autoBind) rig.bindings = autoRig(actor, rig.streamId);
+      if (args.simulate !== undefined) physics.enabled = !!args.simulate;
+      if (args.gravity !== undefined) physics.gravity = Number(args.gravity);
+      if (args.tone !== undefined) physics.tone = Number(args.tone);
+      if (args.damping !== undefined) physics.damping = Number(args.damping);
+      if (args.floor !== undefined) physics.floor = !!args.floor;
+      if (args.shape) actor.shape = args.shape as typeof actor.shape;
+      if (args.resetPose) host.resetActor(actor.id);
+      return {
+        id: actor.id, mode: rig.mode, streamId: rig.streamId,
+        bindings: rig.bindings.length, simulate: physics.enabled,
+      };
+    },
+  },
+  {
+    name: 'actor.pose',
+    description: 'Move an actor\u2019s joints by name. Positions are GOALS fed to '
+      + 'the same solver capture uses, so the rest of the body follows through '
+      + 'the bones rather than the joint tearing loose. Pin a joint to hold it '
+      + 'in place while the rest hangs off it.',
+    inputSchema: obj({
+      id: num('Actor id.'),
+      joints: {
+        type: 'array',
+        description: 'Joints to move and/or pin.',
+        items: obj({
+          name: str('Joint name, e.g. "wrist.L", "head", "hips".'),
+          at: vec3('Target position in ACTOR-LOCAL space (origin at the actor).'),
+          pin: bool('Hold this joint in place.'),
+          weight: num('0..1 pull toward `at`; 1 is a hard pin. Default 1.'),
+        }, ['name']),
+      } as JsonSchema,
+    }, ['id', 'joints']),
+    mutates: true,
+    handler: (host, args) => {
+      const actor = host.ctx.scene.actors.find((a) => a.id === Number(args.id));
+      if (!actor) return { error: `no actor with id ${args.id}` };
+      const list = Array.isArray(args.joints) ? args.joints : [];
+      const applied: string[] = [];
+      const unknown: string[] = [];
+      for (const raw of list) {
+        const spec = raw as Record<string, unknown>;
+        const index = actor.joints.findIndex((j) => j.name === String(spec.name));
+        if (index < 0) { unknown.push(String(spec.name)); continue; }
+        if (spec.pin !== undefined) actor.joints[index].pin = !!spec.pin;
+        const at = spec.at;
+        if (Array.isArray(at) && at.length === 3) {
+          actorSolver.addTarget(actor.id, {
+            index,
+            pos: at.map(Number) as [number, number, number],
+            weight: spec.weight === undefined ? 1 : Number(spec.weight),
+          });
+        }
+        applied.push(String(spec.name));
+      }
+      return {
+        applied,
+        ...(unknown.length ? { unknown, available: actor.joints.map((j) => j.name) } : {}),
+      };
     },
   },
   {

@@ -233,7 +233,7 @@ in the `PROVIDERS` registry in `providers.ts`, not new transport code.
 
 ## Tools
 
-Run `tools/list`, or ask the model, for the live set. Currently 21:
+Run `tools/list`, or ask the model, for the live set. Currently 24:
 
 - **Query** — `scene.summary`, `scene.strokes`, `scene.materials`, `view.screenshot`
 - **Draw** — `stroke.create`, `stroke.delete`, `stroke.transform`
@@ -241,6 +241,9 @@ Run `tools/list`, or ask the model, for the live set. Currently 21:
 - **Style** — `material.update`, `brush.set`, `layer.create`, `layer.update`
 - **World** — `world.set` (environment mode + colours/image/video/sky,
   rotation, IBL strength, and viewport shading)
+- **Actors** — `actor.create`, `actor.rig` (physics + how it is driven),
+  `actor.pose` (move joints by name; positions are GOALS, so the body
+  follows through the bones)
 - **App** — `app.command`, `app.commands`, `app.set_mode`, `view.set`, `scene.set_frame`
 
 `app.command` reaches the whole command palette by fuzzy match, so anything

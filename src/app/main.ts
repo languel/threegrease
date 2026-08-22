@@ -107,6 +107,7 @@ import { unwrap } from '../core/uvunwrap';
 import { PolyMeshManager } from '../render/polymesh';
 import { LightManager } from '../render/lights';
 import { ActorManager } from '../render/actors';
+import { ActorPoseTool } from '../tools/actorpose';
 import { createHumanoid, resetPose } from '../actor/skeleton';
 import { autoRig } from '../actor/rig';
 import { actorSolver } from '../actor/solver';
@@ -437,6 +438,7 @@ class App implements AppHandle {
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
       this.polyPen, this.polyBuild, this.quadPatch, new SplatPaintTool(), new TexturePaintTool(),
+      new ActorPoseTool(),
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
 
@@ -599,6 +601,8 @@ class App implements AppHandle {
       execute: (q, args) => this.commands.execute(q, args),
       setMode: (m) => this.setMode(m),
       setShading: (m) => this.setShading(m),
+      addActor: (at) => this.addActor(at),
+      resetActor: (id) => this.resetActor(id),
       setTool: (id) => this.setTool(id),
       snapView: (v) => this.snapView(v),
       addMeshObject: (kind, src, at) => this.addMeshObject(kind, src, at),

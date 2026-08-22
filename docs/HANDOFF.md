@@ -559,3 +559,28 @@ are 0 on a `<video>` element and near-zero on a 2px ramp — and the fourth
 was a shader that failed to compile, which does not throw. When the whole
 viewport goes black, check the console for a shader link failure before
 suspecting the thing you just changed.
+
+## Session log (2026-08-22b): actors — rigged characters
+
+New subproject. Detail in IMPLEMENTATION_PLAN.md under "Actors".
+
+- `TGActor` in `scene.actors`, a first-class object (`ObjKind` 'ACTOR'):
+  selection, transform, parenting, outliner, constraints.
+- `src/actor/` — `skeleton.ts` (the default 21-joint mannequin),
+  `solver.ts` (verlet + PBD + FABRIK), `rig.ts` (auto-rigging).
+- Viewport shading, physics params and rig setup live in a new Actor tab.
+- Actor Pose tool for dragging joints; `actor.*` route targets for
+  MIDI/OSC; `actor.create/rig/pose` agent tools.
+
+**The design point worth keeping:** the skeleton is positional, not
+rotational, and nothing writes the pose — every input (capture, mouse,
+MIDI, agent) pushes a target into one solver. That is why a captured wrist
+drags the whole arm instead of tearing off the skeleton, and why adding a
+new input source needs no new posing code.
+
+**The lesson:** three of the four bugs in the rigging pass were modelling
+errors that looked like physics bugs. The figure kept shrinking, and the
+cause was that `chest` binds to the shoulder MIDPOINT while its rest
+position sat anatomically below the shoulders — the captured direction and
+ours disagreed, so retargeting lost height every frame. When a rig drifts,
+suspect the correspondence between joint and landmark before the solver.

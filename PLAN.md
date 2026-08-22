@@ -141,6 +141,23 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [ ] Environment texture node graph (Blender-style mapping/coords)
 - [ ] HDR/EXR loading (currently LDR images only)
 
+### Actors (rigged characters)
+- [x] Default humanoid mannequin (21 joints, 20 bones, joint limits)
+- [x] Positional skeleton: joints as particles, bones as distance
+      constraints — one solver for physics AND kinematics
+- [x] Ragdoll: verlet + PBD projection, joint limits, muscle tone, floor
+- [x] FABRIK IK on joint positions
+- [x] Auto-rig from capture: MARKERS (1:1), ANGLES (retarget), IK
+- [x] Size matching so a performer of any height drives any character
+- [x] Live posing: drag a joint (Actor Pose tool), Shift+click to pin
+- [x] MIDI/OSC/WS routes — `actor.<id>.joint.<name>.<x|y|z>` and physics
+- [x] Agent tools `actor.create` / `actor.rig` / `actor.pose`
+- [ ] Self-collision between limbs
+- [ ] Pose library + keyframing an actor's pose onto the timeline
+- [ ] Skinned mesh (bind an imported character to the skeleton)
+- [ ] Foot IK / ground locking so feet stop sliding
+- [ ] Hand and face rigs from the HAND_*/FACE streams
+
 ### Blender parity gaps spotted in use (reference screenshots 2026-07-06)
 - [x] Drawing Plane: "Cursor" option (plane through the 3D cursor)
 - [x] Surface placement: Offset distance (project-onto-selected pending)
