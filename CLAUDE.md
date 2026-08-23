@@ -244,6 +244,14 @@ the browser console or automated evals:
     PERFORMER'S FEET before any mode sees it. Without it every mode
     inherits the performer's dimensions — MARKERS stretches bones, IK
     leaves the character floating.
+  - Any object can attach to a JOINT, not just an actor's root: give a
+    COPY_LOCATION/COPY_ROTATION/TRACK_TO/LIMIT_DISTANCE/SPRING constraint
+    a `target` of kind `ACTOR` plus `targetJoint` (a joint name). Position
+    comes straight from the live pose; `jointWorldMatrix()`
+    (`src/actor/skeleton.ts`) DERIVES an orientation for COPY_ROTATION
+    from the bone leading into that joint, since joints store no rotation
+    of their own — a prop parented to `hand.R` therefore also tips with
+    the forearm, not just translates with the hand.
 
 ## Where to pick up (roadmap, rough priority)
 

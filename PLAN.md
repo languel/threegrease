@@ -152,6 +152,10 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Live posing: drag a joint (Actor Pose tool), Shift+click to pin
 - [x] MIDI/OSC/WS routes — `actor.<id>.joint.<name>.<x|y|z>` and physics
 - [x] Agent tools `actor.create` / `actor.rig` / `actor.pose`
+- [x] Attach any object to a rig control: COPY_LOCATION/COPY_ROTATION/
+      TRACK_TO/LIMIT_DISTANCE/SPRING constraints can target a specific
+      joint (not just the actor root) — props on a hand, a camera on
+      the head, an empty tracking a foot for ground locking later
 - [ ] Self-collision between limbs
 - [ ] Pose library + keyframing an actor's pose onto the timeline
 - [ ] Skinned mesh (bind an imported character to the skeleton)

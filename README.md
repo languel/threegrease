@@ -104,6 +104,13 @@ npm run dev     # open http://localhost:5199
   Auto-bind maps joints to the standard 33-point pose model by name, and
   **Match size** rescales the captured body to your character so it never
   stretches or floats.
+
+  Any object can also attach to a specific joint instead of the actor's
+  root: on the object's Constraints tab, add Copy Location (or Copy
+  Rotation, Track To, Limit Distance, Spring), set its Target to the
+  actor, and a **Joint** dropdown appears — pick `hand.R` for a held prop,
+  `head` for a first-person camera, and so on. The object rides that
+  joint's live pose, physics included.
 - **World & viewport shading** (Scene tab): the environment behind the
   scene and the light it casts. Pick a flat colour, a sky/ground gradient,
   an equirectangular (2:1 lat-long) image, a **360 video** — a file, a URL,

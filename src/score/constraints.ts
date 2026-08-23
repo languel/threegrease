@@ -16,6 +16,7 @@ import {
 import { streamLandmarkWorld, streamStore, streamWorldMatrix } from '../mm/streams';
 import { meshLocalBounds } from '../tools/objectops';
 import { intersectsSpherePolyMesh, polyMeshWorldPrimitives } from '../core/polyspatial';
+import { jointWorldMatrix } from '../actor/skeleton';
 
 export function constraintsOf(scene: GPScene, ref: ObjRef): TGConstraint[] {
   const e =
@@ -24,6 +25,7 @@ export function constraintsOf(scene: GPScene, ref: ObjRef): TGConstraint[] {
     ref.kind === 'SPLAT' ? scene.splats.find((s) => s.id === ref.id) :
     ref.kind === 'TRIGGER' ? scene.score.triggers.find((t) => t.id === ref.id) :
     ref.kind === 'STREAM' ? scene.mmStreams.find((st) => st.id === ref.id) :
+    ref.kind === 'ACTOR' ? scene.actors.find((a) => a.id === ref.id) :
     undefined;
   return (e as { constraints?: TGConstraint[] } | undefined)?.constraints ?? [];
 }
@@ -35,6 +37,37 @@ function worldToLocalTranslation(scene: GPScene, ref: ObjRef, world: THREE.Vecto
 
 function worldPos(scene: GPScene, ref: ObjRef): THREE.Vector3 {
   return new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
+}
+
+/**
+ * A constraint's target position, riding a JOINT when the target is an
+ * actor and one is set (see TGConstraint.targetJoint) — otherwise the
+ * target object's ordinary root position. This is the one seam that lets
+ * "attach to a rig control" reuse every existing COPY_LOCATION/TRACK_TO/
+ * LIMIT_DISTANCE/SPRING constraint instead of needing its own.
+ */
+function targetWorldPos(scene: GPScene, c: TGConstraint): THREE.Vector3 | null {
+  if (!c.target) return null;
+  if (c.target.kind === 'ACTOR' && c.targetJoint) {
+    const actor = scene.actors.find((a) => a.id === c.target!.id);
+    const m = actor ? jointWorldMatrix(scene, actor, c.targetJoint) : null;
+    return m ? new THREE.Vector3().setFromMatrixPosition(m) : null;
+  }
+  return worldPos(scene, c.target as ObjRef);
+}
+
+/** Same idea as targetWorldPos, for COPY_ROTATION. */
+function targetWorldRotation(scene: GPScene, c: TGConstraint): [number, number, number] | null {
+  if (!c.target) return null;
+  if (c.target.kind === 'ACTOR' && c.targetJoint) {
+    const actor = scene.actors.find((a) => a.id === c.target!.id);
+    const m = actor ? jointWorldMatrix(scene, actor, c.targetJoint) : null;
+    if (!m) return null;
+    const e = new THREE.Euler().setFromRotationMatrix(m, 'XYZ');
+    return [e.x, e.y, e.z];
+  }
+  const tt = getObjectTransform(scene, c.target as ObjRef);
+  return tt ? tt.rotation : null;
 }
 
 export const CONSTRAINT_DEFS: Record<ConstraintType, { label: string; group: string }> = {
@@ -154,19 +187,21 @@ export class ConstraintEngine {
             travelers.push({ key: `${ref.kind}:${ref.id}`, pos: new THREE.Vector3(...world) });
           }
         } else if (c.type === 'COPY_LOCATION' && c.target) {
-          const tp = worldPos(scene, c.target as ObjRef);
-          const local = worldToLocalTranslation(scene, ref, tp);
-          const cur = new THREE.Vector3(...t.translation);
-          cur.lerp(local, c.influence);
-          t.translation = [cur.x, cur.y, cur.z];
-          setObjectTransform(scene, ref, t);
+          const tp = targetWorldPos(scene, c);
+          if (tp) {
+            const local = worldToLocalTranslation(scene, ref, tp);
+            const cur = new THREE.Vector3(...t.translation);
+            cur.lerp(local, c.influence);
+            t.translation = [cur.x, cur.y, cur.z];
+            setObjectTransform(scene, ref, t);
+          }
         } else if (c.type === 'COPY_ROTATION' && c.target) {
-          const tt = getObjectTransform(scene, c.target as ObjRef);
-          if (tt) {
+          const tr = targetWorldRotation(scene, c);
+          if (tr) {
             t.rotation = [
-              THREE.MathUtils.lerp(t.rotation[0], tt.rotation[0], c.influence),
-              THREE.MathUtils.lerp(t.rotation[1], tt.rotation[1], c.influence),
-              THREE.MathUtils.lerp(t.rotation[2], tt.rotation[2], c.influence),
+              THREE.MathUtils.lerp(t.rotation[0], tr[0], c.influence),
+              THREE.MathUtils.lerp(t.rotation[1], tr[1], c.influence),
+              THREE.MathUtils.lerp(t.rotation[2], tr[2], c.influence),
             ];
             setObjectTransform(scene, ref, t);
           }
@@ -181,18 +216,18 @@ export class ConstraintEngine {
             setObjectTransform(scene, ref, t);
           }
         } else if (c.type === 'TRACK_TO' && c.target) {
-          const tp = worldPos(scene, c.target as ObjRef);
-          const d = tp.sub(selfWorld);
-          if (d.lengthSq() > 1e-12) {
+          const tp = targetWorldPos(scene, c);
+          const d = tp?.clone().sub(selfWorld);
+          if (d && d.lengthSq() > 1e-12) {
             d.normalize();
             t.rotation = [Math.atan2(-d.z, Math.hypot(d.x, d.y)), 0, Math.atan2(d.y, d.x)];
             setObjectTransform(scene, ref, t);
           }
         } else if (c.type === 'LIMIT_DISTANCE' && c.target) {
-          const tp = worldPos(scene, c.target as ObjRef);
-          const d = selfWorld.clone().sub(tp);
+          const tp = targetWorldPos(scene, c);
+          const d = tp && selfWorld.clone().sub(tp);
           const maxD = Math.max(0.001, c.distance ?? 1);
-          if (d.length() > maxD) {
+          if (tp && d && d.length() > maxD) {
             const clamped = tp.clone().addScaledVector(d.normalize(), maxD);
             const local = worldToLocalTranslation(scene, ref, clamped);
             t.translation = [local.x, local.y, local.z];
@@ -217,17 +252,19 @@ export class ConstraintEngine {
             setObjectTransform(scene, ref, t);
           }
         } else if (c.type === 'SPRING' && c.target) {
-          const key = `${ref.kind}:${ref.id}:${c.id}`;
-          let v = this.velocities.get(key);
-          if (!v) { v = new THREE.Vector3(); this.velocities.set(key, v); }
-          const tp = worldPos(scene, c.target as ObjRef);
-          const clampedDt = Math.min(dt, 0.05); // stability under tab stalls
-          v.addScaledVector(tp.sub(selfWorld), (c.stiffness ?? 12) * clampedDt);
-          v.multiplyScalar(Math.max(0, 1 - (c.damping ?? 4) * clampedDt));
-          const next = selfWorld.clone().addScaledVector(v, clampedDt);
-          const local = worldToLocalTranslation(scene, ref, next);
-          t.translation = [local.x, local.y, local.z];
-          setObjectTransform(scene, ref, t);
+          const tp = targetWorldPos(scene, c);
+          if (tp) {
+            const key = `${ref.kind}:${ref.id}:${c.id}`;
+            let v = this.velocities.get(key);
+            if (!v) { v = new THREE.Vector3(); this.velocities.set(key, v); }
+            const clampedDt = Math.min(dt, 0.05); // stability under tab stalls
+            v.addScaledVector(tp.clone().sub(selfWorld), (c.stiffness ?? 12) * clampedDt);
+            v.multiplyScalar(Math.max(0, 1 - (c.damping ?? 4) * clampedDt));
+            const next = selfWorld.clone().addScaledVector(v, clampedDt);
+            const local = worldToLocalTranslation(scene, ref, next);
+            t.translation = [local.x, local.y, local.z];
+            setObjectTransform(scene, ref, t);
+          }
         }
       }
     }

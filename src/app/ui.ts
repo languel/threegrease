@@ -3510,6 +3510,7 @@ export class UI {
       ...ctx.scene.meshes.map((m) => ({ ref: { kind: 'MESH' as const, id: m.id }, label: `Mesh: ${m.name}` })),
       ...ctx.scene.splats.map((s) => ({ ref: { kind: 'SPLAT' as const, id: s.id }, label: `Splat: ${s.name}` })),
       ...ctx.scene.score.triggers.map((t) => ({ ref: { kind: 'TRIGGER' as const, id: t.id }, label: `Trigger: ${t.name}` })),
+      ...ctx.scene.actors.map((a) => ({ ref: { kind: 'ACTOR' as const, id: a.id }, label: `Actor: ${a.name}` })),
     ].filter((c) => !exclude || c.ref.kind !== exclude.kind || c.ref.id !== exclude.id);
 
     const cur = get();
@@ -3942,6 +3943,7 @@ export class UI {
       ref.kind === 'SPLAT' ? ctx.scene.splats.find((s) => s.id === ref.id) :
       ref.kind === 'TRIGGER' ? ctx.scene.score.triggers.find((t) => t.id === ref.id) :
       ref.kind === 'STREAM' ? ctx.scene.mmStreams.find((st) => st.id === ref.id) :
+      ref.kind === 'ACTOR' ? ctx.scene.actors.find((a) => a.id === ref.id) :
       undefined
     ) as { constraints?: TGConstraint[] } | undefined;
     if (!entity) return panel('Constraints', el('div', { class: 'row', text: 'unsupported object' }));
@@ -3969,10 +3971,22 @@ export class UI {
       this.refresh();
     };
 
-    const targetField = (c: TGConstraint) => this.objectPickerField('Target',
-      () => c.target ?? null,
-      (v) => { c.target = v as TGConstraint['target']; },
-      ref);
+    // Returns the object picker plus, when the picked target is an actor,
+    // a joint dropdown — riding a rig control (a hand, the head) instead
+    // of the actor's root is the whole point of attaching to an actor.
+    const targetField = (c: TGConstraint): Node[] => {
+      const picker = this.objectPickerField('Target',
+        () => c.target ?? null,
+        (v) => { c.target = v as TGConstraint['target']; if (v?.kind !== 'ACTOR') c.targetJoint = null; },
+        ref);
+      if (c.target?.kind !== 'ACTOR') return [picker];
+      const actor = ctx.scene.actors.find((a) => a.id === c.target!.id);
+      const jointSel = selectField('Joint', c.targetJoint ?? '', [
+        ['', '(actor root)'],
+        ...(actor?.joints.map((j) => [j.name, j.name] as [string, string]) ?? []),
+      ], (v) => { c.targetJoint = v || null; });
+      return [picker, jointSel];
+    };
 
     const items: Node[] = [];
     stack.forEach((c, i) => {
@@ -4039,15 +4053,15 @@ export class UI {
           this.msgEditor(c.leaveMessages ??= []),
         );
       } else if (c.type === 'LIMIT_DISTANCE') {
-        rows.push(targetField(c), fieldRow('Distance', numField('', c.distance ?? 1, (v) => { c.distance = Math.max(0.001, v); }, 0.1)));
+        rows.push(...targetField(c), fieldRow('Distance', numField('', c.distance ?? 1, (v) => { c.distance = Math.max(0.001, v); }, 0.1)));
       } else if (c.type === 'SPRING') {
-        rows.push(targetField(c),
+        rows.push(...targetField(c),
           fieldRow('Stiffness', numField('', c.stiffness ?? 12, (v) => { c.stiffness = Math.max(0, v); }, 1)),
           fieldRow('Damping', numField('', c.damping ?? 4, (v) => { c.damping = Math.max(0, v); }, 0.5)));
       } else if (c.type === 'SHRINKWRAP' || c.type === 'FLOOR') {
         rows.push(fieldRow('Offset', numField('', c.offset ?? 0, (v) => { c.offset = v; }, 0.05)));
       } else {
-        rows.push(targetField(c));
+        rows.push(...targetField(c));
       }
       if (c.type !== 'TRIGGER' && c.type !== 'FLOOR' && c.type !== 'SHRINKWRAP') {
         rows.push(el('div', { class: 'row' },

@@ -189,6 +189,10 @@ export interface TGConstraint {
   enabled: boolean;
   influence: number;             // 0..1 blend for transform constraints
   target?: ParentRef | null;     // COPY_* / TRACK_TO / LIMIT_DISTANCE / SPRING
+  /** COPY_LOCATION / COPY_ROTATION / TRACK_TO / LIMIT_DISTANCE / SPRING,
+   *  when `target.kind === 'ACTOR'`: ride that joint's live pose instead
+   *  of the actor's root transform — a joint NAME, matching TGJoint.name */
+  targetJoint?: string | null;
   path?: PathRef | null;         // FOLLOW_PATH
   // FOLLOW_PATH clock
   phase?: number;

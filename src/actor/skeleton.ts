@@ -9,7 +9,9 @@
 // Joint names deliberately match the MediaPipe pose vocabulary where they
 // overlap (shoulder/elbow/wrist/hip/knee/ankle, .L/.R suffixes) — that is
 // what lets autoRig() bind a capture stream without a hand-written table.
-import type { TGActor, TGBone, TGJoint, TGJointLimit, Vec3 } from '../core/types';
+import * as THREE from 'three';
+import type { GPScene, TGActor, TGBone, TGJoint, TGJointLimit, Vec3 } from '../core/types';
+import { worldMatrixOf } from '../tools/objects';
 
 /** height, in world units, of the default figure */
 export const ACTOR_HEIGHT = 1.8;
@@ -190,4 +192,43 @@ export function boneRestLength(actor: TGActor, bone: TGBone): number {
 /** Drop the actor back into its T-pose. */
 export function resetPose(actor: TGActor): void {
   actor.pose = actor.joints.map((j) => [...j.rest] as Vec3);
+}
+
+const JOINT_UP = new THREE.Vector3(0, 1, 0);
+
+/**
+ * World-space position + orientation of one joint, for attaching other
+ * scene objects to a rig control — a camera on the head, a sword in a
+ * hand. Position comes straight from the live pose; orientation is
+ * DERIVED, since joints store no rotation of their own, from the bone
+ * leading INTO the joint (same convention render/actors.ts uses to orient
+ * a limb capsule: UP maps onto the bone direction). The root joint has no
+ * incoming bone and reports the actor's own orientation instead.
+ */
+export function jointWorldMatrix(
+  scene: GPScene, actor: TGActor, jointName: string,
+): THREE.Matrix4 | null {
+  const idx = actor.joints.findIndex((j) => j.name === jointName);
+  if (idx < 0 || !actor.pose[idx]) return null;
+  const joint = actor.joints[idx];
+  const pos = new THREE.Vector3(...actor.pose[idx]);
+
+  // prefer a REAL (drawn) bone ending at this joint over a zero-radius
+  // brace, which exists only for simulation and points somewhere the
+  // viewer never sees
+  const inBone = actor.bones.find((b) => b.b === joint.id && b.radius > 0)
+    ?? actor.bones.find((b) => b.a === joint.id && b.radius > 0);
+  const quat = new THREE.Quaternion();
+  if (inBone) {
+    const aIdx = actor.joints.findIndex((j) => j.id === inBone.a);
+    const bIdx = actor.joints.findIndex((j) => j.id === inBone.b);
+    if (aIdx >= 0 && bIdx >= 0) {
+      const a = actor.pose[aIdx]; const b = actor.pose[bIdx];
+      const dir = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+      if (dir.lengthSq() > 1e-9) quat.setFromUnitVectors(JOINT_UP, dir.normalize());
+    }
+  }
+
+  const local = new THREE.Matrix4().compose(pos, quat, new THREE.Vector3(1, 1, 1));
+  return local.premultiply(worldMatrixOf(scene, { kind: 'ACTOR', id: actor.id }));
 }
