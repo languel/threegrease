@@ -141,6 +141,34 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [ ] Environment texture node graph (Blender-style mapping/coords)
 - [ ] HDR/EXR loading (currently LDR images only)
 
+### Interactive installation (north star — docs/INSTALLATION.md)
+- [x] Trigger zones on any object, volume/plane/topology tested
+- [x] Enter + leave events out over WS / OSC / MIDI
+- [x] Capture-stream landmarks probe every zone automatically
+- [x] Splat + mesh scan import (Kiri and similar work today)
+- [x] Measure tool, display units, scale-the-scene-from-a-measurement
+- [x] Shared snapping module so every tool gets the one magnet
+- [x] Semantic detection: open-vocabulary (text-query) streams feeding the
+      existing zone/probe machinery — model loading unverified, see docs
+- [x] Simulated tracking sources: any object (one point) or actor (full
+      pose) drives a stream through a scene camera — build and test an
+      installation with no hardware attached
+- [x] Stock demo gallery scene (File ▸ New — Demo gallery scene): room,
+      pedestals, trigger zone, visitor walking a path, security camera,
+      driven POSE + DETECT streams, procedural scan placeholder
+- [x] Camera plates: snapshot any camera's view as a perfectly-registered
+      reference plane (the reference-photograph placeholder, and a real
+      feature for freezing a viewpoint to build against)
+- [ ] Tracking MAPPING layer: free / region / ground-homography modes
+      (physical accuracy is one mode, not the goal — remote installations
+      deliberately want non-physical scaling)
+- [ ] Multi-person tracking with identity across frames
+- [ ] ONNX Runtime Web + model registry (detection beyond MediaPipe)
+- [ ] Photo → depth → point cloud (in-browser space capture)
+- [ ] Reference-image workflow: several registered points of view
+- [ ] Numeric entry while drawing; editable-mesh vertex snapping
+- [ ] Gallery runtime: local models, kiosk boot, heartbeat
+
 ### Agent / assistant
 - [x] In-app chat panel — local + hosted providers, native tool calling
 - [x] MCP + ACP over a relay (Claude Code, Claude Desktop, Zed)

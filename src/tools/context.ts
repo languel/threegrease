@@ -114,6 +114,10 @@ export interface Settings {
   /** Viewport shading mode (Blender's four buttons). Affects mesh-family
    *  objects; GP strokes are unlit by design and only change in WIREFRAME. */
   shading: import('../core/types').ViewportShading;
+  /** How lengths are WRITTEN (measure tool, extents readout). The scene is
+   *  unitless with 1 unit = 1 metre by convention; this never moves
+   *  anything, so it is safe to flip mid-session. */
+  lengthUnit: import('../core/types').LengthUnit;
   uiAccent: Vec3;
   /** accent opacity 0..1 — --accent (CSS) is emitted as rgba() using this. */
   uiAccentAlpha: number;
@@ -177,7 +181,7 @@ const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'background', 'snap',
-  'shading', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
+  'shading', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -269,6 +273,7 @@ export function defaultSettings(): Settings {
     invertTrackpadOrbit: false,
     showGizmo: false,
     shading: 'RENDERED',
+    lengthUnit: 'M',
     uiAccent: [0.522, 0.522, 0.522],           // gray(133)
     uiAccentAlpha: 0.5,
     uiHighlight: [1, 0.502, 0],                // rgb(255,128,0)

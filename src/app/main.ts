@@ -79,7 +79,7 @@ import {
   downloadScene, downloadText, importGPObjects, openSceneFile,
   remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
-import { currentStickyPlane, drawingPlane, nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, objectToScreen, perpendicularFoot, placementPreview, raycastFaceTriangle, raycastSurfaces, screenToWorld } from '../tools/projection';
+import { currentStickyPlane, drawingPlane, nearestStrokeEdgeAll, nearestStrokePointAll, objectToScreen, placementPreview, raycastSurfaces, screenToWorld } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
@@ -108,6 +108,13 @@ import { PolyMeshManager } from '../render/polymesh';
 import { LightManager } from '../render/lights';
 import { ActorManager } from '../render/actors';
 import { ActorPoseTool } from '../tools/actorpose';
+import { snapWorldPoint } from '../tools/snapping';
+import {
+  driveStreamFromActor, driveStreamFromObject, driverOf, isDriven,
+  stopDrivingStream, tickSimStreams,
+} from '../actor/simstream';
+import { buildDemoScene } from './demoscene';
+import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
 import { createHumanoid, resetPose } from '../actor/skeleton';
 import { autoRig } from '../actor/rig';
 import { actorSolver } from '../actor/solver';
@@ -124,7 +131,7 @@ import { clearPolyOverlay, polyOverlay } from '../render/polymesh';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
   ObjectSelectTool, deleteObject, deselectAllObjects, getObjectTransform,
-  allRefs, applyObjectTransform, gpIndexOf, listSelected, parentWorldMatrixOf, selectionPivot,
+  allRefs, applyObjectTransform, getParent, gpIndexOf, listSelected, parentWorldMatrixOf, selectionPivot,
   setObjectSelected, setObjectTransform, setParentKeepWorld, worldMatrixOf,
   type ObjRef, type ObjTransform,
 } from '../tools/objects';
@@ -439,7 +446,7 @@ class App implements AppHandle {
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
       this.polyPen, this.polyBuild, this.quadPatch, new SplatPaintTool(), new TexturePaintTool(),
-      new ActorPoseTool(),
+      new ActorPoseTool(), new MeasureTool(),
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
 
@@ -691,117 +698,16 @@ class App implements AppHandle {
   /** Place the 3D cursor. Snapping follows the global magnet (Blender
    *  semantics): magnet off = free move on the drawing plane; magnet on =
    *  snap per its mode (grid / stroke point / object origin / surface). */
+  /** Move the 3D cursor to a pointer position, through the shared magnet.
+   *  The snapping itself lives in tools/snapping.ts so the measure and
+   *  blockout tools get identical behaviour from the same settings. */
   private placeCursor(clientX: number, clientY: number): void {
     const ctx = this.ctx;
-    const rect = ctx.canvas.getBoundingClientRect();
-    const snap = ctx.settings.snap;
-
-    if (snap.enabled && snap.mode === 'POINT') {
-      const hit = nearestStrokePointAll(ctx, clientX - rect.left, clientY - rect.top, 60, ctx.settings.snap.strokeScope ?? 'ANY');
-      if (hit) {
-        ctx.scene.cursor = [hit.x, hit.y, hit.z];
-        this.gp.markDirty();
-        return;
-      }
-      // no stroke nearby: fall through to plane placement
-    }
-    if (snap.enabled && (snap.mode === 'EDGE' || snap.mode === 'EDGE_CENTER' || snap.mode === 'EDGE_PERP')) {
-      // continuous along the path — this is how the cursor rides a stroke
-      // freely instead of jumping vertex to vertex. CENTER locks to segment
-      // midpoints; PERP drops the foot of the perpendicular from where the
-      // cursor currently sits (its pre-move position).
-      const seg = nearestStrokeSegmentAll(ctx, clientX - rect.left, clientY - rect.top, 60, ctx.settings.snap.strokeScope ?? 'ANY');
-      if (seg) {
-        const hit = snap.mode === 'EDGE_CENTER' ? seg.a.clone().lerp(seg.b, 0.5)
-          : snap.mode === 'EDGE_PERP' ? perpendicularFoot(seg.a, seg.b, new THREE.Vector3(...ctx.scene.cursor))
-          : seg.a.clone().lerp(seg.b, seg.t);
-        ctx.scene.cursor = [hit.x, hit.y, hit.z];
-        this.gp.markDirty();
-        return;
-      }
-    }
-    if (snap.enabled && (snap.mode === 'FACE_CENTER' || snap.mode === 'FACE_NEAREST')) {
-      const hit = raycastFaceTriangle(ctx, clientX, clientY);
-      if (hit) {
-        const p = new THREE.Vector3();
-        if (snap.mode === 'FACE_CENTER') hit.tri.getMidpoint(p);
-        else hit.tri.closestPointToPoint(new THREE.Vector3(...ctx.scene.cursor), p);
-        ctx.scene.cursor = [p.x, p.y, p.z];
-        this.gp.markDirty();
-        return;
-      }
-    }
-    if (snap.enabled && (snap.mode === 'SURFACE' || snap.mode === 'CANVAS')) {
-      const hit = raycastSurfaces(ctx, clientX, clientY);
-      if (hit) {
-        ctx.scene.cursor = [hit.x, hit.y, hit.z];
-        this.gp.markDirty();
-        return;
-      }
-      // nothing under the pointer: fall through to plane placement
-    }
-    if (snap.enabled && snap.mode === 'OBJECT') {
-      // nearest object origin in screen space
-      const w = rect.width, h = rect.height;
-      let best: THREE.Vector3 | null = null;
-      let bestD = 80; // px
-      for (const ref of allRefs(ctx.scene)) {
-        const pos = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(ctx.scene, ref));
-        const ndc = pos.clone().project(this.nav.active);
-        if (ndc.z > 1) continue;
-        const dx = (ndc.x * 0.5 + 0.5) * w - (clientX - rect.left);
-        const dy = (-ndc.y * 0.5 + 0.5) * h - (clientY - rect.top);
-        const d = Math.hypot(dx, dy);
-        if (d < bestD) { bestD = d; best = pos; }
-      }
-      if (best) {
-        ctx.scene.cursor = [best.x, best.y, best.z];
-        this.gp.markDirty();
-        return;
-      }
-    }
-    const world = screenToWorld(ctx, clientX, clientY);
-    if (!world) return;
-    // for a cursor CLICK there is no meaningful "relative increment", so
-    // INCREMENT and GRID both land on the absolute lattice (Blender does
-    // the same for cursor snapping)
-    if (snap.enabled && (snap.mode === 'INCREMENT' || snap.mode === 'GRID')) {
-      const g = snapIncrement(ctx.settings);
-      // Blender semantics: grid = the visible world floor grid, not a
-      // lattice on the current drawing plane. Raycast the ground plane
-      // and round the two in-plane world coordinates.
-      const zUp = ctx.settings.upAxis === 'Z';
-      const groundNormal = zUp ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
-      const ndc = new THREE.Vector2(
-        ((clientX - rect.left) / rect.width) * 2 - 1,
-        -((clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      const ray = new THREE.Raycaster();
-      ray.setFromCamera(ndc, this.nav.active);
-      const hit = new THREE.Vector3();
-      if (Math.abs(ray.ray.direction.dot(groundNormal)) > 0.05
-        && ray.ray.intersectPlane(new THREE.Plane(groundNormal, 0), hit)) {
-        if (zUp) {
-          ctx.scene.cursor = [Math.round(hit.x / g) * g, Math.round(hit.y / g) * g, 0];
-        } else {
-          ctx.scene.cursor = [Math.round(hit.x / g) * g, 0, Math.round(hit.z / g) * g];
-        }
-        this.gp.markDirty();
-        return;
-      }
-      // grazing view (front/side): the floor grid is edge-on, so snap on
-      // the drawing plane's lattice instead (matches Blender's ortho grid)
-      const plane = drawingPlane(ctx);
-      const anchor = plane.normal.clone().multiplyScalar(-plane.constant);
-      const tmp = Math.abs(plane.normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-      const u = new THREE.Vector3().crossVectors(tmp, plane.normal).normalize();
-      const v = new THREE.Vector3().crossVectors(plane.normal, u);
-      const d = world.clone().sub(anchor);
-      world.copy(anchor)
-        .addScaledVector(u, Math.round(d.dot(u) / g) * g)
-        .addScaledVector(v, Math.round(d.dot(v) / g) * g);
-    }
-    ctx.scene.cursor = [world.x, world.y, world.z];
+    // the cursor's CURRENT position is the reference the relative modes
+    // (perpendicular, nearest-on-face) measure from
+    const hit = snapWorldPoint(ctx, clientX, clientY, new THREE.Vector3(...ctx.scene.cursor));
+    if (!hit) return;
+    ctx.scene.cursor = [hit.point.x, hit.point.y, hit.point.z];
     this.gp.markDirty();
   }
 
@@ -2069,6 +1975,29 @@ class App implements AppHandle {
     this.refreshWidget();
   }
 
+  /**
+   * Load the stock demo: a virtual gallery room, two pedestals, a rigged
+   * visitor walking a loop, a security camera, and that camera driving both
+   * a POSE stream (full skeleton) and a DETECT stream (one tracked point) —
+   * see app/demoscene.ts. Meant as a working example of every piece an
+   * installation setup touches, testable with nothing plugged in, and a
+   * starting point to replace pieces with real inputs one at a time.
+   */
+  loadDemoScene(): void {
+    this.ctx.pushUndo();
+    const upZ = this.ctx.settings.upAxis === 'Z';
+    const wiring = buildDemoScene(upZ);
+    this.ctx.replaceScene(wiring.scene);
+    // runtime wiring: which stream reads from which virtual source. This is
+    // NOT scene data (see App.setStreamDriver), so it has to be redone here
+    // rather than living inside the scene the undo snapshot just captured.
+    driveStreamFromActor(wiring.poseStreamId, wiring.actorId, wiring.camIndex);
+    driveStreamFromObject(wiring.detectStreamId, { kind: 'ACTOR', id: wiring.actorId }, wiring.camIndex);
+    this.refreshWidget();
+    this.viewAll();
+    this.ui.refresh();
+  }
+
   viewAll(): void {
     const box = new THREE.Box3();
     for (const g of [this.gp.root, this.canvasGroup, this.splats.group, this.meshes.group, this.polys.group, this.paints.group]) {
@@ -2395,9 +2324,33 @@ class App implements AppHandle {
     this.ctx.pushUndo();
     this.ctx.scene.mmStreams = this.ctx.scene.mmStreams.filter((s) => s.id !== id);
     streamStore.drop(id);
+    stopDrivingStream(id);
     if (!this.ctx.scene.mmStreams.some((s) => s.source === 'CAMERA')) mmCapture.stop();
     this.ui.refresh();
   }
+
+  /**
+   * Point a stream at a SIMULATED source instead of a real camera: an actor
+   * (a full pose) or any other object (one tracked point), seen through one
+   * of the scene's own cameras. This is what makes a demo scene work — the
+   * exact same stream a webcam would drive, fed from a virtual visitor
+   * walking a GP path, with no consumer anywhere able to tell the
+   * difference. Not undoable: it is a live wiring choice (like starting the
+   * webcam), not scene data.
+   */
+  setStreamDriver(streamId: number, source: { kind: 'ACTOR'; actorId: number } | { kind: 'OBJECT'; ref: ObjRef }, cameraIndex: number): void {
+    if (source.kind === 'ACTOR') driveStreamFromActor(streamId, source.actorId, cameraIndex);
+    else driveStreamFromObject(streamId, source.ref, cameraIndex);
+    this.ui.refresh();
+  }
+
+  clearStreamDriver(streamId: number): void {
+    stopDrivingStream(streamId);
+    this.ui.refresh();
+  }
+
+  streamDriver(streamId: number) { return driverOf(streamId); }
+  isStreamDriven(streamId: number): boolean { return isDriven(streamId); }
 
   mmCaptureToggle(): void {
     if (mmCapture.status === 'on' || mmCapture.status === 'starting') mmCapture.stop();
@@ -2504,6 +2457,58 @@ class App implements AppHandle {
     this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, at ?? [...this.ctx.scene.cursor], src));
     this.meshes.sync(this.ctx.scene);
     this.ui.refresh();
+  }
+
+  /**
+   * Rescale the WHOLE scene so a chosen measurement equals a real length.
+   *
+   * This is the point of the measure tool for blockout work. You build a
+   * room from reference photographs at whatever arbitrary size the eye
+   * produced, measure something you actually know — a door, a ceiling
+   * height, a floor tile — type the real figure, and the scene becomes
+   * metric. Everything downstream (an actor's 1.8 m, gravity, trigger radii
+   * in metres) then means something.
+   *
+   * Only ROOTS are touched: a parented object is carried by its parent's
+   * scale, so scaling both would square the factor on every child.
+   */
+  scaleSceneToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string } {
+    const scene = this.ctx.scene;
+    const m = scene.measures.find((x) => x.id === measureId);
+    if (!m) return { ok: false, error: 'measurement not found' };
+    const current = measureLength(m);
+    if (current < 1e-9) return { ok: false, error: 'measurement has no length' };
+    if (!(realLength > 0)) return { ok: false, error: 'real length must be greater than zero' };
+    const k = realLength / current;
+    if (Math.abs(k - 1) < 1e-9) return { ok: true, factor: 1 };
+
+    this.ctx.pushUndo();
+    for (const ref of allRefs(scene)) {
+      if (getParent(scene, ref)) continue;      // the parent carries it
+      const t = getObjectTransform(scene, ref);
+      if (!t) continue;
+      setObjectTransform(scene, ref, {
+        translation: [t.translation[0] * k, t.translation[1] * k, t.translation[2] * k],
+        rotation: [...t.rotation] as [number, number, number],
+        scale: [t.scale[0] * k, t.scale[1] * k, t.scale[2] * k],
+      });
+    }
+    // things that carry a world-space length of their own and are not
+    // object transforms
+    for (const trig of scene.score.triggers) trig.radius *= k;
+    for (const meas of scene.measures) {
+      meas.points = meas.points.map((p) => [p[0] * k, p[1] * k, p[2] * k] as [number, number, number]);
+    }
+    for (const cam of scene.cameras) {
+      cam.translation = [cam.translation[0] * k, cam.translation[1] * k, cam.translation[2] * k];
+    }
+    scene.cursor = [scene.cursor[0] * k, scene.cursor[1] * k, scene.cursor[2] * k];
+
+    this.gp.markDirty();
+    this.refreshWidget();
+    this.ui.refresh();
+    this.ctx.requestRender();
+    return { ok: true, factor: k };
   }
 
   /** Add Actor: the default mannequin, standing at the 3D cursor. Built
@@ -2650,6 +2655,77 @@ class App implements AppHandle {
     this.gp.markDirty();
     this.refreshWidget();
     this.ui.refresh();
+  }
+
+  /**
+   * Snapshot a scene camera's view as a reference plane sitting in front of
+   * it — the virtual stand-in for "stand here, take a photo, bring it in as
+   * a plane and build against it".
+   *
+   * Useful well beyond the simulation: once real geometry exists, this is
+   * how you freeze a viewpoint as an image to draw over, and it is the only
+   * reference plane guaranteed to be perfectly registered to the space,
+   * because it was rendered FROM that space rather than photographed of it.
+   *
+   * The plane is placed at `distance` and sized to exactly fill the frustum
+   * there, so it lines up with what the camera sees pixel for pixel.
+   */
+  captureCameraPlate(camIndex: number, distance = 3, width = 1024): void {
+    const scene = this.ctx.scene;
+    const gpCam = scene.cameras[camIndex];
+    if (!gpCam) return;
+    const pose = evalCamera(gpCam, scene.frame);
+    const aspect = 16 / 9;
+    const height = Math.round(width / aspect);
+
+    const cam = new THREE.PerspectiveCamera(pose.fov, aspect, 0.05, 500);
+    cam.position.copy(pose.position);
+    cam.quaternion.copy(pose.quaternion);
+    cam.updateMatrixWorld(true);
+    cam.updateProjectionMatrix();
+
+    const rt = new THREE.WebGLRenderTarget(width, height);
+    const prevTarget = this.glRenderer.getRenderTarget();
+    this.glRenderer.setRenderTarget(rt);
+    this.glRenderer.render(this.scene3, cam);
+    const pixels = new Uint8Array(width * height * 4);
+    this.glRenderer.readRenderTargetPixels(rt, 0, 0, width, height, pixels);
+    this.glRenderer.setRenderTarget(prevTarget);
+    rt.dispose();
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const g = canvas.getContext('2d');
+    if (!g) return;
+    const img = g.createImageData(width, height);
+    // readRenderTargetPixels returns rows bottom-up; ImageData is top-down
+    for (let y = 0; y < height; y++) {
+      const src = (height - 1 - y) * width * 4;
+      img.data.set(pixels.subarray(src, src + width * 4), y * width * 4);
+    }
+    g.putImageData(img, 0, 0);
+
+    // size the plane to fill the frustum at `distance`, then place it there
+    const h = 2 * distance * Math.tan(THREE.MathUtils.degToRad(pose.fov) / 2);
+    const w = h * aspect;
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(pose.quaternion);
+    const at = pose.position.clone().addScaledVector(forward, distance);
+    const e = new THREE.Euler().setFromQuaternion(pose.quaternion, 'XYZ');
+
+    this.ctx.pushUndo();
+    const mesh = createMeshObject(Date.now() % 1e9, 'PLANE', [at.x, at.y, at.z]);
+    mesh.name = `${gpCam.name} · plate`;
+    mesh.texture = canvas.toDataURL('image/png');
+    mesh.unlit = true;
+    mesh.drawTarget = false;   // a reference, not a draw surface, by default
+    mesh.doubleSided = true;
+    mesh.rotation = [e.x, e.y, e.z];
+    mesh.scale = [w, h, 1];
+    scene.meshes.push(mesh);
+    this.meshes.sync(scene, this.nav.active);
+    this.ui.refresh();
+    this.ctx.requestRender();
   }
 
   /** Reference/image plane: textured unlit PLANE sized to the image aspect. */
@@ -3266,6 +3342,14 @@ class App implements AppHandle {
     } catch (err) {
       console.error('constraint engine:', err);
     }
+    // Simulated tracking sources: AFTER constraints, because a driven
+    // actor's own world transform (e.g. FOLLOW_PATH walking it around) and
+    // its pose (actorSolver, above) both need to be final for this frame
+    // before sampling. That means a sim-driven landmark reaches TRIGGER
+    // probing one frame later than the capture it's standing in for would —
+    // irrelevant for a demo/test source, and simpler than reordering the
+    // constraint pass around a feature most scenes never use.
+    tickSimStreams(ctx.scene, ctx.scene.frame);
     this.widget.camera = this.nav.active; // ortho/persp swaps
     // quad view step 1: the widget is scene-graph-resident (renders into
     // every pane) and its own sizing/pointer math is bound to one camera +

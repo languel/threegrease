@@ -277,6 +277,12 @@ input[type="checkbox"]:checked {
 /* Explanatory line inside a panel: quieter than a field, wraps freely. */
 .hint { color: var(--dim); font-size: 10px; line-height: 1.4; }
 .hint.error { color: #ff8a6a; }
+/* stream row: flags a stream fed from a virtual source instead of the live camera */
+.sim-badge {
+  font-size: 9px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--accent2); border: 1px solid var(--accent2); border-radius: 3px;
+  padding: 0 4px; line-height: 1.4;
+}
 .ctxmenu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 .row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .row.spread { justify-content: space-between; }
@@ -538,6 +544,43 @@ button.agent-send-stop { background: #ff6b6b; border-color: #ff6b6b; }
 .agent-status-connecting { color: var(--accent2); font-style: normal; }
 .agent-status-off { color: var(--dim); }
 .agent-status-err { color: #ff6b6b; font-style: normal; }
+/* Measure rows: a name line, then the value line with the rescale field.
+   Two lines because the number is the thing you read, and cramming it beside
+   a text input makes it the thing you skip. */
+.measure-row { border-top: 1px solid var(--border); padding: 6px 0 4px; }
+.measure-len {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px; color: var(--dim); padding-top: 3px;
+}
+.measure-len .grow { flex: 1 1 0; }
+.measure-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums;
+}
+.measure-set { white-space: nowrap; }
+/* Semantic detection: a free-text query box, and a readout of what actually
+   matched — the labels are the only way to tell whether a query is working. */
+.detect-queries {
+  width: 100%; resize: vertical; min-height: 44px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; padding: 5px 6px;
+  font: inherit; font-size: 11px; line-height: 1.4;
+}
+.detect-queries:focus { outline: none; border-color: var(--accent); }
+.detect-status {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 10px; color: var(--dim); padding: 2px 0 4px;
+}
+.detect-status .grow { flex: 1 1 0; }
+.detect-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--dim); }
+.detect-ready { background: #4ade80; }
+.detect-loading { background: var(--accent2); }
+.detect-error { background: #ff6b6b; }
+.detect-hit {
+  background: var(--border); color: var(--text);
+  border-radius: 8px; padding: 1px 6px; white-space: nowrap;
+}
+.detect-none { font-style: italic; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* ---- agent help dialog ----

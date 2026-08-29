@@ -273,6 +273,7 @@ export function createScene(): GPScene {
     mmStreams: [],
     clips: [],
     actors: [],
+    measures: [],
   };
 }
 

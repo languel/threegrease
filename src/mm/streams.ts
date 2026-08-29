@@ -17,7 +17,9 @@ import { bus } from '../events/bus';
 import { worldMatrixOf, type ObjRef } from '../tools/objects';
 
 export const STREAM_POINT_COUNTS: Record<MMStream['kind'], number> = {
-  POSE: 33, HAND_LEFT: 21, HAND_RIGHT: 21, FACE: 478, IRIS: 10, CUSTOM: 0,
+  // DETECT is 0 because its count is whatever the model found this frame —
+  // unlike a landmark model, the point count is not fixed by the topology
+  POSE: 33, HAND_LEFT: 21, HAND_RIGHT: 21, FACE: 478, IRIS: 10, CUSTOM: 0, DETECT: 0,
 };
 
 /** iris landmark indices inside the 478-point face model
@@ -60,7 +62,8 @@ export function createStream(
   const maxId = scene.mmStreams.reduce((m, s) => Math.max(m, s.id), 0);
   nextStreamId = Math.max(nextStreamId, maxId + 1);
   const names: Record<MMStream['kind'], string> = {
-    POSE: 'Pose', HAND_LEFT: 'Hand L', HAND_RIGHT: 'Hand R', FACE: 'Face', IRIS: 'Iris', CUSTOM: busAddress ?? 'Stream',
+    POSE: 'Pose', HAND_LEFT: 'Hand L', HAND_RIGHT: 'Hand R', FACE: 'Face', IRIS: 'Iris',
+    CUSTOM: busAddress ?? 'Stream', DETECT: 'Detect',
   };
   // matches the combined body-map picker's kind colors (poseMap.ts
   // KIND_COLOR_CLASS / styles.css) so a stream's point color always
@@ -71,6 +74,7 @@ export function createStream(
     HAND_RIGHT: [1, 0.478, 0.694], // #ff7ab1
     FACE: [1, 0.984, 0.478],      // #fffb7a
     IRIS: [1, 0.35, 0.55], CUSTOM: [0.55, 1, 0.5],
+    DETECT: [1, 0.62, 0.25],      // #ff9e40 — semantic hits read as their own family
   };
   const isClip = source === 'CLIP';
   return {
@@ -78,6 +82,15 @@ export function createStream(
     name: isClip ? (scene.clips.find((c) => c.id === clipId)?.name ?? 'Clip') : names[kind],
     kind, source, busAddress,
     ...(isClip ? { clipId, playing: true, loop: 'LOOP' as const, speed: 1, phase: 0 } : {}),
+    // A DETECT stream is inert without a config, and the load-time migration
+    // only covers scenes read from disk — a freshly created one has to be
+    // valid on its own.
+    ...(kind === 'DETECT' ? {
+      detect: {
+        model: 'Xenova/owlvit-base-patch32', queries: [], threshold: 0.12,
+        maxResults: 8, intervalMs: 600, webgpu: true,
+      },
+    } : {}),
     visible: true, select: false, lock: false, parent: null, constraints: [],
     probeEvents: kind !== 'FACE',
     // clip frames are recorded in WORLD space — replay at identity so the
@@ -136,6 +149,7 @@ export function streamBusPath(kind: MMStream['kind']): string {
     case 'HAND_RIGHT': return 'hand/r';
     case 'FACE': return 'face';
     case 'IRIS': return 'iris';
+    case 'DETECT': return 'detect';
     default: return 'stream';
   }
 }

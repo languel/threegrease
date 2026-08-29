@@ -7,6 +7,9 @@ import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
 import { PROVIDER_LIST, getProvider } from '../agent/providers';
 import { webMcp } from '../agent/webmcp';
+import { formatLength, measureLength, toWorldLength } from '../tools/measure';
+import { DETECT_MODELS, semanticDetector } from '../mm/detect';
+import type { DetectConfig, DetectHit, MMStream } from '../core/types';
 import type { BakeSource } from '../render/bake';
 import { hasUV } from '../core/uvunwrap';
 import { createImage, createMaterialDB, ensureMaterial, imageById, materialById } from '../core/gpdata';
@@ -61,8 +64,13 @@ export interface AppHandle {
   /** the scene's environment/IBL manager — the World panel reads its
    *  load status, since an image or video source resolves asynchronously */
   world: { status: 'ok' | 'loading' | 'error'; error: string };
+  scaleSceneToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string };
   addActor(at?: [number, number, number]): void;
   resetActor(id: number): void;
+  setStreamDriver(streamId: number, source: { kind: 'ACTOR'; actorId: number } | { kind: 'OBJECT'; ref: ObjRef }, cameraIndex: number): void;
+  clearStreamDriver(streamId: number): void;
+  streamDriver(streamId: number): { source: { kind: 'ACTOR'; actorId: number } | { kind: 'OBJECT'; ref: ObjRef }; cameraIndex: number } | null;
+  isStreamDriven(streamId: number): boolean;
   setMode(mode: EditorMode): void;
   setShading(mode: ViewportShading): void;
   setTool(id: string): void;
@@ -134,6 +142,8 @@ export interface AppHandle {
   objectExtents(ref: import('../tools/objects').ObjRef): [number, number, number] | null;
   pickObject(cb: (ref: import('../tools/objects').ObjRef | null) => void): void;
   newScene(): void;
+  loadDemoScene(): void;
+  captureCameraPlate(camIndex: number, distance?: number, width?: number): void;
   viewAll(): void;
   addCamera(): void;
   cycleCamera(): void;
@@ -562,6 +572,7 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['object-select-lasso', 'lasso', 'Lasso select'],
     ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
     ['actorpose', 'actor', 'Pose actor — drag a joint (the body follows through physics); Shift+click pins/unpins it'],
+    ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits, Backspace undoes a point, Esc cancels); drag a placed point to adjust it'],
   ],
   DRAW: [
     ['draw', 'pencil', 'Draw (D)'], ['erase', 'eraser', 'Erase (E)'],
@@ -745,6 +756,7 @@ export class UI {
 
     menu('File', [
       { label: 'New', action: 'newScene' },
+      { label: 'New — Demo gallery scene', do: () => this.app.loadDemoScene() },
       { label: 'Open…', action: 'open' },
       { label: 'Save', action: 'save' },
       { sep: true },
@@ -1404,7 +1416,7 @@ export class UI {
     const tabs: { id: string; icon: IconName; title: string; build: () => HTMLElement[] }[] = [
       {
         id: 'scene', icon: 'globe', title: 'Scene — world · grid · background',
-        build: () => [this.worldPanel(), this.scenePanel()],
+        build: () => [this.worldPanel(), this.measurePanel(), this.scenePanel()],
       },
       {
         id: 'object', icon: 'cube', title: 'Object — transform · material',
@@ -1559,6 +1571,75 @@ export class UI {
       el('div', { class: 'hint', text: `${actor.joints.length} joints · ${actor.bones.filter((b) => b.radius > 0).length} bones · ${actor.limits.length} limits` }),
       panelHint('Joints are particles and bones are distance constraints, so capture, dragging and physics all drive one solver.'),
     );
+  }
+
+  /** Measurements + display units. Lives in the Scene tab because it is a
+   *  property of the whole document, not of a selection. */
+  private measurePanel(): HTMLElement {
+    const { ctx } = this.app;
+    const scene = ctx.scene;
+    const unit = ctx.settings.lengthUnit;
+
+    const rows: (Node | string)[] = [
+      fieldRow('Units', selectField('', unit, [
+        ['M', 'Metres'], ['CM', 'Centimetres'], ['MM', 'Millimetres'],
+        ['FT', 'Feet'], ['IN', 'Inches'],
+      ], (v) => { ctx.settings.lengthUnit = v; this.app.savePrefs(); this.refresh(); })),
+    ];
+
+    if (!scene.measures.length) {
+      rows.push(fieldRow('', el('div', { class: 'hint', text: 'Pick the Measure tool, click two or more points, press Enter.' })));
+    }
+
+    for (const m of scene.measures) {
+      const len = measureLength(m);
+      const nameInput = el('input', { type: 'text', class: 'grow', value: m.name }) as HTMLInputElement;
+      nameInput.onchange = () => { m.name = nameInput.value; };
+      nameInput.onkeydown = (e) => e.stopPropagation();
+
+      // "this is really N units" -> rescale the whole scene
+      const real = el('input', {
+        type: 'text', value: '', placeholder: formatLength(len, unit).split(' ')[0],
+        title: `Type the REAL length of this measurement and press Enter to rescale the whole scene. Currently ${formatLength(len, unit)}.`,
+      }) as HTMLInputElement;
+      real.style.width = '68px';
+      real.onkeydown = (e) => {
+        e.stopPropagation();
+        if (e.key !== 'Enter') return;
+        const v = Number(real.value);
+        if (!Number.isFinite(v) || v <= 0) { real.value = ''; return; }
+        const res = this.app.scaleSceneToMeasure(m.id, toWorldLength(v, ctx.settings.lengthUnit));
+        if (!res.ok) { real.value = ''; return; }
+        this.refresh();
+      };
+
+      rows.push(el('div', { class: 'measure-row' },
+        el('div', { class: 'row' },
+          nameInput,
+          btn(m.visible ? icon('eye') : icon('eyeOff'),
+            () => { m.visible = !m.visible; ctx.requestRender(); this.refresh(); },
+            { cls: 'icon-btn', title: 'Show in the viewport' }),
+          btn(m.locked ? icon('lockClosed') : icon('lockOpen'),
+            () => { m.locked = !m.locked; this.refresh(); },
+            { cls: 'icon-btn', title: 'Freeze it, so a stray drag cannot move the reference the scene was scaled from' }),
+          btn(icon('xMark'), () => {
+            ctx.pushUndo();
+            scene.measures = scene.measures.filter((x) => x.id !== m.id);
+            ctx.requestRender(); this.refresh();
+          }, { cls: 'icon-btn', title: 'Delete' }),
+        ),
+        el('div', { class: 'measure-len' },
+          el('span', { class: 'measure-val', text: formatLength(len, unit) }),
+          el('span', { text: `${m.points.length} pts` }),
+          el('span', { class: 'grow' }),
+          el('span', { class: 'measure-set', text: 'is really', title: 'Rescale the scene so this measurement equals the length you type' }),
+          real,
+        ),
+      ));
+    }
+
+    return panel('Measure', ...rows,
+      panelHint('Typing a real length rescales every root object, camera, trigger radius and measurement at once.'));
   }
 
   /** Scene tab: the world — what surrounds the scene and lights it.
@@ -4122,6 +4203,127 @@ export class UI {
   /** MediaMime (P11): live landmark addresses + the object-rigging table. */
   /** Native MediaMime: in-app webcam capture -> landmark streams rendered
    *  as confidence-encoded splat sprites. */
+  /**
+   * Editor for a DETECT stream. Open-vocabulary detection has no class list
+   * to pick from — the queries you type ARE the classes — so the control is
+   * a text field, one phrase per line, and the readout shows what actually
+   * matched this frame.
+   */
+  private detectRows(st: MMStream, cfg: DetectConfig): Node[] {
+    const { ctx } = this.app;
+    const q = el('textarea', {
+      class: 'detect-queries', rows: '3',
+      placeholder: 'a person wearing a hat\na dog\na cardboard box',
+    }) as HTMLTextAreaElement;
+    q.value = cfg.queries.join('\n');
+    q.onkeydown = (e) => e.stopPropagation();
+    q.onchange = () => {
+      cfg.queries = q.value.split('\n').map((l) => l.trim()).filter(Boolean);
+      ctx.requestRender();
+      this.refresh();
+    };
+
+    const status = semanticDetector.status;
+    const statusText = status === 'ready'
+      ? `${semanticDetector.device || 'ready'}${semanticDetector.lastMs ? ` · ${Math.round(semanticDetector.lastMs)} ms/run` : ''}`
+      : status === 'loading' ? 'downloading model…'
+        : status === 'error' ? semanticDetector.error.slice(0, 90)
+          : 'idle';
+
+    const hits: DetectHit[] = st.detectHits ?? [];
+    return [
+      fieldRow('Look for', q, { full: true }),
+      el('div', { class: 'row' },
+        selectField('', cfg.model, DETECT_MODELS.map((m) => [m.id, m.label] as [string, string]),
+          (v) => { cfg.model = v; semanticDetector.dispose(); this.refresh(); }),
+        checkbox('', cfg.webgpu, (v) => { cfg.webgpu = v; semanticDetector.dispose(); },
+          'WebGPU when available — much faster than the WASM fallback'),
+      ),
+      el('div', { class: 'row' },
+        numField('every ms', cfg.intervalMs, (v) => { cfg.intervalMs = Math.max(100, Math.round(v)); }, 100,
+          { def: 600, min: 100, title: 'Open-vocabulary detection is not frame-rate work — this is how often a run starts' }),
+        numField('min score', cfg.threshold, (v) => { cfg.threshold = Math.max(0.01, Math.min(1, v)); }, 0.01,
+          { def: 0.12, min: 0.01, max: 1 }),
+        numField('max', cfg.maxResults, (v) => { cfg.maxResults = Math.max(1, Math.round(v)); }, 1,
+          { def: 8, min: 1, title: 'Cap on detections per frame — also the stream\u2019s point count' }),
+      ),
+      el('div', { class: 'detect-status' },
+        el('span', { class: `detect-dot detect-${status}` }),
+        el('span', { text: statusText, title: status === 'error' ? semanticDetector.detail : '' }),
+        el('span', { class: 'grow' }),
+        ...(hits.length
+          ? hits.slice(0, 4).map((h) => el('span', {
+            class: 'detect-hit',
+            text: `${h.label} ${(h.score * 100).toFixed(0)}%`,
+            title: `box ${h.box.map((v) => v.toFixed(2)).join(', ')}`,
+          }))
+          : [el('span', { class: 'detect-none', text: cfg.queries.length ? 'no matches' : 'no queries' })]),
+      ),
+    ];
+  }
+
+  /**
+   * Wire a CAMERA-source stream to a virtual visitor instead of the live
+   * webcam: any object as one tracked point, or — for a POSE stream — an
+   * actor's whole skeleton. Seen through one of the scene's own cameras, so
+   * the synthetic feed represents what a fixed camera in the room would
+   * actually see, the same way a real installation's camera would.
+   */
+  private simSourceRow(st: MMStream): Node[] {
+    const { ctx } = this.app;
+    const driver = this.app.streamDriver(st.id);
+    const curRef: ObjRef | null = !driver ? null
+      : driver.source.kind === 'ACTOR' ? { kind: 'ACTOR', id: driver.source.actorId }
+        : driver.source.ref;
+
+    const picker = this.objectPickerField('Sim source',
+      () => curRef,
+      (ref) => {
+        if (!ref) { this.app.clearStreamDriver(st.id); return; }
+        const camIdx = driver?.cameraIndex ?? ctx.scene.activeCamera;
+        // an actor picked for a POSE stream defaults to full-skeleton
+        // sampling — that is the whole point of a POSE stream; anywhere
+        // else (or any other object) it is one tracked point
+        if (ref.kind === 'ACTOR' && st.kind === 'POSE') {
+          this.app.setStreamDriver(st.id, { kind: 'ACTOR', actorId: ref.id }, camIdx);
+        } else {
+          this.app.setStreamDriver(st.id, { kind: 'OBJECT', ref }, camIdx);
+        }
+      });
+
+    if (!driver) {
+      return [el('div', { class: 'row' }, picker,
+        el('span', { class: 'hint', text: 'optional — replaces the live camera for testing' }))];
+    }
+
+    const camSel = el('select') as HTMLSelectElement;
+    ctx.scene.cameras.forEach((c, i) => camSel.append(el('option', { value: String(i), text: c.name })));
+    camSel.value = String(driver.cameraIndex);
+    camSel.onchange = () => this.app.setStreamDriver(st.id, driver.source, Number(camSel.value));
+
+    // An actor can be driven either way; offer the switch only when it's
+    // actually available, so the control never claims a choice that isn't
+    // meaningful for a non-POSE stream.
+    const actorRef: ObjRef | null = driver.source.kind === 'ACTOR'
+      ? { kind: 'ACTOR', id: driver.source.actorId }
+      : driver.source.kind === 'OBJECT' && driver.source.ref.kind === 'ACTOR' ? driver.source.ref : null;
+
+    return [
+      el('div', { class: 'row' },
+        picker,
+        btn(icon('xMark'), () => this.app.clearStreamDriver(st.id),
+          { cls: 'icon-btn', title: 'Stop simulating — return to the live camera' }),
+      ),
+      el('div', { class: 'row' },
+        'via camera', camSel,
+        ...(st.kind === 'POSE' && actorRef ? [checkbox('full skeleton', driver.source.kind === 'ACTOR', (v) => {
+          if (v) this.app.setStreamDriver(st.id, { kind: 'ACTOR', actorId: actorRef.id }, driver.cameraIndex);
+          else this.app.setStreamDriver(st.id, { kind: 'OBJECT', ref: actorRef }, driver.cameraIndex);
+        }, 'sample every mapped joint, not just this actor’s root')] : []),
+      ),
+    ];
+  }
+
   private mmStreamsPanel(): HTMLElement {
     const { ctx } = this.app;
     const streams = ctx.scene.mmStreams;
@@ -4137,6 +4339,8 @@ export class UI {
       btn('＋Pose', () => this.app.addMMStreams(['POSE'], 'CAMERA'), { title: 'Body stream (33 points, flat by default — pose depth is noisy)' }),
       btn('＋Hands', () => this.app.addMMStreams(['HAND_LEFT', 'HAND_RIGHT'], 'CAMERA'), { title: 'Left + right hand streams (21 points each, with relative depth)' }),
       btn('＋Face', () => this.app.addMMStreams(['FACE', 'IRIS'], 'CAMERA'), { title: 'Face mesh (478 points) + iris (10 points) streams, with relative depth' }),
+      btn('＋Detect', () => this.app.addMMStreams(['DETECT'], 'CAMERA'),
+        { title: 'Semantic detection — type what to look for ("a person wearing a hat", "a dog") and each match becomes a probe' }),
     );
 
     // URL / file sources stand in for the webcam (testing, found footage,
@@ -4178,16 +4382,22 @@ export class UI {
         st.pen.active = v;
         this.refresh();
       }, `pen: draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up`);
+      const driven = this.app.isStreamDriven(st.id);
       return [
         el('div', { class: 'row' },
           btn(st.visible ? icon('eye') : icon('eyeOff'), () => { st.visible = !st.visible; this.refresh(); }, { cls: 'icon-btn' }),
           colorField('', [...st.color, 1], (rgb) => { st.color = rgb; }),
           el('span', { class: 'grow', text: `${st.name}${st.source === 'BUS' ? ` ← ${st.busAddress}` : st.source === 'CLIP' ? ` ⟲ ${clip?.name ?? '(clip gone)'}` : ''}` }),
+          ...(driven ? [el('span', { class: 'sim-badge', text: 'SIM', title: 'Driven from a virtual source, not the live camera' })] : []),
           el('span', { text: frame?.count ? `${frame.count} pts` : '—' }),
           penBtn,
           ...(st.source !== 'CLIP' ? [recBtn] : []),
           btn(icon('xMark'), () => this.app.deleteMMStream(st.id), { cls: 'icon-btn', title: 'Delete stream' }),
         ),
+        // Simulated source: stand in a virtual visitor for the live camera,
+        // so a whole zone/mapping setup can be built and tested with no
+        // webcam attached, then swapped for a real one with no other change.
+        ...(st.source === 'CAMERA' ? this.simSourceRow(st) : []),
         el('div', { class: 'row' },
           numField('size', st.pointSize, (v) => { st.pointSize = Math.max(0.001, v); }, 0.01,
             { def: st.kind === 'FACE' ? 0.012 : st.kind === 'IRIS' ? 0.02 : 0.04, min: 0.001 }),
@@ -4199,6 +4409,8 @@ export class UI {
           checkbox('', st.probeEvents !== false, (v) => { st.probeEvents = v; }, 'probe: participates in trigger-zone events'),
           checkbox('', !!st.emitBus, (v) => { st.emitBus = v; }, 'emit bus: re-broadcast landmarks at the address prefix so rigs/routes/triggers can ride them'),
         ),
+        // DETECT: the queries ARE the classes, so the editor is a text box
+        ...(st.kind === 'DETECT' && st.detect ? this.detectRows(st, st.detect) : []),
         // CLIP replays get a traveler-style transport
         ...(st.source === 'CLIP' ? [el('div', { class: 'row' },
           btn(st.playing ? icon('pause') : icon('play'), () => { st.playing = !st.playing; this.refresh(); },
@@ -4736,6 +4948,8 @@ export class UI {
       btn(icon('plus'), () => this.app.addCamera(), { cls: 'icon-btn', title: 'Add a camera at the current view' }),
       btn(icon('xMark'), () => this.app.removeCamera(), { cls: 'icon-btn', title: 'Delete the active camera' }),
       checkbox('Lock', this.app.lockCamToView, (v) => { this.app.lockCamToView = v; }),
+      btn(icon('photo'), () => this.app.captureCameraPlate(ctx.scene.activeCamera),
+        { cls: 'icon-btn', title: 'Snapshot this camera’s view as a reference plane in front of it — perfectly registered to the space, to draw or build against' }),
       btn(icon('pin'), () => this.app.addCameraKey(), { cls: 'icon-btn', title: 'Keyframe the camera at the current frame' }),
       btn(icon('minus'), () => this.app.removeCameraKeyAtFrame(), { cls: 'icon-btn', title: 'Remove camera key at current frame' }),
       numField('FOV', activeCam(ctx.scene).fov, (v) => { activeCam(ctx.scene).fov = Math.min(140, Math.max(5, v)); }, 1, { def: 50, min: 5, max: 140, route: 'camera.0.fov' }),

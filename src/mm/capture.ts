@@ -18,6 +18,7 @@
 // come from Google's model CDN. Both need network on first use.
 import type { GPScene, MMStream } from '../core/types';
 import { streamStore, STREAM_POINT_COUNTS, IRIS_INDICES } from './streams';
+import { packDetections, semanticDetector } from './detect';
 
 // pinned to the installed @mediapipe/tasks-vision version
 const WASM_LOCAL = '/node_modules/@mediapipe/tasks-vision/wasm';
@@ -249,6 +250,11 @@ export class MMCapture {
   /** Per-rAF: run detection on new source frames and push stream frames. */
   tick(scene: GPScene): void {
     if (this.status !== 'on') return;
+    // Semantic detection runs on its OWN clock and is deliberately outside
+    // the new-frame guard below: it is far slower than the video, so it must
+    // keep working from whatever the latest frame is rather than being
+    // skipped whenever two ticks land on one frame.
+    this.tickDetect(scene);
     const frameKey = this.usingCanvas ? this.canvasFrame : this.video.currentTime;
     if (frameKey === this.lastFrameKey) return;
     this.lastFrameKey = frameKey;
@@ -314,6 +320,39 @@ export class MMCapture {
 
   /** normalized image coords (x right, y DOWN, z toward camera) -> packed
    *  stream-local Y-up frame [x,y,z,conf]*n, centered, aspect-corrected. */
+  /**
+   * Drive DETECT streams. Fire-and-forget: the inference is awaited on its
+   * own promise so a 300 ms model run never stalls a 16 ms frame, and the
+   * result lands in the store whenever it arrives.
+   */
+  private tickDetect(scene: GPScene): void {
+    const streams = scene.mmStreams.filter(
+      (s) => s.kind === 'DETECT' && s.source === 'CAMERA' && s.detect?.queries.length,
+    );
+    if (!streams.length) return;
+    const src = this.sourceEl;
+    const w = this.usingCanvas ? this.canvas.width : this.video.videoWidth;
+    const h = this.usingCanvas ? this.canvas.height : this.video.videoHeight;
+    if (!w || !h) return;
+    const aspect = w / h;
+    const now = performance.now();
+
+    for (const st of streams) {
+      const cfg = st.detect!;
+      void semanticDetector.ensure(cfg.model, cfg.webgpu);
+      if (!semanticDetector.due(cfg.intervalMs, now)) continue;
+      void semanticDetector
+        .run(src, cfg.queries, cfg.threshold, cfg.maxResults)
+        .then((hits) => {
+          if (!hits) return;
+          st.detectHits = hits;
+          streamStore.push(st.id, packDetections(hits, aspect), hits.length);
+        });
+      // one model, one inference in flight — the rest wait for the next tick
+      break;
+    }
+  }
+
   private pack(
     lms: { x: number; y: number; z: number; visibility?: number }[],
     aspect: number, fixedConf: number | null,

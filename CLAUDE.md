@@ -3,6 +3,9 @@
 > Branded in the UI as **3𝜻**; threegrease stays the working project/repo
 > name until it's ready to formally rename.
 
+> **`docs/INSTALLATION.md` is the north star** — the interactive-installation
+> use case this project exists for, what's built, and what's missing.
+>
 > **Start here, then read `docs/HANDOFF.md` (full technical handoff),
 > `docs/PRD.md` (product vision & requirements), and
 > `docs/IMPLEMENTATION_PLAN.md` (phased build plan with acceptance tests).
@@ -66,6 +69,7 @@ Key invariants:
 | `src/tools/` | per-mode tools. `toolsys.ts` (Tool interface + manager), `projection.ts` (screen↔world, drawing planes, STROKE-placement depth snapping), `context.ts` (Settings + AppCtx) |
 | `src/anim/` | playback (`player.ts`), stroke interpolation (`interpolate.ts`), camera eval/keys (`camera.ts`) |
 | `src/app/` | `main.ts` (App class: three setup, input routing, render loop), `ui.ts` (ALL DOM panels), `nav.ts` (views/gizmo/fly/ortho), `keymap.ts` (rebindable shortcuts), `styles.css` |
+| `src/tools/snapping.ts` | the ONE magnet, as a function — every precise-placement tool calls it (`snapWorldPoint`), including the 3D cursor |
 | `src/actor/` | rigged characters — skeleton (`skeleton.ts`), physics/kinematics (`solver.ts`), auto-rigging (`rig.ts`) |
 | `src/agent/` | LLM agent interface — `tools.ts` (the ONE tool registry), `providers.ts` (local + hosted), `session.ts` (agent loop), `rpc.ts` (WS JSON-RPC), `webmcp.ts` (browser-native agent), `panel.ts` (chat state). See `docs/AGENT.md` |
 | `agent/` | Node bridges: `relay.js`, `mcp-server.js`, `acp-server.js`, `selftest.js` |
@@ -260,6 +264,26 @@ the browser console or automated evals:
     from the bone leading into that joint, since joints store no rotation
     of their own — a prop parented to `hand.R` therefore also tips with
     the forearm, not just translates with the hand.
+
+- **`Object3D.lookAt` branches on `isCamera`.** A camera is oriented so
+  **-Z** faces the target (the direction it looks); everything else so +Z
+  does. Building a camera's transform from a plain `new THREE.Object3D()`
+  therefore yields a camera rotated 180 degrees, pointing at the wall behind
+  it. This does not look like a wrong transform — it looks like "tracking
+  silently never sees anything". Use a real camera object (see
+  `lookRotation` in `app/demoscene.ts`).
+- **Simulated tracking sources** (`src/actor/simstream.ts`) let ANY object,
+  or an actor's whole skeleton, drive an `MMStream` — sampled through a
+  SCENE camera, written into `streamStore` in MediaPipe's exact packing.
+  Nothing downstream can tell a simulated visitor from a webcam, which is
+  the point: build/test an installation with no hardware, then swap one
+  piece for a real input. Driver wiring is RUNTIME state, not scene data
+  (`App.setStreamDriver`), so it is re-established after a scene load rather
+  than living in the undo snapshot. Sampling runs AFTER the constraint pass
+  (a FOLLOW_PATH actor's transform and solved pose must be final first), so
+  sim landmarks reach TRIGGER probing one frame late — deliberate.
+  `File ▸ New — Demo gallery scene` (`app/demoscene.ts`) is the worked
+  example and is code, not a saved .json, so it cannot rot as shapes change.
 
 ## Where to pick up (roadmap, rough priority)
 
