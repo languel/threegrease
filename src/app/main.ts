@@ -109,6 +109,11 @@ import { LightManager } from '../render/lights';
 import { ActorManager } from '../render/actors';
 import { ActorPoseTool } from '../tools/actorpose';
 import { snapWorldPoint } from '../tools/snapping';
+import {
+  driveStreamFromActor, driveStreamFromObject, driverOf, isDriven,
+  stopDrivingStream, tickSimStreams,
+} from '../actor/simstream';
+import { buildDemoScene } from './demoscene';
 import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
 import { createHumanoid, resetPose } from '../actor/skeleton';
 import { autoRig } from '../actor/rig';
@@ -1970,6 +1975,29 @@ class App implements AppHandle {
     this.refreshWidget();
   }
 
+  /**
+   * Load the stock demo: a virtual gallery room, two pedestals, a rigged
+   * visitor walking a loop, a security camera, and that camera driving both
+   * a POSE stream (full skeleton) and a DETECT stream (one tracked point) —
+   * see app/demoscene.ts. Meant as a working example of every piece an
+   * installation setup touches, testable with nothing plugged in, and a
+   * starting point to replace pieces with real inputs one at a time.
+   */
+  loadDemoScene(): void {
+    this.ctx.pushUndo();
+    const upZ = this.ctx.settings.upAxis === 'Z';
+    const wiring = buildDemoScene(upZ);
+    this.ctx.replaceScene(wiring.scene);
+    // runtime wiring: which stream reads from which virtual source. This is
+    // NOT scene data (see App.setStreamDriver), so it has to be redone here
+    // rather than living inside the scene the undo snapshot just captured.
+    driveStreamFromActor(wiring.poseStreamId, wiring.actorId, wiring.camIndex);
+    driveStreamFromObject(wiring.detectStreamId, { kind: 'ACTOR', id: wiring.actorId }, wiring.camIndex);
+    this.refreshWidget();
+    this.viewAll();
+    this.ui.refresh();
+  }
+
   viewAll(): void {
     const box = new THREE.Box3();
     for (const g of [this.gp.root, this.canvasGroup, this.splats.group, this.meshes.group, this.polys.group, this.paints.group]) {
@@ -2296,9 +2324,33 @@ class App implements AppHandle {
     this.ctx.pushUndo();
     this.ctx.scene.mmStreams = this.ctx.scene.mmStreams.filter((s) => s.id !== id);
     streamStore.drop(id);
+    stopDrivingStream(id);
     if (!this.ctx.scene.mmStreams.some((s) => s.source === 'CAMERA')) mmCapture.stop();
     this.ui.refresh();
   }
+
+  /**
+   * Point a stream at a SIMULATED source instead of a real camera: an actor
+   * (a full pose) or any other object (one tracked point), seen through one
+   * of the scene's own cameras. This is what makes a demo scene work — the
+   * exact same stream a webcam would drive, fed from a virtual visitor
+   * walking a GP path, with no consumer anywhere able to tell the
+   * difference. Not undoable: it is a live wiring choice (like starting the
+   * webcam), not scene data.
+   */
+  setStreamDriver(streamId: number, source: { kind: 'ACTOR'; actorId: number } | { kind: 'OBJECT'; ref: ObjRef }, cameraIndex: number): void {
+    if (source.kind === 'ACTOR') driveStreamFromActor(streamId, source.actorId, cameraIndex);
+    else driveStreamFromObject(streamId, source.ref, cameraIndex);
+    this.ui.refresh();
+  }
+
+  clearStreamDriver(streamId: number): void {
+    stopDrivingStream(streamId);
+    this.ui.refresh();
+  }
+
+  streamDriver(streamId: number) { return driverOf(streamId); }
+  isStreamDriven(streamId: number): boolean { return isDriven(streamId); }
 
   mmCaptureToggle(): void {
     if (mmCapture.status === 'on' || mmCapture.status === 'starting') mmCapture.stop();
@@ -3219,6 +3271,14 @@ class App implements AppHandle {
     } catch (err) {
       console.error('constraint engine:', err);
     }
+    // Simulated tracking sources: AFTER constraints, because a driven
+    // actor's own world transform (e.g. FOLLOW_PATH walking it around) and
+    // its pose (actorSolver, above) both need to be final for this frame
+    // before sampling. That means a sim-driven landmark reaches TRIGGER
+    // probing one frame later than the capture it's standing in for would —
+    // irrelevant for a demo/test source, and simpler than reordering the
+    // constraint pass around a feature most scenes never use.
+    tickSimStreams(ctx.scene, ctx.scene.frame);
     this.widget.camera = this.nav.active; // ortho/persp swaps
     // quad view step 1: the widget is scene-graph-resident (renders into
     // every pane) and its own sizing/pointer math is bound to one camera +

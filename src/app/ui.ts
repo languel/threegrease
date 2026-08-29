@@ -67,6 +67,10 @@ export interface AppHandle {
   scaleSceneToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string };
   addActor(at?: [number, number, number]): void;
   resetActor(id: number): void;
+  setStreamDriver(streamId: number, source: { kind: 'ACTOR'; actorId: number } | { kind: 'OBJECT'; ref: ObjRef }, cameraIndex: number): void;
+  clearStreamDriver(streamId: number): void;
+  streamDriver(streamId: number): { source: { kind: 'ACTOR'; actorId: number } | { kind: 'OBJECT'; ref: ObjRef }; cameraIndex: number } | null;
+  isStreamDriven(streamId: number): boolean;
   setMode(mode: EditorMode): void;
   setShading(mode: ViewportShading): void;
   setTool(id: string): void;
@@ -138,6 +142,7 @@ export interface AppHandle {
   objectExtents(ref: import('../tools/objects').ObjRef): [number, number, number] | null;
   pickObject(cb: (ref: import('../tools/objects').ObjRef | null) => void): void;
   newScene(): void;
+  loadDemoScene(): void;
   viewAll(): void;
   addCamera(): void;
   cycleCamera(): void;
@@ -750,6 +755,7 @@ export class UI {
 
     menu('File', [
       { label: 'New', action: 'newScene' },
+      { label: 'New — Demo gallery scene', do: () => this.app.loadDemoScene() },
       { label: 'Open…', action: 'open' },
       { label: 'Save', action: 'save' },
       { sep: true },
@@ -4255,6 +4261,68 @@ export class UI {
     ];
   }
 
+  /**
+   * Wire a CAMERA-source stream to a virtual visitor instead of the live
+   * webcam: any object as one tracked point, or — for a POSE stream — an
+   * actor's whole skeleton. Seen through one of the scene's own cameras, so
+   * the synthetic feed represents what a fixed camera in the room would
+   * actually see, the same way a real installation's camera would.
+   */
+  private simSourceRow(st: MMStream): Node[] {
+    const { ctx } = this.app;
+    const driver = this.app.streamDriver(st.id);
+    const curRef: ObjRef | null = !driver ? null
+      : driver.source.kind === 'ACTOR' ? { kind: 'ACTOR', id: driver.source.actorId }
+        : driver.source.ref;
+
+    const picker = this.objectPickerField('Sim source',
+      () => curRef,
+      (ref) => {
+        if (!ref) { this.app.clearStreamDriver(st.id); return; }
+        const camIdx = driver?.cameraIndex ?? ctx.scene.activeCamera;
+        // an actor picked for a POSE stream defaults to full-skeleton
+        // sampling — that is the whole point of a POSE stream; anywhere
+        // else (or any other object) it is one tracked point
+        if (ref.kind === 'ACTOR' && st.kind === 'POSE') {
+          this.app.setStreamDriver(st.id, { kind: 'ACTOR', actorId: ref.id }, camIdx);
+        } else {
+          this.app.setStreamDriver(st.id, { kind: 'OBJECT', ref }, camIdx);
+        }
+      });
+
+    if (!driver) {
+      return [el('div', { class: 'row' }, picker,
+        el('span', { class: 'hint', text: 'optional — replaces the live camera for testing' }))];
+    }
+
+    const camSel = el('select') as HTMLSelectElement;
+    ctx.scene.cameras.forEach((c, i) => camSel.append(el('option', { value: String(i), text: c.name })));
+    camSel.value = String(driver.cameraIndex);
+    camSel.onchange = () => this.app.setStreamDriver(st.id, driver.source, Number(camSel.value));
+
+    // An actor can be driven either way; offer the switch only when it's
+    // actually available, so the control never claims a choice that isn't
+    // meaningful for a non-POSE stream.
+    const actorRef: ObjRef | null = driver.source.kind === 'ACTOR'
+      ? { kind: 'ACTOR', id: driver.source.actorId }
+      : driver.source.kind === 'OBJECT' && driver.source.ref.kind === 'ACTOR' ? driver.source.ref : null;
+
+    return [
+      el('div', { class: 'row' },
+        picker,
+        btn(icon('xMark'), () => this.app.clearStreamDriver(st.id),
+          { cls: 'icon-btn', title: 'Stop simulating — return to the live camera' }),
+      ),
+      el('div', { class: 'row' },
+        'via camera', camSel,
+        ...(st.kind === 'POSE' && actorRef ? [checkbox('full skeleton', driver.source.kind === 'ACTOR', (v) => {
+          if (v) this.app.setStreamDriver(st.id, { kind: 'ACTOR', actorId: actorRef.id }, driver.cameraIndex);
+          else this.app.setStreamDriver(st.id, { kind: 'OBJECT', ref: actorRef }, driver.cameraIndex);
+        }, 'sample every mapped joint, not just this actor’s root')] : []),
+      ),
+    ];
+  }
+
   private mmStreamsPanel(): HTMLElement {
     const { ctx } = this.app;
     const streams = ctx.scene.mmStreams;
@@ -4313,16 +4381,22 @@ export class UI {
         st.pen.active = v;
         this.refresh();
       }, `pen: draws into the active GP object · ${penLandmarkHint(st.kind)} · conf below min = pen up`);
+      const driven = this.app.isStreamDriven(st.id);
       return [
         el('div', { class: 'row' },
           btn(st.visible ? icon('eye') : icon('eyeOff'), () => { st.visible = !st.visible; this.refresh(); }, { cls: 'icon-btn' }),
           colorField('', [...st.color, 1], (rgb) => { st.color = rgb; }),
           el('span', { class: 'grow', text: `${st.name}${st.source === 'BUS' ? ` ← ${st.busAddress}` : st.source === 'CLIP' ? ` ⟲ ${clip?.name ?? '(clip gone)'}` : ''}` }),
+          ...(driven ? [el('span', { class: 'sim-badge', text: 'SIM', title: 'Driven from a virtual source, not the live camera' })] : []),
           el('span', { text: frame?.count ? `${frame.count} pts` : '—' }),
           penBtn,
           ...(st.source !== 'CLIP' ? [recBtn] : []),
           btn(icon('xMark'), () => this.app.deleteMMStream(st.id), { cls: 'icon-btn', title: 'Delete stream' }),
         ),
+        // Simulated source: stand in a virtual visitor for the live camera,
+        // so a whole zone/mapping setup can be built and tested with no
+        // webcam attached, then swapped for a real one with no other change.
+        ...(st.source === 'CAMERA' ? this.simSourceRow(st) : []),
         el('div', { class: 'row' },
           numField('size', st.pointSize, (v) => { st.pointSize = Math.max(0.001, v); }, 0.01,
             { def: st.kind === 'FACE' ? 0.012 : st.kind === 'IRIS' ? 0.02 : 0.04, min: 0.001 }),

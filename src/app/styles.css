@@ -277,6 +277,12 @@ input[type="checkbox"]:checked {
 /* Explanatory line inside a panel: quieter than a field, wraps freely. */
 .hint { color: var(--dim); font-size: 10px; line-height: 1.4; }
 .hint.error { color: #ff8a6a; }
+/* stream row: flags a stream fed from a virtual source instead of the live camera */
+.sim-badge {
+  font-size: 9px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--accent2); border: 1px solid var(--accent2); border-radius: 3px;
+  padding: 0 4px; line-height: 1.4;
+}
 .ctxmenu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 .row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .row.spread { justify-content: space-between; }
