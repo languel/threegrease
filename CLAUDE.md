@@ -67,7 +67,7 @@ Key invariants:
 | `src/anim/` | playback (`player.ts`), stroke interpolation (`interpolate.ts`), camera eval/keys (`camera.ts`) |
 | `src/app/` | `main.ts` (App class: three setup, input routing, render loop), `ui.ts` (ALL DOM panels), `nav.ts` (views/gizmo/fly/ortho), `keymap.ts` (rebindable shortcuts), `styles.css` |
 | `src/actor/` | rigged characters — skeleton (`skeleton.ts`), physics/kinematics (`solver.ts`), auto-rigging (`rig.ts`) |
-| `src/agent/` | LLM agent interface — `tools.ts` (the ONE tool registry), `providers.ts` (local + hosted), `session.ts` (agent loop), `rpc.ts` (WS JSON-RPC), `panel.ts` (chat state). See `docs/AGENT.md` |
+| `src/agent/` | LLM agent interface — `tools.ts` (the ONE tool registry), `providers.ts` (local + hosted), `session.ts` (agent loop), `rpc.ts` (WS JSON-RPC), `webmcp.ts` (browser-native agent), `panel.ts` (chat state). See `docs/AGENT.md` |
 | `agent/` | Node bridges: `relay.js`, `mcp-server.js`, `acp-server.js`, `selftest.js` |
 
 ## UI conventions (for UI-focused work)
@@ -138,8 +138,16 @@ the browser console or automated evals:
   `nav.ts` — don't remove that flag.
 
 - Agent tools (`src/agent/tools.ts`) are the SINGLE registry behind the
-  in-app chat, MCP and ACP — adding one there exposes it to Claude Code
-  and Zed with no Node-side change. `mutates: true` gets pushUndo +
+  in-app chat, MCP, ACP and WebMCP — adding one there exposes it to Claude
+  Code, Zed and the browser's own agent with no Node-side change.
+  WebMCP (`src/agent/webmcp.ts`) registers the same tools with
+  `document.modelContext` (the spec's entry point, and what Chrome's origin
+  trial ships — earlier prototypes used `navigator`, so it feature-detects
+  both). Unregistration is by aborting the AbortSignal passed to
+  registerTool; there is no unregisterTool. Tool names must match
+  `[A-Za-z0-9_.-]{1,128}` or registration throws and takes the batch with
+  it. It is opt-in per session, never automatic — these tools mutate the
+  user's document. `mutates: true` gets pushUndo +
   requestRender from the dispatcher; never open-code either in a handler.
   Image tool results must NOT be stringified into a tool message (~500KB
   of base64 breaks chat templates) — the session converts them to a real

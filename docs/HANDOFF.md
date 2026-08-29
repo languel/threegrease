@@ -584,3 +584,29 @@ cause was that `chest` binds to the shoulder MIDPOINT while its rest
 position sat anatomically below the shoulders — the captured direction and
 ours disagreed, so retargeting lost height every frame. When a rig drifts,
 suspect the correspondence between joint and landmark before the solver.
+
+## Session log (2026-08-29): WebMCP + chat-shaped agent panel
+
+Detail in IMPLEMENTATION_PLAN.md under "WebMCP + a chat-shaped assistant
+panel".
+
+- `src/agent/webmcp.ts` registers the existing `AGENT_TOOLS` with
+  `document.modelContext`, so the browser's own agent drives the scene with
+  no relay and no Node process. Fourth consumer of one registry.
+- The assistant panel is now a real chat: bubbles on opposite sides, a
+  compact tool log badged by caller, a pinned composer. Settings folded
+  away; all explanatory prose replaced with hover tooltips.
+
+**The lesson from this one:** the API's entry point is
+`document.modelContext`, and essentially every secondary source says
+`navigator.modelContext`. Reading the actual spec (and Chrome's own docs,
+which agree) was the difference between working and failing silently —
+`registerTool` on the wrong object never runs and throws nothing. When a
+standard is young enough that the blog posts outnumber the implementations,
+the blog posts are describing an older draft.
+
+Second lesson, smaller: verifying against a mock is worth doing even when
+you cannot test the real thing. The mock caught two genuine result-shape
+bugs — a screenshot going out as base64 text instead of an image block, and
+handlers that return `{error}` rather than throwing being reported to the
+agent as successes.

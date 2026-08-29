@@ -19,6 +19,7 @@ BROWSER (the app)                           NODE (agent/)
 │ src/agent/session.ts         │            │      │ stdio      │    │
 │ src/agent/rpc.ts  (dials out)│            │ mcp-server  acp-server │
 │ src/agent/panel.ts (chat UI) │            └────────────────────────┘
+│ src/agent/webmcp.ts ─────────┼──► the browser's own agent
 └──────────────────────────────┘                 ▲            ▲
                                             Claude Code      Zed
 ```
@@ -27,7 +28,11 @@ The tool registry needs `AppCtx` (the live scene, renderer and undo stack),
 so it lives in the browser and the app **dials out** to the relay. The Node
 servers are pure translators: they fetch tool definitions live from the
 running app, so **a tool added in `src/agent/tools.ts` is immediately visible
-to Claude Code and Zed with no change on the Node side.**
+to Claude Code, Zed and the browser's own agent with no change anywhere
+else.** Four consumers, one registry.
+
+WebMCP is the exception to the dial-out problem: the agent is already *in*
+the browser, so `webmcp.ts` hands it the same tools directly.
 
 ## Quick start — in-app chat
 
@@ -118,6 +123,30 @@ agents on the same wire.
 `acp-server.js` deliberately embeds **no LLM**: it exposes the same tool
 surface for the editor's own model to drive, so there is one tool registry and
 one set of credentials rather than a second provider stack in the bridge.
+
+## Quick start — the browser's own agent (WebMCP)
+
+[WebMCP](https://webmachinelearning.github.io/webmcp/) lets a page hand its
+tools to an agent running inside the browser, with no relay and no Node
+process. Same 24 tools, same undo stack.
+
+1. Open the **Agent** tab ▸ **Connections**.
+2. If the row reads *unavailable*, this browser has no `document.modelContext`
+   — it ships behind an origin trial in Chrome 149 and Edge 150, and in
+   Brave's Leo and ChatGPT Desktop. If it reads *needs https*, serve the page
+   over HTTPS (`localhost` counts as secure).
+3. Click **Register tools**. The row then shows how many are live.
+4. Ask the browser's agent for something. Calls appear in the chat transcript
+   tagged `webmcp`, next to whatever you typed yourself.
+
+Registration is **opt-in per session and never automatic**: these tools
+mutate the user's document, so handing them to an agent is a decision, not a
+default. Unregistering aborts the signal the spec uses for teardown, which
+drops all of them at once.
+
+Read-only tools are annotated `readOnlyHint`, derived from the same `mutates`
+flag that decides whether the dispatcher pushes undo — so the hint the agent
+sees and the undo behaviour can never disagree.
 
 ## Using it — worked examples
 
@@ -276,7 +305,9 @@ Append to `AGENT_TOOLS` in `src/agent/tools.ts`:
 }
 ```
 
-That is the whole change: the in-app chat, MCP, and ACP all pick it up.
+That is the whole change: the in-app chat, MCP, ACP and WebMCP all pick it
+up. Keep the name to `[A-Za-z0-9_.-]`, 128 chars or fewer — WebMCP rejects
+anything else, and a rejected name aborts the whole registration batch.
 Write the description for a model that cannot see the UI — say what it is for,
 not just what it is.
 

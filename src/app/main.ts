@@ -138,6 +138,7 @@ import type { AgentHost } from '../agent/types';
 import { setAgentCommandLister } from '../agent/tools';
 import { AgentRpc } from '../agent/rpc';
 import { AgentPanel } from '../agent/panel';
+import { webMcp } from '../agent/webmcp';
 import { WorldManager } from '../render/world';
 import { materialManager } from '../render/materialmgr';
 
@@ -453,6 +454,10 @@ class App implements AppHandle {
     setAgentCommandLister(() => this.commands.all().map((c) => ({ id: c.id, title: c.title })));
     this.agentRpc = new AgentRpc(this.agentHost());
     this.agent = new AgentPanel(this.agentHost(), this.agentRpc);
+    // WebMCP: the browser's own agent reaches the same registry. Bound here
+    // (not auto-enabled) — registering tools is something the user opts into
+    // per session, the way the relay link is.
+    webMcp.bind(this.agentHost());
 
     // environment: one equirect source drives background + IBL. The live
     // capture element is injected rather than imported so render/world.ts
