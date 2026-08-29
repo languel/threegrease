@@ -156,8 +156,9 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Stock demo gallery scene (File ▸ New — Demo gallery scene): room,
       pedestals, trigger zone, visitor walking a path, security camera,
       driven POSE + DETECT streams, procedural scan placeholder
-- [ ] Placeholder for reference photographs (test card, or a render from
-      the virtual security camera used as its own stand-in)
+- [x] Camera plates: snapshot any camera's view as a perfectly-registered
+      reference plane (the reference-photograph placeholder, and a real
+      feature for freezing a viewpoint to build against)
 - [ ] Tracking MAPPING layer: free / region / ground-homography modes
       (physical accuracy is one mode, not the goal — remote installations
       deliberately want non-physical scaling)

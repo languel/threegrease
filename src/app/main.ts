@@ -2657,6 +2657,77 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /**
+   * Snapshot a scene camera's view as a reference plane sitting in front of
+   * it — the virtual stand-in for "stand here, take a photo, bring it in as
+   * a plane and build against it".
+   *
+   * Useful well beyond the simulation: once real geometry exists, this is
+   * how you freeze a viewpoint as an image to draw over, and it is the only
+   * reference plane guaranteed to be perfectly registered to the space,
+   * because it was rendered FROM that space rather than photographed of it.
+   *
+   * The plane is placed at `distance` and sized to exactly fill the frustum
+   * there, so it lines up with what the camera sees pixel for pixel.
+   */
+  captureCameraPlate(camIndex: number, distance = 3, width = 1024): void {
+    const scene = this.ctx.scene;
+    const gpCam = scene.cameras[camIndex];
+    if (!gpCam) return;
+    const pose = evalCamera(gpCam, scene.frame);
+    const aspect = 16 / 9;
+    const height = Math.round(width / aspect);
+
+    const cam = new THREE.PerspectiveCamera(pose.fov, aspect, 0.05, 500);
+    cam.position.copy(pose.position);
+    cam.quaternion.copy(pose.quaternion);
+    cam.updateMatrixWorld(true);
+    cam.updateProjectionMatrix();
+
+    const rt = new THREE.WebGLRenderTarget(width, height);
+    const prevTarget = this.glRenderer.getRenderTarget();
+    this.glRenderer.setRenderTarget(rt);
+    this.glRenderer.render(this.scene3, cam);
+    const pixels = new Uint8Array(width * height * 4);
+    this.glRenderer.readRenderTargetPixels(rt, 0, 0, width, height, pixels);
+    this.glRenderer.setRenderTarget(prevTarget);
+    rt.dispose();
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const g = canvas.getContext('2d');
+    if (!g) return;
+    const img = g.createImageData(width, height);
+    // readRenderTargetPixels returns rows bottom-up; ImageData is top-down
+    for (let y = 0; y < height; y++) {
+      const src = (height - 1 - y) * width * 4;
+      img.data.set(pixels.subarray(src, src + width * 4), y * width * 4);
+    }
+    g.putImageData(img, 0, 0);
+
+    // size the plane to fill the frustum at `distance`, then place it there
+    const h = 2 * distance * Math.tan(THREE.MathUtils.degToRad(pose.fov) / 2);
+    const w = h * aspect;
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(pose.quaternion);
+    const at = pose.position.clone().addScaledVector(forward, distance);
+    const e = new THREE.Euler().setFromQuaternion(pose.quaternion, 'XYZ');
+
+    this.ctx.pushUndo();
+    const mesh = createMeshObject(Date.now() % 1e9, 'PLANE', [at.x, at.y, at.z]);
+    mesh.name = `${gpCam.name} · plate`;
+    mesh.texture = canvas.toDataURL('image/png');
+    mesh.unlit = true;
+    mesh.drawTarget = false;   // a reference, not a draw surface, by default
+    mesh.doubleSided = true;
+    mesh.rotation = [e.x, e.y, e.z];
+    mesh.scale = [w, h, 1];
+    scene.meshes.push(mesh);
+    this.meshes.sync(scene, this.nav.active);
+    this.ui.refresh();
+    this.ctx.requestRender();
+  }
+
   /** Reference/image plane: textured unlit PLANE sized to the image aspect. */
   importImagePlane(file: File): void {
     const reader = new FileReader();

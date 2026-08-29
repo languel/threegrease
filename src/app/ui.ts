@@ -143,6 +143,7 @@ export interface AppHandle {
   pickObject(cb: (ref: import('../tools/objects').ObjRef | null) => void): void;
   newScene(): void;
   loadDemoScene(): void;
+  captureCameraPlate(camIndex: number, distance?: number, width?: number): void;
   viewAll(): void;
   addCamera(): void;
   cycleCamera(): void;
@@ -4947,6 +4948,8 @@ export class UI {
       btn(icon('plus'), () => this.app.addCamera(), { cls: 'icon-btn', title: 'Add a camera at the current view' }),
       btn(icon('xMark'), () => this.app.removeCamera(), { cls: 'icon-btn', title: 'Delete the active camera' }),
       checkbox('Lock', this.app.lockCamToView, (v) => { this.app.lockCamToView = v; }),
+      btn(icon('photo'), () => this.app.captureCameraPlate(ctx.scene.activeCamera),
+        { cls: 'icon-btn', title: 'Snapshot this camera’s view as a reference plane in front of it — perfectly registered to the space, to draw or build against' }),
       btn(icon('pin'), () => this.app.addCameraKey(), { cls: 'icon-btn', title: 'Keyframe the camera at the current frame' }),
       btn(icon('minus'), () => this.app.removeCameraKeyAtFrame(), { cls: 'icon-btn', title: 'Remove camera key at current frame' }),
       numField('FOV', activeCam(ctx.scene).fov, (v) => { activeCam(ctx.scene).fov = Math.min(140, Math.max(5, v)); }, 1, { def: 50, min: 5, max: 140, route: 'camera.0.fov' }),

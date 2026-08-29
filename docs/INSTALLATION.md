@@ -227,9 +227,17 @@ Placeholder coverage today:
 | Camera | installed webcam | scene camera ("Security Cam 1") |
 | Room geometry | photos / scan | modelled walls + pedestals |
 
-Still missing a placeholder: **reference photographs** (a generated test-card
-plane, or better, a render from the security camera used as its own
-stand-in) and the mapping modes below, which do not exist yet.
+**Camera plates** (📷 in the timeline camera cluster, `App.captureCameraPlate`)
+close the reference-photograph gap and are a real feature beyond the sim:
+snapshot any scene camera's view as a reference plane placed in front of it,
+sized to fill the frustum exactly so it lines up pixel for pixel with what
+that camera sees. It is the only reference plane guaranteed to be perfectly
+registered to the space, because it was rendered *from* the space rather
+than photographed *of* it. Virtually, it stands in for "go stand there and
+take a photo"; with real geometry it is how you freeze a viewpoint to draw
+over.
+
+Still missing a placeholder: the mapping modes below, which do not exist yet.
 
 ### Mapping, not calibration
 
