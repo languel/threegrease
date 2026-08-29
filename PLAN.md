@@ -150,6 +150,14 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Shared snapping module so every tool gets the one magnet
 - [x] Semantic detection: open-vocabulary (text-query) streams feeding the
       existing zone/probe machinery — model loading unverified, see docs
+- [x] Simulated tracking sources: any object (one point) or actor (full
+      pose) drives a stream through a scene camera — build and test an
+      installation with no hardware attached
+- [x] Stock demo gallery scene (File ▸ New — Demo gallery scene): room,
+      pedestals, trigger zone, visitor walking a path, security camera,
+      driven POSE + DETECT streams, procedural scan placeholder
+- [ ] Placeholder for reference photographs (test card, or a render from
+      the virtual security camera used as its own stand-in)
 - [ ] Tracking MAPPING layer: free / region / ground-homography modes
       (physical accuracy is one mode, not the goal — remote installations
       deliberately want non-physical scaling)

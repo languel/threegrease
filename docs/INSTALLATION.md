@@ -167,6 +167,70 @@ Hits are sorted by horizontal position, which is stable for well-separated
 subjects and not a substitute for real tracking. That is the same identity
 problem multi-person pose has, and it wants the same fix.
 
+### Simulated sources — a virtual placeholder for every input
+
+`src/actor/simstream.ts` + `src/app/demoscene.ts`.
+
+The principle: **every key input has a virtual stand-in**, so a whole
+installation — room, zones, mappings, event wiring — can be built and
+exercised with nothing plugged in, then have any ONE piece swapped for a
+real input with nothing else changing.
+
+That works because a simulated source is not a special case anywhere. It
+writes to the same `streamStore` MediaPipe writes to, in the same packing,
+so every consumer downstream (trigger zones, routes, clips, the body-map
+picker, the pen) genuinely cannot tell the difference.
+
+Two source shapes:
+
+- **ACTOR** — a full 33-point POSE, mapping joints back to landmark indices.
+  This is the inverse of `rig.ts`'s `POSE_MAP`: there a landmark drives a
+  joint, here the actor is the source of truth and the stream is synthesized
+  from it.
+- **OBJECT** — ANY object as ONE tracked point. This is what makes "any
+  object is a tracking source" literal rather than actor-only: put a box on
+  a `FOLLOW_PATH` and it *is* a visitor as far as a zone is concerned.
+
+Both are sampled through a **scene camera**, not the app's viewport camera,
+so the synthetic feed represents what a fixed camera in the room would see
+regardless of where you happen to be looking while authoring. Landmarks
+behind the camera or out of frame report low confidence rather than a
+position that is silently wrong — the same contract a real detector's
+low-confidence points carry.
+
+Sampling runs *after* the constraint pass, because a `FOLLOW_PATH`-driven
+actor's transform and its solved pose both have to be final for the frame
+before they are read. That means a sim landmark reaches TRIGGER probing one
+frame later than the capture it stands in for — irrelevant for a test
+source, and cheaper than reordering the constraint pass for a feature most
+scenes never use.
+
+Wiring a stream to a sim source is **runtime state, not scene data**
+(`App.setStreamDriver`) — the same category as "the webcam is running".
+
+**File ▸ New — Demo gallery scene** builds the worked example: a 7×5×2.6 m
+room, two pedestals, a trigger zone with enter/leave OSC, a rigged visitor
+walking a GP loop, a security camera, that camera driving both a POSE and a
+DETECT stream, and a hidden procedural point cloud standing in for a 3D
+scan. It is deliberately code rather than a saved `.json`: a saved file
+would rot silently the first time a field is added, and reading the builder
+is the fastest way to see a worked example of every piece.
+
+Placeholder coverage today:
+
+| Input | Real | Virtual placeholder |
+| --- | --- | --- |
+| Body tracking | webcam + MediaPipe | actor sampled as a 33-point pose |
+| Object/person position | detector | any object as one tracked point |
+| Semantic detection | OWL-ViT queries | actor driving the DETECT stream |
+| 3D scan | Kiri / splat import | procedural room point cloud |
+| Camera | installed webcam | scene camera ("Security Cam 1") |
+| Room geometry | photos / scan | modelled walls + pedestals |
+
+Still missing a placeholder: **reference photographs** (a generated test-card
+plane, or better, a render from the security camera used as its own
+stand-in) and the mapping modes below, which do not exist yet.
+
 ### Mapping, not calibration
 
 A correction to the earlier analysis. Registration was framed as "get to

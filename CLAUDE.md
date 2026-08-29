@@ -265,6 +265,26 @@ the browser console or automated evals:
     of their own — a prop parented to `hand.R` therefore also tips with
     the forearm, not just translates with the hand.
 
+- **`Object3D.lookAt` branches on `isCamera`.** A camera is oriented so
+  **-Z** faces the target (the direction it looks); everything else so +Z
+  does. Building a camera's transform from a plain `new THREE.Object3D()`
+  therefore yields a camera rotated 180 degrees, pointing at the wall behind
+  it. This does not look like a wrong transform — it looks like "tracking
+  silently never sees anything". Use a real camera object (see
+  `lookRotation` in `app/demoscene.ts`).
+- **Simulated tracking sources** (`src/actor/simstream.ts`) let ANY object,
+  or an actor's whole skeleton, drive an `MMStream` — sampled through a
+  SCENE camera, written into `streamStore` in MediaPipe's exact packing.
+  Nothing downstream can tell a simulated visitor from a webcam, which is
+  the point: build/test an installation with no hardware, then swap one
+  piece for a real input. Driver wiring is RUNTIME state, not scene data
+  (`App.setStreamDriver`), so it is re-established after a scene load rather
+  than living in the undo snapshot. Sampling runs AFTER the constraint pass
+  (a FOLLOW_PATH actor's transform and solved pose must be final first), so
+  sim landmarks reach TRIGGER probing one frame late — deliberate.
+  `File ▸ New — Demo gallery scene` (`app/demoscene.ts`) is the worked
+  example and is code, not a saved .json, so it cannot rot as shapes change.
+
 ## Where to pick up (roadmap, rough priority)
 
 NPR brush engine, canvas retirement, object mode, and the N1–N8 Blender-
