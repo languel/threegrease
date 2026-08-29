@@ -2529,3 +2529,99 @@ nothing. `App.sys` now re-exports the app's own singletons; use it.
 Self-collision between limbs, pose keyframing, skinned meshes, foot
 locking (feet still slide), and hand/face rigs from the HAND_*/FACE
 streams.
+
+## WebMCP + a chat-shaped assistant panel
+
+Two changes to the agent surface: a fourth way to reach the tool registry,
+and a panel that finally looks like the chat it always was.
+
+### WebMCP
+
+[WebMCP](https://webmachinelearning.github.io/webmcp/) lets a page hand its
+tools to an agent running *inside* the browser. That sidesteps the whole
+reason the relay exists: MCP and ACP are stdio protocols spoken by
+processes, so a browser tab has to dial out to a Node bridge. A WebMCP agent
+is already in the tab, so `src/agent/webmcp.ts` just hands it the tools.
+
+The integration is one small file because `AGENT_TOOLS` was already the
+single registry behind the in-app chat, MCP and ACP. WebMCP is a **fourth
+consumer, not a fourth definition** — and calls run through `runTool`, so an
+external agent gets the same `pushUndo`, the same `requestRender` and the
+same error handling as anything typed into the panel. There is deliberately
+no second dispatch path to keep in sync.
+
+**Facts taken from the spec rather than from memory.** Every secondary
+source (blogs, SEO explainers) says `navigator.modelContext`. The W3C CG
+draft and Chrome's origin-trial docs both say **`document.modelContext`**.
+Getting that wrong fails *silently* — `registerTool` never runs and the page
+simply looks tool-less — so it feature-detects both, since earlier
+prototypes did hang it off `navigator`.
+
+The rest, likewise verified:
+
+- There is **no `unregisterTool`**. Teardown is by aborting the
+  `AbortSignal` passed to `registerTool`, which is why `disable()` drops all
+  24 tools at once rather than looping.
+- Names must match `[A-Za-z0-9_.-]{1,128}`. Ours (dotted ids like
+  `scene.summary`) already comply, but a single bad name rejects the WHOLE
+  batch, so `nameOk()` screens them rather than letting one future tool take
+  every other tool down with it.
+- `readOnlyHint` is derived from the existing `mutates` flag — the same flag
+  that decides whether the dispatcher pushes undo. The hint an agent sees
+  and the undo behaviour therefore cannot drift apart.
+- Availability is gated on `SecureContext` and the `"tools"` permissions
+  policy. The panel distinguishes *unavailable* from *needs https*, because
+  those have completely different fixes and the raw failure is opaque.
+
+**Two result-shape bugs the verification caught:**
+
+- A screenshot was going out as ~500KB of base64 inside a *text* block. It
+  now becomes a real `image` content block — the same distinction the
+  in-app session already makes when converting a tool result.
+- Several handlers RETURN an error object (`{error: 'no actor with id …'}`)
+  rather than throwing, because a missing id is information for the model,
+  not an exception. `runTool` reports those as `ok`, so the agent was being
+  told a failure had succeeded. `toReply` now flags them `isError`, and
+  `onActivity` reports the same verdict the agent sees — taking `result.ok`
+  there instead marked a failed call as ✓ in the transcript while the agent
+  was told it failed.
+
+**Opt-in, never automatic.** These tools mutate the user's document, so
+handing them to an agent is a decision rather than a default — the same
+stance the relay link takes.
+
+**Verification.** No browser to hand ships WebMCP (Chrome 149 / Edge 150 are
+origin trials), so it was tested against a spec-shaped mock of
+`document.modelContext` that enforces the spec's own error cases (duplicate
+names, bad names, missing execute). All 24 tools register; annotations are
+correct (`scene.summary` read-only, `stroke.create` not); `scene.summary`
+returns valid JSON; `actor.create` actually mutates the scene; a bad id
+comes back `isError`; the screenshot is an image block; a second `enable()`
+does not double-register; and aborting drops all 24.
+
+### Chat layout
+
+The panel owned real state (a session, a transcript, an in-flight request)
+but rendered as a stack of property rows. It is now shaped like the chat it
+is: a scrolling log with user and assistant on **opposite sides** — side is
+what makes a transcript scannable without reading it — tool calls as
+one-line mono telemetry badged with who called them (`webmcp` / `relay`),
+and a composer pinned underneath. Enter sends, Shift+Enter is a newline.
+
+Provider, model and behaviour moved into a collapsed **Agent settings**
+panel, and the connection surfaces into **Connections**.
+
+**No narrative text in the UI.** The provider setup note, the
+credential-storage warning and a tool call's full arguments are all `title`
+tooltips on the control they describe. The empty state is three clickable
+prompts rather than a sentence explaining what to type — actions, not prose.
+
+`panel()` gained a `DEFAULT_COLLAPSED` set for panels that should start
+shut. That required storing the toggle as an explicit boolean: the old code
+deleted the key on expand, which would have let a default-collapsed panel
+snap closed again on the very next refresh.
+
+### Not done
+
+Batching a whole prompt into ONE undo step (still one per tool call), and
+streaming assistant text — replies land whole.
