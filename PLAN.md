@@ -141,6 +141,14 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [ ] Environment texture node graph (Blender-style mapping/coords)
 - [ ] HDR/EXR loading (currently LDR images only)
 
+### Agent / assistant
+- [x] In-app chat panel — local + hosted providers, native tool calling
+- [x] MCP + ACP over a relay (Claude Code, Claude Desktop, Zed)
+- [x] WebMCP — the same registry handed to the browser's own agent
+- [x] Chat-shaped panel: bubbles, compact tool log, tooltips over prose
+- [ ] Batch a whole prompt into ONE undo step (currently one per tool call)
+- [ ] Streaming assistant text (replies land whole today)
+
 ### Actors (rigged characters)
 - [x] Default humanoid mannequin (21 joints, 20 bones, joint limits)
 - [x] Positional skeleton: joints as particles, bones as distance

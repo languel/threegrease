@@ -86,6 +86,18 @@ npm run dev     # open http://localhost:5199
   Blender-lite per-object Material panel — color, opacity, texture,
   unlit, two-sided, wireframe, world/face-view/camera lock, draw-target
   flag. Old canvas planes migrate automatically into these.
+- **Assistant** (Agent tab): a chat panel that drives the scene through the
+  same 24 tools everything else uses — draw, inspect, transform, rig. Point
+  it at a local model (Ollama, LM Studio, oMLX, Unsloth) or a hosted one
+  (Anthropic, OpenAI, Google, OpenRouter). Under **Connections** the same
+  tools can also be handed to:
+  - **WebMCP** — the browser's own agent, no extra process. Opt-in per
+    session; needs a browser that ships `document.modelContext` (Chrome 149
+    / Edge 150 origin trial at time of writing).
+  - **the relay** — Claude Code, Claude Desktop or Zed over MCP/ACP, via
+    `node agent/relay.js`. See [docs/AGENT.md](docs/AGENT.md).
+
+  Whoever calls a tool, it shows up in the same transcript, tagged.
 - **Actors** (Add ▸ Actor, then the Actor tab): a rigged mannequin you can
   throw around, pose by hand, or drive from a webcam. The skeleton is
   *positional* — joints are particles, bones are distance constraints — so

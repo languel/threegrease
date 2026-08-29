@@ -460,37 +460,84 @@ button.props-tab.active { background: var(--panel); border-color: var(--border);
    The transcript is the only scrolling list in the sidebar, so it gets an
    explicit height: without one the panel grows unbounded and pushes the
    composer off-screen exactly when a long turn makes it most needed. */
-.agent-log {
-  max-height: 260px; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 5px;
-  padding: 6px; border: 1px solid var(--border); border-radius: 4px;
-  background: var(--panel); font-size: 11px; line-height: 1.45;
+/* Chat: a log that scrolls, a composer pinned under it. The log gets an
+   explicit height because it is the only scrolling list in the sidebar —
+   without one the panel grows unbounded and pushes the composer off-screen
+   exactly when a long turn makes it most needed. */
+.agent-chat { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.agent-bar { display: flex; align-items: center; gap: 4px; }
+.agent-bar .grow { flex: 1 1 0; min-width: 0; }
+.agent-chip {
+  font-size: 10px; color: var(--dim); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; max-width: 60%;
 }
-.agent-empty { color: var(--dim); font-style: italic; }
-.agent-msg { white-space: pre-wrap; word-break: break-word; }
-.agent-user { color: var(--text); }
-.agent-user::before { content: '› '; color: var(--accent2); }
-.agent-assistant { color: var(--text); }
+.agent-log {
+  height: 300px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); font-size: 11px; line-height: 1.45;
+}
+/* Bubbles: the side a message sits on is what makes a transcript scannable
+   without reading it, so user and assistant get opposite alignment rather
+   than differing only by colour. */
+.agent-msg {
+  white-space: pre-wrap; word-break: break-word;
+  max-width: 88%; padding: 5px 8px; border-radius: 10px;
+}
+.agent-user {
+  align-self: flex-end; background: var(--accent); color: #fff;
+  border-bottom-right-radius: 3px;
+}
+.agent-assistant {
+  align-self: flex-start; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-bottom-left-radius: 3px;
+}
+.agent-error {
+  align-self: flex-start; background: rgba(255, 107, 107, 0.12);
+  border: 1px solid rgba(255, 107, 107, 0.4); color: #ff8a8a;
+}
 /* tool rows are dense telemetry, not prose — mono and dimmed so a long run
    reads as a log rather than competing with the model's actual answer */
 .agent-tool {
-  color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px;
+  display: flex; align-items: baseline; gap: 5px;
+  color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px; min-width: 0;
 }
-.agent-tool-mark { color: var(--accent2); }
+.agent-tool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-tool-mark { color: var(--accent2); flex: none; }
 .agent-failed, .agent-failed .agent-tool-mark { color: #ff6b6b; }
-.agent-error { color: #ff6b6b; }
-.agent-status { color: var(--dim); font-style: italic; }
-.agent-note { color: var(--dim); font-size: 10px; line-height: 1.4; }
+/* badge marking a call that came from outside this panel */
+.agent-src {
+  flex: none; font-size: 9px; padding: 0 4px; border-radius: 6px;
+  background: var(--border); color: var(--dim);
+}
+.agent-status-line { color: var(--dim); font-style: italic; font-size: 10px; text-align: center; }
+.agent-seeds { display: flex; flex-wrap: wrap; gap: 4px; margin: auto 0; }
+button.agent-seed {
+  font-size: 10px; padding: 3px 8px; border-radius: 999px;
+  color: var(--dim); background: transparent;
+}
+button.agent-seed:hover { color: var(--text); border-color: var(--accent); }
+/* composer: textarea grows with its content (capped in JS), button stays put */
+.agent-composer { display: flex; align-items: flex-end; gap: 4px; }
 .agent-input {
-  width: 100%; resize: vertical; min-height: 46px;
+  flex: 1 1 auto; resize: none; min-height: 30px; overflow-y: auto;
   background: var(--panel); color: var(--text);
-  border: 1px solid var(--border); border-radius: 4px; padding: 5px 6px;
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
   font: inherit; font-size: 11px;
 }
 .agent-input:focus { outline: none; border-color: var(--accent); }
+button.agent-send {
+  flex: none; width: 30px; height: 30px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px; background: var(--accent); color: #fff; border-color: var(--accent);
+}
+button.agent-send-stop { background: #ff6b6b; border-color: #ff6b6b; }
+.agent-status { color: var(--dim); font-style: italic; }
 .agent-status-open { color: #4ade80; font-style: normal; }
 .agent-status-connecting { color: var(--accent2); font-style: normal; }
 .agent-status-off { color: var(--dim); }
+.agent-status-err { color: #ff6b6b; font-style: normal; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* ---- agent help dialog ----

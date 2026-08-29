@@ -10,6 +10,7 @@ import type { AgentHost } from './types';
 import { AgentSession } from './session';
 import { PROVIDER_LIST, defaultProviderSettings, getProvider, listModels } from './providers';
 import { AgentRpc } from './rpc';
+import { webMcp } from './webmcp';
 
 const PREFS_KEY = 'threegrease.agent';
 
@@ -30,6 +31,8 @@ interface Entry {
   text: string;
   call?: ToolCall;
   ok?: boolean;
+  /** who invoked it — absent for the in-app chat's own calls */
+  source?: 'relay' | 'webmcp';
 }
 
 export class AgentPanel {
@@ -47,7 +50,15 @@ export class AgentPanel {
     this.session = new AgentSession(host, this.settings);
     this.rpc.onStatus = () => this.rerender?.();
     this.rpc.onActivity = (name, ok) => {
-      this.transcript.push({ role: 'tool', text: `(external) ${name}`, ok });
+      this.transcript.push({ role: 'tool', text: name, source: 'relay', ok });
+      this.rerender?.();
+    };
+    // The browser's own agent drives the same tools; surface its calls in
+    // the same transcript so the panel shows everything acting on the scene,
+    // not only what was typed into it.
+    webMcp.onStatus = () => this.rerender?.();
+    webMcp.onActivity = (name, ok) => {
+      this.transcript.push({ role: 'tool', text: name, source: 'webmcp', ok });
       this.rerender?.();
     };
   }
