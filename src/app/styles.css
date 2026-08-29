@@ -538,6 +538,20 @@ button.agent-send-stop { background: #ff6b6b; border-color: #ff6b6b; }
 .agent-status-connecting { color: var(--accent2); font-style: normal; }
 .agent-status-off { color: var(--dim); }
 .agent-status-err { color: #ff6b6b; font-style: normal; }
+/* Measure rows: a name line, then the value line with the rescale field.
+   Two lines because the number is the thing you read, and cramming it beside
+   a text input makes it the thing you skip. */
+.measure-row { border-top: 1px solid var(--border); padding: 6px 0 4px; }
+.measure-len {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px; color: var(--dim); padding-top: 3px;
+}
+.measure-len .grow { flex: 1 1 0; }
+.measure-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums;
+}
+.measure-set { white-space: nowrap; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* ---- agent help dialog ----

@@ -141,6 +141,21 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [ ] Environment texture node graph (Blender-style mapping/coords)
 - [ ] HDR/EXR loading (currently LDR images only)
 
+### Interactive installation (north star — docs/INSTALLATION.md)
+- [x] Trigger zones on any object, volume/plane/topology tested
+- [x] Enter + leave events out over WS / OSC / MIDI
+- [x] Capture-stream landmarks probe every zone automatically
+- [x] Splat + mesh scan import (Kiri and similar work today)
+- [x] Measure tool, display units, scale-the-scene-from-a-measurement
+- [x] Shared snapping module so every tool gets the one magnet
+- [ ] **Register a camera to the floor (homography)** — the blocker
+- [ ] Multi-person tracking with identity across frames
+- [ ] ONNX Runtime Web + model registry (detection beyond MediaPipe)
+- [ ] Photo → depth → point cloud (in-browser space capture)
+- [ ] Reference-image workflow: several registered points of view
+- [ ] Numeric entry while drawing; editable-mesh vertex snapping
+- [ ] Gallery runtime: local models, kiosk boot, heartbeat
+
 ### Agent / assistant
 - [x] In-app chat panel — local + hosted providers, native tool calling
 - [x] MCP + ACP over a relay (Claude Code, Claude Desktop, Zed)

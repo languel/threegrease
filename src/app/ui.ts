@@ -7,6 +7,7 @@ import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
 import { PROVIDER_LIST, getProvider } from '../agent/providers';
 import { webMcp } from '../agent/webmcp';
+import { formatLength, measureLength, toWorldLength } from '../tools/measure';
 import type { BakeSource } from '../render/bake';
 import { hasUV } from '../core/uvunwrap';
 import { createImage, createMaterialDB, ensureMaterial, imageById, materialById } from '../core/gpdata';
@@ -61,6 +62,7 @@ export interface AppHandle {
   /** the scene's environment/IBL manager — the World panel reads its
    *  load status, since an image or video source resolves asynchronously */
   world: { status: 'ok' | 'loading' | 'error'; error: string };
+  scaleSceneToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string };
   addActor(at?: [number, number, number]): void;
   resetActor(id: number): void;
   setMode(mode: EditorMode): void;
@@ -562,6 +564,7 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['object-select-lasso', 'lasso', 'Lasso select'],
     ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
     ['actorpose', 'actor', 'Pose actor — drag a joint (the body follows through physics); Shift+click pins/unpins it'],
+    ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits, Backspace undoes a point, Esc cancels); drag a placed point to adjust it'],
   ],
   DRAW: [
     ['draw', 'pencil', 'Draw (D)'], ['erase', 'eraser', 'Erase (E)'],
@@ -1404,7 +1407,7 @@ export class UI {
     const tabs: { id: string; icon: IconName; title: string; build: () => HTMLElement[] }[] = [
       {
         id: 'scene', icon: 'globe', title: 'Scene — world · grid · background',
-        build: () => [this.worldPanel(), this.scenePanel()],
+        build: () => [this.worldPanel(), this.measurePanel(), this.scenePanel()],
       },
       {
         id: 'object', icon: 'cube', title: 'Object — transform · material',
@@ -1559,6 +1562,75 @@ export class UI {
       el('div', { class: 'hint', text: `${actor.joints.length} joints · ${actor.bones.filter((b) => b.radius > 0).length} bones · ${actor.limits.length} limits` }),
       panelHint('Joints are particles and bones are distance constraints, so capture, dragging and physics all drive one solver.'),
     );
+  }
+
+  /** Measurements + display units. Lives in the Scene tab because it is a
+   *  property of the whole document, not of a selection. */
+  private measurePanel(): HTMLElement {
+    const { ctx } = this.app;
+    const scene = ctx.scene;
+    const unit = ctx.settings.lengthUnit;
+
+    const rows: (Node | string)[] = [
+      fieldRow('Units', selectField('', unit, [
+        ['M', 'Metres'], ['CM', 'Centimetres'], ['MM', 'Millimetres'],
+        ['FT', 'Feet'], ['IN', 'Inches'],
+      ], (v) => { ctx.settings.lengthUnit = v; this.app.savePrefs(); this.refresh(); })),
+    ];
+
+    if (!scene.measures.length) {
+      rows.push(fieldRow('', el('div', { class: 'hint', text: 'Pick the Measure tool, click two or more points, press Enter.' })));
+    }
+
+    for (const m of scene.measures) {
+      const len = measureLength(m);
+      const nameInput = el('input', { type: 'text', class: 'grow', value: m.name }) as HTMLInputElement;
+      nameInput.onchange = () => { m.name = nameInput.value; };
+      nameInput.onkeydown = (e) => e.stopPropagation();
+
+      // "this is really N units" -> rescale the whole scene
+      const real = el('input', {
+        type: 'text', value: '', placeholder: formatLength(len, unit).split(' ')[0],
+        title: `Type the REAL length of this measurement and press Enter to rescale the whole scene. Currently ${formatLength(len, unit)}.`,
+      }) as HTMLInputElement;
+      real.style.width = '68px';
+      real.onkeydown = (e) => {
+        e.stopPropagation();
+        if (e.key !== 'Enter') return;
+        const v = Number(real.value);
+        if (!Number.isFinite(v) || v <= 0) { real.value = ''; return; }
+        const res = this.app.scaleSceneToMeasure(m.id, toWorldLength(v, ctx.settings.lengthUnit));
+        if (!res.ok) { real.value = ''; return; }
+        this.refresh();
+      };
+
+      rows.push(el('div', { class: 'measure-row' },
+        el('div', { class: 'row' },
+          nameInput,
+          btn(m.visible ? icon('eye') : icon('eyeOff'),
+            () => { m.visible = !m.visible; ctx.requestRender(); this.refresh(); },
+            { cls: 'icon-btn', title: 'Show in the viewport' }),
+          btn(m.locked ? icon('lockClosed') : icon('lockOpen'),
+            () => { m.locked = !m.locked; this.refresh(); },
+            { cls: 'icon-btn', title: 'Freeze it, so a stray drag cannot move the reference the scene was scaled from' }),
+          btn(icon('xMark'), () => {
+            ctx.pushUndo();
+            scene.measures = scene.measures.filter((x) => x.id !== m.id);
+            ctx.requestRender(); this.refresh();
+          }, { cls: 'icon-btn', title: 'Delete' }),
+        ),
+        el('div', { class: 'measure-len' },
+          el('span', { class: 'measure-val', text: formatLength(len, unit) }),
+          el('span', { text: `${m.points.length} pts` }),
+          el('span', { class: 'grow' }),
+          el('span', { class: 'measure-set', text: 'is really', title: 'Rescale the scene so this measurement equals the length you type' }),
+          real,
+        ),
+      ));
+    }
+
+    return panel('Measure', ...rows,
+      panelHint('Typing a real length rescales every root object, camera, trigger radius and measurement at once.'));
   }
 
   /** Scene tab: the world — what surrounds the scene and lights it.

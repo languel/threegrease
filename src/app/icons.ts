@@ -75,6 +75,8 @@ const PATHS: Record<string, string> = {
   // anything subtle: wire (meridians through it), solid (plain), material
   // (a specular highlight — a plain terminator arc was indistinguishable
   // from solid at this size), rendered (a sun casting rays).
+  // A ruler laid diagonally, with tick marks along one edge.
+  ruler: 'M3.5 16.5 16.5 3.5a1.5 1.5 0 0 1 2.1 0l1.9 1.9a1.5 1.5 0 0 1 0 2.1L7.5 20.5a1.5 1.5 0 0 1-2.1 0l-1.9-1.9a1.5 1.5 0 0 1 0-2.1ZM8 12l2 2m2-6 2 2m-8 8 2 2',
   // A standing figure — the Add-menu entry and the Actor properties tab.
   actor: 'M12 5.6a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM12 7.6v7m0-7L7.5 9.4M12 7.6l4.5 1.8M12 14.6 8.6 22M12 14.6 15.4 22',
   shadeWire: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 0c-2.485 0-4.5-4.03-4.5-9s2.015-9 4.5-9 4.5 4.03 4.5 9-2.015 9-4.5 9ZM3.6 9h16.8M3.6 15h16.8M12 3v18',

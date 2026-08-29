@@ -70,6 +70,11 @@ export function deserializeScene(json: string): GPScene {
   scene.images ??= [];
   // actors postdate most saves; an empty list is the correct migration
   scene.actors ??= [];
+  scene.measures ??= [];
+  for (const m of scene.measures) {
+    m.visible ??= true;
+    m.points ??= [];
+  }
   for (const a of scene.actors) {
     a.select ??= false;
     a.lock ??= false;

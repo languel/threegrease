@@ -3,6 +3,9 @@
 > Branded in the UI as **3𝜻**; threegrease stays the working project/repo
 > name until it's ready to formally rename.
 
+> **`docs/INSTALLATION.md` is the north star** — the interactive-installation
+> use case this project exists for, what's built, and what's missing.
+>
 > **Start here, then read `docs/HANDOFF.md` (full technical handoff),
 > `docs/PRD.md` (product vision & requirements), and
 > `docs/IMPLEMENTATION_PLAN.md` (phased build plan with acceptance tests).
@@ -66,6 +69,7 @@ Key invariants:
 | `src/tools/` | per-mode tools. `toolsys.ts` (Tool interface + manager), `projection.ts` (screen↔world, drawing planes, STROKE-placement depth snapping), `context.ts` (Settings + AppCtx) |
 | `src/anim/` | playback (`player.ts`), stroke interpolation (`interpolate.ts`), camera eval/keys (`camera.ts`) |
 | `src/app/` | `main.ts` (App class: three setup, input routing, render loop), `ui.ts` (ALL DOM panels), `nav.ts` (views/gizmo/fly/ortho), `keymap.ts` (rebindable shortcuts), `styles.css` |
+| `src/tools/snapping.ts` | the ONE magnet, as a function — every precise-placement tool calls it (`snapWorldPoint`), including the 3D cursor |
 | `src/actor/` | rigged characters — skeleton (`skeleton.ts`), physics/kinematics (`solver.ts`), auto-rigging (`rig.ts`) |
 | `src/agent/` | LLM agent interface — `tools.ts` (the ONE tool registry), `providers.ts` (local + hosted), `session.ts` (agent loop), `rpc.ts` (WS JSON-RPC), `webmcp.ts` (browser-native agent), `panel.ts` (chat state). See `docs/AGENT.md` |
 | `agent/` | Node bridges: `relay.js`, `mcp-server.js`, `acp-server.js`, `selftest.js` |

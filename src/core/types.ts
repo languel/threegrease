@@ -860,6 +860,35 @@ export interface TGActor {
   materialId?: number | null;
 }
 
+/**
+ * A persisted measurement: a polyline whose segment lengths are drawn in the
+ * viewport. Two points is a ruler; three or more also reports the angle at
+ * each interior vertex, which is what you need when squaring up a room from
+ * photographs.
+ *
+ * This is scene data rather than a transient overlay because a blockout is
+ * built over days — "that doorway is 900" has to survive a save, and the
+ * measurement that established the scene's scale has to stay auditable.
+ */
+export interface TGMeasure {
+  id: number;
+  name: string;
+  /** world-space points, in order */
+  points: Vec3[];
+  visible: boolean;
+  select?: boolean;
+  lock?: boolean;
+  /** freeze it once it has served its purpose, so a stray drag can't move
+   *  the reference the whole scene was scaled from */
+  locked?: boolean;
+}
+
+/** Display units. The scene itself is unitless — one world unit is one
+ *  METRE by convention (the actor mannequin is 1.8 tall, gravity is 9.81),
+ *  and this only decides how lengths are WRITTEN. Changing it never moves
+ *  anything, which is what keeps it safe to flip while working. */
+export type LengthUnit = 'M' | 'CM' | 'MM' | 'FT' | 'IN';
+
 export interface TGRoute {
   id: number;
   enabled: boolean;
@@ -947,4 +976,6 @@ export interface GPScene {
   clips: TGClip[];
   /** rigged characters (ragdoll / mannequin), see actor/ */
   actors: TGActor[];
+  /** persisted rulers / annotations for real-world blockout */
+  measures: TGMeasure[];
 }
