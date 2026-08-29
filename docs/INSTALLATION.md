@@ -42,19 +42,21 @@ Verified by reading the source, August 2026.
   path as live data, so a piece can be tested without an audience.
 - **Measurement** (new, see below).
 
-### The blocker
+### The gap: mapping the camera into the space
 
-**Nothing registers a camera to the room.** There is no calibration code in
-the repository — a stream's placement is a hand-authored TRS you drag until
-it looks right. Worse, monocular pose depth is a hip-relative guess, so the
-POSE stream ships with its depth axis scaled to **zero** by default. A webcam
-therefore produces a flat sheet of landmarks at whatever scale you dragged it
-to. You cannot say "a person is standing at the door" in world coordinates.
+> Superseded in part — see "Mapping, not calibration" below. The original
+> framing treated physical accuracy as the goal; it is one mode among
+> several. The underlying gap is real either way.
 
-Every other box in the installation pipeline already works. This is the one
-that doesn't, and everything else is downstream of it.
+**Nothing maps a camera into the room in a controllable way.** A stream's
+placement is a hand-authored TRS you drag until it looks right, with no
+notion of what region of the frame corresponds to what region of the space.
+Monocular pose depth is a hip-relative guess, so the POSE stream ships with
+its depth axis scaled to **zero** by default: a webcam produces a flat sheet
+of landmarks at whatever scale you dragged it to.
 
-**The fix is a ground-plane homography.** Everyone stands on the same floor,
+For the cases where the zone really does have to line up with a doorway, the
+answer is a **ground-plane homography**. Everyone stands on the same floor,
 so four clicked correspondences (a point in the camera image ↔ a point on the
 floor plan) give a 3×3 matrix converting image position to floor position, in
 metres, permanently. No depth sensor, no full calibration. It also *is* the
@@ -70,10 +72,9 @@ ground is not recoverable from one RGB camera.
    probes as `mm:<stream>:<landmark>`. Crowds need a person-instance concept
    with identity across frames, so a zone can report *who* entered and for
    how long.
-2. **Detection is locked to MediaPipe**, loaded from Google's CDN at
-   runtime. Adding ONNX Runtime Web plus a small model registry opens up
-   person detection, segmentation and counting. The `CUSTOM` stream kind and
-   its `[x,y,z,confidence]` packing were designed for this and are unused.
+2. ~~**Detection is locked to MediaPipe**~~ — addressed by the semantic
+   detection stream below, though model loading still needs verifying on
+   real hardware. MediaPipe models are still CDN-loaded at runtime.
 3. **Photo → 3D in the browser.** Smaller than it looks: painted point
    clouds (`TGPaintCloud`) are already a serializable, transformable,
    constraint-carrying container of arbitrary `[x,y,z,radius,r,g,b,a]` points
@@ -86,7 +87,7 @@ ground is not recoverable from one RGB camera.
 
 ### Sequence
 
-1. **Register a camera to the floor** — unlocks everything downstream.
+1. **The mapping layer** (free / region / homography) — unlocks the rest.
 2. **Track several people with identity** — makes it a crowd piece.
 3. **Capture the space faster** — depth-to-cloud, measuring affordances.
    Independent of 1 and 2; can lead if the teaching calendar wants it.
