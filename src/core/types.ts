@@ -342,7 +342,7 @@ export interface MMStream {
   /** semantic channel; IRIS = the 10 iris points of the face model
    *  (their own stream so an eye can drive a cursor); CUSTOM = arbitrary
    *  bus-fed point set */
-  kind: 'POSE' | 'HAND_LEFT' | 'HAND_RIGHT' | 'FACE' | 'IRIS' | 'CUSTOM';
+  kind: 'POSE' | 'HAND_LEFT' | 'HAND_RIGHT' | 'FACE' | 'IRIS' | 'CUSTOM' | 'DETECT';
   /** CLIP = replays a recorded TGClip through the same live-frame store */
   source: 'CAMERA' | 'BUS' | 'CLIP';
   /** BUS source: address prefix whose numeric-suffixed children are point
@@ -360,6 +360,12 @@ export interface MMStream {
   lock?: boolean;
   /** streams are full scene objects: constraint stack + trigger probing */
   constraints?: TGConstraint[];
+  /** DETECT kind: open-vocabulary detection config. One point per hit, at
+   *  the box centre, so detections probe zones like any other landmark. */
+  detect?: DetectConfig;
+  /** last frame's detections, runtime-only — the labels the UI shows and
+   *  the message templates substitute. Never serialized. */
+  detectHits?: DetectHit[];
   /** landmarks act as probes for TRIGGER zones (default on; FACE off —
    *  478 probes per frame is rarely what you want) */
   probeEvents?: boolean;
@@ -881,6 +887,33 @@ export interface TGMeasure {
   /** freeze it once it has served its purpose, so a stray drag can't move
    *  the reference the whole scene was scaled from */
   locked?: boolean;
+}
+
+/** One open-vocabulary detection: what matched, how strongly, and where.
+ *  Box is [x0,y0,x1,y1] as 0..1 fractions of the source frame. */
+export interface DetectHit {
+  label: string;
+  score: number;
+  box: [number, number, number, number];
+}
+
+/** Semantic detection config on a stream. The queries ARE the classes —
+ *  free text, matched by CLIP's text tower, so "a person wearing a hat" is
+ *  as valid a class as "dog". */
+export interface DetectConfig {
+  /** transformers.js model id (see DETECT_MODELS) */
+  model: string;
+  /** one phrase per class to look for */
+  queries: string[];
+  /** 0..1 confidence floor */
+  threshold: number;
+  /** cap on detections per frame — also the stream's point count ceiling */
+  maxResults: number;
+  /** ms between inferences. Open-vocabulary detection is not frame-rate
+   *  work, so this is a real dial, not a formality. */
+  intervalMs: number;
+  /** try WebGPU first — the loader falls back to WASM if it fails */
+  webgpu: boolean;
 }
 
 /** Display units. The scene itself is unitless — one world unit is one

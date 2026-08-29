@@ -8,6 +8,8 @@ import type { UnwrapMode } from '../core/uvunwrap';
 import { PROVIDER_LIST, getProvider } from '../agent/providers';
 import { webMcp } from '../agent/webmcp';
 import { formatLength, measureLength, toWorldLength } from '../tools/measure';
+import { DETECT_MODELS, semanticDetector } from '../mm/detect';
+import type { DetectConfig, DetectHit, MMStream } from '../core/types';
 import type { BakeSource } from '../render/bake';
 import { hasUV } from '../core/uvunwrap';
 import { createImage, createMaterialDB, ensureMaterial, imageById, materialById } from '../core/gpdata';
@@ -4194,6 +4196,65 @@ export class UI {
   /** MediaMime (P11): live landmark addresses + the object-rigging table. */
   /** Native MediaMime: in-app webcam capture -> landmark streams rendered
    *  as confidence-encoded splat sprites. */
+  /**
+   * Editor for a DETECT stream. Open-vocabulary detection has no class list
+   * to pick from — the queries you type ARE the classes — so the control is
+   * a text field, one phrase per line, and the readout shows what actually
+   * matched this frame.
+   */
+  private detectRows(st: MMStream, cfg: DetectConfig): Node[] {
+    const { ctx } = this.app;
+    const q = el('textarea', {
+      class: 'detect-queries', rows: '3',
+      placeholder: 'a person wearing a hat\na dog\na cardboard box',
+    }) as HTMLTextAreaElement;
+    q.value = cfg.queries.join('\n');
+    q.onkeydown = (e) => e.stopPropagation();
+    q.onchange = () => {
+      cfg.queries = q.value.split('\n').map((l) => l.trim()).filter(Boolean);
+      ctx.requestRender();
+      this.refresh();
+    };
+
+    const status = semanticDetector.status;
+    const statusText = status === 'ready'
+      ? `${semanticDetector.device || 'ready'}${semanticDetector.lastMs ? ` · ${Math.round(semanticDetector.lastMs)} ms/run` : ''}`
+      : status === 'loading' ? 'downloading model…'
+        : status === 'error' ? semanticDetector.error.slice(0, 90)
+          : 'idle';
+
+    const hits: DetectHit[] = st.detectHits ?? [];
+    return [
+      fieldRow('Look for', q, { full: true }),
+      el('div', { class: 'row' },
+        selectField('', cfg.model, DETECT_MODELS.map((m) => [m.id, m.label] as [string, string]),
+          (v) => { cfg.model = v; semanticDetector.dispose(); this.refresh(); }),
+        checkbox('', cfg.webgpu, (v) => { cfg.webgpu = v; semanticDetector.dispose(); },
+          'WebGPU when available — much faster than the WASM fallback'),
+      ),
+      el('div', { class: 'row' },
+        numField('every ms', cfg.intervalMs, (v) => { cfg.intervalMs = Math.max(100, Math.round(v)); }, 100,
+          { def: 600, min: 100, title: 'Open-vocabulary detection is not frame-rate work — this is how often a run starts' }),
+        numField('min score', cfg.threshold, (v) => { cfg.threshold = Math.max(0.01, Math.min(1, v)); }, 0.01,
+          { def: 0.12, min: 0.01, max: 1 }),
+        numField('max', cfg.maxResults, (v) => { cfg.maxResults = Math.max(1, Math.round(v)); }, 1,
+          { def: 8, min: 1, title: 'Cap on detections per frame — also the stream\u2019s point count' }),
+      ),
+      el('div', { class: 'detect-status' },
+        el('span', { class: `detect-dot detect-${status}` }),
+        el('span', { text: statusText, title: status === 'error' ? semanticDetector.detail : '' }),
+        el('span', { class: 'grow' }),
+        ...(hits.length
+          ? hits.slice(0, 4).map((h) => el('span', {
+            class: 'detect-hit',
+            text: `${h.label} ${(h.score * 100).toFixed(0)}%`,
+            title: `box ${h.box.map((v) => v.toFixed(2)).join(', ')}`,
+          }))
+          : [el('span', { class: 'detect-none', text: cfg.queries.length ? 'no matches' : 'no queries' })]),
+      ),
+    ];
+  }
+
   private mmStreamsPanel(): HTMLElement {
     const { ctx } = this.app;
     const streams = ctx.scene.mmStreams;
@@ -4209,6 +4270,8 @@ export class UI {
       btn('＋Pose', () => this.app.addMMStreams(['POSE'], 'CAMERA'), { title: 'Body stream (33 points, flat by default — pose depth is noisy)' }),
       btn('＋Hands', () => this.app.addMMStreams(['HAND_LEFT', 'HAND_RIGHT'], 'CAMERA'), { title: 'Left + right hand streams (21 points each, with relative depth)' }),
       btn('＋Face', () => this.app.addMMStreams(['FACE', 'IRIS'], 'CAMERA'), { title: 'Face mesh (478 points) + iris (10 points) streams, with relative depth' }),
+      btn('＋Detect', () => this.app.addMMStreams(['DETECT'], 'CAMERA'),
+        { title: 'Semantic detection — type what to look for ("a person wearing a hat", "a dog") and each match becomes a probe' }),
     );
 
     // URL / file sources stand in for the webcam (testing, found footage,
@@ -4271,6 +4334,8 @@ export class UI {
           checkbox('', st.probeEvents !== false, (v) => { st.probeEvents = v; }, 'probe: participates in trigger-zone events'),
           checkbox('', !!st.emitBus, (v) => { st.emitBus = v; }, 'emit bus: re-broadcast landmarks at the address prefix so rigs/routes/triggers can ride them'),
         ),
+        // DETECT: the queries ARE the classes, so the editor is a text box
+        ...(st.kind === 'DETECT' && st.detect ? this.detectRows(st, st.detect) : []),
         // CLIP replays get a traveler-style transport
         ...(st.source === 'CLIP' ? [el('div', { class: 'row' },
           btn(st.playing ? icon('pause') : icon('play'), () => { st.playing = !st.playing; this.refresh(); },

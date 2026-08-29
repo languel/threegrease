@@ -13,8 +13,13 @@ export function serializeScene(scene: GPScene): string {
   // world fall back; a real http(s) URL is saved as given.
   const world = scene.world?.videoUrl?.startsWith('blob:')
     ? { ...scene.world, videoUrl: '' } : scene.world;
+  // detectHits is the last inference's output, not document state — saving
+  // it would restore a scene claiming to have seen things it hasn't
+  const mmStreams = scene.mmStreams?.some((s) => s.detectHits)
+    ? scene.mmStreams.map((s) => (s.detectHits ? { ...s, detectHits: undefined } : s))
+    : scene.mmStreams;
   return JSON.stringify(
-    { format: FORMAT, version: VERSION, scene: { ...scene, world } }, null, 0);
+    { format: FORMAT, version: VERSION, scene: { ...scene, world, mmStreams } }, null, 0);
 }
 
 export function deserializeScene(json: string): GPScene {
@@ -47,6 +52,14 @@ export function deserializeScene(json: string): GPScene {
     st.parent ??= null;
     st.constraints ??= [];
     st.probeEvents ??= st.kind !== 'FACE';
+    if (st.kind === 'DETECT') {
+      st.detect ??= {
+        model: 'Xenova/owlvit-base-patch32', queries: [], threshold: 0.12,
+        maxResults: 8, intervalMs: 600, webgpu: true,
+      };
+      // hits are this frame's inference output, never document state
+      delete st.detectHits;
+    }
     st.pen ??= { active: false, landmarks: [0], minConf: 0.5 };
     const legacyPen = st.pen as unknown as { landmark?: number; landmarks?: number[] };
     if (!legacyPen.landmarks) legacyPen.landmarks = legacyPen.landmark !== undefined ? [legacyPen.landmark] : [0];

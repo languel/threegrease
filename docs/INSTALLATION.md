@@ -132,6 +132,57 @@ placements — with real-world dimensions throughout.
   and measurement rescales at once. Everything downstream then means
   something in metres.
 
+### Semantic detection (shipped, model loading UNVERIFIED)
+
+`src/mm/detect.ts` — open-vocabulary detection: find things by *describing*
+them. The queries are free text matched by CLIP's text tower, so "a person
+wearing a hat" is as valid a class as "dog". A `DETECT` stream packs each hit
+at its box centre into the same normalized convention MediaPipe uses, so
+every downstream consumer — trigger zones, routes, clips — works on semantic
+detections with no changes. A zone firing when "a person carrying a bag"
+enters is an ordinary trigger zone.
+
+Runs on its own interval, asynchronously, one inference in flight at a time.
+This is **not** frame-rate work and the UI treats the interval as a real dial.
+
+**What is verified:** the integration (pipeline name, options, packing), the
+lazy chunking (transformers.js is a separate 568 KB chunk), the WebGPU→WASM
+fallback path, and the whole UI.
+
+**What is NOT verified:** that any model actually runs. `Xenova/owlvit-base-patch32`
+— the most-cited model — fails session creation on transformers.js 4.2 with
+`Could not find an implementation for Cast(13)`, identically on WebGPU and
+WASM: its ONNX export predates the runtime. The `onnx-community/*-ONNX`
+re-exports are current and now lead the list, but the embedded test browser
+has a broken Cache API, so each attempt re-downloads hundreds of MB and the
+probe could not be completed. **Model choice needs testing on the target
+machine** — which is why it is a dropdown, and why a load failure now reports
+"This model did not load in this browser — try another from the list"
+rather than an ONNX graph-pass stack trace.
+
+**Known limitation:** trigger zones key enter/leave state by probe INDEX, so
+a detection set that reshuffles between frames reads as objects teleporting.
+Hits are sorted by horizontal position, which is stable for well-separated
+subjects and not a substitute for real tracking. That is the same identity
+problem multi-person pose has, and it wants the same fix.
+
+### Mapping, not calibration
+
+A correction to the earlier analysis. Registration was framed as "get to
+physical truth", treating the hand-placed stream transform as a deficiency.
+But a webcam watching one room can drive an installation in another, and
+there deliberately flattening or non-physically scaling the tracking input is
+the *point*. So the goal is not calibration; it is a **legible, controllable
+mapping layer** in which physical accuracy is one mode among several:
+
+- **Free** — place and scale the tracking volume by hand (what exists today)
+- **Region** — map a crop of the camera frame into a target object's bounds,
+  stretched or aspect-preserved. This is the remote-installation case.
+- **Ground homography** — four image↔floor correspondences, for when the
+  zone really does have to line up with a doorway.
+
+`depthScale` is already the flattening dial and stays.
+
 ### Next
 
 - Reference-image workflow: place a photo plane from a known camera position,

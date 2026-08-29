@@ -552,6 +552,29 @@ button.agent-send-stop { background: #ff6b6b; border-color: #ff6b6b; }
   font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums;
 }
 .measure-set { white-space: nowrap; }
+/* Semantic detection: a free-text query box, and a readout of what actually
+   matched — the labels are the only way to tell whether a query is working. */
+.detect-queries {
+  width: 100%; resize: vertical; min-height: 44px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; padding: 5px 6px;
+  font: inherit; font-size: 11px; line-height: 1.4;
+}
+.detect-queries:focus { outline: none; border-color: var(--accent); }
+.detect-status {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 10px; color: var(--dim); padding: 2px 0 4px;
+}
+.detect-status .grow { flex: 1 1 0; }
+.detect-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--dim); }
+.detect-ready { background: #4ade80; }
+.detect-loading { background: var(--accent2); }
+.detect-error { background: #ff6b6b; }
+.detect-hit {
+  background: var(--border); color: var(--text);
+  border-radius: 8px; padding: 1px 6px; white-space: nowrap;
+}
+.detect-none { font-style: italic; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* ---- agent help dialog ----
