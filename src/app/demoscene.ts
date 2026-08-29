@@ -20,6 +20,7 @@ import {
   createStroke, genId,
 } from '../core/gpdata';
 import { createMeshObject } from '../render/meshes';
+import { createPaintCloud } from '../render/paintclouds';
 import { createHumanoid } from '../actor/skeleton';
 import { createConstraint } from '../score/constraints';
 import { createStream } from '../mm/streams';
@@ -55,6 +56,49 @@ function lookRotation(from: Vec3, at: Vec3, upZ: boolean): Vec3 {
   obj.lookAt(new THREE.Vector3(...at));
   const e = new THREE.Euler().setFromQuaternion(obj.quaternion, 'XYZ');
   return [e.x, e.y, e.z];
+}
+
+/**
+ * A procedural stand-in for a 3D scan: points scattered over the room's
+ * floor and walls, packed as a paint cloud.
+ *
+ * The scan input needs a virtual placeholder like every other input does.
+ * A real Kiri/splat capture arrives as noisy, unevenly-dense surface points
+ * with colour, so that is what this fakes — jittered off the surface rather
+ * than laid on a clean lattice, because the whole reason to test against a
+ * scan is that scans are messy. Uses TGPaintCloud, which already renders
+ * per-point colour/size and exports real 3DGS PLY, so this is the same
+ * container a genuine scan-derived cloud lands in.
+ */
+function roomScanPoints(w: number, d: number, h: number, upZ: boolean): number[] {
+  const pts: number[] = [];
+  // deterministic jitter: a fixed LCG, so the placeholder is identical
+  // every load and a bug is reproducible rather than reshuffling each time
+  let seed = 1337;
+  const rnd = (): number => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0xffffffff;
+  };
+  const push = (x: number, y: number, z: number, c: Vec3): void => {
+    const p: Vec3 = upZ ? [x, y, z] : [x, z, -y];
+    pts.push(p[0], p[1], p[2], 0.012 + rnd() * 0.01, c[0], c[1], c[2], 1);
+  };
+  const N_FLOOR = 2600, N_WALL = 900;
+  for (let i = 0; i < N_FLOOR; i++) {
+    const g = 0.42 + rnd() * 0.1;
+    push((rnd() - 0.5) * w, (rnd() - 0.5) * d, rnd() * 0.012, [g, g * 0.97, g * 0.92]);
+  }
+  for (const [ax, sign] of [[0, 1], [0, -1], [1, 1], [1, -1]] as [number, number][]) {
+    for (let i = 0; i < N_WALL; i++) {
+      const t = (rnd() - 0.5);
+      const up = rnd() * h;
+      const g = 0.72 + rnd() * 0.12;
+      const jitter = (rnd() - 0.5) * 0.03;
+      if (ax === 0) push(t * w, (sign * d) / 2 + jitter, up, [g, g, g * 0.96]);
+      else push((sign * w) / 2 + jitter, t * d, up, [g, g, g * 0.96]);
+    }
+  }
+  return pts;
 }
 
 /** A short oval walking loop between the two pedestals, as GP stroke points
@@ -169,6 +213,15 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   detectStream.name = 'Security Cam · Detect (sim)';
   if (detectStream.detect) detectStream.detect.queries = ['a person'];
   scene.mmStreams.push(detectStream);
+
+  // ---- the scan placeholder: hidden by default, because the modelled room
+  // above is the thing you author against. Turn it on to check that zones,
+  // snapping and measurement behave against scan-like data BEFORE a real
+  // capture exists — the point of a placeholder is to de-risk the swap.
+  const scan = createPaintCloud(genId(), 'Room scan (simulated)', [0, 0, 0]);
+  scan.points = roomScanPoints(ROOM_W, ROOM_D, ROOM_H, upAxisZ);
+  scan.visible = false;
+  scene.paintClouds.push(scan);
 
   scene.objects.push(pathObj);
   scene.meshes.push(...room, ped1, ped2);
