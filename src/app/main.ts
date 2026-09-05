@@ -113,6 +113,7 @@ import {
   driveStreamFromActor, driveStreamFromObject, driverOf, isDriven,
   stopDrivingStream, tickSimStreams,
 } from '../actor/simstream';
+import { gaitEngine } from '../actor/gait';
 import { buildDemoScene } from './demoscene';
 import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
 import { createHumanoid, resetPose } from '../actor/skeleton';
@@ -3305,6 +3306,13 @@ class App implements AppHandle {
     // happen AFTER the stream engine (they read this frame's landmarks) and
     // BEFORE the constraint engine (which may move the actor as a whole).
     actorRig.update(ctx.scene, dt);
+    // Gait AFTER the rig (a capture rig should win over a procedural cycle
+    // for any joint both drive) and BEFORE the solver, so its foot/pelvis
+    // targets land in the same pass. It reads the actor transform, which
+    // the constraint pass below updates — so the cycle is phased on last
+    // frame's motion. Imperceptible while walking, and the same deliberate
+    // one-frame lag simstream already documents.
+    gaitEngine.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
     if (actorSolver.update(ctx.scene, dt, ctx.settings.upAxis === 'Z')) ctx.requestRender();
     this.actors.handlesVisible = !this.presentation && !this.infoOverlayHidden;
     this.actors.selectionColor =

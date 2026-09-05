@@ -1530,6 +1530,32 @@ export class UI {
         title: 'constraint passes per step — more is stiffer and slower' }),
       checkbox('Floor', ph.floor, (v) => { ph.floor = v; }, 'collide with the ground plane'),
 
+      el('div', { class: 'menu-header', text: 'Gait' }),
+      ...(actor.gait ? [
+        checkbox('Walk', actor.gait.enabled, (v) => {
+          ctx.pushUndo(); actor.gait!.enabled = v; touch(); this.refresh();
+        }, 'procedural walk cycle — drives the feet wherever the root goes'),
+        ...(actor.gait.enabled ? [
+          slider('Stride', actor.gait.strideLength, 0.4, 2.5, 0.05,
+            (v) => { actor.gait!.strideLength = v; }, { def: 1.4,
+              title: 'ground covered per full cycle (two steps). The cycle is phased by DISTANCE, so this sets step length, not tempo' }),
+          slider('Step height', actor.gait.stepHeight, 0, 0.4, 0.005,
+            (v) => { actor.gait!.stepHeight = v; }, { def: 0.12 }),
+          slider('Stance width', actor.gait.stanceWidth, 0, 0.6, 0.01,
+            (v) => { actor.gait!.stanceWidth = v; }, { def: 0.22 }),
+          slider('Duty', actor.gait.dutyFactor, 0.5, 0.9, 0.01,
+            (v) => { actor.gait!.dutyFactor = v; }, { def: 0.62,
+              title: 'fraction of the cycle a foot is planted — above 0.5 both feet overlap on the ground, which is what makes it a walk rather than a run' }),
+          slider('Bob', actor.gait.bob, 0, 0.15, 0.005,
+            (v) => { actor.gait!.bob = v; }, { def: 0.035 }),
+          slider('Arm swing', actor.gait.armSwing, 0, 0.5, 0.01,
+            (v) => { actor.gait!.armSwing = v; }, { def: 0.16 }),
+          slider('Blend', actor.gait.strength, 0, 1, 0.05,
+            (v) => { actor.gait!.strength = v; }, { def: 0.9,
+              title: 'how hard the gait pulls the feet against physics' }),
+        ] : []),
+      ] : []),
+
       el('div', { class: 'menu-header', text: 'Rig' }),
       fieldRow('Mode', selectField('', rig.mode, [
         ['NONE', 'None (free ragdoll)'],

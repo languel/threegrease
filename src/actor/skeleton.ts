@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import type { GPScene, TGActor, TGBone, TGJoint, TGJointLimit, Vec3 } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
+import { defaultGait } from './gait';
 
 /** height, in world units, of the default figure */
 export const ACTOR_HEIGHT = 1.8;
@@ -159,6 +160,7 @@ export function createHumanoid(
       enabled: false, gravity: 9.81, damping: 0.98, iterations: 8,
       tone: 0.06, floor: true, selfCollide: false,
     },
+    gait: defaultGait(),
     shape: 'BOTH',
     color: [0.72, 0.74, 0.80],
     opacity: 1,

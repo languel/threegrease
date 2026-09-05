@@ -852,6 +852,25 @@ export interface TGActor {
   rig: TGRig;
   physics: TGActorPhysics;
   /** draw solid limb capsules, or just the stick skeleton */
+  /** Procedural walk cycle. Phased by DISTANCE travelled, not time, so
+   *  stride couples to speed and feet do not slide — see actor/gait.ts. */
+  gait?: {
+    enabled: boolean;
+    /** metres of ground covered per full cycle (two steps) */
+    strideLength: number;
+    stepHeight: number;
+    /** lateral separation between the feet */
+    stanceWidth: number;
+    /** fraction of the cycle a foot is planted; >0.5 walks, <0.5 runs */
+    dutyFactor: number;
+    /** pelvis drop per step */
+    bob: number;
+    armSwing: number;
+    /** speed the gait is tuned around, m/s — also the fade-in threshold */
+    walkSpeed: number;
+    /** how hard the gait pulls the feet, 0..1 */
+    strength: number;
+  };
   shape: 'CAPSULE' | 'STICK' | 'BOTH';
   color: Vec3;
   opacity: number;

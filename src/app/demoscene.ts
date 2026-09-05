@@ -105,7 +105,11 @@ function roomScanPoints(w: number, d: number, h: number, upZ: boolean): number[]
  *  on the floor. */
 function walkLoopPoints(): Vec3[] {
   const pts: Vec3[] = [];
-  const cx = 0, cy = 0, rx = 2.4, ry = 1.5;
+  // Wide and slow on purpose: a tight loop turns the actor ~40 degrees per
+  // stride, and a world-locked stance foot then swings noticeably in body
+  // space. Real walkers shorten their stride to corner; the gait does not
+  // model that yet, so the demo gives it room.
+  const cx = 0, cy = 0, rx = 2.7, ry = 1.7;
   const n = 24;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
@@ -201,9 +205,10 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   const actor = createHumanoid(genId(), 'Visitor', upAxisZ);
   actor.physics.enabled = true;
   actor.physics.tone = 0.08; // holds a walking stance rather than ragdolling
+  if (actor.gait) actor.gait.enabled = true;   // walk the loop, don't glide it
   const follow = createConstraint('FOLLOW_PATH');
   follow.path = { objectIndex: 1, layerId: pathLayer.id, strokeId: stroke.id }; // index 1: pathObj is scene.objects[1]
-  follow.speed = 0.12;
+  follow.speed = 0.075;   // ~1.1 m/s around this loop — a walking pace
   follow.loop = 'LOOP';
   follow.running = true;
   follow.orient = true;
