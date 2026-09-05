@@ -292,6 +292,37 @@ the browser console or automated evals:
   rotation of `(90, 0, yaw)` yaws the plane while it is still lying flat and
   then tips the result onto its side. `(90, yaw, 0)` is the one that means
   "stand it up, then turn it".
+- **A joint limit cannot express a hinge on its own, and the ones that
+  shipped were aimed at the wrong bones.** Two compounding traps:
+  - The angle between two bones is UNSIGNED, so a knee bent 40 degrees
+    forward and one bent 40 degrees backward both measure the same and both
+    pass any min/max. The two are mirror images about the root-to-tip line
+    and nothing preferred either — which is why a limb sat double-jointed
+    and snapped between them on every step. `TGJointLimit.pole` is the
+    actor-local direction the middle joint must stay on the near side of;
+    the solver enforces it by REFLECTING that joint across the root-to-tip
+    line, an isometry that fixes both endpoints so both bone lengths survive
+    exactly and the correction vanishes as the limb straightens.
+  - A limit names its bones by the joint they END at. `(knee, hip)`
+    therefore resolved to `hip->knee` and `hips->hip`, which measures the
+    HIP's abduction; the knee and elbow were never constrained by anything.
+    To limit a knee you name the bone BELOW it: `(ankle, knee)`. Limits are
+    rebuilt from joint names by `rebuildLimbLimits` rather than hand-listed,
+    and serialize.ts rebuilds any actor whose limits predate poles.
+  `physics.hinges = false` restores the free-bending version deliberately.
+- **The animation mixer** (`src/actor/mixer.ts`) is where every source of
+  motion is weighed. Sources ask `gain(actor, source, jointName)` for their
+  own multiplier rather than the mixer calling them, so each producer keeps
+  its own state (the gait keeps advancing while muted, so unmuting picks up
+  mid-stride) and an actor with no layer stack gets 1 and behaves as before.
+  Layers are scene data; crossfades (`fadeTo`) are runtime and must stay out
+  of the undo snapshot. The SOLVER does the actual combining: contributions
+  to one joint resolve to a weighted MEAN with the summed weight as the
+  pull, because applying them in sequence made the last source to run win
+  and the outcome depend on frame order. CLIP layers are the one source the
+  mixer drives itself, matching `TGClip.joints` by NAME — a pose clip is
+  ACTOR_LOCAL (`TGClip.space`) so it replays where the character stands
+  rather than dragging it back to where it was performed.
 - **FOLLOW_PATH `orient` points an object's FORWARD axis down the tangent,
   and "forward" is not universal.** An ACTOR's skeleton is authored +Y
   forward in Z-up (-Z in Y-up); everything else has no anatomy and keeps the

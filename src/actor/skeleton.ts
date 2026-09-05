@@ -78,16 +78,77 @@ function limbBones(side: string): [string, string, number][] {
 }
 
 /**
- * Bones that must not fold the wrong way. Expressed as (child, parent)
- * pairs with a degree range on the angle BETWEEN them, which is all a
- * positional solver needs — 180 means "straight through", so an elbow that
- * may bend one way only is roughly 10..175.
+ * Bones that must not fold the wrong way, rebuilt from joint NAMES.
+ *
+ * Two things were wrong with the table this replaces, and they compounded:
+ *
+ *  - It named the wrong bones. A limit names its bones by the joint they
+ *    END at, so `(knee, hip)` resolved to the bones `hip->knee` and
+ *    `hips->hip` — which measures the HIP's abduction, not the knee's bend.
+ *    The knee and the elbow were never constrained by anything. To limit a
+ *    knee you name the bone below it: `(ankle, knee)`.
+ *  - Even correctly aimed, an angle limit cannot express a hinge. The angle
+ *    between two bones is UNSIGNED, so a knee bent 40 degrees forward and
+ *    one bent 40 degrees backward both measure 140 and both pass. The two
+ *    are mirror images about the hip-to-ankle line and nothing preferred
+ *    either, which is why a limb would sit double-jointed and snap between
+ *    the two on every step. The `pole` says which side is the right one.
+ *
+ * Forward is read off the SKELETON (the foot sits ahead of the ankle, the
+ * head above the hips) rather than off the up-axis setting, so this works
+ * in either convention, at any scale, and on a loaded actor whose
+ * authoring frame is no longer known.
  */
-function limbLimits(side: string): [string, string, number, number][] {
-  return [
-    [`elbow.${side}`, `shoulder.${side}`, 15, 178],
-    [`knee.${side}`, `hip.${side}`, 15, 178],
-  ];
+export function rebuildLimbLimits(actor: TGActor): void {
+  const forward = forwardOf(actor);
+  if (!forward) return;
+  const back: Vec3 = [-forward[0], -forward[1], -forward[2]];
+  const byName = new Map(actor.joints.map((j) => [j.name, j.id]));
+  const boneBetween = (a: string, b: string): TGBone | undefined =>
+    actor.bones.find((bo) => bo.a === byName.get(a) && bo.b === byName.get(b));
+
+  const limits: TGJointLimit[] = [];
+  for (const side of ['L', 'R']) {
+    const hinges: [string, string, string, Vec3][] = [
+      // [root, hinge, tip, which way the hinge is allowed to stick out]
+      [`hip.${side}`, `knee.${side}`, `ankle.${side}`, forward],
+      [`shoulder.${side}`, `elbow.${side}`, `wrist.${side}`, back],
+    ];
+    for (const [root, hinge, tip, pole] of hinges) {
+      const parent = boneBetween(root, hinge);
+      const child = boneBetween(hinge, tip);
+      // 180 is straight through, 0 is folded flat against itself
+      if (parent && child) {
+        limits.push({ bone: child.id, parent: parent.id, min: 15, max: 178, pole: [...pole] as Vec3 });
+      }
+    }
+  }
+  actor.limits = limits;
+}
+
+/** The actor's own forward direction, recovered from its rest skeleton. */
+function forwardOf(actor: TGActor): Vec3 | null {
+  const rest = (name: string): Vec3 | undefined =>
+    actor.joints.find((j) => j.name === name)?.rest;
+  const head = rest('head'); const hips = rest('hips');
+  const ankle = rest('ankle.L'); const foot = rest('foot.L');
+  if (!head || !hips || !ankle || !foot) return null;
+  const dominant = (v: number[], skip = -1): number => {
+    let best = -1; let mag = 0;
+    for (let i = 0; i < 3; i++) {
+      if (i === skip) continue;
+      if (Math.abs(v[i]) > mag) { mag = Math.abs(v[i]); best = i; }
+    }
+    return best;
+  };
+  const upAxis = dominant([head[0] - hips[0], head[1] - hips[1], head[2] - hips[2]]);
+  if (upAxis < 0) return null;
+  const d = [foot[0] - ankle[0], foot[1] - ankle[1], foot[2] - ankle[2]];
+  const fwdAxis = dominant(d, upAxis);
+  if (fwdAxis < 0) return null;
+  const forward: Vec3 = [0, 0, 0];
+  forward[fwdAxis] = Math.sign(d[fwdAxis]) || 1;
+  return forward;
 }
 
 /** Cross-braces: without them a chain of distance constraints has no
@@ -133,25 +194,14 @@ export function createHumanoid(
   }));
   const boneByName = new Map(bones.map((b) => [b.name, b.id]));
 
-  const limits: TGJointLimit[] = [];
-  for (const side of ['L', 'R']) {
-    for (const [child, parent, min, max] of limbLimits(side)) {
-      // limits name their bones by the joint they end at
-      const childBone = bones.find((b) => b.b === byName.get(child));
-      const parentBone = bones.find((b) => b.b === byName.get(parent));
-      if (childBone && parentBone) {
-        limits.push({ bone: childBone.id, parent: parentBone.id, min, max });
-      }
-    }
-  }
   void boneByName;
 
-  return {
+  const actor: TGActor = {
     id,
     name,
     joints,
     bones,
-    limits,
+    limits: [],
     pose: joints.map((j) => [...j.rest] as Vec3),
     rig: {
       mode: 'NONE', streamId: null, bindings: [], strength: 1,
@@ -159,7 +209,7 @@ export function createHumanoid(
     },
     physics: {
       enabled: false, gravity: 9.81, damping: 0.98, iterations: 8,
-      tone: 0.06, floor: true, selfCollide: false,
+      tone: 0.06, floor: true, selfCollide: false, hinges: true,
     },
     layers: defaultLayers(),
     gait: defaultGait(),
@@ -174,6 +224,8 @@ export function createHumanoid(
     rotation: [0, 0, 0],
     scale: [1, 1, 1],
   };
+  rebuildLimbLimits(actor);
+  return actor;
 }
 
 export function jointByName(actor: TGActor, name: string): TGJoint | undefined {

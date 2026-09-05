@@ -1535,6 +1535,11 @@ export class UI {
       slider('Iterations', ph.iterations, 1, 24, 1, (v) => { ph.iterations = Math.round(v); }, { def: 8,
         title: 'constraint passes per step — more is stiffer and slower' }),
       checkbox('Floor', ph.floor, (v) => { ph.floor = v; }, 'collide with the ground plane'),
+      checkbox('Hinges', ph.hinges !== false, (v) => {
+        ctx.pushUndo(); ph.hinges = v; touch(); this.refresh();
+      }, 'knees bend forward, elbows back. Off, the limbs are double-jointed '
+        + 'and snap between mirror poses as they move — wrong for a person, '
+        + 'interesting for everything else'),
 
       el('div', { class: 'menu-header', text: 'Control' }),
       fieldRow('', btn(

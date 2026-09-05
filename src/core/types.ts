@@ -792,6 +792,16 @@ export interface TGJointLimit {
   parent: number;    // the bone it hinges off
   min: number;       // smallest allowed angle between them (degrees)
   max: number;
+  /**
+   * Which WAY the joint is allowed to bend, as an actor-local direction the
+   * middle joint should sit on the near side of. Without it a limit is
+   * useless as a hinge: the angle between two bones is UNSIGNED, so a knee
+   * bent 40 degrees forward and one bent 40 degrees backward measure the
+   * same and both pass. That is what makes a limb double-jointed and lets
+   * it snap between the two mirror-image solutions on every step.
+   * Undefined = no hinge, bends either way (the old behaviour).
+   */
+  pole?: Vec3;
 }
 
 /** How incoming data becomes a pose. Each mode is a different answer to
@@ -854,6 +864,10 @@ export interface TGActorPhysics {
   floor: boolean;
   /** keep bones from passing through each other */
   selfCollide: boolean;
+  /** enforce joint POLES — knees forward, elbows back. Off gives limbs
+   *  that bend either way and flip between mirror solutions, which is
+   *  wrong for a person and interesting for everything else. */
+  hinges?: boolean;
 }
 
 /** Where one mixer layer gets its motion. */

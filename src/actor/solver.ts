@@ -222,7 +222,56 @@ export class ActorSolver {
         pb[0] -= dx * (wb / wsum); pb[1] -= dy * (wb / wsum); pb[2] -= dz * (wb / wsum);
       }
 
-      // --- angle limits: stop elbows and knees folding backwards --------
+      // --- hinge poles: decide WHICH WAY a knee or elbow bends ----------
+      // The angle limits below cannot do this. The angle between two bones
+      // is unsigned, so a knee bent 40 degrees forward and one bent 40
+      // degrees backward both measure 140 and both pass — the two are
+      // mirror images of each other about the hip-to-ankle line and the
+      // solver has no reason to prefer either. That is exactly what a
+      // double-jointed limb flipping 180 degrees on every step looks like.
+      //
+      // The fix is a pole: reflect the middle joint across the root-to-tip
+      // line whenever it has drifted to the wrong side. Reflection about a
+      // line through the two endpoints is an isometry that fixes them, so
+      // BOTH bone lengths survive it exactly — no fighting with the
+      // distance pass — and the correction shrinks to nothing as the limb
+      // straightens, so there is no pop at full extension.
+      if (actor.physics.hinges !== false) {
+        for (const lim of actor.limits) {
+          if (!lim.pole) continue;
+          const child = actor.bones.find((b) => b.id === lim.bone);
+          const parent = actor.bones.find((b) => b.id === lim.parent);
+          if (!child || !parent) continue;
+          const iRoot = idx.get(parent.a);
+          const iHinge = idx.get(child.a);
+          const iTip = idx.get(child.b);
+          if (iRoot === undefined || iHinge === undefined || iTip === undefined) continue;
+          const jHinge = actor.joints[iHinge];
+          if (jHinge.pin || jHinge.mass <= 0) continue;
+          const root = pose[iRoot]; const hinge = pose[iHinge]; const tip = pose[iTip];
+          const axis = new THREE.Vector3(
+            tip[0] - root[0], tip[1] - root[1], tip[2] - root[2]);
+          const len = axis.length();
+          if (len < 1e-6) continue;
+          axis.divideScalar(len);
+          const rel = new THREE.Vector3(
+            hinge[0] - root[0], hinge[1] - root[1], hinge[2] - root[2]);
+          // component of the hinge off the root->tip line
+          const perp = rel.clone().addScaledVector(axis, -rel.dot(axis));
+          if (perp.lengthSq() < 1e-10) continue;   // straight: nothing to mirror
+          // the pole, with any along-axis part removed — only the sideways
+          // half of it says which way is "front" for THIS limb pose
+          const pole = new THREE.Vector3(...lim.pole);
+          pole.addScaledVector(axis, -pole.dot(axis));
+          if (pole.lengthSq() < 1e-10) continue;   // limb aimed along the pole
+          if (perp.dot(pole) >= 0) continue;       // already bending correctly
+          hinge[0] -= 2 * perp.x;
+          hinge[1] -= 2 * perp.y;
+          hinge[2] -= 2 * perp.z;
+        }
+      }
+
+      // --- angle limits: stop elbows and knees folding too far ----------
       for (const lim of actor.limits) {
         const child = actor.bones.find((b) => b.id === lim.bone);
         const parent = actor.bones.find((b) => b.id === lim.parent);

@@ -1,6 +1,7 @@
 import type { GPObject, GPScene, TGMaterial, Vec3 } from '../core/types';
 import { defaultGait } from '../actor/gait';
 import { defaultLayers } from '../actor/mixer';
+import { rebuildLimbLimits } from '../actor/skeleton';
 import { bumpIdCounter, createDefaultCamera, createImage, createMaterialDB, createWorld, defaultLights, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
 import { sanitizePolyMesh } from '../core/polymesh';
@@ -100,6 +101,11 @@ export function deserializeScene(json: string): GPScene {
     a.shape ??= 'BOTH';
     a.gait ??= defaultGait();
     a.layers ??= defaultLayers();
+    a.physics.hinges ??= true;
+    // A limit with no pole predates hinges — and those limits also named
+    // the wrong bones (they constrained the hip and the shoulder, never the
+    // knee or the elbow), so they are rebuilt rather than patched.
+    if (!a.limits?.length || a.limits.some((l) => !l.pole)) rebuildLimbLimits(a);
     // a pose shorter than the joint list means the skeleton changed under
     // an old save — fill from rest rather than leaving holes the solver
     // would read as NaN
