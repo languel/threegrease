@@ -315,6 +315,33 @@ collision (imported `MODEL` meshes have none), a third-person boom that
 shortens rather than sweeps, and a gait that does not shorten its stride to
 corner.
 
+### Mixing sources
+
+A character has more than one thing posing it: a capture rig, the
+procedural gait, a recorded take, a hand drag, an OSC route, and — the
+reason this exists now rather than later — whatever a generative model
+eventually produces. They used to push goals straight at the solver, which
+applied them in sequence, so the last source to run won and the outcome
+depended on frame order. That is a race, not a blend, and it is the thing
+that has to be settled before "walk this loop", "go there" and an imported
+clip can share a body.
+
+Two halves. The **solver** resolves every contribution to a joint into one
+goal — weighted mean, summed pull — so "two sources want this ankle" is
+well-defined. The **mixer** (`src/actor/mixer.ts`) decides how loudly each
+source may ask: a layer carries a weight and a body mask, so *capture owns
+the upper body, the walk owns the legs* is a two-line stack rather than a
+special case wired into the rig. Layers are scene data and undo;
+crossfades are runtime, so handing control from a clip to the gait mid-show
+still saves the file you started with.
+
+**Pose clips** close the loop. Recording an actor captures joint positions
+in the actor's own frame, with a joint name per column — local because it
+is a pose, not a place, and by name so a take survives a skeleton edited
+between recording and playback and plays on any actor with the same
+vocabulary. Possess a character, perform a move, record it, and it becomes
+a layer you can blend against everything else.
+
 ### Not built: imported animation
 
 `.glb/.gltf` import currently discards `gltf.animations` — geometry only,
@@ -322,7 +349,9 @@ no `AnimationMixer` anywhere. So Mixamo clips and other authored motion do
 not play, and there is no retargeting onto the positional skeleton. The
 positional rig makes retargeting tractable (a bone is a distance
 constraint, so a foreign skeleton's joint positions are targets like any
-other), but none of it exists yet.
+other), and the mixer is the seam an importer would plug into — sampling a
+glTF clip into named joint positions produces exactly what a CLIP layer
+already consumes. But none of it exists yet.
 
 ## Walkthrough
 
