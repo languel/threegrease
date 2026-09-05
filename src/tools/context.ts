@@ -23,6 +23,8 @@ export type PaintBrush = 'DRAW' | 'BLUR' | 'AVERAGE' | 'SMEAR';
 export interface Settings {
   mode: EditorMode;
   activeTool: string;
+  /** which "walk here / jump there" verb the Direct tool fires */
+  directAction: string;
   brush: {
     preset: string;
     size: number;            // px (VIEW) or world*100 (SCENE), see sizeToWidth()
@@ -227,12 +229,15 @@ export interface AppCtx {
   pushUndo(): void;
   replaceScene(s: GPScene): void;
   refreshUI(): void;
+  /** transient one-line message in the viewport status area */
+  setStatus(text: string, ms?: number): void;
 }
 
 export function defaultSettings(): Settings {
   return {
     mode: 'DRAW',
     activeTool: 'draw',
+    directAction: 'walk',
     brush: {
       preset: 'Pen',
       size: 8, strength: 1, hardness: 1,

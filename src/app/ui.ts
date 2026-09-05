@@ -59,6 +59,7 @@ import { selectAll, selectLinked, selectMoreLess } from '../tools/select';
 import { icon, type IconName } from './icons';
 import { autoRig } from '../actor/rig';
 import { MASK_LABELS, SOURCE_LABELS, nextLayerId } from '../actor/mixer';
+import { MOVE_ACTIONS } from '../actor/commands';
 import type { ActorLayerSource } from '../core/types';
 
 export interface AppHandle {
@@ -592,6 +593,36 @@ function flattenFieldRows(body: HTMLElement): void {
   }
 }
 
+/**
+ * The direct-command HUD: a strip of verbs floating over the viewport while
+ * the Direct tool is active. It is a HUD rather than a sidebar panel on
+ * purpose — the whole interaction is "look at the space, point at it", and
+ * a control you have to leave the space to reach breaks that.
+ */
+function renderDirectHud(app: AppHandle): void {
+  const host = document.querySelector('#viewport');
+  if (!host) return;
+  const existing = host.querySelector('#direct-hud');
+  const on = app.ctx.settings.activeTool === 'direct';
+  if (!on) { existing?.remove(); return; }
+  const bar = el('div', { id: 'direct-hud', class: 'direct-hud' });
+  const actor = app.ctx.scene.actors.find((a) => a.select) ?? app.ctx.scene.actors[0];
+  bar.append(el('span', {
+    class: 'direct-hud-who',
+    text: actor ? actor.name : 'no actor in the scene',
+  }));
+  for (const a of MOVE_ACTIONS) {
+    const active = app.ctx.settings.directAction === a.id;
+    const b = btn(a.label, () => {
+      app.ctx.settings.directAction = a.id;
+      renderDirectHud(app);
+    }, { cls: active ? 'active' : '', title: `${a.label} — ${a.hint}` });
+    bar.append(b);
+  }
+  existing?.replaceWith(bar);
+  if (!existing) host.append(bar);
+}
+
 // ---------------------------------------------------------------------------
 
 const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
@@ -600,6 +631,7 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['object-select-lasso', 'lasso', 'Lasso select'],
     ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
     ['actorpose', 'actor', 'Pose actor — drag a joint (the body follows through physics); Shift+click pins/unpins it'],
+    ['direct', 'actor', 'Direct — click the world to send a character there. Pick the verb in the HUD: walk / run / sneak / march / jump / look / stop'],
     ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits, Backspace undoes a point, Esc cancels); drag a placed point to adjust it'],
   ],
   DRAW: [
@@ -716,6 +748,7 @@ export class UI {
     this.buildMenubar();
     this.buildTopbar();
     this.buildToolbar();
+    renderDirectHud(this.app);
     this.buildSidebar();
     this.refreshTimelineControls();
     this.drawTimeline();

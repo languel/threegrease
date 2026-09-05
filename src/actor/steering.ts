@@ -23,11 +23,12 @@
 // when it wedges in a concave corner it says so (`stuck`) rather than
 // vibrating there forever pretending to walk.
 import * as THREE from 'three';
-import type { GPScene, TGActor, TGActorSteer } from '../core/types';
+import type { GPScene, TGActor, TGActorSteer, Vec3 } from '../core/types';
 import { worldMatrixOf, type ObjRef } from '../tools/objects';
 import {
   actorHeight, angleDelta, headingBasis, headingEuler, headingOf, walkVolume,
 } from './locomotion';
+import { actorMixer } from './mixer';
 
 /** How long a character may make no progress before it gives up. */
 const STUCK_SECONDS = 1.2;
@@ -40,6 +41,14 @@ function rotateAboutUp(dir: THREE.Vector3, angle: number, upAxis: number): THREE
   const axis = new THREE.Vector3();
   axis.setComponent(upAxis, 1);
   return dir.clone().applyAxisAngle(axis, angle);
+}
+
+interface Hop {
+  from: THREE.Vector3;
+  to: THREE.Vector3;
+  t: number;
+  dur: number;
+  height: number;
 }
 
 interface SteerState {
@@ -70,6 +79,7 @@ export class SteerEngine {
    * goal was ignored. Clearing the goal (mode NONE) hands it back.
    */
   hasGoal(actor: TGActor): boolean {
+    if (this.hops.has(actor.id)) return true;   // a jump owns the root too
     const st = actor.steer;
     return !!st && st.mode !== 'NONE' && !this.suppressed.has(actor.id);
   }
@@ -77,6 +87,57 @@ export class SteerEngine {
   /** Is this actor still walking toward its destination? */
   active(actor: TGActor): boolean {
     return this.hasGoal(actor) && !actor.steer!.arrived;
+  }
+
+  private hops = new Map<number, Hop>();
+
+  /** Is this actor in the air right now? */
+  airborne(actorId: number): boolean { return this.hops.has(actorId); }
+
+  /**
+   * Leave the ground and land on a point. A jump is not walking, so it does
+   * not go through the seek loop at all — the root follows a ballistic arc
+   * and the WALK IS FADED OUT for the duration, through the mixer, because
+   * a gait that keeps cycling in mid-air is the tell that a character is
+   * being slid rather than thrown.
+   */
+  hopTo(actor: TGActor, to: Vec3, upZ: boolean): void {
+    const upAxis = upZ ? 2 : 1;
+    const from = new THREE.Vector3(...actor.translation);
+    const dest = new THREE.Vector3(...to);
+    const flat = dest.clone().sub(from);
+    flat.setComponent(upAxis, 0);
+    const dist = flat.length();
+    // Long jumps take longer and go higher, but both saturate: without a
+    // cap, clicking across the room launches the character into orbit.
+    const dur = Math.min(1.6, 0.45 + dist * 0.22);
+    const height = Math.min(1.1, 0.35 + dist * 0.18);
+    this.hops.set(actor.id, { from, to: dest, t: 0, dur, height });
+    // stop steering while airborne; the goal is the landing spot
+    if (actor.steer) { actor.steer.arrived = true; actor.steer.stuck = false; }
+    const gait = actorMixer.layerFor(actor, 'GAIT');
+    if (gait) actorMixer.fadeTo(actor.id, gait.id, 0, 0.12);
+  }
+
+  private hop(actor: TGActor, h: Hop, dt: number, upZ: boolean): void {
+    const upAxis = upZ ? 2 : 1;
+    h.t += dt;
+    const k = Math.min(1, h.t / h.dur);
+    const p = h.from.clone().lerp(h.to, k);
+    // a parabola on top of the straight line between the two ends
+    p.setComponent(upAxis, p.getComponent(upAxis) + Math.sin(Math.PI * k) * h.height);
+    actor.translation = [p.x, p.y, p.z];
+    // face the way you jumped
+    const flat = h.to.clone().sub(h.from);
+    flat.setComponent(upAxis, 0);
+    if (flat.lengthSq() > 1e-6) {
+      actor.rotation = headingEuler(headingOf(flat, upZ), upZ);
+    }
+    if (k >= 1) {
+      this.hops.delete(actor.id);
+      const gait = actorMixer.layerFor(actor, 'GAIT');
+      if (gait) actorMixer.fadeTo(actor.id, gait.id, 1, 0.18);
+    }
   }
 
   /**
@@ -87,6 +148,8 @@ export class SteerEngine {
   update(scene: GPScene, dt: number, upZ: boolean): void {
     this.frame++;
     for (const actor of scene.actors) {
+      const h = this.hops.get(actor.id);
+      if (h) { this.hop(actor, h, Math.min(0.05, dt), upZ); continue; }
       if (!this.active(actor)) { this.states.delete(actor.id); continue; }
       this.step(scene, actor, Math.min(0.05, dt), upZ);
     }

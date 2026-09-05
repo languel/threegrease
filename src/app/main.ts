@@ -123,6 +123,7 @@ import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
 import { buildDemoScene } from './demoscene';
 import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
+import { DirectTool } from '../tools/direct';
 import { createHumanoid, resetPose } from '../actor/skeleton';
 import { autoRig } from '../actor/rig';
 import { actorSolver } from '../actor/solver';
@@ -367,6 +368,7 @@ class App implements AppHandle {
         this.ui?.refresh();
       },
       refreshUI: () => this.ui?.refresh(),
+      setStatus: (t: string, ms?: number) => this.setStatusHint(t, ms),
     };
 
     // scene dressing
@@ -463,7 +465,7 @@ class App implements AppHandle {
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
       this.polyPen, this.polyBuild, this.quadPatch, new SplatPaintTool(), new TexturePaintTool(),
-      new ActorPoseTool(), new MeasureTool(),
+      new ActorPoseTool(), new MeasureTool(), new DirectTool(),
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
 
