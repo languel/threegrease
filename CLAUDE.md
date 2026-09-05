@@ -272,6 +272,13 @@ the browser console or automated evals:
   it. This does not look like a wrong transform — it looks like "tracking
   silently never sees anything". Use a real camera object (see
   `lookRotation` in `app/demoscene.ts`).
+- **A `TRIGGER` takes its SHAPE from its carrier, and `radius` is often
+  ignored.** On a BOX/SPHERE/CYLINDER mesh it tests that primitive's own
+  local bounds; on a PLANE it is a crossing detector; on a POLY it tests the
+  topology. `radius` ONLY applies in the fallback sphere case — a carrier
+  with no geometry (an EMPTY). Putting a proximity zone on a box therefore
+  silently gives you a box-sized zone and no error. Use an EMPTY for
+  "within N metres of", a primitive for "inside this volume".
 - **Simulated tracking sources** (`src/actor/simstream.ts`) let ANY object,
   or an actor's whole skeleton, drive an `MMStream` — sampled through a
   SCENE camera, written into `streamStore` in MediaPipe's exact packing.

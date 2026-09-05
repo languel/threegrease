@@ -264,3 +264,10 @@ mapping layer** in which physical accuracy is one mode among several:
   faces only).
 - Numeric entry while drawing — type a wall length instead of eyeballing it.
 - `viewAll` should include measurements in its bounds.
+
+## Walkthrough
+
+Step-by-step instructions for setting up and running a fully virtual test —
+loading the stock demo, watching the simulated tracking and zones work, and
+swapping pieces for real inputs one at a time — are in
+[VIRTUAL_TEST_WALKTHROUGH.md](VIRTUAL_TEST_WALKTHROUGH.md).
