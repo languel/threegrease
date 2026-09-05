@@ -21,6 +21,7 @@
 import * as THREE from 'three';
 import type { GPScene, TGActor, Vec3 } from '../core/types';
 import { actorSolver } from './solver';
+import { actorMixer } from './mixer';
 import { worldMatrixOf } from '../tools/objects';
 
 /** Joints the gait drives. Anything not listed is left to the solver. */
@@ -122,6 +123,11 @@ export class GaitEngine {
     const rightAxis = 0;
 
     const idxOf = (name: string) => actor.joints.findIndex((j) => j.name === name);
+    // The mixer's say on this layer, per joint — a stack can hand the legs
+    // to the walk and the arms to a capture without the gait knowing. The
+    // cycle above still advanced while muted, deliberately: unmuting picks
+    // up mid-stride instead of restarting from a standstill.
+    const gain = (name: string): number => actorMixer.gain(actor, 'GAIT', name);
 
     for (let f = 0; f < 2; f++) {
       const foot = st.feet[f];
@@ -170,21 +176,24 @@ export class GaitEngine {
       }
 
       const ai = idxOf(FOOT[f]);
-      if (ai >= 0) {
-        actorSolver.addTarget(actor.id, { index: ai, pos: [local.x, local.y, local.z], weight: w });
+      const footW = w * gain(FOOT[f]);
+      if (ai >= 0 && footW > 0.001) {
+        actorSolver.addTarget(actor.id,
+          { index: ai, pos: [local.x, local.y, local.z], weight: footW });
       }
 
       // Arms counter-swing against the opposite leg — the single cheapest
       // cue that reads as walking rather than shuffling.
       if (g.armSwing > 0.001) {
         const hi = idxOf(HAND[1 - f]);
-        if (hi >= 0) {
+        const handW = w * 0.6 * gain(HAND[1 - f]);
+        if (hi >= 0 && handW > 0.001) {
           const rest = actor.joints[hi].rest;
           const swing = Math.cos(fp * Math.PI * 2) * g.armSwing;
           const localTarget: Vec3 = upZ
             ? [rest[0], rest[1] + swing, rest[2]]
             : [rest[0], rest[1], rest[2] - swing];
-          actorSolver.addTarget(actor.id, { index: hi, pos: localTarget, weight: w * 0.6 });
+          actorSolver.addTarget(actor.id, { index: hi, pos: localTarget, weight: handW });
         }
       }
     }
@@ -192,12 +201,13 @@ export class GaitEngine {
     // ---- pelvis bob: twice per stride, since each step drops the hips ----
     if (g.bob > 0.0001) {
       const hi = idxOf('hips');
-      if (hi >= 0) {
+      const hipW = w * 0.5 * gain('hips');
+      if (hi >= 0 && hipW > 0.001) {
         const rest = actor.joints[hi].rest;
         const bob = -Math.abs(Math.sin(st.phase * Math.PI * 2)) * g.bob;
         const p: Vec3 = [...rest] as Vec3;
         p[upAxis] += bob;
-        actorSolver.addTarget(actor.id, { index: hi, pos: p, weight: w * 0.5 });
+        actorSolver.addTarget(actor.id, { index: hi, pos: p, weight: hipW });
       }
     }
   }

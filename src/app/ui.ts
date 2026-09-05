@@ -58,6 +58,8 @@ import * as ops from '../tools/editops';
 import { selectAll, selectLinked, selectMoreLess } from '../tools/select';
 import { icon, type IconName } from './icons';
 import { autoRig } from '../actor/rig';
+import { MASK_LABELS, SOURCE_LABELS, nextLayerId } from '../actor/mixer';
+import type { ActorLayerSource } from '../core/types';
 
 export interface AppHandle {
   ctx: AppCtx;
@@ -1562,6 +1564,39 @@ export class UI {
               + 'on it — the gait re-walks the loop on its own.',
           }), { full: true }),
       ] : []),
+
+      el('div', { class: 'menu-header', text: 'Mixer' }),
+      ...(actor.layers ?? []).flatMap((layer) => [
+        fieldRow('', el('div', { class: 'field-group' },
+          checkbox('', layer.enabled, (v) => {
+            ctx.pushUndo(); layer.enabled = v; touch(); this.refresh();
+          }, 'mute or unmute this layer'),
+          selectField('', layer.source, SOURCE_LABELS.map(([v, l]) => [v, l]),
+            (v) => { ctx.pushUndo(); layer.source = v as ActorLayerSource; touch(); this.refresh(); }),
+          selectField('', layer.mask, MASK_LABELS.map(([v, l]) => [v, l]),
+            (v) => { ctx.pushUndo(); layer.mask = v as typeof layer.mask; touch(); this.refresh(); }),
+          btn(icon('trash'), () => {
+            ctx.pushUndo();
+            actor.layers = (actor.layers ?? []).filter((l) => l !== layer);
+            touch();
+            this.refresh();
+          }, { cls: 'icon-btn', title: 'Remove this layer' }),
+        ), { full: true }),
+        slider(layer.name, layer.weight, 0, 1, 0.01,
+          (v) => { layer.weight = v; }, { def: 1,
+            title: 'how much of this source survives into the pose. Sources '
+              + 'that want the same joint are blended by weight, not fought over' }),
+      ]),
+      fieldRow('', btn('+ Layer', () => {
+        ctx.pushUndo();
+        actor.layers = [...(actor.layers ?? []), {
+          id: nextLayerId(actor), name: 'Clip', enabled: true,
+          weight: 1, mask: 'ALL', source: 'CLIP', clipId: null,
+        }];
+        touch();
+        this.refresh();
+      }, { title: 'Add a mixer layer — a second source of motion, masked to part of the body' }),
+        { full: true }),
 
       el('div', { class: 'menu-header', text: 'Gait' }),
       ...(actor.gait ? [

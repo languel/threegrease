@@ -14,6 +14,7 @@ import type { AppCtx } from './context';
 import type { Tool, ToolEvent } from './toolsys';
 import type { TGActor } from '../core/types';
 import { objectToScreen } from './projection';
+import { actorMixer } from '../actor/mixer';
 import { actorSolver } from '../actor/solver';
 import { worldMatrixOf } from '../tools/objects';
 
@@ -113,9 +114,14 @@ export class ActorPoseTool implements Tool {
     at.add(this.grab.offset);
     // back to actor-local, which is the space the solver works in
     at.applyMatrix4(worldMatrixOf(ctx.scene, { kind: 'ACTOR', id: actor.id }).invert());
-    actorSolver.addTarget(actor.id, {
-      index: this.grab.index, pos: [at.x, at.y, at.z], weight: 1,
-    });
+    // MANUAL is a mixer layer like any other, so a stack can hold a hand
+    // drag under a running clip instead of it always winning outright.
+    const w = actorMixer.gain(actor, 'MANUAL', actor.joints[this.grab.index]?.name ?? '');
+    if (w > 0.001) {
+      actorSolver.addTarget(actor.id, {
+        index: this.grab.index, pos: [at.x, at.y, at.z], weight: w,
+      });
+    }
     ctx.requestRender();
   }
 

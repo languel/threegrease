@@ -19,6 +19,7 @@
 // the solver works in and the space the pose is stored in.
 import * as THREE from 'three';
 import type { GPScene, TGActor, TGRigBinding, Vec3 } from '../core/types';
+import { actorMixer } from './mixer';
 import { actorSolver, solveFabrik } from './solver';
 import { streamLandmarkWorld } from '../mm/streams';
 import { worldMatrixOf } from '../tools/objects';
@@ -144,12 +145,26 @@ export class ActorRig {
     return out;
   }
 
+  /** The rig layer's say on one joint, so a mixer stack can hand part of
+   *  the body to something else without the rig knowing (actor/mixer.ts).
+   *  A capture still writes the whole skeleton; the mixer decides how much
+   *  of it survives. */
+  private gain(actor: TGActor, index: number): number {
+    const name = actor.joints[index]?.name;
+    return name ? actorMixer.gain(actor, 'RIG', name) : 0;
+  }
+
+  private emit(actor: TGActor, index: number, pos: Vec3, weight: number): void {
+    const w = weight * this.gain(actor, index);
+    if (w > 0.001) actorSolver.addTarget(actor.id, { index, pos, weight: w });
+  }
+
   /** 1:1 — pin every bound joint to its landmark. */
   private markers(actor: TGActor, captured: Map<number, Vec3>): void {
     const w = actor.rig.strength;
     for (const [index, pos] of captured) {
       const bind = actor.rig.bindings.find((b) => actor.joints[index]?.id === b.joint);
-      actorSolver.addTarget(actor.id, { index, pos, weight: w * (bind?.weight ?? 1) });
+      this.emit(actor, index, pos, w * (bind?.weight ?? 1));
     }
   }
 
@@ -174,7 +189,7 @@ export class ActorRig {
     if (rootIdx >= 0 && captured.has(rootIdx)) {
       const pos = captured.get(rootIdx)!;
       placed.set(rootIdx, pos);
-      actorSolver.addTarget(actor.id, { index: rootIdx, pos, weight: w });
+      this.emit(actor, rootIdx, pos, w);
     }
 
     for (const bone of actor.bones) {
@@ -204,7 +219,7 @@ export class ActorRig {
         from[2] + (dz / d) * restLen,
       ];
       placed.set(ib, pos);
-      actorSolver.addTarget(actor.id, { index: ib, pos, weight: w });
+      this.emit(actor, ib, pos, w);
     }
   }
 
@@ -271,7 +286,7 @@ export class ActorRig {
     for (const name of ['hips', 'chest', 'head']) {
       const i = actor.joints.findIndex((j) => j.name === name);
       const pos = i >= 0 ? captured.get(i) : undefined;
-      if (pos) actorSolver.addTarget(actor.id, { index: i, pos, weight: w });
+      if (pos) this.emit(actor, i, pos, w);
     }
     for (const { tip, chain } of ikChains(actor)) {
       const goal = captured.get(tip);
@@ -280,7 +295,7 @@ export class ActorRig {
       // solve, not a force), then the tip is pinned so physics keeps it
       // there while the rest of the body reacts.
       solveFabrik(actor, chain, goal);
-      actorSolver.addTarget(actor.id, { index: tip, pos: goal, weight: w });
+      this.emit(actor, tip, goal, w);
     }
   }
 }

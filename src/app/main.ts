@@ -113,6 +113,7 @@ import {
   driveStreamFromActor, driveStreamFromObject, driverOf, isDriven,
   stopDrivingStream, tickSimStreams,
 } from '../actor/simstream';
+import { actorMixer } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
 import { buildDemoScene } from './demoscene';
 import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
@@ -258,7 +259,7 @@ class App implements AppHandle {
    */
   readonly sys = {
     streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
-    gaitEngine, possession,
+    gaitEngine, possession, actorMixer,
   };
   readonly paints = new PaintCloudManager();
   readonly mmPoints = new StreamPointsManager();
@@ -3398,6 +3399,10 @@ class App implements AppHandle {
     // goals, then the solver runs physics+kinematics over them. Both must
     // happen AFTER the stream engine (they read this frame's landmarks) and
     // BEFORE the constraint engine (which may move the actor as a whole).
+    // Mixer first: it only advances crossfades, but every source below asks
+    // it how loudly it may speak this frame, so the fades must be current
+    // before any of them emit.
+    actorMixer.update(ctx.scene, dt);
     actorRig.update(ctx.scene, dt);
     // Gait AFTER the rig (a capture rig should win over a procedural cycle
     // for any joint both drive) and BEFORE the solver, so its foot/pelvis

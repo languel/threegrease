@@ -5,6 +5,7 @@ import type { AppCtx } from '../tools/context';
 import type { TGRoute } from '../core/types';
 import { activeObject } from '../core/gpdata';
 import { bus, addressMatches, type TGEvent } from './bus';
+import { actorMixer } from '../actor/mixer';
 import { actorSolver } from '../actor/solver';
 
 interface ResolvedTarget {
@@ -116,7 +117,8 @@ export function resolveTarget(ctx: AppCtx, path: string): ResolvedTarget | null 
           set: (v) => {
             const pos = [...actor.pose[index]] as [number, number, number];
             pos[axis] = num(v);
-            actorSolver.addTarget(actor.id, { index, pos, weight: 1 });
+            const w = actorMixer.gain(actor, 'MANUAL', actor.joints[index].name);
+            if (w > 0.001) actorSolver.addTarget(actor.id, { index, pos, weight: w });
           },
           dirty: 'render',
         };

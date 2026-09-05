@@ -22,6 +22,7 @@ import { listSelected, objectName, getObjectTransform, setObjectTransform, delet
 import type { ObjRef } from '../tools/objects';
 import { BRUSH_PRESETS } from '../core/brushes';
 import { autoRig } from '../actor/rig';
+import { actorMixer } from '../actor/mixer';
 import { actorSolver } from '../actor/solver';
 
 // ---- schema helpers -------------------------------------------------------
@@ -690,11 +691,15 @@ export const AGENT_TOOLS: AgentTool[] = [
         if (spec.pin !== undefined) actor.joints[index].pin = !!spec.pin;
         const at = spec.at;
         if (Array.isArray(at) && at.length === 3) {
-          actorSolver.addTarget(actor.id, {
-            index,
-            pos: at.map(Number) as [number, number, number],
-            weight: spec.weight === undefined ? 1 : Number(spec.weight),
-          });
+          const base = spec.weight === undefined ? 1 : Number(spec.weight);
+          const w = base * actorMixer.gain(actor, 'MANUAL', actor.joints[index].name);
+          if (w > 0.001) {
+            actorSolver.addTarget(actor.id, {
+              index,
+              pos: at.map(Number) as [number, number, number],
+              weight: w,
+            });
+          }
         }
         applied.push(String(spec.name));
       }

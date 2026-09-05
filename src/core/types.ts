@@ -844,6 +844,33 @@ export interface TGActorPhysics {
   selfCollide: boolean;
 }
 
+/** Where one mixer layer gets its motion. */
+export type ActorLayerSource = 'RIG' | 'GAIT' | 'CLIP' | 'MANUAL';
+
+/**
+ * One layer of the actor's animation mixer (see actor/mixer.ts). Authorship,
+ * so it is scene data and it undoes; the live crossfade multiplier that
+ * scales `weight` during a performance is runtime and deliberately is not.
+ */
+export interface TGActorLayer {
+  id: number;                    // actor-local, like joints and bones
+  name: string;
+  enabled: boolean;
+  /** authored blend weight, 0..1 */
+  weight: number;
+  /** which part of the body this layer is allowed to move */
+  mask: 'ALL' | 'UPPER' | 'LOWER' | 'ARMS' | 'LEGS' | 'SPINE' | 'HEAD';
+  source: ActorLayerSource;
+  // ---- CLIP source ----
+  clipId?: number | null;
+  /** playback head, 0..1 of the clip */
+  phase?: number;
+  /** cycles per second */
+  speed?: number;
+  loop?: LoopMode;
+  playing?: boolean;
+}
+
 export interface TGActor {
   id: number;
   name: string;
@@ -854,6 +881,8 @@ export interface TGActor {
    *  Persisted (this IS the character's pose); velocity is not. */
   pose: Vec3[];
   rig: TGRig;
+  /** mixer stack — every source of motion, weighed and masked in one place */
+  layers?: TGActorLayer[];
   physics: TGActorPhysics;
   /** draw solid limb capsules, or just the stick skeleton */
   /** Procedural walk cycle. Phased by DISTANCE travelled, not time, so

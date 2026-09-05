@@ -150,15 +150,43 @@ export class ActorSolver {
     this.project(actor, st, upZ);
   }
 
-  /** Blend joints toward this frame's goals. Weight 1 is a hard pin. */
+  /**
+   * Blend joints toward this frame's goals. Weight 1 is a hard pin.
+   *
+   * One joint is routinely claimed by several sources at once — a capture
+   * rig and the procedural gait both want the ankles, a route pins a wrist
+   * the walk is swinging. Applying the goals in sequence made each one lerp
+   * the pose toward its own answer, so the LAST source to run won in
+   * proportion to its weight and the result depended on which engine
+   * happened to be called first in the frame. That is a race, not a blend.
+   *
+   * So resolve first: the goal is the weight-weighted MEAN of every
+   * contribution, and the pull toward it is the summed weight clamped to 1.
+   * A lone source at 0.9 therefore behaves exactly as it always did, two
+   * sources that agree pull harder than either alone, and two that disagree
+   * meet in between instead of one silently erasing the other. How loudly
+   * each source is allowed to ask is the mixer's job (actor/mixer.ts).
+   */
   private applyTargets(actor: TGActor, targets: JointTarget[]): void {
+    if (!targets.length) return;
+    const acc = new Map<number, { x: number; y: number; z: number; w: number }>();
     for (const t of targets) {
-      const p = actor.pose[t.index];
-      if (!p) continue;
       const w = Math.max(0, Math.min(1, t.weight));
-      p[0] += (t.pos[0] - p[0]) * w;
-      p[1] += (t.pos[1] - p[1]) * w;
-      p[2] += (t.pos[2] - p[2]) * w;
+      if (w <= 0 || !actor.pose[t.index]) continue;
+      const a = acc.get(t.index);
+      if (a) {
+        a.x += t.pos[0] * w; a.y += t.pos[1] * w; a.z += t.pos[2] * w; a.w += w;
+      } else {
+        acc.set(t.index, { x: t.pos[0] * w, y: t.pos[1] * w, z: t.pos[2] * w, w });
+      }
+    }
+    for (const [index, a] of acc) {
+      if (a.w <= 1e-6) continue;
+      const p = actor.pose[index];
+      const w = Math.min(1, a.w);
+      p[0] += (a.x / a.w - p[0]) * w;
+      p[1] += (a.y / a.w - p[1]) * w;
+      p[2] += (a.z / a.w - p[2]) * w;
     }
   }
 

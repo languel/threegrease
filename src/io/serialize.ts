@@ -1,5 +1,6 @@
 import type { GPObject, GPScene, TGMaterial, Vec3 } from '../core/types';
 import { defaultGait } from '../actor/gait';
+import { defaultLayers } from '../actor/mixer';
 import { bumpIdCounter, createDefaultCamera, createImage, createMaterialDB, createWorld, defaultLights, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
 import { sanitizePolyMesh } from '../core/polymesh';
@@ -98,6 +99,7 @@ export function deserializeScene(json: string): GPScene {
     a.limits ??= [];
     a.shape ??= 'BOTH';
     a.gait ??= defaultGait();
+    a.layers ??= defaultLayers();
     // a pose shorter than the joint list means the skeleton changed under
     // an old save — fill from rest rather than leaving holes the solver
     // would read as NaN
