@@ -127,6 +127,9 @@ export interface AppHandle {
   mmCaptureStart(source?: { url?: string; file?: File }): void;
   mmSetPlaybackRate(rate: number): void;
   togglePossess(actorId: number): void;
+  actorGoTo(actorId: number, point: Vec3): void;
+  actorGoToObject(actorId: number, ref: import('../tools/objects').ObjRef): void;
+  actorStop(actorId: number): void;
   possessedActor(): number | null;
   possessView(): 'FIRST' | 'THIRD';
   setPossessView(view: 'FIRST' | 'THIRD'): void;
@@ -1579,6 +1582,67 @@ export class UI {
             + 'the performance rather than the path. Play it back on a CLIP '
             + 'mixer layer, on this actor or any other with the same joints.',
         }), { full: true }),
+
+      el('div', { class: 'menu-header', text: 'Go to' }),
+      ...(actor.steer ? (() => {
+        const st = actor.steer!;
+        const status = st.stuck ? ' — stuck'
+          : st.arrived && st.mode !== 'NONE' ? ' — arrived'
+            : st.mode === 'NONE' ? '' : ' — walking';
+        return [
+          fieldRow('Goal', selectField('', st.mode, [
+            ['NONE', 'Nowhere' + (st.mode === 'NONE' ? '' : '')],
+            ['POINT', 'A point' + (st.mode === 'POINT' ? status : '')],
+            ['OBJECT', 'An object' + (st.mode === 'OBJECT' ? status : '')],
+          ], (v) => {
+            ctx.pushUndo();
+            st.mode = v as typeof st.mode;
+            st.arrived = false;
+            st.stuck = false;
+            touch();
+            this.refresh();
+          })),
+          ...(st.mode === 'POINT' ? [
+            fieldRow('', btn('Send to the 3D cursor', () => {
+              this.app.actorGoTo(actor.id, [...ctx.scene.cursor] as Vec3);
+            }, { title: 'Place the 3D cursor where you want the character to '
+              + 'end up (Shift+RMB), then send it there. It walks — the gait '
+              + 'is driven by the root moving, so this is the same animation '
+              + 'as a path or as driving it yourself.' }), { full: true }),
+          ] : []),
+          ...(st.mode === 'OBJECT' ? [
+            this.objectPickerField('Target',
+              () => (st.target ?? null) as import('../tools/objects').ObjRef | null,
+              (v) => {
+                if (v) this.app.actorGoToObject(actor.id, v);
+                else { st.target = null; this.refresh(); }
+              },
+              { kind: 'ACTOR', id: actor.id }),
+          ] : []),
+          ...(st.mode === 'NONE' ? [] : [
+            slider('Speed', st.speed, 0.2, 4, 0.05, (v) => { st.speed = v; }, { def: 1.3,
+              title: 'cruising speed, m/s. The gait is distance-phased, so '
+                + 'this IS the cadence' }),
+            slider('Turn rate', st.turnRate, 30, 720, 10,
+              (v) => { st.turnRate = Math.round(v); }, { def: 200,
+                title: 'degrees per second. Not instant on purpose: a body '
+                  + 'that snaps round pivots under its own planted foot' }),
+            slider('Stop within', st.stopDistance, 0.05, 2, 0.05,
+              (v) => { st.stopDistance = v; }, { def: 0.35 }),
+            slider('Slow from', st.slowRadius, 0.1, 4, 0.1,
+              (v) => { st.slowRadius = v; }, { def: 1.2,
+                title: 'start easing off this far out, so the last stride '
+                  + 'shortens instead of the walk stopping dead' }),
+            checkbox('Walk around things', st.avoid, (v) => {
+              ctx.pushUndo(); st.avoid = v; touch(); this.refresh();
+            }, 'probe ahead and sidestep. Steering, not pathfinding — it '
+              + 'handles furniture in a room, not a maze'),
+            fieldRow('', btn(st.arrived || st.stuck ? 'Clear goal' : 'Stop here',
+              () => this.app.actorStop(actor.id),
+              { title: 'Forget the destination' }), { full: true }),
+          ]),
+        ];
+      })() : []),
 
       el('div', { class: 'menu-header', text: 'Mixer' }),
       ...(actor.layers ?? []).flatMap((layer) => [

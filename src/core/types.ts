@@ -908,6 +908,40 @@ export interface TGActorLayer {
   playing?: boolean;
 }
 
+/**
+ * A destination, and how the character gets to it (see actor/steering.ts).
+ * The third way an actor's root can move, alongside a FOLLOW_PATH
+ * constraint and possession — and the one a generative motion model wants,
+ * since you tell it WHERE, not how.
+ */
+export interface TGActorSteer {
+  mode: 'NONE' | 'POINT' | 'OBJECT';
+  /** POINT: a world position */
+  point?: Vec3;
+  /** OBJECT: whatever it is, wherever it is now */
+  target?: ParentRef | null;
+  /** cruising speed, m/s */
+  speed: number;
+  /** how fast it gets up to speed, 1/s */
+  accel: number;
+  /** degrees/second the heading may turn — NOT instant, or the body spins
+   *  under a world-locked stance foot and visibly scuffs */
+  turnRate: number;
+  /** start slowing down this far out */
+  slowRadius: number;
+  /** close enough; arrival is declared here */
+  stopDistance: number;
+  radius: number;
+  stepHeight: number;
+  /** probe ahead and sidestep around obstacles */
+  avoid: boolean;
+  lookAhead: number;
+  /** set by the engine when the goal is reached (or given up on) */
+  arrived?: boolean;
+  /** set when it wedged and stopped making progress */
+  stuck?: boolean;
+}
+
 export interface TGActor {
   id: number;
   name: string;
@@ -920,6 +954,8 @@ export interface TGActor {
   rig: TGRig;
   /** mixer stack — every source of motion, weighed and masked in one place */
   layers?: TGActorLayer[];
+  /** where this character is trying to get to, and how */
+  steer?: TGActorSteer;
   physics: TGActorPhysics;
   /** draw solid limb capsules, or just the stick skeleton */
   /** Procedural walk cycle. Phased by DISTANCE travelled, not time, so

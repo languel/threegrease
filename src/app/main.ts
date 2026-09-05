@@ -5,7 +5,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
 import { History } from '../core/history';
-import type { GPScene, TGLight, ViewportShading } from '../core/types';
+import type { GPScene, TGLight, Vec3, ViewportShading } from '../core/types';
 import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { defaultSettings, loadPrefs, savePrefs, snapIncrement, type AppCtx } from '../tools/context';
@@ -114,6 +114,7 @@ import {
   stopDrivingStream, tickSimStreams,
 } from '../actor/simstream';
 import { actorMixer } from '../actor/mixer';
+import { steerEngine } from '../actor/steering';
 import { gaitEngine } from '../actor/gait';
 import { buildDemoScene } from './demoscene';
 import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
@@ -259,7 +260,7 @@ class App implements AppHandle {
    */
   readonly sys = {
     streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
-    gaitEngine, possession, actorMixer,
+    gaitEngine, possession, actorMixer, steerEngine,
   };
   readonly paints = new PaintCloudManager();
   readonly mmPoints = new StreamPointsManager();
@@ -2422,7 +2423,9 @@ class App implements AppHandle {
     possession.begin(actorId);
     // Constraints on the driven actor stand down for the duration —
     // otherwise a FOLLOW_PATH walker snaps back onto its path every frame.
-    constraintEngine.possessed = { kind: 'ACTOR', id: actorId };
+    constraintEngine.setDriven({ kind: 'ACTOR', id: actorId }, true);
+    // driving by hand outranks a destination: the goal is kept, not lost
+    steerEngine.suppressed.add(actorId);
     // Nothing here poses the character: the gait engine sees the root move
     // and produces the walk cycle, exactly as it does for a path traveler.
     if (actor.gait) actor.gait.enabled = true;
@@ -2445,8 +2448,11 @@ class App implements AppHandle {
   /** Fly mode ended (Enter, Esc, a click elsewhere) — tear possession down. */
   private endPossess(): void {
     if (!possession.active) return;
+    // read the id BEFORE end() clears it, or the constraint suppression
+    // never lifts and the actor silently ignores its own path afterwards
+    constraintEngine.setDriven({ kind: 'ACTOR', id: possession.actorId! }, false);
+    steerEngine.suppressed.delete(possession.actorId!);
     possession.end();
-    constraintEngine.possessed = null;
     this.nav.walkDriver = null;
     this.ui.refresh();
   }
@@ -2454,6 +2460,47 @@ class App implements AppHandle {
   togglePossess(actorId: number): void {
     if (possession.actorId === actorId) this.unpossess();
     else this.possess(actorId);
+  }
+
+  // ------------------------------------------------------------- steering
+
+  /** Send a character to a world point. It walks; the gait does the rest. */
+  actorGoTo(actorId: number, point: Vec3): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
+    if (!actor?.steer) return;
+    this.ctx.pushUndo();
+    actor.steer.mode = 'POINT';
+    actor.steer.point = [...point] as Vec3;
+    actor.steer.target = null;
+    actor.steer.arrived = false;
+    actor.steer.stuck = false;
+    if (actor.gait) actor.gait.enabled = true;
+    this.ui.refresh();
+  }
+
+  /** Send a character to whatever an object is, wherever it ends up. */
+  actorGoToObject(actorId: number, ref: ObjRef): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
+    if (!actor?.steer) return;
+    this.ctx.pushUndo();
+    actor.steer.mode = 'OBJECT';
+    actor.steer.target = ref;
+    actor.steer.arrived = false;
+    actor.steer.stuck = false;
+    if (actor.gait) actor.gait.enabled = true;
+    this.ui.refresh();
+  }
+
+  /** Give up on the destination. The goal is cleared, not just paused. */
+  actorStop(actorId: number): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
+    if (!actor?.steer) return;
+    this.ctx.pushUndo();
+    actor.steer.mode = 'NONE';
+    actor.steer.arrived = false;
+    actor.steer.stuck = false;
+    steerEngine.reset(actorId);
+    this.ui.refresh();
   }
 
   possessedActor(): number | null { return possession.actorId; }
@@ -3403,6 +3450,17 @@ class App implements AppHandle {
     // it how loudly it may speak this frame, so the fades must be current
     // before any of them emit.
     actorMixer.update(ctx.scene, dt);
+    // Steering moves the ROOT, like possession and like a FOLLOW_PATH
+    // constraint — and like both of those it touches no joint: the gait
+    // below sees the root move and produces the walking. Before the gait so
+    // this frame's motion is this frame's stride, and the constraint pass
+    // is told to stand down for anything actually steering, or a path would
+    // snap the character back every frame.
+    steerEngine.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
+    for (const a of ctx.scene.actors) {
+      constraintEngine.setDriven({ kind: 'ACTOR', id: a.id },
+        possession.actorId === a.id || steerEngine.hasGoal(a));
+    }
     actorRig.update(ctx.scene, dt);
     // Gait AFTER the rig (a capture rig should win over a procedural cycle
     // for any joint both drive) and BEFORE the solver, so its foot/pelvis

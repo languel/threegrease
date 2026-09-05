@@ -1,6 +1,7 @@
 import type { GPObject, GPScene, TGMaterial, Vec3 } from '../core/types';
 import { defaultGait } from '../actor/gait';
 import { defaultLayers } from '../actor/mixer';
+import { defaultSteer } from '../actor/steering';
 import { rebuildLimbRules } from '../actor/skeleton';
 import { bumpIdCounter, createDefaultCamera, createImage, createMaterialDB, createWorld, defaultLights, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
@@ -101,6 +102,7 @@ export function deserializeScene(json: string): GPScene {
     a.shape ??= 'BOTH';
     a.gait ??= defaultGait();
     a.layers ??= defaultLayers();
+    a.steer ??= defaultSteer();
     a.physics.hinges ??= true;
     // A limit with no pole predates hinges — and those limits also named
     // the wrong bones (they constrained the hip and the shoulder, never the

@@ -348,6 +348,31 @@ the browser console or automated evals:
   `score/constraints.ts` builds a basis rather than yaw/pitch eulers, which
   is also what makes a sloped path work: pitch in the X euler slot is applied
   about the WORLD x-axis and is only correct while the yaw is zero.
+- **An actor's ROOT has exactly three drivers, and they are the same
+  shape**: a FOLLOW_PATH constraint (a recorded route), possession
+  (`app/possess.ts`, your hands), and steering (`actor/steering.ts`, a
+  destination). None of them touches the pose — the gait sees the root move
+  and produces the walking — which is why all three read as one character.
+  `ConstraintEngine.driven` (runtime, a Set) stands an object's transform
+  constraints down while another driver owns it; the object is STILL fed to
+  the trigger probes, because a visitor entering a zone should not depend on
+  who is walking it. A steer goal suppresses the path even AFTER arrival, on
+  purpose: otherwise the old path grabs the character the instant it reaches
+  where you sent it, which looks like the goal was ignored.
+- **Steering, not pathfinding.** No navmesh, no A*: seek, arrival ramp,
+  wall-slide, and a three-whisker look-ahead that ROTATES the desired
+  direction around an obstacle. Two traps worth keeping: (a) ADDING a
+  lateral force to the seek force does not work — at a box sitting on the
+  straight line to the goal the two cancel and the character grinds into it;
+  rotating makes the forward component fall away as the obstacle closes;
+  (b) re-picking the side to pass on every frame flickers when the two sides
+  measure the same, so the side is committed until the way is clear. When it
+  wedges anyway it sets `stuck` rather than shuffling forever while the gait
+  dutifully animates a walk going nowhere. The heading turns at a bounded
+  RATE — snapping it spins the body under a world-locked stance foot.
+- **The shared walking body** (`actor/locomotion.ts`) is where collision and
+  ground live, so a character does not collide differently depending on who
+  is steering it. `walkVolume.gather(scene, frame)` is idempotent per frame.
 - **Possession** (`src/app/possess.ts`) is fly mode driving a body. Fly mode
   owns pointer lock, mouse-look, the WASD key set and the
   Esc-through-pointer-lock cancel; `Navigation.walkDriver` replaces only the
@@ -358,10 +383,7 @@ the browser console or automated evals:
   `meshLocalBounds` (the TRIGGER zones' own bounds), NOT a physics engine;
   anything whose top is within a step height counts as ground rather than a
   wall, which is what makes floors, pedestals and steps all one rule.
-  `ConstraintEngine.possessed` (runtime state) stands the driven object's
-  constraints down for the duration — without it a FOLLOW_PATH walker snaps
-  back onto its path every frame — while still feeding it to the trigger
-  probes, so a possessed visitor fires zones.
+  It shares its collision with steering (see above).
 - **Simulated tracking sources** (`src/actor/simstream.ts`) let ANY object,
   or an actor's whole skeleton, drive an `MMStream` — sampled through a
   SCENE camera, written into `streamStore` in MediaPipe's exact packing.

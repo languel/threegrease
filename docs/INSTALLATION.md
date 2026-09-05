@@ -315,6 +315,31 @@ collision (imported `MODEL` meshes have none), a third-person boom that
 shortens rather than sweeps, and a gait that does not shorten its stride to
 corner.
 
+### Telling a character where to go
+
+A path is a recording of a route. An installation is full of routes that
+depend on what just happened — meet the visitor, return to the plinth,
+leave — so the useful primitive is a DESTINATION, not a curve. `Actor ▸ Go
+to` (and the `actor.goto` agent tool, so the same thing works from chat,
+MCP or a score) gives a character a point or an object and it walks there
+itself: seeking, easing into the goal so the last stride shortens rather
+than the walk stopping dead, sliding along what it brushes and stepping
+around what is in the way.
+
+It is the third driver of an actor's root, and deliberately the same shape
+as the other two — a FOLLOW_PATH constraint and possession. None of them
+touches the pose; the gait sees the root move and produces the walking, so
+a character on a path, one you are driving and one walking itself somewhere
+are all the same character.
+
+Steering, not pathfinding: no navmesh and no A*. It handles a room with
+furniture in it, which is the room these pieces are staged in; it will not
+solve a maze, and when it wedges it says `stuck` rather than shuffling in
+place forever while the gait animates a walk that goes nowhere. It is also
+the interface a generative motion model wants — you tell it where, not how
+— so a Kimodo-style generator would replace the gait UNDER this layer
+rather than sitting beside it.
+
 ### Mixing sources
 
 A character has more than one thing posing it: a capture rig, the

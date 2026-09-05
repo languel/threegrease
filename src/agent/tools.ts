@@ -659,6 +659,57 @@ export const AGENT_TOOLS: AgentTool[] = [
     },
   },
   {
+    name: 'actor.goto',
+    description: 'Tell a character where to GO. It walks there itself \u2014 seeking, '
+      + 'slowing into the goal, sliding along walls and sidestepping obstacles \u2014 '
+      + 'and the procedural gait animates the walking, so this is the same '
+      + 'motion as following a path or being driven by hand. Give either a '
+      + 'world point or an object to walk to; omit both to stop. This is '
+      + 'steering, not pathfinding: it will not solve a maze, and it reports '
+      + '`stuck` rather than shuffling forever if it wedges.',
+    inputSchema: obj({
+      id: num('Actor id.'),
+      to: vec3('Destination in WORLD space.'),
+      object: obj({
+        kind: str('Object kind, e.g. "MESH", "GP", "ACTOR".'),
+        id: num('Object id.'),
+      }, ['kind', 'id']),
+      speed: num('Cruising speed in m/s. Default keeps the current setting.'),
+      stop: bool('Stop and forget the destination.'),
+    }, ['id']),
+    mutates: true,
+    handler: (host, args) => {
+      const actor = host.ctx.scene.actors.find((a) => a.id === Number(args.id));
+      if (!actor) return { error: `no actor with id ${args.id}` };
+      if (!actor.steer) return { error: 'actor has no steering block' };
+      const st = actor.steer;
+      if (args.speed !== undefined) st.speed = Number(args.speed);
+      if (args.stop) {
+        st.mode = 'NONE';
+        st.arrived = false;
+        st.stuck = false;
+        return { ok: true, stopped: true };
+      }
+      st.arrived = false;
+      st.stuck = false;
+      const target = args.object as { kind?: unknown; id?: unknown } | undefined;
+      if (target?.kind !== undefined) {
+        st.mode = 'OBJECT';
+        st.target = { kind: String(target.kind), id: Number(target.id) } as typeof st.target;
+      } else if (Array.isArray(args.to) && args.to.length === 3) {
+        st.mode = 'POINT';
+        st.point = args.to.map(Number) as [number, number, number];
+        st.target = null;
+      } else {
+        return { error: 'give either `to` (a world point) or `object`' };
+      }
+      // A character with no gait would SLIDE to the goal, which is the one
+      // thing this is meant to stop looking like.
+      if (actor.gait) actor.gait.enabled = true;
+      return { ok: true, mode: st.mode, speed: st.speed };
+    },
+  },
+  {
     name: 'actor.pose',
     description: 'Move an actor\u2019s joints by name. Positions are GOALS fed to '
       + 'the same solver capture uses, so the rest of the body follows through '

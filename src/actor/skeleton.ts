@@ -14,6 +14,7 @@ import type { GPScene, TGActor, TGBone, TGJoint, TGJointLimit, Vec3 } from '../c
 import { worldMatrixOf } from '../tools/objects';
 import { defaultGait } from './gait';
 import { defaultLayers } from './mixer';
+import { defaultSteer } from './steering';
 
 /** height, in world units, of the default figure */
 export const ACTOR_HEIGHT = 1.8;
@@ -224,6 +225,7 @@ export function createHumanoid(
       tone: 0.06, floor: true, selfCollide: false, hinges: true,
     },
     layers: defaultLayers(),
+    steer: defaultSteer(),
     gait: defaultGait(),
     shape: 'BOTH',
     color: [0.72, 0.74, 0.80],

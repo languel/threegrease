@@ -187,6 +187,33 @@ Things worth noticing while you drive:
   duration instead of snapping back onto the path under you. Release and
   it picks the path up again.
 
+### Sending it somewhere instead of driving it
+
+Release the controls and open **Actor ▸ Go to**. Set the goal to **A
+point**, put the 3D cursor where you want the character to end up
+(Shift+RMB in the viewport), and hit **Send to the 3D cursor** — it walks
+there on its own, easing into the goal so the last stride shortens instead
+of the walk stopping dead. Set the goal to **An object** and it walks to
+wherever that object is *now*, which is what you want for "meet the
+visitor" or "return to the plinth".
+
+You can also say it in words: the `actor.goto` agent tool takes a point or
+an object, so the same instruction works from the in-app chat, from Claude
+Code over MCP, or from anything else driving the agent bridge.
+
+Worth knowing:
+
+- **This is steering, not pathfinding.** It seeks, slides along what it
+  brushes, and steps around what is directly in its way. That covers a room
+  with furniture in it. It will not solve a maze, and if it wedges in a
+  concave corner it stops and reports **stuck** rather than shuffling in
+  place forever while the legs dutifully animate a walk going nowhere.
+- **A goal takes the character off its path** — and keeps it off after it
+  arrives, until you clear the goal. Otherwise the old `FOLLOW_PATH` would
+  grab it the instant it got where you sent it.
+- **Turn rate is deliberately not instant.** A body that snaps round spins
+  under its own planted foot and visibly scuffs.
+
 ### Recording a walk, and turning it into the loop
 
 Press `R` (or **Record this walk**) while possessed, walk the route you

@@ -168,14 +168,21 @@ export class ConstraintEngine {
    *  flashes the carrier object's outline) — replaced every frame */
   fired: { ref: ObjRef; kind: 'enter' | 'leave' }[] = [];
   /**
-   * Object currently being driven by hand (see `app/possess.ts`). Its
-   * transform constraints are skipped while possessed — otherwise a
-   * FOLLOW_PATH walker snaps straight back onto its path the instant you
-   * try to steer it — but it is still offered to pass 2 as a trigger probe,
-   * because a possessed visitor walking into a zone is the whole point.
-   * RUNTIME state, never scene data: possession does not survive a reload.
+   * Objects whose transform another system owns this frame — a possessed
+   * character (`app/possess.ts`), one steering itself somewhere
+   * (`actor/steering.ts`). Their transform constraints are skipped for the
+   * duration, because otherwise a FOLLOW_PATH walker snaps straight back
+   * onto its path the instant anything else tries to move it. They ARE
+   * still offered to pass 2 as trigger probes: a visitor walking into a
+   * zone is the whole point, and it should not matter who is walking it.
+   * RUNTIME state, never scene data — none of this survives a reload.
    */
-  possessed: ObjRef | null = null;
+  readonly driven = new Set<string>();
+
+  setDriven(ref: ObjRef, on: boolean): void {
+    const key = `${ref.kind}:${ref.id}`;
+    if (on) this.driven.add(key); else this.driven.delete(key);
+  }
 
   reset(): void {
     this.velocities.clear();
@@ -203,7 +210,7 @@ export class ConstraintEngine {
     const travelers: { key: string; pos: THREE.Vector3 }[] = [];
     for (const ref of allRefs(scene)) {
       if (ref.kind === 'CANVAS') continue;
-      if (this.possessed && ref.kind === this.possessed.kind && ref.id === this.possessed.id) continue;
+      if (this.driven.has(`${ref.kind}:${ref.id}`)) continue;
       const stack = constraintsOf(scene, ref);
       if (!stack.length) continue;
       for (const c of stack) {
@@ -332,11 +339,10 @@ export class ConstraintEngine {
     // and every landmark of probe-enabled MM streams — so "right hand
     // enters a virtual box" is just a box mesh with a TRIGGER constraint.
     this.fired = [];
-    if (this.possessed) {
-      travelers.push({
-        key: `${this.possessed.kind}:${this.possessed.id}`,
-        pos: worldPos(scene, this.possessed),
-      });
+    for (const key of this.driven) {
+      const [kind, id] = key.split(':');
+      const ref = { kind, id: Number(id) } as ObjRef;
+      travelers.push({ key, pos: worldPos(scene, ref) });
     }
     const probes: { key: string; pos: THREE.Vector3 }[] = [...travelers];
     for (const [id, state] of score.states) {
