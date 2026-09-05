@@ -28,6 +28,9 @@ export function bumpIdCounter(scene: GPScene): void {
   for (const s of scene.splats ?? []) max = Math.max(max, s.id);
   for (const c of scene.paintClouds ?? []) max = Math.max(max, c.id);
   for (const st of scene.mmStreams ?? []) max = Math.max(max, st.id);
+  for (const c of scene.clips ?? []) max = Math.max(max, c.id);
+  for (const a of scene.actors ?? []) max = Math.max(max, a.id);
+  for (const m of scene.measures ?? []) max = Math.max(max, m.id);
   nextId = Math.max(nextId, max + 1);
 }
 
