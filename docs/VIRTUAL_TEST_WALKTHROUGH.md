@@ -145,7 +145,66 @@ point cloud over the floor and walls, standing in for what a real Kiri /
 Use this to sanity-check that measuring, snapping and zone placement behave
 sensibly against noisy scan-like data, before you actually go scan the room.
 
-## 7. Swap one piece for something real
+## 7. Walk the room yourself
+
+The simulated visitor is on rails, which is the point when you want a
+repeatable test — but you also want to walk the space and see what a
+person actually sees, and to author a path by walking it rather than by
+drawing an oval and hoping.
+
+Select the **Visitor** actor, open the **Actor** tab, and hit **Possess —
+take the controls** (or press `Shift+P` with the actor selected):
+
+| Key | Does |
+| --- | --- |
+| mouse | look — and the character turns to face where you look |
+| `W` `A` `S` `D` | walk, relative to where you're looking |
+| `Shift` | run |
+| `V` | switch first ↔ third person |
+| `R` | start/stop recording this walk as a clip |
+| `Enter` | done — leave the camera where it is |
+| `Esc` | done — put the camera back where it was |
+
+Things worth noticing while you drive:
+
+- **The legs walk.** Nothing about possession poses the character: the gait
+  engine sees the root move and generates the walk cycle, exactly as it
+  does for the actor on its path. Steering and path-following are the same
+  animation, so what you see driving is what you'll get on playback.
+- **You bump into things.** Walls and pedestals block; a low platform is
+  something you step onto rather than into. Collision is world-AABB
+  push-out against mesh objects — conservative for rotated geometry, exact
+  for the axis-aligned rooms people actually build. To let the character
+  walk through a piece of reference geometry, turn off **Collide** on that
+  mesh.
+- **Zones fire for you too.** Walk into the bubble by Pedestal A and the
+  event monitor shows `/gallery/enter/pedestalA`, same as when the
+  simulated visitor passes through it. That is the whole test: an
+  installation should not be able to tell the difference between a
+  scripted visitor, a simulated one and you.
+- **The actor's own constraints stand down while you drive.** If you
+  possess an actor that has a `FOLLOW_PATH`, it stops following for the
+  duration instead of snapping back onto the path under you. Release and
+  it picks the path up again.
+
+### Recording a walk, and turning it into the loop
+
+Press `R` (or **Record this walk**) while possessed, walk the route you
+want, press `R` again. That commits a clip of the path you walked. Then:
+
+1. **Capture** tab ▸ **Clips** ▸ the pencil icon on your clip — bakes it to
+   a GP stroke, one point per recorded frame.
+2. Edit that stroke like any other: **smooth** it to take the wobble out of
+   a hand-driven path, **sculpt** it to nudge a corner wide.
+3. Select the stroke, then on the actor's **Constraints** tab add ▸ **Follow
+   Path** ▸ *Use selected stroke*, and set the speed.
+
+The actor now re-walks the route you walked, with the gait regenerating the
+footfalls at whatever speed you set. This is usually a better loop than a
+drawn oval, because a walked path already has the pauses and the wide
+corners a person actually takes.
+
+## 8. Swap one piece for something real
 
 Everything above works because a simulated source and a real one are
 indistinguishable to the rest of the app. To replace a piece:
@@ -174,9 +233,10 @@ built around.
 ## Building your own scene from scratch (not the stock demo)
 
 1. **Add ▸ Actor (mannequin)** — a rigged visitor. In its **Actor** tab,
-   turn on **Simulate**, and optionally give it a `FOLLOW_PATH` constraint
-   bound to a GP stroke (draw a loop, select it, Constraints tab ▸ Add
-   Object Constraint ▸ Follow Path ▸ "Use selected stroke").
+   turn on **Simulate**, turn on **Walk** (the gait), and give it a route:
+   either possess it and record one (step 7), or draw a loop, select it,
+   and Constraints tab ▸ Add Object Constraint ▸ Follow Path ▸ "Use
+   selected stroke".
 2. **Add a camera** where you want the "installed webcam" to stand — the
    timeline camera row's **+** button adds one at the current view.
 3. **Capture tab ▸ +Pose** (or +Detect) to create a stream, source =
@@ -201,3 +261,14 @@ built around.
   planned but not built.
 - **Multi-person tracking** doesn't exist — one pose stream tracks one
   skeleton, real or simulated.
+- **The character controller is deliberately barebones.** No gravity and no
+  jumping: you are placed on the surface under you, never falling off it.
+  Collision is axis-aligned bounding boxes, so a rotated box blocks a
+  slightly larger area than it looks like, and imported `MODEL` meshes have
+  no collision at all (box a stand-in around them if you need one). The
+  third-person camera pulls its boom in when a wall is behind you rather
+  than sweeping around obstacles.
+- **The gait doesn't shorten its stride when cornering.** Real walkers take
+  smaller steps around a tight turn; this one keeps its stride and a
+  world-locked stance foot visibly swings in body space when the actor
+  turns more than ~30° in a stride. Give paths room, or slow them down.

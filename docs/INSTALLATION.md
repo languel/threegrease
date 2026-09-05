@@ -41,6 +41,8 @@ Verified by reading the source, August 2026.
 - **Rehearsal**: clips record world-space frames and replay through the same
   path as live data, so a piece can be tested without an audience.
 - **Measurement** (new, see below).
+- **Locomotion and possession** (new, see below): a procedural gait, and a
+  first/third-person controller for walking the space yourself.
 
 ### The gap: mapping the camera into the space
 
@@ -264,6 +266,63 @@ mapping layer** in which physical accuracy is one mode among several:
   faces only).
 - Numeric entry while drawing — type a wall length instead of eyeballing it.
 - `viewAll` should include measurements in its bounds.
+
+### Locomotion, possession, and walked paths
+
+An installation sim needs a body in the room before it needs anything
+clever. Three pieces, each doing less than it sounds like:
+
+**A procedural gait** (`src/actor/gait.ts`). Feet, pelvis and hands are
+pushed into the actor solver as ordinary joint targets, so nothing
+downstream knows a gait exists. The one decision that matters: the cycle is
+phased by DISTANCE TRAVELLED, not time. A time-phased gait slides its feet
+the instant speed changes, which is the immediate tell that something is
+animated rather than walking; distance-phasing couples stride to speed by
+construction. A planted foot is stored in world space and converted to
+actor-local every frame — the body advances, the foot does not.
+
+**Possession** (`src/app/possess.ts`). Fly mode already owned pointer lock,
+mouse-look, WASD and the Esc-through-pointer-lock cancel, so possession
+borrows all of it and replaces only the last step: the input walks a body,
+and then places the camera behind it or in its head. It writes the actor's
+translation and heading and nothing else — the gait sees the root move and
+answers. Driving and following a path are therefore the same animation, so
+what you see while steering is what plays back.
+
+Collision is world-AABB push-out against mesh objects, over the same
+`meshLocalBounds` the TRIGGER zones use. This is a deliberate non-decision:
+a physics engine would be a large dependency to make a mannequin stop at a
+wall, and the rooms people block out are axis-aligned. Anything whose top is
+within a step height counts as ground rather than a wall, which makes
+floors, pedestals and steps one rule instead of three. There is no gravity —
+you are placed on the surface under you.
+
+While you drive, the actor's own constraints stand down (otherwise a
+FOLLOW_PATH walker snaps back onto its path under you), but it is still fed
+to the trigger probes: **a possessed visitor fires zones exactly like a
+simulated or a real one**, which is the same guarantee the simulated-source
+design rests on.
+
+**Walked paths.** The actor is an ObjRef, `clipRecorder` already records an
+ObjRef's world origin, and `bakeClipToStrokes` already turns a clip into a
+GP stroke — which is a path, which FOLLOW_PATH replays. So recording your
+own walk needed no new machinery at all: walk it, bake it, smooth or sculpt
+the stroke, hand it back to the actor as a path. A walked loop beats a drawn
+oval because it already has the pauses and the wide corners a person takes.
+
+Known limits, all listed in the walkthrough: no gravity or jumping, AABB-only
+collision (imported `MODEL` meshes have none), a third-person boom that
+shortens rather than sweeps, and a gait that does not shorten its stride to
+corner.
+
+### Not built: imported animation
+
+`.glb/.gltf` import currently discards `gltf.animations` — geometry only,
+no `AnimationMixer` anywhere. So Mixamo clips and other authored motion do
+not play, and there is no retargeting onto the positional skeleton. The
+positional rig makes retargeting tractable (a bone is a distance
+constraint, so a foreign skeleton's joint positions are targets like any
+other), but none of it exists yet.
 
 ## Walkthrough
 

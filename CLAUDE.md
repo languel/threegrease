@@ -279,6 +279,33 @@ the browser console or automated evals:
   with no geometry (an EMPTY). Putting a proximity zone on a box therefore
   silently gives you a box-sized zone and no error. Use an EMPTY for
   "within N metres of", a primitive for "inside this volume".
+- **A PLANE mesh's `scale` is its HALF size.** `PlaneGeometry(2, 2)` (see
+  `render/meshes.ts`) means the primitive spans -1..1 before scaling, so a
+  7 m wall is `scale.x = 3.5`. BOX/SPHERE/CYLINDER are unit-sized, so their
+  scale IS their size — the two conventions sit next to each other in the
+  same switch. Getting it wrong builds everything at double size, which is
+  invisible in a screenshot of an empty room and only shows up when
+  something authored at true scale (a scan, a collision test) sits well
+  inside the walls.
+- **To stand a plane up and turn it, the yaw goes in the Y Euler slot, not
+  Z.** Euler order XYZ composes as Rx·Ry·Rz, so Rz is applied FIRST: a
+  rotation of `(90, 0, yaw)` yaws the plane while it is still lying flat and
+  then tips the result onto its side. `(90, yaw, 0)` is the one that means
+  "stand it up, then turn it".
+- **Possession** (`src/app/possess.ts`) is fly mode driving a body. Fly mode
+  owns pointer lock, mouse-look, the WASD key set and the
+  Esc-through-pointer-lock cancel; `Navigation.walkDriver` replaces only the
+  last step, handing the look angles and keys to a driver that walks an
+  actor and then places the camera (1st/3rd person). Nothing there poses the
+  character — the gait engine sees the root move and answers, so driving and
+  FOLLOW_PATH are the same animation. Collision is world-AABB push-out over
+  `meshLocalBounds` (the TRIGGER zones' own bounds), NOT a physics engine;
+  anything whose top is within a step height counts as ground rather than a
+  wall, which is what makes floors, pedestals and steps all one rule.
+  `ConstraintEngine.possessed` (runtime state) stands the driven object's
+  constraints down for the duration — without it a FOLLOW_PATH walker snaps
+  back onto its path every frame — while still feeding it to the trigger
+  probes, so a possessed visitor fires zones.
 - **Simulated tracking sources** (`src/actor/simstream.ts`) let ANY object,
   or an actor's whole skeleton, drive an `MMStream` — sampled through a
   SCENE camera, written into `streamStore` in MediaPipe's exact packing.
