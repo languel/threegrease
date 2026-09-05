@@ -299,17 +299,32 @@ the browser console or automated evals:
     pass any min/max. The two are mirror images about the root-to-tip line
     and nothing preferred either — which is why a limb sat double-jointed
     and snapped between them on every step. `TGJointLimit.pole` is the
-    actor-local direction the middle joint must stay on the near side of;
-    the solver enforces it by REFLECTING that joint across the root-to-tip
-    line, an isometry that fixes both endpoints so both bone lengths survive
-    exactly and the correction vanishes as the limb straightens.
+    actor-local direction the hinge is allowed to stick out in, and the
+    solver ROTATES the middle joint about the root-to-tip axis into the
+    plane that axis and the pole span. Keeping the along-axis and
+    perpendicular distances makes it a pure rotation, so both bone lengths
+    survive exactly and the correction vanishes as the limb straightens.
+    Testing only the SIGN of `perp.dot(pole)` is not enough and was the
+    first attempt at this: it fixes the backwards fold but leaves the whole
+    sideways swing free, and this skeleton's knee swung further sideways
+    (+/-0.25) than it ever bent forwards (0.18) — the twist that reads as
+    the joint spinning 180 degrees.
   - A limit names its bones by the joint they END at. `(knee, hip)`
     therefore resolved to `hip->knee` and `hips->hip`, which measures the
     HIP's abduction; the knee and elbow were never constrained by anything.
     To limit a knee you name the bone BELOW it: `(ankle, knee)`. Limits are
     rebuilt from joint names by `rebuildLimbLimits` rather than hand-listed,
     and serialize.ts rebuilds any actor whose limits predate poles.
-  `physics.hinges = false` restores the free-bending version deliberately.
+- **A leaf bone needs its DIRECTION held, and `tone` fights it.** Nothing
+  below a foot or a hand pulls it into shape, and tone pulls a joint toward
+  its fixed rest POSITION — so swinging the ankle 0.4 m forward drags the
+  foot back toward where it stands at rest, which puts it BEHIND the ankle.
+  A foot pointing backwards on a third of the frames is the visible result.
+  `TGBone.trackRest` (0..1) holds the bone's rest direction in the actor's
+  own frame instead, which is what "a foot points forward" actually means.
+  `physics.hinges = false` turns off both this and the poles, restoring the
+  free-bending version deliberately — it looks good on anything that isn't
+  a person.
 - **The animation mixer** (`src/actor/mixer.ts`) is where every source of
   motion is weighed. Sources ask `gain(actor, source, jointName)` for their
   own multiplier rather than the mixer calling them, so each producer keeps

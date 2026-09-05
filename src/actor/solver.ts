@@ -256,18 +256,57 @@ export class ActorSolver {
           axis.divideScalar(len);
           const rel = new THREE.Vector3(
             hinge[0] - root[0], hinge[1] - root[1], hinge[2] - root[2]);
-          // component of the hinge off the root->tip line
-          const perp = rel.clone().addScaledVector(axis, -rel.dot(axis));
-          if (perp.lengthSq() < 1e-10) continue;   // straight: nothing to mirror
-          // the pole, with any along-axis part removed — only the sideways
-          // half of it says which way is "front" for THIS limb pose
+          const along = rel.dot(axis);
+          // where the hinge sits off the root->tip line
+          const perp = rel.clone().addScaledVector(axis, -along);
+          const bend = perp.length();
+          if (bend < 1e-5) continue;               // straight: no plane to pick
+          // the pole with any along-axis part removed — only its sideways
+          // half says which direction is "front" for THIS limb pose
           const pole = new THREE.Vector3(...lim.pole);
           pole.addScaledVector(axis, -pole.dot(axis));
           if (pole.lengthSq() < 1e-10) continue;   // limb aimed along the pole
-          if (perp.dot(pole) >= 0) continue;       // already bending correctly
-          hinge[0] -= 2 * perp.x;
-          hinge[1] -= 2 * perp.y;
-          hinge[2] -= 2 * perp.z;
+          pole.normalize();
+          // Put the hinge IN the plane the axis and the pole span, on the
+          // pole's side. Testing only the sign of perp.dot(pole) — "is it
+          // bending forwards at all" — is not enough: it leaves the whole
+          // sideways swing free, and on this skeleton the knee swung
+          // further sideways (+/-0.25) than it ever bent forwards (0.18),
+          // which is the twist that reads as the joint rotating 180
+          // degrees. Keeping `along` and `bend` makes this a pure rotation
+          // about the root-to-tip axis, so both bone lengths survive it
+          // exactly and there is nothing for the distance pass to fight.
+          hinge[0] = root[0] + axis.x * along + pole.x * bend;
+          hinge[1] = root[1] + axis.y * along + pole.y * bend;
+          hinge[2] = root[2] + axis.z * along + pole.z * bend;
+        }
+      }
+
+      // --- leaf bones: hold their body-relative direction ---------------
+      // A foot or a hand ends its chain, so nothing below it pulls it into
+      // shape — and `tone` actively works against it, because tone pulls a
+      // joint toward its fixed rest POSITION. Swing the ankle 0.4 m forward
+      // and tone drags the foot back toward where it stands at rest, which
+      // puts it BEHIND the ankle: the foot points backwards. Track the rest
+      // DIRECTION instead, which is what "a foot points forward" means.
+      if (actor.physics.hinges !== false) {
+        for (const bone of actor.bones) {
+          const k = bone.trackRest ?? 0;
+          if (k <= 0) continue;
+          const ia = idx.get(bone.a); const ib = idx.get(bone.b);
+          if (ia === undefined || ib === undefined) continue;
+          const tip = actor.joints[ib];
+          if (tip.pin || tip.mass <= 0) continue;
+          const ra = actor.joints[ia].rest; const rb = tip.rest;
+          const dir = new THREE.Vector3(rb[0] - ra[0], rb[1] - ra[1], rb[2] - ra[2]);
+          const restLen = dir.length();
+          if (restLen < 1e-9) continue;
+          dir.divideScalar(restLen);
+          const pa = pose[ia]; const pb = pose[ib];
+          const cur = Math.hypot(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]) || restLen;
+          pb[0] += (pa[0] + dir.x * cur - pb[0]) * k;
+          pb[1] += (pa[1] + dir.y * cur - pb[1]) * k;
+          pb[2] += (pa[2] + dir.z * cur - pb[2]) * k;
         }
       }
 

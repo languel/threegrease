@@ -99,7 +99,7 @@ function limbBones(side: string): [string, string, number][] {
  * in either convention, at any scale, and on a loaded actor whose
  * authoring frame is no longer known.
  */
-export function rebuildLimbLimits(actor: TGActor): void {
+export function rebuildLimbRules(actor: TGActor): void {
   const forward = forwardOf(actor);
   if (!forward) return;
   const back: Vec3 = [-forward[0], -forward[1], -forward[2]];
@@ -124,6 +124,18 @@ export function rebuildLimbLimits(actor: TGActor): void {
     }
   }
   actor.limits = limits;
+
+  // Leaf bones have nothing below them to hold their direction, so they are
+  // tracked to their rest direction instead. Strong enough to keep a foot
+  // pointing forward through a stride; not a pin, so the ankle still leads.
+  const leaf: [string, string][] = [];
+  for (const side of ['L', 'R']) {
+    leaf.push([`ankle.${side}`, `foot.${side}`], [`wrist.${side}`, `hand.${side}`]);
+  }
+  for (const [a, b] of leaf) {
+    const bone = boneBetween(a, b);
+    if (bone) bone.trackRest = 0.5;
+  }
 }
 
 /** The actor's own forward direction, recovered from its rest skeleton. */
@@ -224,7 +236,7 @@ export function createHumanoid(
     rotation: [0, 0, 0],
     scale: [1, 1, 1],
   };
-  rebuildLimbLimits(actor);
+  rebuildLimbRules(actor);
   return actor;
 }
 

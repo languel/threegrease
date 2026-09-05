@@ -782,6 +782,17 @@ export interface TGBone {
   stiffness: number;
   /** limb thickness for the mannequin capsule (0 = no visible limb) */
   radius: number;
+  /**
+   * 0..1 — hold this bone's REST DIRECTION in the actor's own frame.
+   *
+   * For a leaf bone (ankle->foot, wrist->hand) nothing downstream pulls it
+   * into shape, and `tone` actively works against it: tone pulls a joint
+   * toward its fixed rest POSITION, so when the ankle swings forward the
+   * foot is dragged back toward where it stands at rest and ends up BEHIND
+   * the ankle — a foot pointing backwards. Tracking the rest direction
+   * instead keeps a foot forward and a hand hanging, whatever the limb does.
+   */
+  trackRest?: number;
 }
 
 /** Angular limit at the joint shared by two bones, in degrees. Keeps a
