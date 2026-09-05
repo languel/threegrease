@@ -30,7 +30,10 @@
 // timing and state — the gait still advances its cycle while muted, so
 // unmuting does not restart mid-step — and it means a scene with no layer
 // stack at all (an older file) gets gain 1 and behaves exactly as before.
-import type { GPScene, TGActor, TGActorLayer, ActorLayerSource } from '../core/types';
+import type { GPScene, TGActor, TGActorLayer, ActorLayerSource, LoopMode } from '../core/types';
+import { actorSolver } from './solver';
+import { clipWindowSeconds, sampleClipFrame } from '../mm/clips';
+import { advancePhase } from '../score/engine';
 
 /** Which joints a mask covers. Names are the skeleton's own vocabulary
  *  (see actor/skeleton.ts), so a mask is a name test, not an index list —
@@ -118,8 +121,22 @@ export class ActorMixer {
     return f.from + (f.to - f.from) * (k * k * (3 - 2 * k));
   }
 
-  /** Advance crossfades. Call once per frame, before any source emits. */
+  /**
+   * Advance crossfades, then play any CLIP layers. Call once per frame,
+   * BEFORE any other source emits — the fades have to be current before
+   * anything asks `gain()`, and a clip is the one source the mixer drives
+   * itself (nothing else owns a recorded performance).
+   */
   update(scene: GPScene, dt: number): void {
+    this.advanceFades(scene, dt);
+    for (const actor of scene.actors) {
+      for (const layer of actor.layers ?? []) {
+        if (layer.source === 'CLIP') this.playClip(scene, actor, layer, dt);
+      }
+    }
+  }
+
+  private advanceFades(scene: GPScene, dt: number): void {
     if (!this.fades.size) return;
     const live = new Set<string>();
     for (const a of scene.actors) for (const l of a.layers ?? []) live.add(`${a.id}:${l.id}`);
@@ -131,6 +148,62 @@ export class ActorMixer {
         this.held.set(key, f.to);
       }
     }
+  }
+
+  /**
+   * Play a recorded performance onto the skeleton. Joints are matched by
+   * NAME, not by index: a clip recorded on one actor plays on another with
+   * the same vocabulary, and it survives a skeleton edited between take and
+   * playback. A clip with no `joints` list is a world-space landmark or
+   * path recording, not a pose — those replay as CLIP streams instead, and
+   * driving joints with them would plant the character at the origin.
+   */
+  private playClip(scene: GPScene, actor: TGActor, layer: TGActorLayer, dt: number): void {
+    if (!layer.enabled || layer.clipId == null) return;
+    const clip = scene.clips.find((c) => c.id === layer.clipId);
+    if (!clip?.frames.length || !clip.joints?.length) return;
+
+    const loop = (layer.loop ?? 'LOOP') as LoopMode;
+    if (layer.playing !== false) {
+      const [p, running] = advancePhase(
+        layer.phase ?? 0, (layer.speed ?? 1) / clipWindowSeconds(clip), dt, loop);
+      layer.phase = p;
+      if (!running) layer.playing = false;
+    }
+    const frame = sampleClipFrame(clip, layer.phase ?? 0, loop);
+    if (!frame) return;
+
+    const weight = Math.max(0, Math.min(1, layer.weight))
+      * this.fadeFactor(actor.id, layer.id);
+    if (weight < 0.001) return;
+
+    const index = this.jointIndex(actor);
+    const n = Math.min(frame.count, clip.joints.length);
+    for (let i = 0; i < n; i++) {
+      const name = clip.joints[i];
+      if (!maskHas(layer.mask, name)) continue;
+      const ji = index.get(name);
+      if (ji === undefined) continue;
+      const conf = frame.data[i * 4 + 3];
+      const w = weight * (conf > 0 ? Math.min(1, conf) : 1);
+      if (w < 0.001) continue;
+      actorSolver.addTarget(actor.id, {
+        index: ji,
+        pos: [frame.data[i * 4], frame.data[i * 4 + 1], frame.data[i * 4 + 2]],
+        weight: w,
+      });
+    }
+  }
+
+  /** name -> joint index, rebuilt only when the skeleton changes shape */
+  private nameCache = new Map<number, { n: number; map: Map<string, number> }>();
+
+  private jointIndex(actor: TGActor): Map<string, number> {
+    const hit = this.nameCache.get(actor.id);
+    if (hit && hit.n === actor.joints.length) return hit.map;
+    const map = new Map(actor.joints.map((j, i) => [j.name, i]));
+    this.nameCache.set(actor.id, { n: actor.joints.length, map });
+    return map;
   }
 
   /** First layer driven by this source, or undefined. */

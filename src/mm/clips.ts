@@ -23,11 +23,25 @@ import { streamStore, streamWorldMatrix } from './streams';
 
 export type RecordSource =
   | { kind: 'STREAM'; id: number }
-  | { kind: 'OBJECT'; ref: ObjRef };
+  | { kind: 'OBJECT'; ref: ObjRef }
+  /** an actor's POSE over time, in the actor's own frame — the performance
+   *  rather than the path (see TGClip.space) */
+  | { kind: 'ACTOR_POSE'; id: number };
+
+/** Identity of a record source, so "is this one already recording?" is a
+ *  string compare instead of three shapes of structural equality. */
+function sourceKey(s: RecordSource): string {
+  return s.kind === 'STREAM' ? `stream:${s.id}`
+    : s.kind === 'ACTOR_POSE' ? `pose:${s.id}`
+      : `object:${s.ref.kind}:${s.ref.id}`;
+}
 
 interface ActiveRecording {
   source: RecordSource;
   label: string;
+  /** ACTOR_POSE: joint names captured at start, so a skeleton edited
+   *  mid-take cannot silently shift what each column means */
+  joints?: string[];
   count: number;               // fixed per clip (first frame decides)
   frames: { t: number; data: number[] }[];
   t0: number;
@@ -41,22 +55,23 @@ export class ClipRecorder {
   isRecording(source?: RecordSource): boolean {
     if (!this.active) return false;
     if (!source) return true;
-    const a = this.active.source;
-    return a.kind === source.kind && (
-      a.kind === 'STREAM'
-        ? a.id === (source as { id: number }).id
-        : a.ref.kind === (source as { ref: ObjRef }).ref.kind && a.ref.id === (source as { ref: ObjRef }).ref.id);
+    return sourceKey(this.active.source) === sourceKey(source);
   }
 
   start(scene: GPScene, source: RecordSource): void {
     // The clip's display name is the label's LAST segment, so the object's
     // own name has to be last — `object:ACTOR:20` named every recorded walk
     // "20", which is unreadable once a scene has a few of them.
+    const actor = source.kind === 'ACTOR_POSE'
+      ? scene.actors.find((a) => a.id === source.id) : undefined;
     const label = source.kind === 'STREAM'
       ? `stream:${scene.mmStreams.find((s) => s.id === source.id)?.name ?? source.id}`
-      : `object:${source.ref.kind.toLowerCase()}:${objectName(scene, source.ref)}`;
+      : source.kind === 'ACTOR_POSE'
+        ? `pose:${actor?.name ?? source.id}`
+        : `object:${source.ref.kind.toLowerCase()}:${objectName(scene, source.ref)}`;
     this.active = {
       source, label, count: 0, frames: [],
+      joints: actor?.joints.map((j) => j.name),
       t0: performance.now(), lastStreamVersion: -1, lastObjectSample: 0,
     };
   }
@@ -73,6 +88,8 @@ export class ClipRecorder {
       count: rec.count,
       duration: rec.frames[rec.frames.length - 1].t,
       frames: rec.frames,
+      space: rec.joints ? 'ACTOR_LOCAL' : 'WORLD',
+      joints: rec.joints,
     };
     scene.clips.push(clip);
     return clip;
@@ -105,6 +122,28 @@ export class ClipRecorder {
         data[i * 4 + 3] = +frame.data[i * 4 + 3].toFixed(3);
       }
       rec.frames.push({ t: Math.round(now - rec.t0), data });
+    } else if (rec.source.kind === 'ACTOR_POSE') {
+      if (now - rec.lastObjectSample < 15) return;
+      const id = rec.source.id;
+      const actor = scene.actors.find((a) => a.id === id);
+      if (!actor) { this.active = null; return; }
+      rec.lastObjectSample = now;
+      // ACTOR-LOCAL, deliberately: this is a pose, not a place. Recording
+      // it in world space would make playback drag the character back to
+      // wherever it was performed, which is exactly what you do not want
+      // from a walk cycle or a gesture.
+      const n = actor.joints.length;
+      if (!rec.count) rec.count = n;
+      if (n !== rec.count) return;          // skeleton edited mid-take
+      const data = new Array<number>(n * 4);
+      for (let i = 0; i < n; i++) {
+        const p = actor.pose[i] ?? actor.joints[i].rest;
+        data[i * 4] = +p[0].toFixed(5);
+        data[i * 4 + 1] = +p[1].toFixed(5);
+        data[i * 4 + 2] = +p[2].toFixed(5);
+        data[i * 4 + 3] = 1;
+      }
+      rec.frames.push({ t: Math.round(now - rec.t0), data });
     } else {
       if (now - rec.lastObjectSample < 15) return;
       rec.lastObjectSample = now;
@@ -121,6 +160,37 @@ export class ClipRecorder {
 
 export const clipRecorder = new ClipRecorder();
 
+/** Real duration of the clip's trim window, in seconds (never 0). */
+export function clipWindowSeconds(clip: TGClip): number {
+  const w0 = (clip.trimStart ?? 0) * clip.duration;
+  const w1 = Math.max(w0, (clip.trimEnd ?? 1) * clip.duration);
+  return Math.max(0.001, (w1 - w0) / 1000);
+}
+
+/**
+ * The clip's interpolated frame at `phase`, over its trim window. Shared by
+ * CLIP-source streams and the actor mixer's clip layers so a clip means the
+ * same thing however it is played back.
+ */
+export function sampleClipFrame(
+  clip: TGClip, phase: number, loop: LoopMode,
+): { data: Float32Array; count: number } | null {
+  if (!clip.frames.length) return null;
+  const w0 = (clip.trimStart ?? 0) * clip.duration;
+  const w1 = Math.max(w0, (clip.trimEnd ?? 1) * clip.duration);
+  const t = w0 + samplePhase(phase, loop) * (w1 - w0);
+  let i = 0;
+  while (i < clip.frames.length - 1 && clip.frames[i + 1].t < t) i++;
+  const a = clip.frames[i];
+  const b = clip.frames[Math.min(i + 1, clip.frames.length - 1)];
+  const span = Math.max(1, b.t - a.t);
+  const k = Math.max(0, Math.min(1, (t - a.t) / span));
+  const n = Math.min(a.data.length, b.data.length) / 4;
+  const data = new Float32Array(n * 4);
+  for (let j = 0; j < n * 4; j++) data[j] = a.data[j] + (b.data[j] - a.data[j]) * k;
+  return { data, count: n };
+}
+
 /** Advance + resample every CLIP-source stream into the frame store.
  *  Runs the same traveler clock semantics as FOLLOW_PATH (loop modes,
  *  speed as a realtime multiplier, scrubbing via phase). */
@@ -131,27 +201,15 @@ export function updateClipStreams(scene: GPScene, dt: number): void {
     if (!clip || !clip.frames.length) continue;
     // phase runs over the TRIM WINDOW (non-destructive crop): speed 1 =
     // the window's real duration
-    const w0 = (clip.trimStart ?? 0) * clip.duration;
-    const w1 = Math.max(w0, (clip.trimEnd ?? 1) * clip.duration);
-    const durationS = Math.max(0.001, (w1 - w0) / 1000);
-    const prevPhase = st.phase ?? 0;
+    const durationS = clipWindowSeconds(clip);
     if (st.playing) {
-      const [p, running] = advancePhase(prevPhase, (st.speed ?? 1) / durationS, dt, st.loop ?? 'LOOP');
+      const [p, running] = advancePhase(
+        st.phase ?? 0, (st.speed ?? 1) / durationS, dt, st.loop ?? 'LOOP');
       st.phase = p;
       if (!running) st.playing = false;
     }
-    const t = w0 + samplePhase(st.phase ?? 0, (st.loop ?? 'LOOP') as LoopMode) * (w1 - w0);
-    // bracketing frames + lerp
-    let i = 0;
-    while (i < clip.frames.length - 1 && clip.frames[i + 1].t < t) i++;
-    const a = clip.frames[i];
-    const b = clip.frames[Math.min(i + 1, clip.frames.length - 1)];
-    const span = Math.max(1, b.t - a.t);
-    const k = Math.max(0, Math.min(1, (t - a.t) / span));
-    const n = Math.min(a.data.length, b.data.length) / 4;
-    const data = new Float32Array(n * 4);
-    for (let j = 0; j < n * 4; j++) data[j] = a.data[j] + (b.data[j] - a.data[j]) * k;
-    streamStore.push(st.id, data, n);
+    const f = sampleClipFrame(clip, st.phase ?? 0, (st.loop ?? 'LOOP') as LoopMode);
+    if (f) streamStore.push(st.id, f.data, f.count);
   }
 }
 

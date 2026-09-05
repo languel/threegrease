@@ -1564,6 +1564,16 @@ export class UI {
               + 'on it — the gait re-walks the loop on its own.',
           }), { full: true }),
       ] : []),
+      fieldRow('', btn(
+        this.app.mmRecording({ kind: 'ACTOR_POSE', id: actor.id })
+          ? 'Stop recording the pose' : 'Record performance (pose)',
+        () => this.app.mmRecordToggle({ kind: 'ACTOR_POSE', id: actor.id }),
+        {
+          cls: this.app.mmRecording({ kind: 'ACTOR_POSE', id: actor.id }) ? 'active' : '',
+          title: 'Record the SKELETON over time, in the actor\u2019s own frame — '
+            + 'the performance rather than the path. Play it back on a CLIP '
+            + 'mixer layer, on this actor or any other with the same joints.',
+        }), { full: true }),
 
       el('div', { class: 'menu-header', text: 'Mixer' }),
       ...(actor.layers ?? []).flatMap((layer) => [
@@ -1586,6 +1596,23 @@ export class UI {
           (v) => { layer.weight = v; }, { def: 1,
             title: 'how much of this source survives into the pose. Sources '
               + 'that want the same joint are blended by weight, not fought over' }),
+        ...(layer.source === 'CLIP' ? [
+          fieldRow('Clip', selectField('', String(layer.clipId ?? ''), [
+            ['', '(none)'],
+            ...ctx.scene.clips.filter((c) => c.joints?.length)
+              .map((c) => [String(c.id), c.name] as [string, string]),
+          ], (v) => {
+            ctx.pushUndo();
+            layer.clipId = v ? Number(v) : null;
+            layer.phase = 0;
+            layer.playing = true;
+            touch();
+            this.refresh();
+          }), { }),
+          slider('Speed', layer.speed ?? 1, 0.05, 4, 0.05,
+            (v) => { layer.speed = v; }, { def: 1,
+              title: '1 = the take\u2019s own tempo' }),
+        ] : []),
       ]),
       fieldRow('', btn('+ Layer', () => {
         ctx.pushUndo();

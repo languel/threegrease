@@ -410,6 +410,18 @@ export interface TGClip {
   source: string;
   /** points per frame (1 for object recordings) */
   count: number;
+  /**
+   * WORLD (default) is a recording of where something WAS — landmarks, an
+   * object's path — and replays in place. ACTOR_LOCAL is a recording of a
+   * POSE: joint positions in the actor's own frame, so it replays on the
+   * character wherever it happens to be standing rather than dragging it
+   * back to where it was performed.
+   */
+  space?: 'WORLD' | 'ACTOR_LOCAL';
+  /** ACTOR_LOCAL only: joint NAME per point, index-aligned with each
+   *  frame's data. Names rather than indices so a performance recorded on
+   *  one actor plays on another with the same vocabulary. */
+  joints?: string[];
   /** total duration in ms (t of the last frame) */
   duration: number;
   /** non-destructive trim window, 0..1 of duration — playback and bake
