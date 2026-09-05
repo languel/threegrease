@@ -397,7 +397,46 @@ longer torso, and the solver's bone lengths then pull it back — visible as
 a slight pop at the knees and mid-spine. Per-limb scaling is the fix and is
 not built.
 
-### Not built: generative motion
+### Generated motion, and where Kimodo actually goes
+
+`Actor ▸ Generate` makes a motion clip from a description ("tired
+shuffle", "march", "limp on the left", "sneaking, crouched") and puts it on
+a mixer layer. The contract is deliberately narrow:
+
+    MotionRequest { prompt, seconds, joints[], goal? }  ->  TGClip
+
+named joint positions in the actor's frame — exactly what a CLIP layer
+already plays and what a glTF import already produces. Anything that can
+answer that request is interchangeable: the built-in generator, an HTTP
+service, a model in a worker. Nothing downstream knows which one replied.
+
+**The built-in generator is procedural synthesis, not a learned model**, and
+says so everywhere it appears. What it buys is that the whole pipeline —
+request, clip, layer, blend, trim, save — is exercised and testable today,
+so swapping in real weights is a one-line change rather than a project.
+
+**Kimodo** (nv-tlabs/kimodo) cannot run in this browser: the code is
+Apache-2.0 but the WEIGHTS are under NVIDIA research licences, it wants
+~17 GB of VRAM, and it generates offline rather than in real time. The
+honest integration is therefore a backend — point the remote endpoint at a
+service holding the weights and it answers the same request.
+
+The community WebGPU port (lyonsno/kimodo-webgpu) does not change this, for
+three independent reasons and any one is enough: it ships **no licence
+file**, so it cannot be vendored; it still needs a local **Llama 3 8B
+sidecar** to encode the text, so it is client-plus-server anyway rather than
+a browser-only path; and it is **text-to-motion only**, with no waypoint or
+constraint code — which is precisely the half this project needs, since the
+whole point is telling a character where to go. Because it needs a sidecar
+regardless, its integration IS the remote backend: it would fill `prompt`
+and ignore `goal`. If it ever runs end to end in the browser it becomes a
+third backend and nothing else changes.
+
+Generation is in place. Travel is the root's job — a path, a steer goal, or
+the walk cycle — which is what lets a generated style and a destination be
+combined rather than competing.
+
+### Not built
 
 A Kimodo-style text-or-goal-conditioned motion model is not built. The
 pieces it would need now exist: steering is the goal interface (you say

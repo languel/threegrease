@@ -116,6 +116,9 @@ import {
 import { actorMixer } from '../actor/mixer';
 import { steerEngine } from '../actor/steering';
 import { retargetGltfClip } from '../actor/gltfclip';
+import {
+  motionBackends, proceduralBackend, remoteBackend, type MotionRequest,
+} from '../actor/generate';
 import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
 import { buildDemoScene } from './demoscene';
@@ -2567,6 +2570,67 @@ class App implements AppHandle {
     this.setStatusHint(
       `Retargeted ${report.matched.length} joints, ${report.frames} frames`
       + `${report.missing.length ? ` (unmatched: ${report.missing.join(', ')})` : ''}`, 8000);
+    this.ui.refresh();
+  }
+
+  // ---------------------------------------------------- generated motion
+
+  motionBackendIds(): { id: string; label: string }[] {
+    return motionBackends().map((b) => ({ id: b.id, label: b.label }));
+  }
+
+  motionEndpoint(): string { return remoteBackend.endpoint; }
+  setMotionEndpoint(url: string): void { remoteBackend.endpoint = url.trim(); }
+
+  /**
+   * Generate a motion clip for an actor and put it on a layer. The backend
+   * is interchangeable — the built-in synthesiser and a service holding
+   * real weights answer the same request — so nothing downstream of here
+   * knows or cares which one replied.
+   */
+  async generateMotion(
+    actorId: number, prompt: string, seconds: number, backendId = 'local',
+  ): Promise<void> {
+    const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
+    if (!actor) return;
+    const backend = motionBackends().find((b) => b.id === backendId) ?? proceduralBackend;
+    const req: MotionRequest = {
+      prompt,
+      seconds,
+      joints: [],
+      speed: actor.steer?.speed,
+      goal: actor.steer?.mode === 'POINT' ? (actor.steer.point ?? null) : null,
+    };
+    this.setStatusHint(`Generating "${prompt}" (${backend.label})…`, 20000);
+    let clip;
+    try {
+      clip = await backend.generate(req, actor, this.ctx.settings.upAxis === 'Z');
+    } catch (err) {
+      this.setStatusHint(`Generate failed — ${String(err)}`, 8000);
+      return;
+    }
+    this.ctx.pushUndo();
+    this.ctx.scene.clips.push(clip);
+    actor.layers = [...(actor.layers ?? []), {
+      id: nextLayerId(actor),
+      name: clip.name,
+      enabled: true,
+      weight: 1,
+      mask: 'ALL',
+      source: 'CLIP',
+      clipId: clip.id,
+      phase: 0,
+      speed: 1,
+      loop: 'LOOP',
+      playing: true,
+    }];
+    // a generated walk and the procedural one both want the legs, and two
+    // walks blended at once reads as neither
+    const gaitLayer = actor.layers.find((l) => l.source === 'GAIT');
+    if (gaitLayer) gaitLayer.enabled = false;
+    this.setStatusHint(
+      `Generated ${clip.frames.length} frames over ${(clip.duration / 1000).toFixed(1)}s`
+      + ` on ${clip.count} joints`, 6000);
     this.ui.refresh();
   }
 

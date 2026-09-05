@@ -131,6 +131,10 @@ export interface AppHandle {
   actorGoToObject(actorId: number, ref: import('../tools/objects').ObjRef): void;
   actorStop(actorId: number): void;
   modelMotions(): { meshId: number; name: string; clips: string[] }[];
+  motionBackendIds(): { id: string; label: string }[];
+  motionEndpoint(): string;
+  setMotionEndpoint(url: string): void;
+  generateMotion(actorId: number, prompt: string, seconds: number, backendId?: string): Promise<void>;
   importMotion(meshId: number, clipIndex: number, actorId: number): void;
   possessedActor(): number | null;
   possessView(): 'FIRST' | 'THIRD';
@@ -397,6 +401,19 @@ function slider(
   opts: Pick<NumOpts, 'def' | 'route' | 'title'> = {},
 ): HTMLElement {
   return dragNumber(label, value, onInput, { step, min, max, fill: true, ...opts });
+}
+
+/** A plain text input that commits on change/blur. */
+function textField(
+  value: string, onChange: (v: string) => void, title = '',
+): HTMLElement {
+  const input = el('input', {
+    type: 'text', class: 'grow', value, title,
+  }) as HTMLInputElement;
+  if (title) input.placeholder = title.split(' \u2014 ')[0].slice(0, 48);
+  input.addEventListener('change', () => onChange(input.value));
+  input.addEventListener('blur', () => onChange(input.value));
+  return input;
 }
 
 function numField(
@@ -1645,6 +1662,31 @@ export class UI {
           ]),
         ];
       })() : []),
+
+      el('div', { class: 'menu-header', text: 'Generate' }),
+      fieldRow('Describe', textField(this.genPrompt, (v: string) => { this.genPrompt = v; },
+        'walk · tired shuffle · march · sneak · limp on the left · swagger · idle')),
+      slider('Seconds', this.genSeconds, 0.5, 10, 0.5,
+        (v) => { this.genSeconds = v; }, { def: 2 }),
+      ...(this.app.motionBackendIds().length > 1 ? [
+        fieldRow('Using', selectField('', this.genBackend,
+          this.app.motionBackendIds().map((b) => [b.id, b.label] as [string, string]),
+          (v) => { this.genBackend = v; this.refresh(); })),
+      ] : []),
+      ...(this.genBackend === 'remote' ? [
+        fieldRow('Endpoint', textField(this.app.motionEndpoint(),
+          (v: string) => { this.app.setMotionEndpoint(v); },
+          'https://… — a service holding real weights (e.g. Kimodo). '
+          + 'Never contacted unless you set this: it sends a description of '
+          + 'your scene to a third party.')),
+      ] : []),
+      fieldRow('', btn('Generate motion', () => {
+        void this.app.generateMotion(
+          actor.id, this.genPrompt, this.genSeconds, this.genBackend);
+      }, { title: 'Make a motion clip from the description and put it on a '
+        + 'new layer. The built-in generator is procedural synthesis, not a '
+        + 'learned model — a service with real weights answers the same '
+        + 'request and lands in exactly the same place.' }), { full: true }),
 
       el('div', { class: 'menu-header', text: 'Mixer' }),
       ...(actor.layers ?? []).flatMap((layer) => [
@@ -3546,6 +3588,10 @@ export class UI {
   settingsOpen = false;
   /** which imported animation the Actor panel's retarget row is pointing at */
   private motionPick = '';
+  /** Actor panel's motion-generation row (transient, not scene data) */
+  private genPrompt = 'walk';
+  private genSeconds = 2;
+  private genBackend = 'local';
 
   // -------------------------------------------------------- agent help
 

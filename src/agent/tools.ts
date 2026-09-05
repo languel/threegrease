@@ -659,6 +659,36 @@ export const AGENT_TOOLS: AgentTool[] = [
     },
   },
   {
+    name: 'actor.generate',
+    description: 'Generate a motion clip for a character from a description '
+      + '("tired shuffle", "march", "limp on the left") and put it on a mixer '
+      + 'layer. The built-in generator is PROCEDURAL SYNTHESIS, not a learned '
+      + 'model; a service with real weights answers the same request and lands '
+      + 'in the same place. Motion is generated in place \u2014 travel is the '
+      + 'root\u2019s job (a path, a goal, or the walk cycle).',
+    inputSchema: obj({
+      id: num('Actor id.'),
+      prompt: str('How it should move.'),
+      seconds: num('Length of the clip. Default 2.'),
+      backend: str('"local" (default) or "remote".'),
+    }, ['id', 'prompt']),
+    mutates: true,
+    handler: async (host, args) => {
+      const actor = host.ctx.scene.actors.find((a) => a.id === Number(args.id));
+      if (!actor) return { error: `no actor with id ${args.id}` };
+      const app = host as unknown as {
+        generateMotion?: (id: number, p: string, s: number, b?: string) => Promise<void>;
+      };
+      if (!app.generateMotion) return { error: 'motion generation unavailable' };
+      await app.generateMotion(
+        actor.id, String(args.prompt),
+        args.seconds === undefined ? 2 : Number(args.seconds),
+        args.backend ? String(args.backend) : 'local');
+      const clip = host.ctx.scene.clips[host.ctx.scene.clips.length - 1];
+      return { ok: true, clip: clip?.name, frames: clip?.frames.length, joints: clip?.joints };
+    },
+  },
+  {
     name: 'actor.goto',
     description: 'Tell a character where to GO. It walks there itself \u2014 seeking, '
       + 'slowing into the goal, sliding along walls and sidestepping obstacles \u2014 '
