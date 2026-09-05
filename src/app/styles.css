@@ -640,3 +640,11 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
   white-space: nowrap;
 }
 .direct-hud button { font-size: 11px; padding: 3px 8px; }
+
+/* one-line explainer under a preset picker */
+.panel-hint {
+  font-size: 10.5px;
+  color: var(--muted, #9a9aa2);
+  padding: 1px 8px 5px 8px;
+  line-height: 1.35;
+}

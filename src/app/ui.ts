@@ -60,6 +60,7 @@ import { icon, type IconName } from './icons';
 import { autoRig } from '../actor/rig';
 import { MASK_LABELS, SOURCE_LABELS, nextLayerId } from '../actor/mixer';
 import { MOVE_ACTIONS } from '../actor/commands';
+import { ACTOR_LOOKS, LOOK_OPTIONS } from '../render/actorlooks';
 import type { ActorLayerSource } from '../core/types';
 
 export interface AppHandle {
@@ -611,12 +612,25 @@ function renderDirectHud(app: AppHandle): void {
     class: 'direct-hud-who',
     text: actor ? actor.name : 'no actor in the scene',
   }));
+  const armed = app.ctx.settings.directAction;
+  bar.append(btn('Navigate', () => {
+    app.ctx.settings.directAction = '';
+    renderDirectHud(app);
+  }, {
+    cls: armed ? '' : 'active',
+    title: 'Disarmed — clicks do nothing, so you can look around without '
+      + 'sending the visitor somewhere. Esc also disarms.',
+  }));
   for (const a of MOVE_ACTIONS) {
-    const active = app.ctx.settings.directAction === a.id;
+    const active = armed === a.id;
     const b = btn(a.label, () => {
-      app.ctx.settings.directAction = a.id;
+      // clicking the armed verb disarms: one control, two directions
+      app.ctx.settings.directAction = active ? '' : a.id;
       renderDirectHud(app);
-    }, { cls: active ? 'active' : '', title: `${a.label} — ${a.hint}` });
+    }, {
+      cls: active ? 'active' : '',
+      title: active ? `${a.label} — armed; click again to disarm` : `${a.label} — ${a.hint}`,
+    });
     bar.append(b);
   }
   existing?.replaceWith(bar);
@@ -1573,6 +1587,18 @@ export class UI {
 
     return panel(`Actor — ${actor.name}`,
       el('div', { class: 'menu-header', text: 'Look' }),
+      fieldRow('Avatar', selectField('', actor.look ?? 'DEFAULT', LOOK_OPTIONS,
+        (v) => {
+          ctx.pushUndo();
+          actor.look = v as NonNullable<typeof actor.look>;
+          // A look is a STARTING POINT: its colour is applied once, here,
+          // rather than enforced every frame, so recolouring afterwards
+          // sticks instead of being silently overwritten.
+          actor.color = [...ACTOR_LOOKS[actor.look].color] as Vec3;
+          touch();
+          this.refresh();
+        }), { }),
+      el('div', { class: 'panel-hint', text: ACTOR_LOOKS[actor.look ?? 'DEFAULT'].hint }),
       fieldRow('Shape', selectField('', actor.shape, [
         ['BOTH', 'Body + rig'], ['CAPSULE', 'Body only'], ['STICK', 'Rig only'],
       ], (v) => { actor.shape = v; touch(); })),

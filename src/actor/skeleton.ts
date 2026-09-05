@@ -228,6 +228,7 @@ export function createHumanoid(
     steer: defaultSteer(),
     gait: defaultGait(),
     shape: 'BOTH',
+    look: 'DEFAULT',
     color: [0.72, 0.74, 0.80],
     opacity: 1,
     visible: true,

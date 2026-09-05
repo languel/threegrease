@@ -49,6 +49,11 @@ export class DirectTool implements Tool {
   }
 
   onDown(ctx: AppCtx, e: ToolEvent): void {
+    // Disarmed is the DEFAULT and it is not a nicety: staging means looking
+    // around the space at least as often as directing someone through it,
+    // and a mode where every click sends the visitor somewhere makes the
+    // scene hostile to inspect. Arm a verb in the HUD to command.
+    if (!ctx.settings.directAction) return;
     const actorId = this.targetActor(ctx);
     if (actorId == null) { ctx.setStatus?.('Direct: no actor in the scene'); return; }
     const action = MOVE_ACTIONS.find((a) => a.id === ctx.settings.directAction)
@@ -64,6 +69,18 @@ export class DirectTool implements Tool {
     if (at) this.mark = { at, t: performance.now() };
     if (msg) ctx.setStatus?.(msg);
     ctx.requestRender();
+  }
+
+  onKey(ctx: AppCtx, key: string): boolean {
+    // Esc disarms rather than leaving the tool: you almost always want to
+    // keep pointing at the scene, just not to command with the next click.
+    if (key === 'Escape' && ctx.settings.directAction) {
+      ctx.settings.directAction = '';
+      ctx.refreshUI();
+      ctx.setStatus('Direct: disarmed — clicks navigate');
+      return true;
+    }
+    return false;
   }
 
   onMove(): void { /* commands fire on press */ }

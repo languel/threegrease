@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import type { GPScene, TGActor } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 import { materialManager } from './materialmgr';
+import { jointEmphasis, limbEmphasis, lookSpec } from './actorlooks';
 
 /** unit cylinder along +Y, which is what setFromUnitVectors expects to
  *  rotate onto an arbitrary bone direction */
@@ -30,6 +31,8 @@ interface Entry {
   jointCount: number;
   boneCount: number;
   unlit: boolean;
+  /** which look the built meshes are currently wearing */
+  look: string;
 }
 
 export class ActorManager {
@@ -37,7 +40,12 @@ export class ActorManager {
   private entries = new Map<number, Entry>();
   /** shared geometry: every limb/joint is the same unit primitive */
   private limbGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
-  private jointGeo = new THREE.SphereGeometry(1, 12, 8);
+  /** capped tubes, cached per taper ratio. The cylinder's +Y end is the
+   *  CHILD joint (setFromUnitVectors maps +Y onto a->b), so a radiusTop
+   *  below 1 narrows the limb INTO the joint it points at — a forearm
+   *  thinning into a wrist, which is the whole silhouette of a lay figure. */
+  private limbSolid = new Map<number, THREE.CylinderGeometry>();
+  private jointGeo = new THREE.SphereGeometry(1, 16, 12);
   /** tint applied to selected actors, set by the App like LightManager's */
   selectionColor: THREE.Color | null = null;
   /** joint handles are hidden in presentation mode along with other gizmos */
@@ -99,6 +107,7 @@ export class ActorManager {
     return {
       root, limbs, joints, sticks,
       jointCount: actor.joints.length, boneCount: actor.bones.length, unlit: false,
+      look: '',
     };
   }
 
@@ -110,7 +119,16 @@ export class ActorManager {
     root.matrixWorldNeedsUpdate = true;
     if (!actor.visible) return;
 
-    const wantUnlit = materialManager.wantsUnlit(scene, actor.materialId, {
+    const spec = lookSpec(actor.look);
+    // Geometry only changes when the LOOK changes, not per frame — a look
+    // is a rebuild-class decision the same way the skeleton is.
+    if (entry.look !== (actor.look ?? 'DEFAULT')) {
+      entry.look = actor.look ?? 'DEFAULT';
+      const geo = spec.capped ? this.taperedGeo(spec.taper) : this.limbGeo;
+      for (const m of entry.limbs) m.geometry = geo;
+    }
+
+    const wantUnlit = spec.unlit || materialManager.wantsUnlit(scene, actor.materialId, {
       color: actor.color, opacity: actor.opacity, wireframe: false,
     });
     if (entry.unlit !== wantUnlit) {
@@ -127,6 +145,15 @@ export class ActorManager {
         color: actor.color, opacity: actor.opacity, wireframe: false,
       });
       if (this.selectionColor && actor.select) mat.color.copy(this.selectionColor);
+      const std = mat as THREE.MeshStandardMaterial;
+      if (std.roughness !== undefined) {
+        std.roughness = spec.roughness;
+        std.metalness = spec.metalness;
+      }
+      if (std.flatShading !== spec.flat) {
+        std.flatShading = spec.flat;
+        std.needsUpdate = true;
+      }
     }
 
     const showLimbs = actor.shape === 'CAPSULE' || actor.shape === 'BOTH';
@@ -146,7 +173,13 @@ export class ActorManager {
       mesh.visible = showLimbs && bone.radius > 0 && len > 1e-6;
       if (mesh.visible) {
         mesh.position.copy(a).addScaledVector(dir, 0.5);
-        mesh.scale.set(bone.radius, len, bone.radius);
+        // taper narrows the tube toward the CHILD joint, which is the end
+        // the bone points at — a limb thinning into a wrist, not out of it
+        // the taper is in the GEOMETRY (see taperedGeo), so the scale is
+        // just the bone's own radius under the look's multiplier
+        const r = bone.radius * spec.limb
+          * limbEmphasis(spec, actor.joints[ib].name);
+        mesh.scale.set(r, len, r);
         mesh.quaternion.setFromUnitVectors(UP, dir.clone().divideScalar(len));
       }
       // braces (radius 0) are simulation-only and stay out of the overlay
@@ -166,10 +199,21 @@ export class ActorManager {
       // need to see at a glance while performing. In stick mode the handles
       // shrink hard — at body scale they swallow the very lines they are
       // supposed to annotate.
-      const base = showLimbs ? 0.55 : 0.3;
-      mesh.scale.setScalar(j.radius * (j.pin ? base * 1.7 : base));
+      const base = showLimbs ? spec.joint : 0.3;
+      const emph = jointEmphasis(spec, j.name);
+      mesh.scale.setScalar(j.radius * emph * (j.pin ? base * 1.7 : base));
       mesh.visible = showLimbs || showSticks;
     }
+  }
+
+  private taperedGeo(taper: number): THREE.CylinderGeometry {
+    const key = Math.round(taper * 100) / 100;
+    let g = this.limbSolid.get(key);
+    if (!g) {
+      g = new THREE.CylinderGeometry(key, 1, 1, 16, 1, false);
+      this.limbSolid.set(key, g);
+    }
+    return g;
   }
 
   /** Root object for an actor, so picking can map a hit back to it. */

@@ -23,7 +23,9 @@ export type PaintBrush = 'DRAW' | 'BLUR' | 'AVERAGE' | 'SMEAR';
 export interface Settings {
   mode: EditorMode;
   activeTool: string;
-  /** which "walk here / jump there" verb the Direct tool fires */
+  /** which "walk here / jump there" verb the Direct tool fires. EMPTY means
+   *  disarmed: clicks do nothing, so you can look around a scene without
+   *  every click sending the visitor somewhere. */
   directAction: string;
   brush: {
     preset: string;
@@ -237,7 +239,7 @@ export function defaultSettings(): Settings {
   return {
     mode: 'DRAW',
     activeTool: 'draw',
-    directAction: 'walk',
+    directAction: '',
     brush: {
       preset: 'Pen',
       size: 8, strength: 1, hardness: 1,

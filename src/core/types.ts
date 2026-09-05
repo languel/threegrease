@@ -978,6 +978,10 @@ export interface TGActor {
     strength: number;
   };
   shape: 'CAPSULE' | 'STICK' | 'BOTH';
+  /** how it is DRAWN — see render/actorlooks.ts. Changes nothing about the
+   *  skeleton, the physics or the motion; the same pose, rendered as a
+   *  working mannequin, a wooden lay figure, a stick figure or clay. */
+  look?: 'DEFAULT' | 'WOOD' | 'MINIMAL' | 'CLAY';
   color: Vec3;
   opacity: number;
   visible: boolean;
