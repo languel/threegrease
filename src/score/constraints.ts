@@ -5,7 +5,7 @@
 // constraints mutate translations/rotations via setObjectTransform, never
 // meshes.
 import * as THREE from 'three';
-import type { GPScene, TGConstraint, ConstraintType } from '../core/types';
+import type { GPScene, TGConstraint, ConstraintType, Vec3 } from '../core/types';
 import {
   allRefs, getObjectTransform, parentWorldMatrixOf, setObjectTransform,
   worldMatrixOf, type ObjRef,
@@ -37,6 +37,49 @@ function worldToLocalTranslation(scene: GPScene, ref: ObjRef, world: THREE.Vecto
 
 function worldPos(scene: GPScene, ref: ObjRef): THREE.Vector3 {
   return new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
+}
+
+/**
+ * Rotation that points an object's own FORWARD axis down the path tangent.
+ *
+ * "Forward" is not universal. An ACTOR's skeleton is authored +Y forward in
+ * Z-up, mirrored onto -Z in Y-up (`actor/skeleton.ts` `place`); everything
+ * else has no anatomy and keeps the historical +X. Turning an actor's +X
+ * down the path is what makes a walking figure CRAB SIDEWAYS along it: the
+ * gait reads the body's forward axis to lay its footfalls, so a 90-degree
+ * error in the carrier turns a walk cycle into a side-step, and it reads as
+ * a broken gait rather than as a wrong rotation.
+ *
+ * Built as a basis rather than as yaw/pitch eulers, which is also what fixes
+ * a sloped path: the old formula put the pitch in the X slot, and XYZ order
+ * applies that about the WORLD x-axis, so it only pitched correctly while
+ * the yaw happened to be zero.
+ */
+function orientToTangent(kind: ObjRef['kind'], tangent: THREE.Vector3, upZ: boolean): Vec3 | null {
+  const f = tangent.clone();
+  if (f.lengthSq() < 1e-12) return null;
+  f.normalize();
+  const worldUp = new THREE.Vector3(0, upZ ? 0 : 1, upZ ? 1 : 0);
+  const right = new THREE.Vector3().crossVectors(f, worldUp);
+  if (right.lengthSq() < 1e-8) {
+    // straight up or down the up-axis: every roll is as good as any other
+    right.crossVectors(f, new THREE.Vector3(1, 0, 0));
+    if (right.lengthSq() < 1e-8) right.crossVectors(f, new THREE.Vector3(0, 1, 0));
+  }
+  right.normalize();
+  const up = new THREE.Vector3().crossVectors(right, f).normalize();
+
+  const m = new THREE.Matrix4();
+  if (kind === 'ACTOR') {
+    if (upZ) m.makeBasis(right, f, up);
+    else m.makeBasis(right, up, f.clone().negate());
+  } else if (upZ) {
+    m.makeBasis(f, new THREE.Vector3().crossVectors(up, f), up);
+  } else {
+    m.makeBasis(f, up, new THREE.Vector3().crossVectors(f, up));
+  }
+  const e = new THREE.Euler().setFromRotationMatrix(m, 'XYZ');
+  return [e.x, e.y, e.z];
 }
 
 /**
@@ -146,7 +189,10 @@ export class ConstraintEngine {
    * SHRINKWRAP raycast targets; `score` supplies path sampling and legacy
    * traveler states for TRIGGER proximity.
    */
-  update(scene: GPScene, dt: number, score: ScoreEngine, surfaces: THREE.Object3D[]): void {
+  update(
+    scene: GPScene, dt: number, score: ScoreEngine, surfaces: THREE.Object3D[],
+    upZ = true,
+  ): void {
     const tmp: CursorState = {
       position: new THREE.Vector3(), tangent: new THREE.Vector3(1, 0, 0), valid: false,
     };
@@ -178,9 +224,8 @@ export class ConstraintEngine {
             cur.lerp(local, c.influence);
             t.translation = [cur.x, cur.y, cur.z];
             if (c.orient) {
-              // yaw/pitch from tangent (roll-free)
-              const d = tmp.tangent;
-              t.rotation = [Math.atan2(-d.z, Math.hypot(d.x, d.y)), 0, Math.atan2(d.y, d.x)];
+              const rot = orientToTangent(ref.kind, tmp.tangent, upZ);
+              if (rot) t.rotation = rot;
             }
             setObjectTransform(scene, ref, t);
             travelers.push({ key: `${ref.kind}:${ref.id}`, pos: tmp.position.clone() });

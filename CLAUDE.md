@@ -292,6 +292,16 @@ the browser console or automated evals:
   rotation of `(90, 0, yaw)` yaws the plane while it is still lying flat and
   then tips the result onto its side. `(90, yaw, 0)` is the one that means
   "stand it up, then turn it".
+- **FOLLOW_PATH `orient` points an object's FORWARD axis down the tangent,
+  and "forward" is not universal.** An ACTOR's skeleton is authored +Y
+  forward in Z-up (-Z in Y-up); everything else has no anatomy and keeps the
+  historical +X. Turning an actor's +X down the path is what makes a walking
+  figure CRAB SIDEWAYS along it — the gait lays its footfalls along the
+  body's forward axis, so a 90-degree error in the carrier reads as a broken
+  gait rather than as a wrong rotation. `orientToTangent` in
+  `score/constraints.ts` builds a basis rather than yaw/pitch eulers, which
+  is also what makes a sloped path work: pitch in the X euler slot is applied
+  about the WORLD x-axis and is only correct while the yaw is zero.
 - **Possession** (`src/app/possess.ts`) is fly mode driving a body. Fly mode
   owns pointer lock, mouse-look, the WASD key set and the
   Esc-through-pointer-lock cancel; `Navigation.walkDriver` replaces only the

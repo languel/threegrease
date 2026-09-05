@@ -3438,7 +3438,8 @@ class App implements AppHandle {
     // but never actually wired until the mediamime branch — the engine
     // existed and was imported, but nothing invoked it per frame.
     try {
-      constraintEngine.update(ctx.scene, dt, this.score, ctx.surfaces);
+      constraintEngine.update(
+        ctx.scene, dt, this.score, ctx.surfaces, ctx.settings.upAxis === 'Z');
       this.updateZoneFlashes(now);
     } catch (err) {
       console.error('constraint engine:', err);
