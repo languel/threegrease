@@ -179,7 +179,7 @@ export function meshLocalBounds(m: TGMesh): THREE.Box3 | null {
  *  of its local-min corner (that corner stops being the extremal one once
  *  rotated). Used by originToGeometryBase so "Base" means the rotated
  *  object's actual lowest point, not the unrotated local min. */
-function worldAABB(localBox: THREE.Box3, matrix: THREE.Matrix4): THREE.Box3 {
+export function worldAABB(localBox: THREE.Box3, matrix: THREE.Matrix4): THREE.Box3 {
   const { min, max } = localBox;
   const corners = [
     [min.x, min.y, min.z], [max.x, min.y, min.z], [min.x, max.y, min.z], [min.x, min.y, max.z],

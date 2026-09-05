@@ -72,6 +72,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'prevFrame', label: 'Previous frame', combo: 'arrowleft', category: 'Animation' },
   // View / camera
   { id: 'fly', label: 'Flythrough (Enter accepts, Esc teleports back)', combo: '~', category: 'View' },
+  { id: 'possess', label: 'Possess actor (walk it — V switches view, R records)', combo: 'shift+p', category: 'View' },
   { id: 'cameraView', label: 'Look through camera', combo: '0', category: 'View' },
   { id: 'cycleCamera', label: 'Next camera', combo: 'ctrl+shift+c', category: 'View' },
   { id: 'viewAll', label: 'Frame all (view fit)', combo: 'home', category: 'View' },

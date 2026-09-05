@@ -27,6 +27,16 @@ export function viewDirs(up: UpAxis): Record<ViewName, [THREE.Vector3, THREE.Vec
   };
 }
 
+/** One frame of first-person input, handed to a `walkDriver`. */
+export interface WalkInput {
+  /** heading in the up-frame, radians — 0 looks along the frame's -Z */
+  yaw: number;
+  pitch: number;
+  /** currently-held keys: w/a/s/d/q/e/shift */
+  keys: Set<string>;
+  dt: number;
+}
+
 interface GizmoBall { x: number; y: number; z: number; view: ViewName; label: string; color: string }
 
 /**
@@ -60,6 +70,15 @@ export class Navigation {
   private flyStart = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
   private flyStopping = false; // deliberate exit in progress (Enter/click)
   onFlyChange: ((flying: boolean) => void) | null = null;
+  /**
+   * Possession hook. Fly mode already owns the hard parts of a first-person
+   * rig — pointer lock, mouse-look in the up-frame, WASD key state, and the
+   * Esc-through-pointer-lock dance — so driving a CHARACTER reuses all of
+   * it and only replaces the last step: instead of translating the camera,
+   * the driver is handed the look angles and key state and decides where
+   * both the character and the camera go. Set it BEFORE startFly().
+   */
+  walkDriver: ((input: WalkInput) => void) | null = null;
 
   // gizmo hit areas, rebuilt every draw
   private gizmoBalls: GizmoBall[] = [];
@@ -307,6 +326,13 @@ export class Navigation {
       const cam = this.persp;
       cam.quaternion.copy(this.frameQuat())
         .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ')));
+      // possessed: the driver moves a body, not the camera. The orientation
+      // above still applies — it IS the aim — so the driver only has to
+      // place the camera relative to whatever it drives.
+      if (this.walkDriver) {
+        this.walkDriver({ yaw: this.yaw, pitch: this.pitch, keys: this.flyKeys, dt });
+        return;
+      }
       const speed = this.flySpeed * (this.flyKeys.has('shift') ? 3 : 1) * dt;
       const fwd = cam.getWorldDirection(new THREE.Vector3());
       const right = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 0);

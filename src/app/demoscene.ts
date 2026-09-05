@@ -133,7 +133,12 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
     const m = createMeshObject(id, 'PLANE', at);
     m.name = name;
     m.rotation = rot;
-    m.scale = [w, h, 1];
+    // PlaneGeometry is 2x2 (see render/meshes.ts), so a plane's scale is its
+    // HALF size. Passing the full size here made the demo room exactly twice
+    // its stated dimensions — invisible in a screenshot of a big empty room,
+    // but the scan placeholder and the walk loop are both authored at the
+    // real 7 x 5 m and sat well inside the walls.
+    m.scale = [w / 2, h / 2, 1];
     m.color = wallColor;
     m.unlit = false;
     m.doubleSided = true;
@@ -141,11 +146,17 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
     room.push(m);
   };
   if (upAxisZ) {
+    // Stand the plane up with Rx(90), THEN spin it about the (now vertical)
+    // Y of the tilted frame — which in XYZ Euler order (Rx.Ry.Rz) is simply
+    // (90, yaw, 0). Putting the yaw in the Z slot instead applies it FIRST,
+    // which tips the east/west walls onto their sides: they end up spanning
+    // the room's height in X and its width in Z, i.e. a plane slicing
+    // through the middle of the room rather than a wall at its edge.
     addWall('Floor', [0, 0, 0], [0, 0, 0], ROOM_W, ROOM_D);
     addWall('Wall North', [0, ROOM_D / 2, ROOM_H / 2], [Math.PI / 2, 0, 0], ROOM_W, ROOM_H);
-    addWall('Wall South', [0, -ROOM_D / 2, ROOM_H / 2], [Math.PI / 2, 0, Math.PI], ROOM_W, ROOM_H);
-    addWall('Wall East', [ROOM_W / 2, 0, ROOM_H / 2], [Math.PI / 2, 0, -Math.PI / 2], ROOM_D, ROOM_H);
-    addWall('Wall West', [-ROOM_W / 2, 0, ROOM_H / 2], [Math.PI / 2, 0, Math.PI / 2], ROOM_D, ROOM_H);
+    addWall('Wall South', [0, -ROOM_D / 2, ROOM_H / 2], [Math.PI / 2, Math.PI, 0], ROOM_W, ROOM_H);
+    addWall('Wall East', [ROOM_W / 2, 0, ROOM_H / 2], [Math.PI / 2, -Math.PI / 2, 0], ROOM_D, ROOM_H);
+    addWall('Wall West', [-ROOM_W / 2, 0, ROOM_H / 2], [Math.PI / 2, Math.PI / 2, 0], ROOM_D, ROOM_H);
   } else {
     addWall('Floor', [0, 0, 0], [-Math.PI / 2, 0, 0], ROOM_W, ROOM_D);
     addWall('Wall North', [0, ROOM_H / 2, ROOM_D / 2], [0, Math.PI, 0], ROOM_W, ROOM_H);

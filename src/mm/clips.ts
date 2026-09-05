@@ -17,7 +17,7 @@
 import * as THREE from 'three';
 import type { GPScene, LoopMode, TGClip, Vec3 } from '../core/types';
 import { createFrame, createObject, createStroke, createPoint, genId } from '../core/gpdata';
-import { worldMatrixOf, type ObjRef } from '../tools/objects';
+import { objectName, worldMatrixOf, type ObjRef } from '../tools/objects';
 import { advancePhase, samplePhase } from '../score/engine';
 import { streamStore, streamWorldMatrix } from './streams';
 
@@ -49,9 +49,12 @@ export class ClipRecorder {
   }
 
   start(scene: GPScene, source: RecordSource): void {
+    // The clip's display name is the label's LAST segment, so the object's
+    // own name has to be last — `object:ACTOR:20` named every recorded walk
+    // "20", which is unreadable once a scene has a few of them.
     const label = source.kind === 'STREAM'
       ? `stream:${scene.mmStreams.find((s) => s.id === source.id)?.name ?? source.id}`
-      : `object:${source.ref.kind}:${source.ref.id}`;
+      : `object:${source.ref.kind.toLowerCase()}:${objectName(scene, source.ref)}`;
     this.active = {
       source, label, count: 0, frames: [],
       t0: performance.now(), lastStreamVersion: -1, lastObjectSample: 0,

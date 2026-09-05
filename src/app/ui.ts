@@ -124,6 +124,10 @@ export interface AppHandle {
   mmCaptureToggle(): void;
   mmCaptureStart(source?: { url?: string; file?: File }): void;
   mmSetPlaybackRate(rate: number): void;
+  togglePossess(actorId: number): void;
+  possessedActor(): number | null;
+  possessView(): 'FIRST' | 'THIRD';
+  setPossessView(view: 'FIRST' | 'THIRD'): void;
   mmRecordToggle(source: import('../mm/clips').RecordSource): void;
   mmRecording(source?: import('../mm/clips').RecordSource): boolean;
   mmPlayClip(clipId: number): void;
@@ -1529,6 +1533,35 @@ export class UI {
       slider('Iterations', ph.iterations, 1, 24, 1, (v) => { ph.iterations = Math.round(v); }, { def: 8,
         title: 'constraint passes per step — more is stiffer and slower' }),
       checkbox('Floor', ph.floor, (v) => { ph.floor = v; }, 'collide with the ground plane'),
+
+      el('div', { class: 'menu-header', text: 'Control' }),
+      fieldRow('', btn(
+        this.app.possessedActor() === actor.id ? 'Release (Enter / Esc)' : 'Possess — take the controls',
+        () => this.app.togglePossess(actor.id),
+        {
+          cls: this.app.possessedActor() === actor.id ? 'active' : '',
+          title: 'Walk this character yourself: mouse looks, WASD moves, '
+            + 'Shift runs, V switches 1st/3rd person, R records the walk as '
+            + 'a clip, Enter accepts and Esc returns the camera',
+        }), { full: true }),
+      ...(this.app.possessedActor() === actor.id ? [
+        fieldRow('View', selectField('', this.app.possessView(), [
+          ['THIRD', 'Third person'],
+          ['FIRST', 'First person'],
+        ], (v) => this.app.setPossessView(v as 'FIRST' | 'THIRD'))),
+        fieldRow('', btn(
+          this.app.mmRecording({ kind: 'OBJECT', ref: { kind: 'ACTOR', id: actor.id } })
+            ? 'Stop recording (R)' : 'Record this walk (R)',
+          () => this.app.mmRecordToggle({ kind: 'OBJECT', ref: { kind: 'ACTOR', id: actor.id } }),
+          {
+            cls: this.app.mmRecording({ kind: 'OBJECT', ref: { kind: 'ACTOR', id: actor.id } })
+              ? 'active' : '',
+            title: 'Record the path you walk as a clip. Bake it to a GP '
+              + 'stroke in the MediaMime panel, smooth or sculpt it like any '
+              + 'other stroke, then give the actor a Follow Path constraint '
+              + 'on it — the gait re-walks the loop on its own.',
+          }), { full: true }),
+      ] : []),
 
       el('div', { class: 'menu-header', text: 'Gait' }),
       ...(actor.gait ? [

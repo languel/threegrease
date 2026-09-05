@@ -139,6 +139,7 @@ import {
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
+import { possession, type PossessView } from './possess';
 import type { OrthoPane, PaneId, PaneRect } from './quadview';
 import { computePaneRects, createOrthoPanes, relockOrthoPane, syncOrthoFrustum } from './quadview';
 import type { CanvasPlane } from '../core/types';
@@ -257,6 +258,7 @@ class App implements AppHandle {
    */
   readonly sys = {
     streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
+    gaitEngine, possession,
   };
   readonly paints = new PaintCloudManager();
   readonly mmPoints = new StreamPointsManager();
@@ -313,6 +315,10 @@ class App implements AppHandle {
       RIGHT: THREE.MOUSE.PAN,
     };
     this.nav = new Navigation(this.camera, this.controls, glCanvas);
+    // Possession rides on fly mode, so it ends whenever fly mode does —
+    // including the Esc path, which pointer lock swallows and nav detects
+    // through pointerlockchange rather than a keydown.
+    this.nav.onFlyChange = (flying) => { if (!flying) this.endPossess(); };
 
     const settings = defaultSettings();
     loadPrefs(settings);
@@ -862,7 +868,9 @@ class App implements AppHandle {
     canvas.addEventListener('pointerdown', (e) => {
       (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer = this.toolEvent(e);
       if (this.nav.flying) {
-        if (e.button === 0) this.nav.stopFly(); // click confirms fly position
+        // possession keeps the mouse for looking around: Enter/Esc exit,
+        // a click does not (it is the character's action button)
+        if (e.button === 0 && !possession.active) this.nav.stopFly(); // click confirms fly position
         return;
       }
       const te0 = this.toolEvent(e);
@@ -1043,6 +1051,27 @@ class App implements AppHandle {
       this.ctx.canvas.style.cursor = 'default';
       cb(null);
       return;
+    }
+
+    // Possession's own keys, ahead of fly mode (which swallows everything
+    // it doesn't recognise so stray shortcuts can't fire while driving).
+    if (possession.active && !e.repeat) {
+      const pk = key.toLowerCase();
+      if (pk === 'v') {
+        this.setPossessView(possession.view === 'FIRST' ? 'THIRD' : 'FIRST');
+        e.preventDefault();
+        return;
+      }
+      if (this.keymap.actionFor(comboFromEvent(e)) === 'possess') {
+        this.unpossess();
+        e.preventDefault();
+        return;
+      }
+      if (pk === 'r' && possession.actorId != null) {
+        this.mmRecordToggle({ kind: 'OBJECT', ref: { kind: 'ACTOR', id: possession.actorId } });
+        e.preventDefault();
+        return;
+      }
     }
 
     // fly mode swallows its keys (the fly toggle itself is a keymap action)
@@ -1244,6 +1273,13 @@ class App implements AppHandle {
       case 'nextFrame': stepFrame(1); break;
       case 'prevFrame': stepFrame(-1); break;
       case 'fly': this.nav.flying ? this.nav.stopFly() : this.nav.startFly(); break;
+      case 'possess': {
+        if (possession.active) { this.unpossess(); break; }
+        const actors = ctx.scene.actors;
+        const pick = actors.find((a) => a.select) ?? actors[0];
+        if (pick) this.possess(pick.id);
+        break;
+      }
       case 'cameraView': this.toggleCameraView(); break;
       case 'cycleCamera': this.cycleCamera(); break;
       case 'save': this.saveScene(); break;
@@ -2368,6 +2404,63 @@ class App implements AppHandle {
 
   mmSetPlaybackRate(rate: number): void {
     mmCapture.setPlaybackRate(rate);
+  }
+
+  // ------------------------------------------------------- possession
+
+  /**
+   * Take the controls of an actor. Fly mode supplies the rig (pointer lock,
+   * mouse-look, WASD, Esc); `possession` replaces its final step so the
+   * input walks a body instead of the camera.
+   */
+  possess(actorId: number, view: PossessView = possession.view): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
+    if (!actor) return;
+    if (this.nav.flying) this.nav.stopFly(true);
+    possession.view = view;
+    possession.begin(actorId);
+    // Constraints on the driven actor stand down for the duration —
+    // otherwise a FOLLOW_PATH walker snaps back onto its path every frame.
+    constraintEngine.possessed = { kind: 'ACTOR', id: actorId };
+    // Nothing here poses the character: the gait engine sees the root move
+    // and produces the walk cycle, exactly as it does for a path traveler.
+    if (actor.gait) actor.gait.enabled = true;
+    const upZ = () => this.ctx.settings.upAxis === 'Z';
+    this.nav.walkDriver = (input) => {
+      possession.update(this.ctx.scene, input, upZ());
+      possession.placeCamera(this.ctx.scene, this.nav.persp, upZ());
+    };
+    this.nav.startFly();
+    this.ui.refresh();
+  }
+
+  /** Hand the controls back. Routed through fly mode so the camera restore
+   *  and the pointer-lock release stay in exactly one place. */
+  unpossess(): void {
+    if (this.nav.flying) this.nav.stopFly(true);
+    else this.endPossess();
+  }
+
+  /** Fly mode ended (Enter, Esc, a click elsewhere) — tear possession down. */
+  private endPossess(): void {
+    if (!possession.active) return;
+    possession.end();
+    constraintEngine.possessed = null;
+    this.nav.walkDriver = null;
+    this.ui.refresh();
+  }
+
+  togglePossess(actorId: number): void {
+    if (possession.actorId === actorId) this.unpossess();
+    else this.possess(actorId);
+  }
+
+  possessedActor(): number | null { return possession.actorId; }
+  possessView(): PossessView { return possession.view; }
+
+  setPossessView(view: PossessView): void {
+    possession.view = view;
+    this.ui.refresh();
   }
 
   // ------------------------------------------------------------ clips

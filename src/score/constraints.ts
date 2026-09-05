@@ -124,6 +124,15 @@ export class ConstraintEngine {
   /** zone fire events from the LAST update, for visual feedback (the App
    *  flashes the carrier object's outline) — replaced every frame */
   fired: { ref: ObjRef; kind: 'enter' | 'leave' }[] = [];
+  /**
+   * Object currently being driven by hand (see `app/possess.ts`). Its
+   * transform constraints are skipped while possessed — otherwise a
+   * FOLLOW_PATH walker snaps straight back onto its path the instant you
+   * try to steer it — but it is still offered to pass 2 as a trigger probe,
+   * because a possessed visitor walking into a zone is the whole point.
+   * RUNTIME state, never scene data: possession does not survive a reload.
+   */
+  possessed: ObjRef | null = null;
 
   reset(): void {
     this.velocities.clear();
@@ -148,6 +157,7 @@ export class ConstraintEngine {
     const travelers: { key: string; pos: THREE.Vector3 }[] = [];
     for (const ref of allRefs(scene)) {
       if (ref.kind === 'CANVAS') continue;
+      if (this.possessed && ref.kind === this.possessed.kind && ref.id === this.possessed.id) continue;
       const stack = constraintsOf(scene, ref);
       if (!stack.length) continue;
       for (const c of stack) {
@@ -277,6 +287,12 @@ export class ConstraintEngine {
     // and every landmark of probe-enabled MM streams — so "right hand
     // enters a virtual box" is just a box mesh with a TRIGGER constraint.
     this.fired = [];
+    if (this.possessed) {
+      travelers.push({
+        key: `${this.possessed.kind}:${this.possessed.id}`,
+        pos: worldPos(scene, this.possessed),
+      });
+    }
     const probes: { key: string; pos: THREE.Vector3 }[] = [...travelers];
     for (const [id, state] of score.states) {
       if (state.valid) probes.push({ key: `cursor:${id}`, pos: state.position });

@@ -587,6 +587,10 @@ export interface TGMesh {
   select: boolean;
   lock?: boolean;
   drawTarget: boolean;     // raycast target for Surface placement
+  /** blocks a possessed character (walls, furniture) and supports it as
+   *  ground. Undefined means yes — collision is the default, opt out for
+   *  ghost geometry, glass, and reference planes you want to walk through. */
+  collide?: boolean;
   wireframe: boolean;      // reference look
   color: Vec3;
   opacity: number;
