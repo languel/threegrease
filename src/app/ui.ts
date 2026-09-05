@@ -130,6 +130,8 @@ export interface AppHandle {
   actorGoTo(actorId: number, point: Vec3): void;
   actorGoToObject(actorId: number, ref: import('../tools/objects').ObjRef): void;
   actorStop(actorId: number): void;
+  modelMotions(): { meshId: number; name: string; clips: string[] }[];
+  importMotion(meshId: number, clipIndex: number, actorId: number): void;
   possessedActor(): number | null;
   possessView(): 'FIRST' | 'THIRD';
   setPossessView(view: 'FIRST' | 'THIRD'): void;
@@ -1683,6 +1685,30 @@ export class UI {
               title: '1 = the take\u2019s own tempo' }),
         ] : []),
       ]),
+      ...(() => {
+        const motions = this.app.modelMotions();
+        if (!motions.length) return [];
+        const opts: [string, string][] = [];
+        for (const m of motions) {
+          m.clips.forEach((c, i) => opts.push([`${m.meshId}:${i}`, `${m.name} — ${c}`]));
+        }
+        const key = { v: this.motionPick && opts.some(([o]) => o === this.motionPick)
+          ? this.motionPick : opts[0][0] };
+        return [
+          fieldRow('Import', selectField('', key.v, opts, (v) => {
+            this.motionPick = v;
+            this.refresh();
+          }), { }),
+          fieldRow('', btn('Retarget onto this actor', () => {
+            const [meshId, ci] = key.v.split(':');
+            this.app.importMotion(Number(meshId), Number(ci), actor.id);
+          }, { title: 'Sample the imported animation onto this skeleton as a '
+            + 'pose clip, matched by bone name, rescaled about the feet and '
+            + 'turned to face the way this actor faces. It lands as an '
+            + 'ordinary clip on a new layer — trimmable, blendable, saved '
+            + 'with the scene.' }), { full: true }),
+        ];
+      })(),
       fieldRow('', btn('+ Layer', () => {
         ctx.pushUndo();
         actor.layers = [...(actor.layers ?? []), {
@@ -3518,6 +3544,8 @@ export class UI {
   // ------------------------------------------------------------ settings
 
   settingsOpen = false;
+  /** which imported animation the Actor panel's retarget row is pointing at */
+  private motionPick = '';
 
   // -------------------------------------------------------- agent help
 

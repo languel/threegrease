@@ -325,6 +325,36 @@ the browser console or automated evals:
   `physics.hinges = false` turns off both this and the poles, restoring the
   free-bending version deliberately — it looks good on anything that isn't
   a person.
+- **Imported motion is SAMPLED into a pose clip, not played live**
+  (`src/actor/gltfclip.ts`). A glTF clip is rotation curves on a bone
+  hierarchy; our skeleton has no rotations at all. Rather than keep a
+  parallel three.js animation system alive in the frame loop, the clip is
+  sampled once at import into named joint positions — which is exactly what
+  a CLIP mixer layer already plays, so imported motion trims, blends, bakes
+  and saves like a take you performed yourself. `MeshManager.modelAnimations`
+  keeps `gltf.animations` (they used to be dropped on the same line that
+  added the geometry, which is why a Mixamo export imported as a statue).
+  Four ways to get an import that "works" and moves wrong:
+  - NAMING. Mixamo's `LeftArm` is the UPPER ARM, so it maps to our
+    `shoulder.L`; its `LeftShoulder` is the clavicle and has no home here.
+    Off by one bone gives elbows where shoulders should be.
+  - SIDES. **This skeleton's `.L` is the +X side, which is anatomically the
+    character's RIGHT** (it faces +Y with +Z up, so left is -X). That is a
+    pre-existing naming quirk, not something the importer should propagate:
+    it compares the source's ankle-to-ankle direction against the actor's
+    and swaps the NAMES when the two rigs label sides oppositely. Mirroring
+    the geometry instead would give a character whose knees bend outward.
+  - THE BIND POSE. Scale, facing and ground must be measured BEFORE the
+    mixer exists. Sampling the clip's first frame reads whatever pose the
+    animation opens in, and a clip that starts mid-stride hands you a
+    "forward" taken from a leg swung 30 degrees out — the whole character
+    imports rotated, and it looks like bad retargeting rather than a bad
+    measurement.
+  - GROUND. Anchor at the actor's ANKLE REST HEIGHT, not at zero. The ankle
+    joint sits above the sole, so grounding at the floor plane sinks the
+    figure — the same trap the gait hit planting feet.
+  Horizontal root travel is stripped: the clip is an actor-LOCAL pose, and
+  travel belongs to whatever drives the root.
 - **The animation mixer** (`src/actor/mixer.ts`) is where every source of
   motion is weighed. Sources ask `gain(actor, source, jointName)` for their
   own multiplier rather than the mixer calling them, so each producer keeps

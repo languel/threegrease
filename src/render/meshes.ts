@@ -30,6 +30,14 @@ export class MeshManager {
   readonly group = new THREE.Group();
   private entries = new Map<number, { root: THREE.Object3D; src?: string; kind: string; unlit?: boolean; originOffset: Vec3; live?: boolean }>();
   readonly errors = new Map<number, string>();
+  /**
+   * Animation that came in with a MODEL. RUNTIME state, not scene data: the
+   * clips belong to the file, and what the document keeps is whatever you
+   * retargeted OUT of them (a TGClip). Keyed by mesh id.
+   */
+  readonly modelAnimations = new Map<number, {
+    root: THREE.Object3D; clips: THREE.AnimationClip[];
+  }>();
 
   /** Rebuild/update mesh objects to mirror scene.meshes (camera for view locks). */
   sync(scene: GPScene, camera?: THREE.Camera): void {
@@ -40,6 +48,7 @@ export class MeshManager {
         this.disposeTree(entry.root);
         this.entries.delete(id);
         this.errors.delete(id);
+        this.modelAnimations.delete(id);
       }
     }
     for (const data of scene.meshes) {
@@ -116,7 +125,17 @@ export class MeshManager {
       const onErr = (err: unknown) => this.errors.set(data.id, String(err));
       try {
         if (ext === 'obj') new OBJLoader().load(data.src, onLoad, undefined, onErr);
-        else new GLTFLoader().load(data.src, (g) => onLoad(g.scene), undefined, onErr);
+        else {
+          new GLTFLoader().load(data.src, (g) => {
+            onLoad(g.scene);
+            // Keep the animation. It used to be dropped here, which is why
+            // a Mixamo export imported as a statue: the geometry arrived
+            // and the motion was thrown away in the same line.
+            if (g.animations?.length) {
+              this.modelAnimations.set(data.id, { root: g.scene, clips: g.animations });
+            }
+          }, undefined, onErr);
+        }
       } catch (err) { onErr(err); }
       return holder;
     }

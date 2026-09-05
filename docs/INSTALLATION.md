@@ -367,16 +367,45 @@ between recording and playback and plays on any actor with the same
 vocabulary. Possess a character, perform a move, record it, and it becomes
 a layer you can blend against everything else.
 
-### Not built: imported animation
+### Imported animation
 
-`.glb/.gltf` import currently discards `gltf.animations` — geometry only,
-no `AnimationMixer` anywhere. So Mixamo clips and other authored motion do
-not play, and there is no retargeting onto the positional skeleton. The
-positional rig makes retargeting tractable (a bone is a distance
-constraint, so a foreign skeleton's joint positions are targets like any
-other), and the mixer is the seam an importer would plug into — sampling a
-glTF clip into named joint positions produces exactly what a CLIP layer
-already consumes. But none of it exists yet.
+`.glb/.gltf` animation now imports. It is **sampled into a pose clip**
+rather than played live: a glTF clip is rotation curves on a bone
+hierarchy, our skeleton has no rotations at all, so the clip is sampled
+once at import into named joint positions — exactly what a CLIP mixer layer
+already plays. Imported motion is therefore an ordinary clip. It trims, it
+blends against the gait on a masked layer, it bakes to GP strokes, and it
+saves with the scene; there is no second animation system to keep in step
+with the first.
+
+Retargeting recovers what it needs from the skeletons rather than assuming
+it: bone names are matched through a table (Mixamo's `LeftArm` is the upper
+arm, so it becomes our `shoulder.L`), the source is rescaled about the FEET
+the same way live capture is, and its facing and ground are read off the
+bind pose — the toes ahead of the ankles give forward, so a rig facing +Z
+and one facing -X both land the same way round. Horizontal travel is
+stripped, because the clip is an actor-local POSE and travel belongs to
+whatever drives the root.
+
+`Actor ▸ Mixer ▸ Import` lists every animation that came in with a loaded
+model; retargeting one adds the clip and a layer playing it, and stands the
+procedural gait down (two walks blended at once reads as neither).
+
+What is still missing: proportions. The source is matched to the actor by
+hip-above-ankle height only, so a rig with a longer torso arrives with a
+longer torso, and the solver's bone lengths then pull it back — visible as
+a slight pop at the knees and mid-spine. Per-limb scaling is the fix and is
+not built.
+
+### Not built: generative motion
+
+A Kimodo-style text-or-goal-conditioned motion model is not built. The
+pieces it would need now exist: steering is the goal interface (you say
+where, not how), and a CLIP layer consuming named joint positions is the
+output interface. A generator would replace the gait UNDER the steering
+layer rather than sit beside it. The blockers remain the ones in the
+research note — the weights are under NVIDIA research licences, it wants
+~17 GB of VRAM, and it is offline rather than real-time.
 
 ## Walkthrough
 

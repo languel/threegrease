@@ -115,6 +115,8 @@ import {
 } from '../actor/simstream';
 import { actorMixer } from '../actor/mixer';
 import { steerEngine } from '../actor/steering';
+import { retargetGltfClip } from '../actor/gltfclip';
+import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
 import { buildDemoScene } from './demoscene';
 import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
@@ -261,6 +263,9 @@ class App implements AppHandle {
   readonly sys = {
     streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
     gaitEngine, possession, actorMixer, steerEngine,
+    /** the app's own three, so an eval never pulls a second copy in
+     *  (importing 'three' makes vite re-optimize and silently reload) */
+    THREE,
   };
   readonly paints = new PaintCloudManager();
   readonly mmPoints = new StreamPointsManager();
@@ -2500,6 +2505,68 @@ class App implements AppHandle {
     actor.steer.arrived = false;
     actor.steer.stuck = false;
     steerEngine.reset(actorId);
+    this.ui.refresh();
+  }
+
+  // ------------------------------------------------------- motion import
+
+  /** MODEL objects in the scene that arrived carrying animation. */
+  modelMotions(): { meshId: number; name: string; clips: string[] }[] {
+    const out: { meshId: number; name: string; clips: string[] }[] = [];
+    for (const [meshId, entry] of this.meshes.modelAnimations) {
+      const mesh = this.ctx.scene.meshes.find((m) => m.id === meshId);
+      if (!mesh) continue;
+      out.push({ meshId, name: mesh.name, clips: entry.clips.map((c, i) => c.name || `clip ${i + 1}`) });
+    }
+    return out;
+  }
+
+  /**
+   * Retarget one imported animation onto an actor. It becomes an ordinary
+   * pose clip plus a mixer layer playing it — so from here it trims, blends
+   * and saves like a take you performed yourself.
+   */
+  /** last retarget's report, for inspecting a bad import */
+  lastRetarget: ReturnType<typeof retargetGltfClip> | null = null;
+
+  importMotion(meshId: number, clipIndex: number, actorId: number): void {
+    const entry = this.meshes.modelAnimations.get(meshId);
+    const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
+    const source = entry?.clips[clipIndex];
+    if (!entry || !actor || !source) { this.setStatusHint('Import: nothing to retarget'); return; }
+    const mesh = this.ctx.scene.meshes.find((m) => m.id === meshId);
+    const report = retargetGltfClip(entry.root, source, actor, {
+      upZ: this.ctx.settings.upAxis === 'Z',
+      name: `${mesh?.name ?? 'model'}: ${source.name || 'motion'}`,
+    });
+    this.lastRetarget = report;
+    if (!report.clip) {
+      this.setStatusHint(`Import failed — ${report.error ?? 'no clip'}`, 6000);
+      return;
+    }
+    this.ctx.pushUndo();
+    this.ctx.scene.clips.push(report.clip);
+    actor.layers = [...(actor.layers ?? []), {
+      id: nextLayerId(actor),
+      name: source.name || 'Imported',
+      enabled: true,
+      weight: 1,
+      mask: 'ALL',
+      source: 'CLIP',
+      clipId: report.clip.id,
+      phase: 0,
+      speed: 1,
+      loop: 'LOOP',
+      playing: true,
+    }];
+    // An imported walk and the procedural one both want the legs, and
+    // blending two walks at once reads as neither. Stand the gait down and
+    // let the stack say so out loud rather than silently halving both.
+    const gaitLayer = actor.layers.find((l) => l.source === 'GAIT');
+    if (gaitLayer) gaitLayer.enabled = false;
+    this.setStatusHint(
+      `Retargeted ${report.matched.length} joints, ${report.frames} frames`
+      + `${report.missing.length ? ` (unmatched: ${report.missing.join(', ')})` : ''}`, 8000);
     this.ui.refresh();
   }
 
