@@ -161,14 +161,31 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   ped2.scale = [0.5, 0.5, 1.1];
   ped2.color = [0.93, 0.92, 0.9];
 
-  // ---- an interactive zone: TRIGGER on pedestal A, so the demo shows a
-  // probe firing as the walking visitor passes near it, exactly the way a
-  // real installation would react to someone approaching an exhibit ----
+  // ---- an interactive zone: a proximity bubble beside Pedestal A, so the
+  // demo shows a probe firing as the walking visitor passes, exactly the way
+  // a real installation reacts to someone approaching an exhibit.
+  //
+  // The carrier is an EMPTY, NOT the pedestal box, and that matters: the
+  // constraint engine takes a zone's SHAPE from its carrier, and for a
+  // primitive mesh (box/sphere/cylinder) it tests that primitive's own
+  // bounds and ignores `radius` entirely. Hanging this off the pedestal
+  // therefore produced a zone the size of the pedestal — the visitor walked
+  // past 0.8 units away and nothing ever fired. An EMPTY has no bounds, so
+  // it falls through to the sphere test where `radius` is the thing that
+  // actually decides. Kept at floor level to match where the walking
+  // visitor's root probe is.
+  const zoneObj = createMeshObject(genId(), 'EMPTY', upAxisZ ? [-1.6, 0, 0] : [-1.6, 0, 0]);
+  zoneObj.name = 'Zone · near Pedestal A';
   const zone: TGConstraint = createConstraint('TRIGGER');
-  zone.radius = 0.9;
-  zone.messages = [{ address: '/gallery/near/{name}', argExprs: ['{x}', '{y}', '{z}'] }];
+  // `{name}` substitutes the CONSTRAINT's name into the address, so the name
+  // has to be OSC-safe: no spaces, since an OSC address pattern is
+  // whitespace-delimited on the wire and 'near Pedestal A' would split into
+  // an address plus a stray argument at the far end.
+  zone.name = 'pedestalA';
+  zone.radius = 1;
+  zone.messages = [{ address: '/gallery/enter/{name}', argExprs: ['{x}', '{y}', '{z}'] }];
   zone.leaveMessages = [{ address: '/gallery/leave/{name}', argExprs: ['1'] }];
-  ped1.constraints = [zone];
+  zoneObj.constraints = [zone];
 
   // ---- the walk path: a GP stroke loop the visitor follows ----
   const pathObj = createObject('Walk Path');
@@ -208,9 +225,15 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   // via App.setStreamDriver (that wiring is runtime state, not scene data)
   const poseStream = createStream(scene, 'POSE', 'CAMERA', upAxisZ ? 'Z' : 'Y');
   poseStream.name = 'Security Cam · Pose (sim)';
+  // 33 landmarks per frame onto the event bus is a firehose that buries the
+  // zone messages this demo exists to show. Streams still PROBE zones with
+  // emitBus off — that is a separate switch — so the demo loses nothing but
+  // noise. Turn it back on in the stream row to see raw landmark traffic.
+  poseStream.emitBus = false;
   scene.mmStreams.push(poseStream);
   const detectStream = createStream(scene, 'DETECT', 'CAMERA', upAxisZ ? 'Z' : 'Y');
   detectStream.name = 'Security Cam · Detect (sim)';
+  detectStream.emitBus = false;   // same reason as the pose stream above
   if (detectStream.detect) detectStream.detect.queries = ['a person'];
   scene.mmStreams.push(detectStream);
 
@@ -224,7 +247,7 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   scene.paintClouds.push(scan);
 
   scene.objects.push(pathObj);
-  scene.meshes.push(...room, ped1, ped2);
+  scene.meshes.push(...room, ped1, ped2, zoneObj);
   scene.actors.push(actor);
   scene.cameras.push(secCam);
   scene.activeCamera = 0; // keep the user's main camera active; security cam is a second view

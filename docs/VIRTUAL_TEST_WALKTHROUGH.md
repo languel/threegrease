@@ -1,0 +1,203 @@
+# Testing an installation with nothing plugged in
+
+*Step-by-step. For the design behind this, see [INSTALLATION.md](INSTALLATION.md)
+("Simulated sources — a virtual placeholder for every input").*
+
+The idea: every piece of a real installation — a tracked visitor, a camera,
+a 3D scan — has a virtual stand-in that feeds the exact same code path a real
+one would. So you can build and test a whole setup (zones, OSC output,
+mappings) with no webcam, no scan, nothing plugged in, then swap one piece
+for a real input at a time.
+
+This walks through the stock demo, then how to build your own from scratch.
+
+## 1. Load the stock demo
+
+**File ▸ New — Demo gallery scene.**
+
+This replaces the current scene (undoable — `Ctrl+Z` gets it back) with:
+
+- a 7×5×2.6 m room (floor + 4 walls)
+- two pedestals ("Pedestal A", "Pedestal B")
+- a rigged mannequin ("Visitor") walking a loop between them
+- a proximity trigger zone beside Pedestal A (see step 3 for why it's a
+  separate object)
+- a second camera ("Security Cam 1") mounted in a corner
+- two streams driven by that camera: a full-skeleton pose stream and a
+  single-point "detect" stream
+- a hidden point cloud standing in for a 3D scan of the room
+
+Switch to **Object mode** (toolbar, top-left arrow icon, or `Tab`/`1`) and
+press **Space** to play. The mannequin should walk the oval loop between the
+pedestals continuously.
+
+If it's not moving: select "Visitor" in the outliner, open the **Actor**
+tab (the standing-figure icon in the properties sidebar), and confirm
+**Simulate** is checked under Physics.
+
+## 2. Watch the simulated tracking work
+
+Open the **Capture** tab (camera icon, "Capture — live landmarks & object
+rigging") and find **Streams — native capture**. You'll see two rows:
+
+- `Security Cam · Pose (sim)` — 33 points
+- `Security Cam · Detect (sim)` — 1 point
+
+Both carry an orange **SIM** badge, meaning they're driven from a virtual
+source, not a webcam. Expand a row: under **Sim source** you'll see it's
+set to the Visitor actor, `via camera` Security Cam 1.
+
+Play the animation again and watch the stream row — the values update every
+frame as the mannequin walks, exactly as if a real camera were tracking a
+real person.
+
+**Expected oddity:** the visible landmark dots won't sit *on* the mannequin.
+A stream's landmarks are placed by that stream's own transform (position /
+rotation / scale in its row), and a fresh camera stream defaults to standing
+its cloud up in front of the origin. The simulation supplies the *content* of
+the frame, not where the cloud lands in the room — exactly like a real
+webcam, where you place the stream to match your space. Aligning those two is
+the mapping work that doesn't exist yet (see INSTALLATION.md, "Mapping, not
+calibration"). The zone in step 3 fires off the walking visitor directly, so
+it's unaffected.
+
+## 3. Watch the zone fire
+
+Open the **Bindings** tab and find **Events / IO** near the bottom. There's
+a live monitor showing the last 10 bus messages.
+
+Play the animation. As the Visitor's loop passes Pedestal A you'll see the
+zone open and close each lap:
+
+```
+13.4 constraint:1 /gallery/enter/pedestalA -1.801 0.976 0
+15.0 constraint:1 /gallery/leave/pedestalA 1
+21.8 constraint:1 /gallery/enter/pedestalA -1.8 0.977 0
+```
+
+The three numbers on `enter` are the probe's world position — where the
+visitor actually was when they crossed in.
+
+You should also see Pedestal A's zone flash briefly in the viewport when it
+fires; that's the same feedback a real installation gets.
+
+**This is the whole point.** A real webcam tracking a real person produces
+*identical* messages on this bus. Run `bridge/` (see its README) and they go
+straight out as OSC to Max / TouchDesigner / SuperCollider, with nothing else
+changed.
+
+### Why the zone is a separate object, not the pedestal
+
+In the outliner you'll see **Zone · near Pedestal A** as its own (empty)
+object rather than the trigger living on the pedestal itself. That's
+deliberate, and it's a trap worth knowing about:
+
+> A `TRIGGER` takes its **shape from its carrier**. On a box, sphere or
+> cylinder it tests that primitive's actual volume and **ignores the
+> `radius` field entirely**. Only a carrier with no geometry (an Empty)
+> falls through to the sphere test where `radius` is what decides.
+
+Hanging the trigger off the pedestal gave a zone the size of the pedestal —
+the visitor walked past 0.8 m away and nothing ever fired, with no error to
+explain why. If you want a proximity bubble, use an Empty. If you want
+"inside this volume", use the box.
+
+### If the monitor is drowning in traffic
+
+The demo turns **emit bus** OFF on both streams. A pose stream re-broadcasts
+all 33 landmarks every frame, which buries everything else in a 10-line
+monitor. Streams still *probe* zones with it off — that's a separate switch —
+so nothing is lost but noise. Turn it back on in the stream's row if you
+want to see raw landmark traffic.
+
+## 4. Try the semantic-detection placeholder
+
+Same Streams panel, expand `Security Cam · Detect (sim)`. The **Look for**
+box holds the text query (defaults to `a person`). This is where a real
+`DETECT` stream's open-vocabulary query goes — "a person wearing a hat", "a
+dog" — once a model is loading successfully (see the note at the bottom of
+this doc).
+
+Right now the sim path bypasses the model entirely: it drives the stream
+from the Visitor's position directly, so you can test that zones/routes
+respond to a DETECT-kind stream before any model is involved.
+
+## 5. Look through the security camera
+
+Timeline camera row (bottom of the screen): the camera dropdown lists
+"Camera 1" and "Security Cam 1". Pick the latter, then press **0** (or the
+camera icon button) to look through it. You should see the room from a
+high corner angle with the Visitor walking below.
+
+Click the **photo icon** next to the camera controls (📷, "Snapshot this
+camera's view…") to bake that exact view into a reference plane placed in
+front of the camera. This is the virtual stand-in for "go stand there and
+take a photo" — the resulting plane is pixel-registered to the room, so you
+can draw or block out against it later.
+
+## 6. Look at the scan placeholder
+
+In the outliner, find **Room scan (simulated)** — it's a paint-cloud object,
+hidden by default. Click its eye icon to show it. You'll see a scattered
+point cloud over the floor and walls, standing in for what a real Kiri /
+3D-Gaussian-Splat capture of the room would look like once imported.
+
+Use this to sanity-check that measuring, snapping and zone placement behave
+sensibly against noisy scan-like data, before you actually go scan the room.
+
+## 7. Swap one piece for something real
+
+Everything above works because a simulated source and a real one are
+indistinguishable to the rest of the app. To replace a piece:
+
+- **Replace the tracked visitor with a real webcam**: in the Streams panel,
+  on the `Pose (sim)` row, click the **✕** next to "Sim source" to clear the
+  driver. Then use **+Pose** in the same panel and **Camera** to start a real
+  webcam capture into a new POSE stream.
+- **Replace the room with a real scan**: File ▸ Import ▸ Splat
+  (`.ply/.spz/.splat` — a Kiri export works directly), or Model
+  (`.glb/.gltf/.obj`). Hide or delete the procedural walls/scan placeholder
+  once the real one is in.
+- **Replace the security camera with a photo you actually took**: File ▸
+  Import ▸ GP object, or just drag a photo in as a reference plane (Add
+  menu ▸ Plane, then set its texture in Object Properties), positioned and
+  scaled by eye or using the **Measure** tool (Scene tab) to get it to real
+  dimensions.
+- **Point a zone at a real object** instead of a pedestal: select any mesh,
+  open its **Constraints** tab, and add a `TRIGGER` constraint the same way
+  Pedestal A already has one.
+
+Nothing about the zone, the route, or the OSC output needs to change when
+you do this — that's the guarantee the whole simulated-source design is
+built around.
+
+## Building your own scene from scratch (not the stock demo)
+
+1. **Add ▸ Actor (mannequin)** — a rigged visitor. In its **Actor** tab,
+   turn on **Simulate**, and optionally give it a `FOLLOW_PATH` constraint
+   bound to a GP stroke (draw a loop, select it, Constraints tab ▸ Add
+   Object Constraint ▸ Follow Path ▸ "Use selected stroke").
+2. **Add a camera** where you want the "installed webcam" to stand — the
+   timeline camera row's **+** button adds one at the current view.
+3. **Capture tab ▸ +Pose** (or +Detect) to create a stream, source =
+   Camera.
+4. In that stream's row, under **Sim source**, pick your actor (or any
+   other object — a box on a path works too, for testing a simpler
+   "detected object" case) and the camera you added in step 2.
+5. Build your zones: select any object, **Constraints** tab, Add Object
+   Constraint ▸ Trigger. Set its radius and the OSC/bus message address.
+6. Play, and watch **Bindings ▸ Events / IO** for the messages.
+
+## Known gaps (see INSTALLATION.md for detail)
+
+- **Semantic detection models are not yet verified loading.** The most-cited
+  OWL-ViT export fails to load in this browser/runtime combination; the
+  dropdown lists alternatives to try on your actual machine. Until one
+  loads, use the simulated DETECT stream (step 4 above) to test the
+  plumbing.
+- **No camera-to-room registration (mapping) modes yet.** Placing a stream's
+  camera and scale is still by hand. A ground-plane homography mode (click
+  4 points in a photo, click the matching 4 points on the floor plan) is
+  planned but not built.
+- **Multi-person tracking** doesn't exist — one pose stream tracks one
+  skeleton, real or simulated.
