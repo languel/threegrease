@@ -270,7 +270,14 @@ export class SteerEngine {
         radius: st.radius, stepHeight: st.stepHeight, height: actorHeight(actor, upAxis),
       };
       const ground = walkVolume.groundAt(pos, upAxis, body);
-      const wall = (b: THREE.Box3): boolean => walkVolume.blocks(b, ground, upAxis, body);
+      // Loose props are not obstacles to plan around — walking into them is
+      // the point — so the whiskers ignore anything the body would not be
+      // stopped by either.
+      const wall = (b: THREE.Box3): boolean => {
+        const i = walkVolume.boxes.indexOf(b);
+        if (i >= 0 && walkVolume.loose[i]) return false;
+        return walkVolume.blocks(b, ground, upAxis, body);
+      };
 
       // THREE parallel whiskers, not one ray. A single ray from the centre
       // slips past the corner of a box the shoulders would still hit, and

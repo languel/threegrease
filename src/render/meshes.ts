@@ -26,6 +26,12 @@ export function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
     // a cone with four sides is a pyramid, and it needs no new geometry
     // path — flat-shaded so the four faces read as facets, not as a cone
     case 'PYRAMID': return new THREE.ConeGeometry(0.5, 1, 4, 1);
+    // the remaining platonic solids, all unit-diameter like SPHERE so
+    // "scale is size" keeps holding across the whole primitive family
+    case 'TETRA': return new THREE.TetrahedronGeometry(0.5);
+    case 'OCTA': return new THREE.OctahedronGeometry(0.5);
+    case 'DODECA': return new THREE.DodecahedronGeometry(0.5);
+    case 'ICOSA': return new THREE.IcosahedronGeometry(0.5);
     default: return new THREE.BoxGeometry(1, 1, 1);
   }
 }

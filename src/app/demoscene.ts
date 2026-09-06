@@ -25,6 +25,7 @@ import { createPaintCloud } from '../render/paintclouds';
 import { createHumanoid } from '../actor/skeleton';
 import type { TGActor } from '../core/types';
 import type { Step } from '../actor/behaviour';
+import { defaultBody } from '../actor/props';
 import { createConstraint } from '../score/constraints';
 import { createStream } from '../mm/streams';
 
@@ -173,6 +174,58 @@ export function wandererScript(upAxisZ: boolean): Step[] {
     { say: 'Sitting this one out.', wait: 5 },
     { say: 'Round again.', goto: P(4.0, -8.0), style: 'walk' },
   ];
+}
+
+/**
+ * The same gallery, plus a floor full of things that fall over.
+ *
+ * A second scene rather than more props in the first: the demo scene is
+ * about a character reading a SPACE, and this one is about a character
+ * disturbing it. Mixing them would make both harder to watch.
+ */
+export function buildPlaygroundScene(upAxisZ: boolean): DemoWiring {
+  const wiring = buildDemoScene(upAxisZ);
+  const { scene } = wiring;
+  const at = (x: number, y: number, up: number): Vec3 =>
+    (upAxisZ ? [x, y, up] : [x, up, y]);
+
+  const loose = (
+    kind: 'SPHERE' | 'BOX' | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA',
+    name: string, x: number, y: number, size: number, color: Vec3,
+  ): void => {
+    const m = createMeshObject(genId(), kind, at(x, y, size * 0.5 + 0.02));
+    m.name = name;
+    m.scale = [size, size, size];
+    m.color = color;
+    m.drawTarget = true;
+    m.body = defaultBody(size * 0.5);
+    scene.meshes.push(m);
+  };
+
+  // Ten balls, deliberately across a wide size range: the mass model is
+  // roughly volume, so the small ones scatter off a shin while the big one
+  // has to be leaned into. That contrast is the whole demonstration.
+  const balls: [number, number, number][] = [
+    [-2.2, -1.0, 0.30], [-1.4, -1.6, 0.42], [-0.5, -0.9, 0.24],
+    [0.3, -1.8, 0.55], [1.1, -1.1, 0.34], [1.9, -2.0, 0.28],
+    [-2.6, -2.4, 0.66], [0.0, -0.3, 0.20], [2.6, -1.4, 0.48],
+    [-1.0, -2.8, 0.38],
+  ];
+  const hue: Vec3[] = [
+    [0.85, 0.35, 0.30], [0.35, 0.50, 0.80], [0.90, 0.70, 0.28],
+    [0.40, 0.72, 0.50], [0.70, 0.42, 0.78],
+  ];
+  balls.forEach(([x, y, d], i) => loose('SPHERE', `Ball ${i + 1}`, x, y, d, hue[i % hue.length]));
+
+  // ...and the solids, which behave the same way and look like they should
+  // not, which is exactly the honest limit of a sphere-only simulation.
+  loose('BOX', 'Crate', 3.4, -3.0, 0.7, [0.72, 0.60, 0.44]);
+  loose('TETRA', 'Tetrahedron', -3.6, -0.4, 0.6, [0.85, 0.55, 0.35]);
+  loose('OCTA', 'Octahedron', 2.2, 0.4, 0.6, [0.45, 0.70, 0.85]);
+  loose('DODECA', 'Dodecahedron', -3.2, 1.4, 0.66, [0.80, 0.45, 0.60]);
+  loose('ICOSA', 'Icosahedron', 0.9, 1.2, 0.58, [0.55, 0.75, 0.45]);
+
+  return wiring;
 }
 
 export function buildDemoScene(upAxisZ: boolean): DemoWiring {

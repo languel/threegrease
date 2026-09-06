@@ -600,7 +600,8 @@ export interface TGMesh {
   /** EMPTY = Blender-style null object: an axes tripod with no surface —
    *  a parenting/grouping anchor and constraint target, never a draw
    *  target or export geometry. */
-  kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'MODEL' | 'EMPTY';
+  kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID'
+  | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA' | 'MODEL' | 'EMPTY';
   src?: string;            // MODEL only: .glb/.gltf/.obj URL (blob = session)
   translation: Vec3;
   rotation: Vec3;
@@ -613,6 +614,24 @@ export interface TGMesh {
    *  ground. Undefined means yes — collision is the default, opt out for
    *  ghost geometry, glass, and reference planes you want to walk through. */
   collide?: boolean;
+  /**
+   * Loose prop: falls, rolls, and can be pushed or kicked by a character.
+   *
+   * Absent means STATIC, which is the right default — a wall that could be
+   * shoved is a bug, not a feature. See `actor/props.ts` for what the
+   * simulation does and, more importantly, what it does not.
+   */
+  body?: {
+    mass: number;
+    /** 0 = dead stop, 1 = perfectly elastic */
+    bounce: number;
+    /** ground friction, 0..1 per second-ish */
+    friction: number;
+    /** live state — RUNTIME, but kept here so a scene saved mid-roll
+     *  reloads where it was rather than snapping back */
+    vel?: Vec3;
+    spin?: Vec3;
+  };
   wireframe: boolean;      // reference look
   color: Vec3;
   opacity: number;

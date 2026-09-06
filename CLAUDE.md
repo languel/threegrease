@@ -478,6 +478,23 @@ the browser console or automated evals:
   detour at all, and a goal reachable only by stairs tries twice, says so,
   and gives up in a bounded 23 s instead of shuffling forever. The heading turns at a bounded
   RATE — snapping it spins the body under a world-locked stance foot.
+- **Loose props** (`actor/props.ts`, `TGMesh.body`) fall, roll and get kicked.
+  The design falls out of one observation: an actor is ALREADY a set of joint
+  spheres with radii and a solved position every frame, so prop-vs-character
+  contact needs no new representation — sphere against sphere, with the
+  impulse taken from how fast that joint happens to be moving. Walking into a
+  ball nudges it, a swinging foot launches it, a hand bats it, and none of
+  those are special cases. Only the component of the joint's motion heading
+  INTO the prop counts, or a foot brushing past flings things it never hit.
+  What it is NOT: no rotational dynamics, no resting-contact solver, and
+  every prop collides as a SPHERE whatever it is drawn as — a cube will not
+  topple onto a face. That is deliberately the same fidelity the character's
+  own world-AABB collision has; pairing a rigid-body engine with a capsule
+  that push-outs of boxes would be worse, not better.
+  A loose prop is GROUND but never a WALL: you can stand on a crate, and you
+  walk THROUGH a ball rather than edging round it, because the joints are
+  what move it and stopping the body would prevent the contact that does the
+  work. Steering's whiskers skip them for the same reason.
 - **The shared walking body** (`actor/locomotion.ts`) is where collision and
   ground live, so a character does not collide differently depending on who
   is steering it. `walkVolume.gather(scene, frame)` is idempotent per frame.

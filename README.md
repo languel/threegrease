@@ -240,6 +240,26 @@ The stock choreography uses the built-in synthesiser, so it runs the moment
 you open it with nothing downloaded — and upgrades itself to the on-device
 model the instant you load that in the Motion panel.
 
+### Loose props
+
+`File ▸ New — Gallery + loose props` is the same gallery with a floor full
+of things that fall over: ten balls across a wide size range, plus a crate
+and the platonic solids. Characters push, kick and scatter them, and can
+stand on them. Mass is roughly volume, so a small ball skitters off a shin
+while a big one has to be leaned into.
+
+It is a small simulation and honest about it: no rotational dynamics, and
+every prop collides as a sphere whatever it is drawn as, which is the same
+fidelity the characters' own collision has.
+
+### Grouping
+
+Select anything and press `Ctrl+G` (or **Group selection under a new
+empty**). It creates an empty at the selection's horizontal centre and its
+LOWEST point — a pivot you can drop on a floor and rotate about, rather than
+a centroid floating inside the geometry — and parents everything to it,
+preserving world positions.
+
 ## Licensing
 
 threegrease is proprietary — see [LICENSE](LICENSE). It is an internal

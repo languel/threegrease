@@ -60,6 +60,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'paste', label: 'Paste strokes', combo: 'ctrl+v', category: 'Edit' },
   // Object mode
   { id: 'parentSet', label: 'Parent selected to active (object mode)', combo: 'ctrl+p', category: 'Edit' },
+  { id: 'groupToEmpty', label: 'Group selection under a new empty (object mode)', combo: 'ctrl+g', category: 'Edit' },
   { id: 'applyTransform', label: 'Apply transform', combo: 'ctrl+a', category: 'Object' },
   { id: 'parentClear', label: 'Clear parent (object mode)', combo: 'alt+p', category: 'Edit' },
   // Animation

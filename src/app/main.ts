@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
+import { genId, createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
 import { History } from '../core/history';
 import type { GPScene, TGActor, TGActorLayer, TGLight, Vec3, ViewportShading } from '../core/types';
 import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
@@ -125,9 +125,11 @@ import {
 import { ARDY_NOTICES, ardyBackend, ardyDownloadHint } from '../actor/ardy';
 import { bindHumanoid, poseHumanoid } from '../render/vrmpose';
 import { vrmManager } from '../render/vrm';
+import { propEngine } from '../actor/props';
+import { walkVolume } from '../actor/locomotion';
 import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
-import { buildDemoScene, wandererScript } from './demoscene';
+import { buildDemoScene, buildPlaygroundScene, wandererScript } from './demoscene';
 import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
 import { DirectTool } from '../tools/direct';
 import { createHumanoid, resetPose } from '../actor/skeleton';
@@ -1324,6 +1326,45 @@ class App implements AppHandle {
         this.ui.refresh();
         break;
       }
+      case 'groupToEmpty': {
+        if (ctx.settings.mode !== 'OBJECT') break;
+        const refs = listSelected(ctx.scene);
+        if (!refs.length) break;
+        // Bounds from the RENDERED objects rather than from the data: the
+        // selection can mix GP objects, meshes, splats and editable meshes,
+        // and the one thing they all agree on is where they end up on screen.
+        const box = new THREE.Box3();
+        for (const r of refs) {
+          const root = this.objectRoot(r);
+          if (!root) continue;
+          const b = new THREE.Box3().setFromObject(root);
+          if (!b.isEmpty()) box.union(b);
+        }
+        if (box.isEmpty()) break;
+        const upAxis = ctx.settings.upAxis === 'Z' ? 2 : 1;
+        const centre = box.getCenter(new THREE.Vector3());
+        // Centred horizontally but sitting on the selection's LOWEST point:
+        // a group pivot you can drop onto a floor, rotate about, and see —
+        // a centroid floating inside the geometry is none of those.
+        const at = centre.toArray() as [number, number, number];
+        at[upAxis] = box.min.getComponent(upAxis);
+        ctx.pushUndo();
+        const empty = createMeshObject(genId(), 'EMPTY', at);
+        empty.name = `Group (${refs.length})`;
+        ctx.scene.meshes.push(empty);
+        const parent: ObjRef = { kind: 'MESH', id: empty.id };
+        let ok = 0;
+        for (const r of refs) if (setParentKeepWorld(ctx.scene, r, parent)) ok++;
+        // select the new group, so the very next drag moves the whole thing
+        deselectAllObjects(ctx.scene);
+        setObjectSelected(ctx.scene, parent, true);
+        this.setStatusHint(`Grouped ${ok} object(s) under ${empty.name}`);
+        this.syncCanvases();
+        this.gp.markDirty();
+        this.refreshWidget();
+        this.ui.refresh();
+        break;
+      }
       case 'parentClear': {
         if (ctx.settings.mode !== 'OBJECT') break;
         const refs = listSelected(ctx.scene);
@@ -1915,10 +1956,13 @@ class App implements AppHandle {
     const add = (id: string, title: string, run: (args?: string) => unknown, keywords = '') =>
       reg.register({ id, title, keywords, run });
 
-    for (const kind of ['PLANE', 'BOX', 'SPHERE', 'CYLINDER', 'PYRAMID', 'EMPTY'] as const) {
+    for (const kind of ['PLANE', 'BOX', 'SPHERE', 'CYLINDER', 'PYRAMID',
+      'TETRA', 'OCTA', 'DODECA', 'ICOSA', 'EMPTY'] as const) {
       add(`add.${kind.toLowerCase()}`, `Add ${kind.toLowerCase()} at cursor`,
         () => this.addMeshObject(kind), 'object primitive mesh');
     }
+    add('object.group', 'Group selection under a new empty',
+      () => this.runAction('groupToEmpty'), 'object parent empty group pivot');
     add('add.camera', 'Add camera at current view', () => this.addCamera(), 'object');
     add('add.gp', 'Add blank Grease Pencil object', () => this.addGPObject(), 'object grease pencil new');
     add('add.polymesh', 'Add Editable Mesh', () => this.addPolyMeshObject(), 'object topology poly editable mesh');
@@ -2040,10 +2084,11 @@ class App implements AppHandle {
    * installation setup touches, testable with nothing plugged in, and a
    * starting point to replace pieces with real inputs one at a time.
    */
-  loadDemoScene(): void {
+  loadDemoScene(playground = false): void {
     this.ctx.pushUndo();
     const upZ = this.ctx.settings.upAxis === 'Z';
-    const wiring = buildDemoScene(upZ);
+    propEngine.reset();
+    const wiring = playground ? buildPlaygroundScene(upZ) : buildDemoScene(upZ);
     this.ctx.replaceScene(wiring.scene);
     // runtime wiring: which stream reads from which virtual source. This is
     // NOT scene data (see App.setStreamDriver), so it has to be redone here
@@ -2820,7 +2865,7 @@ class App implements AppHandle {
     URL.revokeObjectURL(a.href);
   }
 
-  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'EMPTY', src?: string, at?: [number, number, number]): void {
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA' | 'EMPTY', src?: string, at?: [number, number, number]): void {
     this.ctx.pushUndo();
     const id = Date.now() % 1e9;
     this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, at ?? [...this.ctx.scene.cursor], src));
@@ -3661,6 +3706,15 @@ class App implements AppHandle {
     this.score.update(ctx.scene, dt, now);
     this.syncScoreGlyphs();
     if (this.sim.step(ctx.scene, dt)) ctx.requestRender(this.sim.lastLayerId ?? undefined);
+    // Loose props: after the solver, so contact reads this frame's finished
+    // pose — a foot's velocity is the kick, and it has to be the real one.
+    // Static geometry only: props resolve against each other separately, and
+    // a crate solved against its own box would shove itself across the room.
+    if (propEngine.update(
+      ctx.scene, dt, ctx.settings.upAxis === 'Z',
+      walkVolume.gather(ctx.scene).staticBoxes)) {
+      this.meshes.sync(ctx.scene, this.nav.active);
+    }
     this.splats.sync(ctx.scene);
     this.meshes.sync(ctx.scene, this.nav.active);
     this.polys.sync(ctx.scene, this.nav.active);

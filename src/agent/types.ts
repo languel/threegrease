@@ -39,7 +39,7 @@ export interface AgentHost {
   resetActor(id: number): void;
   setTool(id: string): void;
   snapView(view: 'FRONT' | 'BACK' | 'RIGHT' | 'LEFT' | 'TOP' | 'BOTTOM'): void;
-  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'EMPTY', src?: string, at?: [number, number, number]): void;
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA' | 'EMPTY', src?: string, at?: [number, number, number]): void;
   addGPObject(): void;
   addLight(kind: import('../core/types').TGLight['kind'], at?: [number, number, number]): void;
   /** base64 PNG of the current viewport — the vision channel */

@@ -107,7 +107,7 @@ export interface AppHandle {
   sim: { enabled: boolean; damping: number; stiffness: number; reset(): void };
   splats: { errors: Map<number, string> };
   meshes: { errors: Map<number, string> };
-  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'EMPTY'): void;
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA' | 'EMPTY'): void;
   /** Persist UVs on an editable mesh (App owns the camera for VIEW). */
   unwrapPoly(id: number, mode: UnwrapMode): void;
   /** Bake a source onto the selected object's base-color texture. */
@@ -165,7 +165,7 @@ export interface AppHandle {
   objectExtents(ref: import('../tools/objects').ObjRef): [number, number, number] | null;
   pickObject(cb: (ref: import('../tools/objects').ObjRef | null) => void): void;
   newScene(): void;
-  loadDemoScene(): void;
+  loadDemoScene(playground?: boolean): void;
   captureCameraPlate(camIndex: number, distance?: number, width?: number): void;
   viewAll(): void;
   addCamera(): void;
@@ -838,6 +838,7 @@ export class UI {
     menu('File', [
       { label: 'New', action: 'newScene' },
       { label: 'New — Demo gallery scene', do: () => this.app.loadDemoScene() },
+      { label: 'New — Gallery + loose props', do: () => this.app.loadDemoScene(true) },
       { label: 'Open…', action: 'open' },
       { label: 'Save', action: 'save' },
       { sep: true },
@@ -895,6 +896,10 @@ export class UI {
       { label: 'Sphere', do: () => this.app.addMeshObject('SPHERE') },
       { label: 'Cylinder', do: () => this.app.addMeshObject('CYLINDER') },
       { label: 'Pyramid', do: () => this.app.addMeshObject('PYRAMID') },
+      { label: 'Tetrahedron', do: () => this.app.addMeshObject('TETRA') },
+      { label: 'Octahedron', do: () => this.app.addMeshObject('OCTA') },
+      { label: 'Dodecahedron', do: () => this.app.addMeshObject('DODECA') },
+      { label: 'Icosahedron', do: () => this.app.addMeshObject('ICOSA') },
       { label: 'Empty', do: () => this.app.addMeshObject('EMPTY') },
       { sep: true },
       { label: 'Actor (mannequin)', do: () => this.app.addActor() },

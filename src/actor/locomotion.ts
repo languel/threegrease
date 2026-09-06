@@ -47,6 +47,8 @@ export class WalkVolume {
     if (frame >= 0 && frame === this.stamp) return this;
     this.stamp = frame;
     this.boxes.length = 0;
+    this.staticBoxes.length = 0;
+    this.loose.length = 0;
     for (const m of scene.meshes) {
       if (m.visible === false || m.collide === false) continue;
       const local = meshLocalBounds(m);
@@ -56,9 +58,18 @@ export class WalkVolume {
         if (box.max[ax] - box.min[ax] < MIN_THICK) box.min[ax] = box.max[ax] - MIN_THICK;
       }
       this.boxes.push(box);
+      this.loose.push(!!m.body);
+      // The prop simulation needs the IMMOVABLE world: a loose crate solved
+      // against its own box would shove itself across the room.
+      if (!m.body) this.staticBoxes.push(box);
     }
     return this;
   }
+
+  /** The immovable subset of `boxes`, for the prop simulation. */
+  staticBoxes: THREE.Box3[] = [];
+  /** per-box: is this a loose prop rather than world geometry? */
+  loose: boolean[] = [];
 
   /** Ground snap + horizontal push-out, in that order. Mutates `pos`. */
   resolve(pos: THREE.Vector3, upAxis: number, body: WalkBody): void {
@@ -66,7 +77,8 @@ export class WalkVolume {
     const flat = (['x', 'y', 'z'] as const).filter((_, i) => i !== upAxis);
     const feet = pos.getComponent(upAxis);
 
-    // ground: the highest surface under us that we could step onto
+    // Ground: EVERYTHING, loose props included — standing on a crate is
+    // exactly what a crate is for, and it costs nothing to allow.
     let ground = 0;
     for (const b of this.boxes) {
       if (b.max[ax] > feet + body.stepHeight || b.max[ax] < ground) continue;
@@ -78,7 +90,13 @@ export class WalkVolume {
 
     // walls: anything spanning the body's height band, pushed out along its
     // axis of LEAST penetration — which for a room is always the wall normal
-    for (const b of this.boxes) {
+    for (let i = 0; i < this.boxes.length; i++) {
+      const b = this.boxes[i];
+      // A LOOSE prop never blocks. It is something you walk into and send
+      // rolling, not something you edge around — and the character's joints
+      // are already what push it (actor/props.ts), so stopping the body here
+      // would only prevent the contact that does the work.
+      if (this.loose[i]) continue;
       if (b.max[ax] <= ground + body.stepHeight) continue;  // ground or a step
       if (b.min[ax] >= ground + body.height) continue;      // overhead
       let bestAxis: 'x' | 'y' | 'z' | null = null;
