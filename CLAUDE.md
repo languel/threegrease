@@ -498,6 +498,18 @@ the browser console or automated evals:
   topple onto a face. That is deliberately the same fidelity the character's
   own world-AABB collision has; pairing a rigid-body engine with a capsule
   that push-outs of boxes would be worse, not better.
+  You can also drag one by hand: the Pose tool grabs props as well as joints
+  (`tools/actorpose.ts`), and the two are the same gesture on purpose —
+  neither one WRITES a position. A joint gets a solver target; a prop gets a
+  velocity toward the cursor (`propEngine.hold`), so it still meets the room
+  on the way and stops at the wall instead of ending up inside it. Letting go
+  simply stops steering it, which is why the throw needs no extra code: the
+  chase velocity IS the throw. A held prop carries no gravity, so it stays
+  where you park it in mid-air until you release — staging a scene wants
+  that, and falling on release is the same rule as everything else.
+  Prop positions are read and written THROUGH the parent transform, because
+  `mesh.translation` is parent-local and one Cmd-G puts every ball under an
+  empty; the simulation itself works in world space.
   A loose prop is GROUND but never a WALL: you can stand on a crate, and you
   walk THROUGH a ball rather than edging round it, because the joints are
   what move it and stopping the body would prevent the contact that does the

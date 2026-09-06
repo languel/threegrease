@@ -22,12 +22,18 @@
 import * as THREE from 'three';
 import type { GPScene, TGMesh, Vec3 } from '../core/types';
 import { meshLocalBounds, worldAABB } from '../tools/objectops';
-import { worldMatrixOf } from '../tools/objects';
+import { parentWorldMatrixOf, worldMatrixOf } from '../tools/objects';
 
 /** Below this speed a prop is treated as parked, so a room full of them
  *  does not shimmer forever. */
 const SLEEP = 0.035;
 const MAX_STEP = 1 / 60;
+/** How fast a HELD prop is allowed to chase the cursor. Bounded because the
+ *  hold is a velocity, not a teleport: at any speed the prop still resolves
+ *  against walls, and a flick that outran the collision pass would post a
+ *  ball through the gallery wall. It is also the throw speed, since letting
+ *  go simply stops steering it. */
+const HOLD_SPEED = 14;
 
 interface Live {
   mesh: TGMesh;
@@ -35,6 +41,11 @@ interface Live {
   vel: THREE.Vector3;
   radius: number;
   invMass: number;
+  /** world -> the space `mesh.translation` is written in (identity unless
+   *  the prop is parented — grouping props under an empty is one click away) */
+  toLocal: THREE.Matrix4;
+  /** where a hand is dragging it this frame, in world space */
+  hold: THREE.Vector3 | null;
 }
 
 /** A prop's collision radius: the largest half-extent it is drawn with. */
@@ -47,8 +58,25 @@ export class PropEngine {
   /** joint world positions from the previous frame, for contact velocity */
   private lastJoints = new Map<string, THREE.Vector3>();
   private accum = 0;
+  /** props under a cursor right now: mesh id -> world target */
+  private held = new Map<number, THREE.Vector3>();
 
-  reset(): void { this.lastJoints.clear(); this.accum = 0; }
+  reset(): void { this.lastJoints.clear(); this.held.clear(); this.accum = 0; }
+
+  /**
+   * Drag a prop by steering it, never by placing it.
+   *
+   * The whole point of dragging a ball rather than typing its coordinates is
+   * to see it meet the room, so a held prop is driven by a VELOCITY toward
+   * the cursor and then goes through the same collision pass as everything
+   * else: it stops at walls, shoulders other props aside, and shoves a
+   * character it is pushed into. Setting `translation` from the tool would
+   * skip all of that and put the ball inside the wall.
+   */
+  hold(id: number, target: THREE.Vector3): void { this.held.set(id, target.clone()); }
+  /** Let go. Whatever velocity the chase built up is the throw. */
+  release(id: number): void { this.held.delete(id); }
+  isHeld(id: number): boolean { return this.held.has(id); }
 
   /** Every dynamic prop's world AABB, so the walking body can stand on them. */
   dynamicBoxes(scene: GPScene): THREE.Box3[] {
@@ -66,12 +94,15 @@ export class PropEngine {
     for (const m of scene.meshes) {
       if (!m.body || m.visible === false || m.lock) continue;
       m.body.vel ??= [0, 0, 0];
+      const parent = parentWorldMatrixOf(scene, { kind: 'MESH', id: m.id });
       live.push({
         mesh: m,
-        pos: new THREE.Vector3(...m.translation),
+        pos: new THREE.Vector3(...m.translation).applyMatrix4(parent),
         vel: new THREE.Vector3(...m.body.vel),
         radius: propRadius(m),
         invMass: m.body.mass > 0 ? 1 / m.body.mass : 0,
+        toLocal: parent.clone().invert(),
+        hold: this.held.get(m.id) ?? null,
       });
     }
     if (!live.length) return false;
@@ -87,7 +118,8 @@ export class PropEngine {
     if (!stepped) return false;
 
     for (const b of live) {
-      b.mesh.translation = [b.pos.x, b.pos.y, b.pos.z];
+      const local = b.pos.clone().applyMatrix4(b.toLocal);
+      b.mesh.translation = [local.x, local.y, local.z];
       b.mesh.body!.vel = [b.vel.x, b.vel.y, b.vel.z];
     }
     return true;
@@ -100,7 +132,16 @@ export class PropEngine {
     const g = -9.81;
 
     for (const b of live) {
-      b.vel.setComponent(upAxis, b.vel.getComponent(upAxis) + g * h);
+      if (b.hold) {
+        // Chase the cursor at a bounded speed and carry no gravity while
+        // held, so a prop stays where you put it in mid-air — which is what
+        // staging a scene actually needs — and falls the moment you let go.
+        const want = b.hold.clone().sub(b.pos).divideScalar(h);
+        if (want.length() > HOLD_SPEED) want.setLength(HOLD_SPEED);
+        b.vel.copy(want);
+      } else {
+        b.vel.setComponent(upAxis, b.vel.getComponent(upAxis) + g * h);
+      }
       b.pos.addScaledVector(b.vel, h);
     }
 
@@ -132,7 +173,7 @@ export class PropEngine {
     }
 
     for (const b of live) {
-      if (b.vel.lengthSq() < SLEEP * SLEEP) b.vel.set(0, 0, 0);
+      if (!b.hold && b.vel.lengthSq() < SLEEP * SLEEP) b.vel.set(0, 0, 0);
     }
   }
 

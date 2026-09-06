@@ -275,7 +275,7 @@ class App implements AppHandle {
   readonly sys = {
     streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
     gaitEngine, possession, actorMixer, steerEngine, ardyBackend,
-    behaviourEngine, actorLog,
+    behaviourEngine, actorLog, propEngine,
     bindHumanoid, poseHumanoid, vrmManager,
     /** the app's own three, so an eval never pulls a second copy in
      *  (importing 'three' makes vite re-optimize and silently reload) */

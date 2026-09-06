@@ -1,7 +1,7 @@
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
-import type { MaterialBlend, TGMaterial, TextureSlotName, Vec3, ViewportShading } from '../core/types';
+import type { MaterialBlend, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
@@ -63,6 +63,7 @@ import { autoRig } from '../actor/rig';
 import { MASK_LABELS, SOURCE_LABELS, nextLayerId } from '../actor/mixer';
 import { MOVE_ACTIONS, runMoveAction } from '../actor/commands';
 import { nextMacroId } from '../actor/macros';
+import { defaultBody, propRadius } from '../actor/props';
 import { ACTOR_LOOKS, LOOK_OPTIONS } from '../render/actorlooks';
 import type { ActorLayerSource } from '../core/types';
 
@@ -652,7 +653,7 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['object-select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
     ['object-select-lasso', 'lasso', 'Lasso select'],
     ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
-    ['actorpose', 'actorPose', 'Pose actor — drag a joint (the body follows through physics); Shift+click pins/unpins it'],
+    ['actorpose', 'actorPose', 'Pose — drag a joint (the body follows through physics; Shift+click pins it), or drag a physics prop to move and throw it'],
     ['direct', 'actorDirect', 'Direct — click the world to send a character there. Pick the verb in the HUD: walk / run / sneak / march / jump / look / stop'],
     ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits, Backspace undoes a point, Esc cancels); drag a placed point to adjust it'],
   ],
@@ -2920,6 +2921,7 @@ export class UI {
           class: 'row',
           text: 'Camera lock: Loc/Rot/Scale become a view-space offset (keep z negative for depth)',
         })] : []),
+        ...this.physicsRows(m),
         ...(m.kind === 'MODEL' || m.kind === 'EMPTY'
           ? [] // MODEL owns its imported materials; EMPTY has no surface
           : this.materialEditor(ref)),
@@ -3015,6 +3017,44 @@ export class UI {
       );
     }
     return panel(`Properties — ${objectName(ctx.scene, ref)}`, ...rows);
+  }
+
+  /**
+   * Loose-prop physics for one mesh.
+   *
+   * Absent `body` means static, which stays the default: a wall you can
+   * shove is a bug. Turning it on is what makes an object grabbable with the
+   * Pose tool, so this row and that drag are really one feature — stage the
+   * room by throwing things around in it.
+   */
+  private physicsRows(m: TGMesh): Node[] {
+    const { ctx } = this.app;
+    const on = !!m.body;
+    const rows: Node[] = [
+      el('div', { class: 'menu-sep' }),
+      el('div', { class: 'menu-header', text: 'Physics' }),
+      checkbox('Loose prop', on, (v) => {
+        ctx.pushUndo();
+        m.body = v ? defaultBody(propRadius(m)) : undefined;
+        this.refresh();
+      }, 'falls, rolls, and can be pushed, kicked or thrown — drag it with the Pose tool'),
+    ];
+    if (!m.body) return rows;
+    const b = m.body;
+    rows.push(
+      el('div', { class: 'row' },
+        numField('Mass', b.mass, (v) => { b.mass = Math.max(0.01, v); }, 0.1,
+          { def: defaultBody(propRadius(m)).mass }),
+        slider('Bounce', b.bounce, 0, 1, 0.01, (v) => { b.bounce = v; }, { def: 0.42 }),
+        slider('Friction', b.friction, 0, 1, 0.01, (v) => { b.friction = v; }, { def: 0.06 }),
+      ),
+      el('div', { class: 'row' },
+        btn('Stop', () => { b.vel = [0, 0, 0]; ctx.requestRender(); },
+          { title: 'park it where it is — the drop that put it there keeps trying otherwise' }),
+        el('span', { class: 'hint', text: 'sphere collision only — a cube will not topple onto a face' }),
+      ),
+    );
+    return rows;
   }
 
   /** Blender-style brush Advanced panel; edits are baked into future strokes only. */
