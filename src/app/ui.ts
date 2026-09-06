@@ -645,8 +645,8 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['object-select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
     ['object-select-lasso', 'lasso', 'Lasso select'],
     ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
-    ['actorpose', 'actor', 'Pose actor — drag a joint (the body follows through physics); Shift+click pins/unpins it'],
-    ['direct', 'actor', 'Direct — click the world to send a character there. Pick the verb in the HUD: walk / run / sneak / march / jump / look / stop'],
+    ['actorpose', 'actorPose', 'Pose actor — drag a joint (the body follows through physics); Shift+click pins/unpins it'],
+    ['direct', 'actorDirect', 'Direct — click the world to send a character there. Pick the verb in the HUD: walk / run / sneak / march / jump / look / stop'],
     ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits, Backspace undoes a point, Esc cancels); drag a placed point to adjust it'],
   ],
   DRAW: [

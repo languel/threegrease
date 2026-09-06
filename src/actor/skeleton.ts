@@ -56,8 +56,18 @@ const SPINE_SPECS: JointSpec[] = [
   // pointed up, and angle retargeting would shorten the figure every
   // frame — it measurably did, costing ~0.5 units of height.
   { name: 'chest', at: [0, 0, 0.806], radius: 0.072, mass: 2.5 },
-  { name: 'neck', at: [0, 0, 0.851], radius: 0.038 },
-  { name: 'head', at: [0, 0, 0.900], radius: 0.078, mass: 1.2 },
+  // Neck and head, sized off the canonical 7.5-head figure rather than by
+  // eye. A head is 1/7.5 = 0.133 of total height, so its radius is 0.067 and
+  // its centre sits at 0.933 — which puts the crown at 1.0, i.e. the figure
+  // is actually as tall as it claims to be.
+  //
+  // The previous numbers (head at 0.900, radius 0.078) made the head 0.156
+  // of height — a 6.4-head figure — and, worse, spanned 0.822 to 0.978,
+  // which SWALLOWED the neck joint at 0.851 entirely. That is where the
+  // hunched look came from: not a bad pose, a head resting directly on the
+  // shoulder line with no neck visible between them.
+  { name: 'neck', at: [0, 0, 0.845], radius: 0.034 },
+  { name: 'head', at: [0, 0, 0.930], radius: 0.067, mass: 1.2 },
 ];
 
 /** bones as name pairs — resolved to ids once the joints exist */

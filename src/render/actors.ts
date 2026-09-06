@@ -19,6 +19,19 @@ import { worldMatrixOf } from '../tools/objects';
 import { materialManager } from './materialmgr';
 import { jointEmphasis, limbEmphasis, lookSpec } from './actorlooks';
 
+/** Which local axis the actor stands up along, from its own rest skeleton. */
+function actorUpAxis(actor: TGActor): number {
+  const head = actor.joints.find((j) => j.name === 'head')?.rest;
+  const hips = actor.joints.find((j) => j.name === 'hips')?.rest;
+  if (!head || !hips) return 2;
+  let best = 2; let mag = 0;
+  for (let i = 0; i < 3; i++) {
+    const d = Math.abs(head[i] - hips[i]);
+    if (d > mag) { mag = d; best = i; }
+  }
+  return best;
+}
+
 /** unit cylinder along +Y, which is what setFromUnitVectors expects to
  *  rotate onto an arbitrary bone direction */
 const UP = new THREE.Vector3(0, 1, 0);
@@ -201,7 +214,14 @@ export class ActorManager {
       // supposed to annotate.
       const base = showLimbs ? spec.joint : 0.3;
       const emph = jointEmphasis(spec, j.name);
-      mesh.scale.setScalar(j.radius * emph * (j.pin ? base * 1.7 : base));
+      const r = j.radius * emph * (j.pin ? base * 1.7 : base);
+      mesh.scale.setScalar(r);
+      // the head is an ovoid, stretched along the actor's own up axis —
+      // read off the skeleton (head above hips) rather than from the scene
+      // setting, so it is right for an actor built in either convention
+      if (j.name === 'head' && spec.headOvoid !== 1) {
+        mesh.scale.setComponent(actorUpAxis(actor), r * spec.headOvoid);
+      }
       mesh.visible = showLimbs || showSticks;
     }
   }

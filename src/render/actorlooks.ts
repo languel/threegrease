@@ -47,6 +47,10 @@ export interface LookSpec {
    * actually built.
    */
   limbEmphasis: Record<string, number>;
+  /** stretch the head along the up axis: 1 is a ball, >1 an egg. A real lay
+   *  figure's head is a turned ovoid, and that single ratio is most of why
+   *  it reads as carved rather than as a snowman. */
+  headOvoid: number;
   /** applied to actor.color when the look is chosen */
   color: Vec3;
   hint: string;
@@ -57,8 +61,11 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     label: 'Mannequin',
     limb: 1, joint: 0.55, taper: 1, capped: false,
     roughness: 0.75, metalness: 0, flat: false, unlit: false,
-    emphasis: {},
+    // 1.15 holds the head at the size it read at before the skeleton's own
+    // head shrank — this look was never the one with the problem
+    emphasis: { head: 1.15 },
     limbEmphasis: {},
+    headOvoid: 1,
     color: [0.72, 0.74, 0.80],
     hint: 'the working rig — even tubes, small beads, neutral grey',
   },
@@ -69,8 +76,11 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     // large and the limbs taper into them.
     limb: 0.92, joint: 0.86, taper: 0.68, capped: true,
     roughness: 0.45, metalness: 0, flat: false, unlit: false,
-    emphasis: { head: 1.12, hips: 1.15, chest: 1.1, hand: 0.85, foot: 0.9 },
-    limbEmphasis: { neck: 0.65, head: 0.8 },
+    emphasis: { head: 1.05, hips: 1.15, chest: 1.1, hand: 0.85, foot: 0.9 },
+    // the neck is a slim PEG between the shoulder line and the head, which
+    // is the join a lay figure shows off rather than hides
+    limbEmphasis: { neck: 0.55, head: 0.62 },
+    headOvoid: 1.32,
     color: [0.78, 0.58, 0.34],
     hint: 'artist’s lay figure — turned limbs, proud ball joints, warm wood',
   },
@@ -80,8 +90,11 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     // keeps the same weight from every angle and against any background.
     limb: 0.3, joint: 0.42, taper: 1, capped: false,
     roughness: 1, metalness: 0, flat: false, unlit: true,
-    emphasis: { head: 1.5, hand: 0.7, foot: 0.7 },
+    // 1.75 keeps this figure EXACTLY the size it was before the skeleton's
+    // head shrank; it was the one look that already read correctly
+    emphasis: { head: 1.75, hand: 0.7, foot: 0.7 },
     limbEmphasis: {},
+    headOvoid: 1,
     color: [0.93, 0.93, 0.96],
     hint: 'stylised stick figure — thin lines, one flat tone, no lighting',
   },
@@ -97,6 +110,7 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     roughness: 0.95, metalness: 0, flat: false, unlit: false,
     emphasis: { head: 1.6, hand: 1.55, foot: 1.35, hips: 1.15, chest: 1.1 },
     limbEmphasis: { spine: 1.25, chest: 1.25, neck: 0.5, head: 0.5, hand: 1.2, foot: 1.2 },
+    headOvoid: 1.1,
     color: [0.91, 0.70, 0.58],
     hint: 'stop-motion chunk — big head and hands, stocky torso, matte clay',
   },
