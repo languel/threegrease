@@ -18,6 +18,7 @@ import type { GPScene, TGActor } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 import { materialManager } from './materialmgr';
 import { jointEmphasis, limbEmphasis, lookSpec } from './actorlooks';
+import { actorHasAvatar } from './vrm';
 
 /** Which local axis the actor stands up along, from its own rest skeleton. */
 function actorUpAxis(actor: TGActor): number {
@@ -169,7 +170,12 @@ export class ActorManager {
       }
     }
 
-    const showLimbs = actor.shape === 'CAPSULE' || actor.shape === 'BOTH';
+    // While a VRM wears this actor's motion the mannequin gets out of the
+    // way — two bodies in the same place is never what anyone wants — but
+    // the RIG overlay stays available, because that is how you see what is
+    // actually driving the avatar.
+    const wearing = actorHasAvatar(actor);
+    const showLimbs = !wearing && (actor.shape === 'CAPSULE' || actor.shape === 'BOTH');
     const showSticks = actor.shape === 'STICK' || actor.shape === 'BOTH';
     const idx = new Map(actor.joints.map((j, i) => [j.id, i]));
     const a = new THREE.Vector3(); const b = new THREE.Vector3(); const dir = new THREE.Vector3();

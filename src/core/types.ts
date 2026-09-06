@@ -978,6 +978,10 @@ export interface TGActor {
     strength: number;
   };
   shape: 'CAPSULE' | 'STICK' | 'BOTH';
+  /** MODEL mesh id of a VRM avatar this actor wears. While set, the actor's
+   *  own mannequin is hidden and the avatar is posed from its skeleton — and
+   *  the avatar's transform is the ACTOR's, not authored. */
+  avatar?: number | null;
   /** how it is DRAWN — see render/actorlooks.ts. Changes nothing about the
    *  skeleton, the physics or the motion; the same pose, rendered as a
    *  working mannequin, a wooden lay figure, a stick figure or clay. */

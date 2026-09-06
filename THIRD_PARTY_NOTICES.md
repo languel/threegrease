@@ -20,6 +20,7 @@ point of the document:
 | Package | Licence |
 | --- | --- |
 | `three` | MIT |
+| `@pixiv/three-vrm` | MIT |
 | `onnxruntime-web` | MIT |
 | `@sparkjsdev/spark` | MIT |
 | `@huggingface/tokenizers` | Apache-2.0 |

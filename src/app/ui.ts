@@ -133,6 +133,8 @@ export interface AppHandle {
   actorGoToObject(actorId: number, ref: import('../tools/objects').ObjRef): void;
   actorStop(actorId: number): void;
   modelMotions(): { meshId: number; name: string; clips: string[] }[];
+  avatarChoices(): { id: number; name: string }[];
+  setActorAvatar(actorId: number, meshId: number | null): void;
   motionBackendIds(): { id: string; label: string }[];
   motionEndpoint(): string;
   motionStatus(): { text: string; busy: boolean; notices: string[]; hint: string } | null;
@@ -838,7 +840,7 @@ export class UI {
       { sep: true },
       { header: 'Import' },
       { label: 'GP object / scene (.json)…', do: () => this.filePick('.json', (f) => this.app.importGPFile(f)) },
-      { label: 'Model (.glb/.gltf/.obj)…', do: () => this.filePick('.glb,.gltf,.obj', (f) => this.app.importModelFile(f)) },
+      { label: 'Model / avatar (.glb/.gltf/.obj/.vrm)…', do: () => this.filePick('.glb,.gltf,.obj,.vrm', (f) => this.app.importModelFile(f)) },
       {
         label: 'Splat (.ply/.spz/.splat)…',
         do: () => this.filePick('.ply,.spz,.splat,.ksplat,.sog', (f) => {
@@ -894,7 +896,7 @@ export class UI {
       { sep: true },
       { label: 'Actor (mannequin)', do: () => this.app.addActor() },
       { sep: true },
-      { label: 'Model…', do: () => this.filePick('.glb,.gltf,.obj', (f) => this.app.importModelFile(f)) },
+      { label: 'Model / avatar…', do: () => this.filePick('.glb,.gltf,.obj,.vrm', (f) => this.app.importModelFile(f)) },
       { sep: true },
       { label: 'Grease Pencil (blank)', do: () => this.app.addGPObject() },
       { label: 'GP object…', do: () => this.filePick('.json', (f) => this.app.importGPFile(f)) },
@@ -1601,6 +1603,20 @@ export class UI {
           this.refresh();
         }), { }),
       el('div', { class: 'panel-hint', text: ACTOR_LOOKS[actor.look ?? 'DEFAULT'].hint }),
+      ...(() => {
+        const avatars = this.app.avatarChoices();
+        if (!avatars.length) return [];
+        return [
+          fieldRow('Avatar model', selectField('', String(actor.avatar ?? ''), [
+            ['', '(none — use the mannequin)'],
+            ...avatars.map((v) => [String(v.id), v.name] as [string, string]),
+          ], (v) => this.app.setActorAvatar(actor.id, v ? Number(v) : null))),
+          el('div', { class: 'panel-hint', text: actor.avatar != null
+            ? 'The avatar wears this actor\u2019s motion. Its transform is the '
+              + 'actor\u2019s, so move the actor, not the model.'
+            : 'A VRM imported into the scene can wear this skeleton\u2019s motion.' }),
+        ];
+      })(),
       fieldRow('Shape', selectField('', actor.shape, [
         ['BOTH', 'Body + rig'], ['CAPSULE', 'Body only'], ['STICK', 'Rig only'],
       ], (v) => { actor.shape = v; touch(); })),

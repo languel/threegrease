@@ -120,6 +120,8 @@ import {
   motionBackends, proceduralBackend, remoteBackend, type MotionRequest,
 } from '../actor/generate';
 import { ARDY_NOTICES, ardyBackend, ardyDownloadHint } from '../actor/ardy';
+import { bindHumanoid, poseHumanoid } from '../render/vrmpose';
+import { vrmManager } from '../render/vrm';
 import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
 import { buildDemoScene } from './demoscene';
@@ -268,6 +270,7 @@ class App implements AppHandle {
   readonly sys = {
     streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
     gaitEngine, possession, actorMixer, steerEngine, ardyBackend,
+    bindHumanoid, poseHumanoid, vrmManager,
     /** the app's own three, so an eval never pulls a second copy in
      *  (importing 'three' makes vite re-optimize and silently reload) */
     THREE,
@@ -2663,6 +2666,22 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** Loaded VRM avatars in the scene, for the Actor panel's picker. */
+  avatarChoices(): { id: number; name: string }[] {
+    return vrmManager.ids()
+      .map((id) => this.ctx.scene.meshes.find((m) => m.id === id))
+      .filter((m): m is NonNullable<typeof m> => !!m)
+      .map((m) => ({ id: m.id, name: m.name }));
+  }
+
+  setActorAvatar(actorId: number, meshId: number | null): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
+    if (!actor) return;
+    this.ctx.pushUndo();
+    actor.avatar = meshId;
+    this.ui.refresh();
+  }
+
   possessedActor(): number | null { return possession.actorId; }
   possessView(): PossessView { return possession.view; }
 
@@ -3674,6 +3693,11 @@ class App implements AppHandle {
     // probing one frame later than the capture it's standing in for would —
     // irrelevant for a demo/test source, and simpler than reordering the
     // constraint pass around a feature most scenes never use.
+    // Avatars: after the constraint pass, because the actor's own world
+    // transform has to be final before the avatar inherits it, and after the
+    // solver because it reads the finished pose.
+    vrmManager.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
+
     tickSimStreams(ctx.scene, ctx.scene.frame);
     this.widget.camera = this.nav.active; // ortho/persp swaps
     // quad view step 1: the widget is scene-graph-resident (renders into

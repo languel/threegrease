@@ -7,6 +7,7 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import type { GPScene, TGMesh, Vec3 } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 import { materialManager } from './materialmgr';
+import { VrmManager, vrmManager } from './vrm';
 
 function vec3Eq(a: Vec3, b: Vec3): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
@@ -52,6 +53,7 @@ export class MeshManager {
         this.entries.delete(id);
         this.errors.delete(id);
         this.modelAnimations.delete(id);
+        vrmManager.forget(id);
       }
     }
     for (const data of scene.meshes) {
@@ -129,8 +131,14 @@ export class MeshManager {
       try {
         if (ext === 'obj') new OBJLoader().load(data.src, onLoad, undefined, onErr);
         else {
-          new GLTFLoader().load(data.src, (g) => {
+          const loader = new GLTFLoader();
+          // Always registered: a VRM IS a glTF, so rather than sniffing the
+          // extension (blob: URLs have none anyway) we let the plugin decide
+          // and check whether it produced a humanoid.
+          VrmManager.prepare(loader);
+          loader.load(data.src, (g) => {
             onLoad(g.scene);
+            vrmManager.adopt(data.id, g as unknown as { scene: THREE.Object3D });
             // Keep the animation. It used to be dropped here, which is why
             // a Mixamo export imported as a statue: the geometry arrived
             // and the motion was thrown away in the same line.
