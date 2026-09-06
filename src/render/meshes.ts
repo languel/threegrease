@@ -36,9 +36,41 @@ export function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
   }
 }
 
-/** how far the silhouette shell is pushed out past the surface. Small
- *  enough to read as an outline, big enough to survive at a distance. */
-const HULL_GROW = 1.045;
+/**
+ * Outline width in SCREEN pixels.
+ *
+ * Not a scale factor. Fattening the shell by a percentage makes the rim
+ * proportional to the object, so a crate 400 px across gets a fat band and a
+ * marble 20 px across gets half a pixel — an outline that quietly vanishes on
+ * exactly the small things you are hunting for. The shader below pushes each
+ * vertex along its normal by a fixed number of pixels instead, which is what
+ * every DCC outline does and why theirs stay legible at any distance.
+ */
+const OUTLINE_PX = 2.6;
+/** outlines draw after everything else, two passes per object */
+const OUTLINE_ORDER = 900;
+
+const OUTLINE_VERT = `
+uniform float uPx;
+uniform vec2 uRes;
+void main() {
+  vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  // the vertex normal, projected into the same clip space, is the direction
+  // "outwards" reads as on screen
+  vec3 n = normalize(normalMatrix * normal);
+  vec2 dir = (projectionMatrix * vec4(n, 0.0)).xy;
+  if (length(dir) > 1e-6) {
+    // clip.w undoes the perspective divide, so the offset lands as uPx
+    // pixels whatever the depth
+    clip.xy += normalize(dir) * (uPx / uRes) * clip.w * 2.0;
+  }
+  gl_Position = clip;
+}`;
+
+const OUTLINE_FRAG = `
+uniform vec3 uColor;
+uniform float uOpacity;
+void main() { gl_FragColor = vec4(uColor, uOpacity); }`;
 
 export class MeshManager {
   readonly group = new THREE.Group();
@@ -69,6 +101,11 @@ export class MeshManager {
   /** selection outlines, id -> colour; hover wins where they overlap */
   private selected = new Map<number, string>();
   private hulls = new Map<number, { group: THREE.Group; color: string }>();
+  /** rotating stencil value, so overlapping outlines do not mask each other */
+  private nextStencilRef = 0;
+  /** viewport size in CSS px, shared by every outline material (App.resize
+   *  keeps it current — a stale one makes the outline width drift) */
+  readonly outlineResolution = new THREE.Vector2(1, 1);
 
   setHover(id: number | null, color = '#7fd4ff'): void {
     this.hover = id === null ? null : { id, color };
@@ -171,27 +208,64 @@ export class MeshManager {
       if (!hull) {
         const group = new THREE.Group();
         group.userData.forId = id;
+        // Each outlined object gets its OWN stencil value. With one shared
+        // ref, the second object's mask would still be sitting in the buffer
+        // where the two overlap and would eat the first object's rim; with a
+        // ref each, every shell tests only against its own body, so all the
+        // outlines survive on top of each other.
+        const ref = (this.nextStencilRef = (this.nextStencilRef % 250) + 1);
+        const order = OUTLINE_ORDER + (ref % 100) * 2;
         entry.root.traverse((o) => {
           const m = o as THREE.Mesh;
           if (!m.isMesh || !m.geometry || o.userData.hoverShell) return;
-          const shell = new THREE.Mesh(m.geometry, new THREE.MeshBasicMaterial({
-            color: colour,
-            // Back faces only, fattened a little: the front faces are then
-            // covered by the object itself and only the rim survives. It is
-            // the cheapest true silhouette there is, and it needs no shader.
+          const local = m === (entry.root as THREE.Mesh)
+            ? new THREE.Matrix4() : (m.updateMatrix(), m.matrix.clone());
+          // Pass 1: stamp the object's own pixels into the stencil buffer,
+          // writing no colour. It is what keeps the shell to a RIM once the
+          // depth test is gone.
+          const mask = new THREE.Mesh(m.geometry, new THREE.MeshBasicMaterial({
+            colorWrite: false, depthWrite: false, depthTest: false,
+            side: THREE.DoubleSide,
+            stencilWrite: true, stencilRef: ref,
+            stencilFunc: THREE.AlwaysStencilFunc,
+            stencilFail: THREE.ReplaceStencilOp,
+            stencilZFail: THREE.ReplaceStencilOp,
+            stencilZPass: THREE.ReplaceStencilOp,
+          }));
+          mask.raycast = () => {};
+          mask.userData.hoverShell = true;
+          mask.renderOrder = order;
+          mask.matrixAutoUpdate = false;
+          mask.matrix.copy(local);
+          // Pass 2: the geometry again, fattened, back faces only — the
+          // silhouette. Depth testing is OFF so a selected object stays
+          // outlined from behind a wall (an outline you cannot see is the
+          // one you are looking for), and the stencil is what stops that
+          // from painting the whole shape as a solid blob.
+          const shell = new THREE.Mesh(m.geometry, new THREE.ShaderMaterial({
+            uniforms: {
+              uColor: { value: new THREE.Color(colour) },
+              uOpacity: { value: 0.95 },
+              uPx: { value: OUTLINE_PX },
+              uRes: { value: this.outlineResolution },
+            },
+            vertexShader: OUTLINE_VERT,
+            fragmentShader: OUTLINE_FRAG,
             side: THREE.BackSide,
             transparent: true,
-            opacity: 0.9,
-            depthWrite: false,
+            depthWrite: false, depthTest: false,
+            stencilWrite: true, stencilRef: ref,
+            stencilFunc: THREE.NotEqualStencilFunc,
+            stencilFail: THREE.KeepStencilOp,
+            stencilZFail: THREE.KeepStencilOp,
+            stencilZPass: THREE.KeepStencilOp,
           }));
           shell.raycast = () => {};
           shell.userData.hoverShell = true;
-          shell.renderOrder = 2;
-          m.updateMatrix();
+          shell.renderOrder = order + 1;
           shell.matrixAutoUpdate = false;
-          shell.matrix.copy(m === (entry.root as THREE.Mesh) ? new THREE.Matrix4() : m.matrix)
-            .multiply(new THREE.Matrix4().makeScale(HULL_GROW, HULL_GROW, HULL_GROW));
-          group.add(shell);
+          shell.matrix.copy(local);
+          group.add(mask, shell);
         });
         if (!group.children.length) continue;
         entry.root.add(group);
@@ -200,7 +274,8 @@ export class MeshManager {
       }
       if (hull.color !== colour) hull.color = colour;
       for (const o of hull.group.children) {
-        ((o as THREE.Mesh).material as THREE.MeshBasicMaterial).color.set(colour);
+        const mat = (o as THREE.Mesh).material as THREE.ShaderMaterial;
+        mat.uniforms?.uColor?.value.set(colour);
       }
     }
   }

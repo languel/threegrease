@@ -2149,6 +2149,7 @@ class App implements AppHandle {
 
   /** Frame just what is selected; falls back to framing everything. */
   viewSelected(): void {
+    this.ui?.revealSelection();
     const refs = listSelected(this.ctx.scene);
     if (!refs.length) { this.viewAll(); return; }
     const box = new THREE.Box3();
@@ -3703,6 +3704,7 @@ class App implements AppHandle {
     this.hud.width = w * devicePixelRatio;
     this.hud.height = h * devicePixelRatio;
     for (const entry of this.selHelpers.values()) entry.helper.material.resolution.set(w, h);
+    this.meshes.outlineResolution.set(w, h);
     this.gp.markDirty();
     this.ui?.drawTimeline();
   }

@@ -87,7 +87,13 @@ Key invariants:
   clicked anything below the fold — and the row you had just clicked slid
   out from under the pointer. `UI.rememberScroll`/`restoreScroll` carry the
   offsets of `.sidebar-outliner` and `.props-content` across the rebuild;
-  add any new scrollable region to `UI.SCROLLERS`.
+  add any new scrollable region to `UI.SCROLLERS`. The one time the outliner
+  SHOULD move is when the selection changed somewhere else — picking in the
+  viewport used to leave the list wherever it was, which tells you nothing in
+  a scene of sixty objects. `revealSelectedRow` scrolls to it only when the
+  selection key actually changed AND the row is off screen; anything more
+  eager is the original bug (the list moving out from under someone reading
+  it) wearing a different hat. Frame-selection asks for it explicitly.
 - **Explanations hang off controls, never underneath them.** A paragraph in
   a panel is read once and then re-read every time you come back for the
   control it explains, and it pushes the actual settings off screen.
@@ -537,6 +543,21 @@ the browser console or automated evals:
   sideways. `screenDisc` projects the real tangent circle instead, and refuses
   to answer for a prop the eye is inside or that straddles the near plane
   (that case reported a 49,000 px disc that swallowed every other pick).
+  The outline is a SHADER, and both halves of that matter. It draws with
+  `depthTest: false` so a selected object stays outlined from behind a wall —
+  an outline you cannot see is exactly the one you were looking for — and a
+  per-object STENCIL ref is what keeps that from painting the shape as a
+  solid blob: pass one stamps the object's own pixels, pass two draws the
+  shell only where the stencil does NOT match. Each outlined object gets its
+  own ref (rotating 1..250), because with one shared value the second
+  object's mask sits in the buffer where they overlap and eats the first
+  one's rim. And the shell is fattened in SCREEN PIXELS by offsetting each
+  vertex along its projected normal, not by scaling the mesh: a percentage
+  makes the rim proportional to the object, so a crate 400 px across gets a
+  fat band while a marble 20 px across gets half a pixel and the highlight
+  vanishes on exactly the small things you are hunting for.
+  `MeshManager.outlineResolution` must track the viewport (App.resize) or the
+  width drifts.
   In the end the 2D marker went away entirely: the inverted hull is now the
   ONE outline in the app — `MeshManager.setHover` for what is under the
   cursor and `setSelectionOutlines` for what is selected, any colour, and the

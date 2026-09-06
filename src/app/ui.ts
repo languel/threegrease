@@ -1630,6 +1630,40 @@ export class UI {
     const tabsRow = el('div', { class: 'sidebar-tabsrow' }, strip, content);
     side.append(outliner, tabsRow);
     this.restoreScroll(side);
+    this.revealSelectedRow(side);
+  }
+
+  /**
+   * Bring the selected row into view when the selection changed elsewhere.
+   *
+   * Selecting in the VIEWPORT used to leave the outliner wherever it was, so
+   * a scene of sixty objects would tell you nothing about what you had just
+   * clicked. This only fires when the selection actually changed, and only
+   * when the row is off screen — scrolling the list out from under someone
+   * who is reading it is the bug this replaces, not a feature.
+   */
+  /** Frame-selection also reveals the row: the two questions ("where is it"
+   *  and "which one is it") are asked at the same moment. */
+  revealSelection(): void {
+    this.revealedKey = '';
+    this.revealSelectedRow($('sidebar'));
+  }
+
+  private revealSelectedRow(root: ParentNode): void {
+    const scroller = root.querySelector('.sidebar-outliner') as HTMLElement | null;
+    if (!scroller) return;
+    const rows = [...scroller.querySelectorAll('.list-item.active')] as HTMLElement[];
+    const row = rows[rows.length - 1];
+    const key = row?.dataset.ref ?? '';
+    if (key === this.revealedKey) return;
+    this.revealedKey = key;
+    if (!row) return;
+    const top = row.offsetTop - scroller.offsetTop;
+    const above = top < scroller.scrollTop;
+    const below = top + row.offsetHeight > scroller.scrollTop + scroller.clientHeight;
+    if (!above && !below) return;
+    scroller.scrollTop = Math.max(0, top - scroller.clientHeight / 2 + row.offsetHeight / 2);
+    this.scrollMemory.set('.sidebar-outliner', scroller.scrollTop);
   }
 
   /** Actor tab: the mannequin's shape, its physics, and its rig.
@@ -2314,6 +2348,8 @@ export class UI {
   private outlinerCollapsed = new Set<string>();
   /** row a shift-range is measured from — the last plainly-clicked one */
   private outlinerAnchor: string | null = null;
+  /** the row the outliner was last scrolled to, so it only chases a CHANGE */
+  private revealedKey = '';
 
   private objectsPanel(): HTMLElement {
     const { ctx } = this.app;
