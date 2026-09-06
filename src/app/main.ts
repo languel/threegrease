@@ -116,6 +116,7 @@ import {
 import { actorMixer } from '../actor/mixer';
 import { steerEngine } from '../actor/steering';
 import { behaviourEngine } from '../actor/behaviour';
+import { actorState } from '../actor/state';
 import { actorLog } from './actorlog';
 import { retargetGltfClip } from '../actor/gltfclip';
 import {
@@ -3895,6 +3896,40 @@ class App implements AppHandle {
       const inset = this.ui.inspectorOpen ? 250 : 0;
       this.nav.drawGizmo(g, this.hud.width / devicePixelRatio - inset);
     }
+    // ---- per-actor state badges ----------------------------------------
+    // Above the head, in the same hues the log uses. The monologue says what
+    // a character INTENDS; this says what is actually happening to it, and
+    // the two disagreeing is the most useful thing on screen.
+    if (!this.presentation && !this.infoOverlayHidden) {
+      const upZ = this.ctx.settings.upAxis === 'Z';
+      const upAxis = upZ ? 2 : 1;
+      const head = new THREE.Vector3();
+      g.font = '600 11px sans-serif';
+      g.textAlign = 'center';
+      for (const actor of this.ctx.scene.actors) {
+        if (!actor.visible) continue;
+        const hi = actor.joints.findIndex((j) => j.name === 'head');
+        const local = hi >= 0 ? actor.pose[hi] : null;
+        head.set(local?.[0] ?? 0, local?.[1] ?? 0, local?.[2] ?? 0);
+        head.applyMatrix4(worldMatrixOf(this.ctx.scene, { kind: 'ACTOR', id: actor.id }));
+        head.setComponent(upAxis, head.getComponent(upAxis) + 0.28);
+        const p = head.clone().project(this.ctx.camera);
+        if (p.z > 1 || p.z < -1) continue;      // behind the camera
+        const x = (p.x * 0.5 + 0.5) * (this.hud.width / devicePixelRatio);
+        const y = (-p.y * 0.5 + 0.5) * (this.hud.height / devicePixelRatio);
+        const st = actorState(this.ctx.scene, actor, upZ, possession.actorId);
+        const text = `${actor.name} · ${st.label}`;
+        const w = g.measureText(text).width;
+        g.fillStyle = 'rgba(20,20,24,0.62)';
+        g.beginPath();
+        g.roundRect(x - w / 2 - 6, y - 14, w + 12, 17, 5);
+        g.fill();
+        g.fillStyle = st.color;
+        g.fillText(text, x, y - 2);
+      }
+      g.textAlign = 'left';
+    }
+
     if (this.nav.flying) {
       g.fillStyle = '#fff';
       g.font = '13px sans-serif';

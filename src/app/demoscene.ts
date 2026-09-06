@@ -1,3 +1,4 @@
+
 // A stock, fully virtual gallery scene: room, props, cameras, and a visitor
 // walking a loop — so an installation can be blocked out, wired and tested
 // entirely with simulated sources, then have any ONE piece swapped for a
@@ -105,21 +106,25 @@ function roomScanPoints(w: number, d: number, h: number, upZ: boolean): number[]
   return pts;
 }
 
-/** A short oval walking loop between the two pedestals, as GP stroke points
- *  on the floor. */
+/**
+ * The Walker's route: a hand-authored circuit that threads the gallery.
+ *
+ * NOT an oval any more, and it cannot be. A FOLLOW_PATH constraint sets the
+ * transform outright — it does not collide with anything, because collision
+ * belongs to the walking body that steering and possession share. So a path
+ * IS the author's promise that the route is walkable, and the previous oval
+ * quietly broke that promise: measured against the props, it passed through
+ * the ziggurat, the stairs, the platform and a column.
+ *
+ * These points were checked against every prop's footprint plus the walker's
+ * own body radius. If you move the furniture, re-check the route.
+ */
 function walkLoopPoints(): Vec3[] {
-  const pts: Vec3[] = [];
-  // Wide and slow on purpose: a tight loop turns the actor ~40 degrees per
-  // stride, and a world-locked stance foot then swings noticeably in body
-  // space. Real walkers shorten their stride to corner; the gait does not
-  // model that yet, so the demo gives it room.
-  const cx = 0, cy = 0, rx = 7.0, ry = 5.2;
-  const n = 24;
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2;
-    pts.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry, 0]);
-  }
-  return pts;
+  return [
+    [-3.6, -2.6, 0], [-3.6, 1.0, 0], [-2.6, 3.6, 0], [0.6, 4.2, 0],
+    [3.2, 3.4, 0], [3.4, 1.4, 0], [2.6, -0.2, 0], [2.0, -1.8, 0],
+    [0.4, -2.9, 0], [-1.6, -3.2, 0], [-3.2, -3.2, 0],
+  ];
 }
 
 /**
@@ -251,7 +256,9 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
 
   // Two free-standing partitions. These are the projection surfaces: solid,
   // double-sided, dark enough that a projected image would read on them.
-  const p1 = prop('BOX', 'Partition (projection)', at(-2.0, 6.0, 1.6), size(6.0, 0.2, 3.2), screen);
+  // Clear of the platform and the stairs: it used to sit across both, which
+  // is what made the top of the room unreadable.
+  const p1 = prop('BOX', 'Partition (projection)', at(1.5, 8.6, 1.6), size(6.0, 0.2, 3.2), screen);
   p1.doubleSided = true;
   const p2 = prop('BOX', 'Partition (projection) 2', at(4.5, -7.5, 1.6), size(5.0, 0.2, 3.2), screen);
   p2.doubleSided = true;
@@ -281,8 +288,8 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   // Balls. NOTE: these do not roll — there is no rigid-body simulation for
   // props, only the actor's own collision against their bounds. They are
   // scenery you can walk around, and a target for "go to that object".
-  prop('SPHERE', 'Ball', at(1.5, 1.5, 0.45), size(0.9, 0.9, 0.9), [0.80, 0.35, 0.30]);
-  prop('SPHERE', 'Ball 2', at(2.6, 0.6, 0.30), size(0.6, 0.6, 0.6), [0.35, 0.45, 0.75]);
+  prop('SPHERE', 'Ball', at(0.2, 1.4, 0.45), size(0.9, 0.9, 0.9), [0.80, 0.35, 0.30]);
+  prop('SPHERE', 'Ball 2', at(1.3, 0.4, 0.30), size(0.6, 0.6, 0.6), [0.35, 0.45, 0.75]);
 
   // ---- the ziggurat: a snub pyramid you can actually climb ---------------
   // A smooth frustum would be a lie here. Collision tests world AABBs, so a
@@ -329,9 +336,11 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
       at(-0.5 - i * 0.35, 6.2, top / 2),
       size(0.35, 2.4, top), plinth);
   }
-  // The raised platform both the ramp and the stairs arrive at. Ramp comes
-  // up its south edge, stairs up its east edge.
-  prop('BOX', 'Platform', at(-4.6, 6.2, 0.9), size(4.4, 3.2, 1.8), plinth);
+  // The raised platform both approaches arrive at, sized to MEET them both:
+  // west to -8.1 so the ramp's full width lands on it, east to -2.4 so the
+  // top stair overlaps its edge. A platform that stops short of what climbs
+  // to it is a 1.8 m drop the walker will (correctly) refuse to cross.
+  prop('BOX', 'Platform', at(-5.25, 6.2, 0.9), size(5.7, 3.2, 1.8), plinth);
 
   // ---- an interactive zone: a proximity bubble beside Pedestal A, so the
   // demo shows a probe firing as the walking visitor passes, exactly the way
@@ -390,10 +399,10 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   const walker = makeVisitor('Walker', at(-7.0, 0, 0), 'WOOD', [0.78, 0.58, 0.34]);
   const follow = createConstraint('FOLLOW_PATH');
   follow.path = { objectIndex: 1, layerId: pathLayer.id, strokeId: stroke.id }; // index 1: pathObj is scene.objects[1]
-  // Phase is a fraction of the loop per second, so it has to be re-derived
-  // when the loop changes size: this oval is ~39 m around, and 0.031 of it
-  // per second is a ~1.2 m/s walk.
-  follow.speed = 0.031;
+  // Phase is a fraction of the loop per second, so it must be re-derived
+  // whenever the route changes: this circuit is 24.2 m around, and 0.0476 of
+  // it per second is a ~1.15 m/s walk.
+  follow.speed = 0.0476;
   follow.loop = 'LOOP';
   follow.running = true;
   follow.orient = true;

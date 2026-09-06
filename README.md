@@ -219,6 +219,19 @@ carry composite **NVIDIA Open Model** and **Meta Llama 3 Community** terms
 rather than the Apache-2.0 of the runtime code. The required attributions
 are shown in the app beside the backend selector.
 
+### Watching what characters do
+
+Two visitors run in the stock demo scene: **Walker** follows a drawn route,
+**Wanderer** is handed goals by a script and steers, climbs and avoids its
+own way there. Same skeleton, same gait, same solver — the two ways of
+driving a character, side by side.
+
+The viewport reports in two registers. The **log** (top left) is each
+character's running commentary in the first person — what it intends, said
+at the moment the goal is set. The **badge** above each head is what is
+actually happening to it: *on route*, *walking*, *climbing*, *looking*,
+*idle*, *stuck*, *driving*. When the two disagree, that is the bug.
+
 ## Licensing
 
 threegrease is proprietary — see [LICENSE](LICENSE). It is an internal

@@ -431,6 +431,20 @@ the browser console or automated evals:
   `score/constraints.ts` builds a basis rather than yaw/pitch eulers, which
   is also what makes a sloped path work: pitch in the X euler slot is applied
   about the WORLD x-axis and is only correct while the yaw is zero.
+- **A FOLLOW_PATH traveller does NOT collide with anything.** Collision lives
+  in the shared walking body that steering and possession use; the constraint
+  engine simply sets the transform. So a path is the AUTHOR'S PROMISE that
+  the route is walkable, and it is easy to break that promise silently — the
+  demo's old oval passed through the ziggurat, the stairs, the platform and a
+  column, and just looked like a ghost. If you move the furniture, re-check
+  the route (`walkLoopPoints` in demoscene.ts was verified against every
+  prop's footprint plus the walker's body radius).
+- **The viewport says what characters are DOING, in two registers**: the
+  first-person log (`app/actorlog.ts`) is what they INTEND, emitted where the
+  goal is actually set so it cannot drift from behaviour; the per-actor badge
+  (`actor/state.ts`, drawn on the HUD) is what is actually happening to them.
+  The two disagreeing — "I'm going to climb the stairs" over a badge reading
+  `stuck` — is the most useful thing on the screen.
 - **An actor's ROOT has exactly three drivers, and they are the same
   shape**: a FOLLOW_PATH constraint (a recorded route), possession
   (`app/possess.ts`, your hands), and steering (`actor/steering.ts`, a
