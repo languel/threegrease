@@ -36,7 +36,17 @@ const PROP_SLACK_PX = 10;
  *  loose prop. Dropping the floor into the simulation is not a feature. */
 const STATIC_GRAB_MAX_R = 1.5;
 
-interface Disc { x: number; y: number; r: number }
+/**
+ * A prop's shape on screen.
+ *
+ * A SPHERE gets an exact circle. Nothing else can: every primitive's local
+ * bounds are the same unit box (`meshLocalBounds`), so a tetrahedron's
+ * "radius" is its box's, more than twice the silhouette it actually draws —
+ * a circle there always looks like the highlight missed. Those get the
+ * projected bounds RECTANGLE instead, which reads as bounds rather than as a
+ * badly fitted ring, and is honest about being generous.
+ */
+interface Disc { x: number; y: number; r: number; rect?: { w: number; h: number } }
 
 interface PropHit {
   meshId: number;
@@ -154,6 +164,48 @@ export class ActorPoseTool implements Tool {
   }
 
   /**
+   * The same disc for something that is NOT a sphere.
+   *
+   * A bounding sphere is the wrong ring for a crate or a tetrahedron: the
+   * physics treats every prop as a sphere, but you are pointing at a SHAPE,
+   * and a tetra's bounding sphere is more than twice its drawn silhouette
+   * (33 px around a 15 px shape) — which looks like the highlight has missed
+   * again. Projecting the eight corners of its box is nearly free and lands
+   * close to what is actually on screen.
+   */
+  private boxDisc(ctx: AppCtx, m: TGMesh): Disc | null {
+    const local = meshLocalBounds(m);
+    if (!local) return null;
+    const box = worldAABB(local, worldMatrixOf(ctx.scene, { kind: 'MESH', id: m.id }));
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      const p = new THREE.Vector3(
+        i & 1 ? box.max.x : box.min.x,
+        i & 2 ? box.max.y : box.min.y,
+        i & 4 ? box.max.z : box.min.z,
+      );
+      if (p.clone().applyMatrix4(ctx.camera.matrixWorldInverse).z > -1e-3) return null;
+      const sp = objectToScreen(ctx, [p.x, p.y, p.z]);
+      minX = Math.min(minX, sp.x); maxX = Math.max(maxX, sp.x);
+      minY = Math.min(minY, sp.y); maxY = Math.max(maxY, sp.y);
+    }
+    if (!Number.isFinite(minX)) return null;
+    return {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      r: Math.max(6, Math.max(maxX - minX, maxY - minY) / 2),
+      rect: { w: Math.max(12, maxX - minX), h: Math.max(12, maxY - minY) },
+    };
+  }
+
+  /** The ring for one mesh: exact for a sphere, box-projected otherwise. */
+  private discFor(ctx: AppCtx, m: TGMesh, world: THREE.Vector3): Disc | null {
+    return m.kind === 'SPHERE'
+      ? this.screenDisc(ctx, world, this.radiusOf(ctx, m))
+      : this.boxDisc(ctx, m);
+  }
+
+  /**
    * The prop under a screen point.
    *
    * Its own drawn silhouette is the grab area, not a fixed radius: a beach
@@ -177,12 +229,14 @@ export class ActorPoseTool implements Tool {
       if (isStatic && (m.kind === 'PLANE' || m.kind === 'EMPTY')) continue;
       const world = new THREE.Vector3()
         .setFromMatrixPosition(worldMatrixOf(ctx.scene, { kind: 'MESH', id: m.id }));
-      const radius = this.radiusOf(ctx, m);
-      if (isStatic && radius > STATIC_GRAB_MAX_R) continue;
-      const disc = this.screenDisc(ctx, world, radius);
+      if (isStatic && this.radiusOf(ctx, m) > STATIC_GRAB_MAX_R) continue;
+      const disc = this.discFor(ctx, m, world);
       if (!disc) continue;
       const d = Math.hypot(disc.x - x, disc.y - y);
-      if (d > disc.r + PROP_SLACK_PX) continue;
+      if (disc.rect) {
+        if (Math.abs(x - disc.x) > disc.rect.w / 2 + PROP_SLACK_PX
+          || Math.abs(y - disc.y) > disc.rect.h / 2 + PROP_SLACK_PX) continue;
+      } else if (d > disc.r + PROP_SLACK_PX) continue;
       // Live props win over static scenery at any distance, then nearest to
       // the centre — so overlapping props resolve the way they look rather
       // than by scene order.
@@ -338,7 +392,7 @@ export class ActorPoseTool implements Tool {
       if (mesh) {
         const w = new THREE.Vector3()
           .setFromMatrixPosition(worldMatrixOf(ctx.scene, { kind: 'MESH', id: p.meshId }));
-        const disc = this.screenDisc(ctx, w, this.radiusOf(ctx, mesh)) ?? p.disc;
+        const disc = this.discFor(ctx, mesh, w) ?? p.disc;
         const s = { x: disc.x, y: disc.y };
         const r = Math.max(12, disc.r + 3);
         const held = !!this.propGrab;
@@ -349,13 +403,23 @@ export class ActorPoseTool implements Tool {
         // Drawn twice: a dark casing under a bright line. The viewport is a
         // room, so a single thin stroke lands on pale floor as often as on
         // dark wall and disappears against one of them.
+        const outline = () => {
+          hud.beginPath();
+          if (disc.rect) {
+            const rr = Math.min(8, disc.rect.w / 4, disc.rect.h / 4);
+            hud.roundRect(s.x - disc.rect.w / 2, s.y - disc.rect.h / 2, disc.rect.w, disc.rect.h, rr);
+          } else {
+            hud.arc(s.x, s.y, r, 0, Math.PI * 2);
+          }
+          hud.stroke();
+        };
         hud.setLineDash(held ? [] : [5, 4]);
         hud.strokeStyle = 'rgba(0,0,0,0.55)';
         hud.lineWidth = held ? 4.5 : 4;
-        hud.beginPath(); hud.arc(s.x, s.y, r, 0, Math.PI * 2); hud.stroke();
+        outline();
         hud.strokeStyle = tint;
         hud.lineWidth = held ? 2.2 : 1.8;
-        hud.beginPath(); hud.arc(s.x, s.y, r, 0, Math.PI * 2); hud.stroke();
+        outline();
         hud.setLineDash([]);
         // a dot at the centre: the ring says WHERE, the dot says the grab
         // acts on the prop's origin, which is what the drag actually moves
@@ -369,10 +433,10 @@ export class ActorPoseTool implements Tool {
         // A big prop's ring can be wider than the viewport, so the label has
         // to fall back to the inside edge rather than off the canvas.
         const tw = hud.measureText(label).width;
-        const right = s.x + r + 6;
+        const right = s.x + (disc.rect ? disc.rect.w / 2 : r) + 6;
         const lx = right + tw < hud.canvas.width / (window.devicePixelRatio || 1)
           ? right
-          : Math.max(4, Math.min(s.x - r - 6 - tw, s.x + 8));
+          : Math.max(4, Math.min(s.x - (disc.rect ? disc.rect.w / 2 : r) - 6 - tw, s.x + 8));
         hud.lineWidth = 3;
         hud.strokeStyle = 'rgba(0,0,0,0.6)';
         hud.strokeText(label, lx, s.y + 4);

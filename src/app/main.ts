@@ -1057,6 +1057,20 @@ class App implements AppHandle {
       }
     }, true);
     window.addEventListener('resize', () => this.resize());
+    // A window resize is only ONE of the ways the viewport changes size: a
+    // panel opening, the sidebar dragging, the timeline growing, or a
+    // browser zoom all resize it silently. `setSize(w, h, false)` leaves the
+    // canvas ELEMENT at its CSS size while the drawing buffer keeps the old
+    // one, so a missed resize does not clip or letterbox — it STRETCHES the
+    // render, and the HUD (drawn in buffer px) drifts from the projection
+    // (computed from the element's rect) by a factor that grows with the
+    // distance from the top-left. The symptom is an overlay that no longer
+    // lands on the thing it is marking, while clicking still works, which
+    // reads as bad HUD maths rather than as a stale buffer. Observe the
+    // element itself and there is nothing left to miss.
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => this.resize()).observe(document.getElementById('viewport')!);
+    }
   }
 
   private onKey(e: KeyboardEvent): void {
@@ -3620,10 +3634,16 @@ class App implements AppHandle {
     ring.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, normal));
   }
 
+  /** last size the buffers were built for, so a ResizeObserver that fires
+   *  for an unchanged layout costs nothing */
+  private sized = { w: 0, h: 0, dpr: 0 };
+
   private resize(): void {
     const vp = document.getElementById('viewport')!;
     const w = vp.clientWidth, h = vp.clientHeight;
     if (w === 0 || h === 0) return;
+    if (w === this.sized.w && h === this.sized.h && devicePixelRatio === this.sized.dpr) return;
+    this.sized = { w, h, dpr: devicePixelRatio };
     this.glRenderer.setSize(w, h, false);
     if (this.quadView) {
       this.paneRects = computePaneRects(w, h);

@@ -507,6 +507,19 @@ the browser console or automated evals:
   chase velocity IS the throw. A held prop carries no gravity, so it stays
   where you park it in mid-air until you release — staging a scene wants
   that, and falling on release is the same rule as everything else.
+  **A missed resize STRETCHES the render and drifts every overlay.**
+  `glRenderer.setSize(w, h, false)` deliberately leaves the canvas ELEMENT at
+  its CSS size, so when the viewport changes size without `resize()` running,
+  the drawing buffer keeps the old dimensions and the browser scales it to
+  fit. Nothing clips and nothing letterboxes — the image is simply stretched,
+  and the HUD (drawn in buffer px) parts company with `objectToScreen`
+  (computed from the element's bounding rect) by a factor that grows with the
+  distance from the top-left. A highlight that sits below and larger than the
+  thing it marks, while clicking that thing still works, is this and not a
+  HUD-maths bug: the pick runs in the same space as the projection. A window
+  resize is only one of the ways it happens (panels, the sidebar drag, the
+  timeline, browser zoom), so `#viewport` is watched with a ResizeObserver
+  and `resize()` early-outs when the size is unchanged.
   Two things the highlight taught: a sphere's SILHOUETTE is not its centre
   projected plus a projected radius — under perspective an off-axis sphere
   projects to an ellipse displaced outward, and the visible radius is the
@@ -514,6 +527,10 @@ the browser console or automated evals:
   sideways. `screenDisc` projects the real tangent circle instead, and refuses
   to answer for a prop the eye is inside or that straddles the near plane
   (that case reported a 49,000 px disc that swallowed every other pick).
+  Only a SPHERE gets a circle: every primitive reports the same unit box from
+  `meshLocalBounds`, so a tetrahedron's "radius" is its box's — over twice the
+  silhouette it draws. The others get the projected bounds RECTANGLE, which
+  reads as bounds instead of as a badly fitted ring.
   And ALT IS NOT AVAILABLE as a viewport modifier: `emulate3Button` (on by
   default) makes Alt+LMB orbit, so an Alt gesture never reaches a tool at all.
   Prop positions are read and written THROUGH the parent transform, because
