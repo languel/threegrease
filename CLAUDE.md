@@ -442,7 +442,11 @@ the browser console or automated evals:
 - **The viewport says what characters are DOING, in two registers**: the
   first-person log (`app/actorlog.ts`) is what they INTEND, emitted where the
   goal is actually set so it cannot drift from behaviour; the per-actor badge
-  (`actor/state.ts`, drawn on the HUD) is what is actually happening to them.
+  (`actor/state.ts`, drawn on the HUD) is what is actually happening to them,
+  including WHICH system is posing them — gait / synth / ARDY / capture /
+  import / you. Take the LOUDEST clip layer when deciding that, not the
+  first: during a crossfade two are live, and the first is the one on its way
+  out, so the badge kept naming the backend that had just been replaced.
   The two disagreeing — "I'm going to climb the stairs" over a badge reading
   `stuck` — is the most useful thing on the screen.
 - **An actor's ROOT has exactly three drivers, and they are the same

@@ -86,6 +86,16 @@ export interface MotionStyle {
   limp: number;
   /** vertical head float, metres */
   headBob: number;
+  /** 0 = arms hang, 1 = reaching overhead */
+  armRaise: number;
+  /** which arm is raised: +1 our .L side, -1 our .R, 0 = both */
+  armSide: number;
+  /** lateral oscillation of a raised hand */
+  wave: number;
+  /** hold a foot off the ground: +1 our .L, -1 our .R, 0 = neither */
+  oneLeg: number;
+  /** vertical bounce of the whole body, on the beat */
+  bounce: number;
 }
 
 export function baseStyle(): MotionStyle {
@@ -93,6 +103,7 @@ export function baseStyle(): MotionStyle {
     stride: 1.4, cadence: 0.95, stepHeight: 0.12, stanceWidth: 0.22,
     duty: 0.62, bob: 0.035, sway: 0.02, armSwing: 0.16,
     lean: 0, crouch: 0, limp: 0, headBob: 0.01,
+    armRaise: 0, armSide: 0, wave: 0, oneLeg: 0, bounce: 0,
   };
 }
 
@@ -111,6 +122,24 @@ const WORDS: [RegExp, Tweak][] = [
   [/\b(idle|stand|standing|wait|waiting)\b/, { cadence: 0.25, stride: 0.05, stepHeight: 0.005, armSwing: 0.02, bob: 0.008 }],
   [/\b(bouncy|skip|skipping|happy)\b/, { bob: 0.09, stepHeight: 0.2, cadence: 1.2, armSwing: 0.26 }],
   [/\bcrouch(ed|ing)?\b/, { crouch: 0.16, stepHeight: 0.08 }],
+  // ---- in-place gestures. Stride goes to almost nothing: these are things
+  // you do while standing, and a residual stride reads as pacing.
+  [/\b(wave|waving|waves|greet|greeting|hello)\b/, {
+    stride: 0.04, stepHeight: 0.004, cadence: 1.1, armSwing: 0.03,
+    armRaise: 0.92, armSide: 1, wave: 0.2, sway: 0.015,
+  }],
+  [/\b(dance|dances|dancing|boogie|groove)\b/, {
+    stride: 0.16, stepHeight: 0.07, cadence: 1.55, duty: 0.5,
+    bob: 0.05, sway: 0.085, armSwing: 0.34, armRaise: 0.5, bounce: 0.075,
+  }],
+  [/\b(one leg|balance|balancing|flamingo|stork)\b/, {
+    stride: 0.02, stepHeight: 0.004, cadence: 0.3, armSwing: 0.04,
+    oneLeg: 1, armRaise: 0.42, sway: 0.03,
+  }],
+  [/\b(stretch|stretching|reach|reaching|arms up)\b/, {
+    stride: 0.02, stepHeight: 0.004, cadence: 0.35,
+    armRaise: 1, armSide: 0, armSwing: 0.02,
+  }],
   [/\b(right)\b/, {}],
 ];
 
@@ -121,6 +150,12 @@ export function styleFromPrompt(prompt: string): MotionStyle {
   for (const [re, tweak] of WORDS) if (re.test(p)) Object.assign(st, tweak);
   // "limp on the right" flips which leg is favoured
   if (st.limp && /\bright\b/.test(p)) st.limp = -Math.abs(st.limp);
+  // "…on the right" flips whichever single-sided thing the words asked for
+  if (/\bright\b/.test(p)) {
+    if (st.armSide > 0) st.armSide = -1;
+    if (st.oneLeg > 0) st.oneLeg = -1;
+  }
+  if (/\bboth\b/.test(p) && st.armRaise > 0) st.armSide = 0;
   return st;
 }
 
@@ -161,6 +196,11 @@ export class ProceduralBackend implements MotionBackend {
 
     const rest = (n: string): Vec3 | null =>
       actor.joints.find((j) => j.name === n)?.rest ?? null;
+    // Reach is measured off the SKELETON, not guessed: a raised hand should
+    // end up at arm's length above the shoulder, whatever size the figure is.
+    const sh = rest('shoulder.L'); const wr = rest('wrist.L');
+    const armLen = sh && wr
+      ? Math.abs(sh[upAxis] - wr[upAxis]) : 0.55;
     const driven = ['hips', 'chest', 'head', 'ankle.L', 'ankle.R', 'wrist.L', 'wrist.R']
       .filter((n) => rest(n) && (!req.joints.length || req.joints.includes(n)));
     const ground = rest('ankle.L')?.[upAxis] ?? 0;
@@ -169,13 +209,22 @@ export class ProceduralBackend implements MotionBackend {
     for (let f = 0; f < count; f++) {
       const t = (f / count) * dur;               // exclusive end: seamless loop
       const phase = (t * style.cadence) % 1;
+      // one bounce for the whole body, so it reads as the figure moving
+      // rather than as its parts disagreeing
+      const bounce = -Math.abs(Math.sin(phase * Math.PI * 2)) * style.bounce;
       const data: number[] = [];
       for (const name of driven) {
         const r = rest(name)!;
         const p: Vec3 = [r[0], r[1], r[2]];
         const side = name.endsWith('.L') ? 1 : -1;
 
-        if (name.startsWith('ankle')) {
+        if (name.startsWith('ankle') && style.oneLeg !== 0
+          && Math.sign(style.oneLeg) === side) {
+          // held off the ground: knee up and slightly forward, and left there
+          p[0] = side * style.stanceWidth * 0.35;
+          p[fwdAxis] = 0.16 * fwdSign;
+          p[upAxis] = ground + 0.36 + Math.sin(t * 1.1) * 0.02;
+        } else if (name.startsWith('ankle')) {
           // A limp shortens one leg's stance and drops its lift. Expressed
           // as a per-side scale rather than a special case, so "limp" and
           // "limp harder" are the same knob.
@@ -199,20 +248,40 @@ export class ProceduralBackend implements MotionBackend {
         } else if (name === 'hips') {
           p[upAxis] -= style.crouch
             + Math.abs(Math.sin(phase * Math.PI * 2)) * style.bob;
+          p[upAxis] += bounce;
           p[0] += Math.sin(phase * Math.PI * 2) * style.sway;
+          // balancing: the weight has to go over the foot that is still down,
+          // or the figure stands on nothing and reads as a glitch
+          if (style.oneLeg !== 0) p[0] -= Math.sign(style.oneLeg) * 0.09;
         } else if (name === 'chest') {
           p[upAxis] -= style.crouch * 0.8;
+          p[upAxis] += bounce * 0.8;
           p[fwdAxis] += style.lean * fwdSign;
           p[0] += Math.sin(phase * Math.PI * 2) * style.sway * 0.5;
+          if (style.oneLeg !== 0) p[0] -= Math.sign(style.oneLeg) * 0.05;
         } else if (name === 'head') {
           p[upAxis] -= style.crouch * 0.7
             - Math.sin(phase * Math.PI * 4) * style.headBob;
+          p[upAxis] += bounce * 0.7;
           p[fwdAxis] += style.lean * 0.6 * fwdSign;
         } else if (name.startsWith('wrist')) {
           // arms counter-swing the opposite leg
           const swing = Math.cos((phase + (side > 0 ? 0.5 : 0)) * Math.PI * 2) * style.armSwing;
           p[fwdAxis] += swing * fwdSign;
           p[upAxis] -= style.crouch * 0.6;
+          p[upAxis] += bounce;
+          // ...and a raised arm overrides the swing entirely. Out to the side
+          // as well as up, or the hand travels through the head on its way.
+          const raised = style.armRaise > 0
+            && (style.armSide === 0 || Math.sign(style.armSide) === side);
+          if (raised) {
+            p[upAxis] += armLen * 1.75 * style.armRaise;
+            p[0] += side * 0.22 * style.armRaise;
+            if (style.wave > 0) {
+              p[0] += side * Math.sin(t * 7.5) * style.wave;
+              p[fwdAxis] += Math.cos(t * 7.5) * style.wave * 0.35 * fwdSign;
+            }
+          }
         }
         data.push(+p[0].toFixed(5), +p[1].toFixed(5), +p[2].toFixed(5), 1);
       }

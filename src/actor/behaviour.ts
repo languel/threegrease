@@ -26,7 +26,9 @@ export type Step =
   /** turn on the spot to look at something */
   | { say: string; face: Vec3 }
   /** stand there */
-  | { say: string; wait: number };
+  | { say: string; wait: number }
+  /** do something in place — a gesture, a dance — for `hold` seconds */
+  | { say: string; perform: string; hold: number; seconds?: number };
 
 interface Runner {
   steps: Step[];
@@ -42,6 +44,15 @@ const STEP_TIMEOUT = 30;
 
 export class BehaviourEngine {
   private runners = new Map<number, Runner>();
+
+  /**
+   * Wired by the App, because generating motion is its job, not a behaviour's
+   * — the same reason steps set scene state rather than posing anything.
+   * `perform` asks for a clip; travelling steps ask for it to be dropped so
+   * the walk cycle takes the legs back.
+   */
+  onPerform: ((actorId: number, prompt: string, seconds: number) => void) | null = null;
+  onClearMotion: ((actorId: number) => void) | null = null;
 
   clear(): void { this.runners.clear(); }
 
@@ -87,6 +98,16 @@ export class BehaviourEngine {
     st.arrived = false;
     st.stuck = false;
 
+    if ('perform' in step) {
+      st.mode = 'NONE';
+      this.onPerform?.(actor.id, step.perform, step.seconds ?? 3);
+      return;
+    }
+    // Anything that TRAVELS hands the body back to the gait first: a held
+    // gesture playing while the character walks away is the stacking problem
+    // in a different costume.
+    this.onClearMotion?.(actor.id);
+
     if ('style' in step && step.style) applyStyleToGait(actor, step.style);
 
     if ('goto' in step) {
@@ -111,6 +132,7 @@ export class BehaviourEngine {
 
   private done(actor: TGActor, step: Step, t: number): boolean {
     if ('wait' in step) return t >= step.wait;
+    if ('perform' in step) return t >= step.hold;
     // arrived OR gave up — a character that wedged should carry on with its
     // day rather than standing in a corner for the rest of the piece
     return !!actor.steer?.arrived;

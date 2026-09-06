@@ -230,7 +230,15 @@ The viewport reports in two registers. The **log** (top left) is each
 character's running commentary in the first person — what it intends, said
 at the moment the goal is set. The **badge** above each head is what is
 actually happening to it: *on route*, *walking*, *climbing*, *looking*,
-*idle*, *stuck*, *driving*. When the two disagree, that is the bug.
+*idle*, *stuck*, *driving* — and **which system is producing the pose**:
+*gait*, *synth*, *ARDY*, *capture*, *import*, *you*. Synth and ARDY answer
+the same request through the same seam, so from the outside they are
+otherwise indistinguishable; the badge is how you tell. When the intent and
+the state disagree, that is the bug.
+
+The stock choreography uses the built-in synthesiser, so it runs the moment
+you open it with nothing downloaded — and upgrades itself to the on-device
+model the instant you load that in the Motion panel.
 
 ## Licensing
 

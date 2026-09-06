@@ -2053,6 +2053,15 @@ class App implements AppHandle {
     // The second visitor's script is runtime wiring too, for the same reason
     // the stream drivers are: it is not part of the document.
     behaviourEngine.clear();
+    behaviourEngine.onPerform = (actorId, prompt, seconds) => {
+      // The synthesiser until the on-device model is loaded, ARDY after —
+      // so the demo runs the instant it is opened with nothing downloaded,
+      // and upgrades itself the moment you load the model in the Motion
+      // panel. The badge says which one is playing.
+      void this.generateMotion(
+        actorId, prompt, seconds, ardyBackend.ready ? 'ardy' : 'local');
+    };
+    behaviourEngine.onClearMotion = (actorId) => this.clearGeneratedMotion(actorId);
     actorLog.clear();
     if (wiring.wandererId != null) {
       behaviourEngine.run(wiring.wandererId, wandererScript(upZ), true);
@@ -3918,14 +3927,27 @@ class App implements AppHandle {
         const x = (p.x * 0.5 + 0.5) * (this.hud.width / devicePixelRatio);
         const y = (-p.y * 0.5 + 0.5) * (this.hud.height / devicePixelRatio);
         const st = actorState(this.ctx.scene, actor, upZ, possession.actorId);
-        const text = `${actor.name} · ${st.label}`;
-        const w = g.measureText(text).width;
+        const main = `${actor.name} · ${st.label}`;
+        const tail = ` · ${st.driver}`;
+        // The driver rides along in a dimmer tone: which system is producing
+        // the pose is the question you have the moment more than one can.
+        const wMain = g.measureText(main).width;
+        g.font = '11px sans-serif';
+        const wTail = g.measureText(tail).width;
+        g.font = '600 11px sans-serif';
+        const w = wMain + wTail;
         g.fillStyle = 'rgba(20,20,24,0.62)';
         g.beginPath();
         g.roundRect(x - w / 2 - 6, y - 14, w + 12, 17, 5);
         g.fill();
+        g.textAlign = 'left';
         g.fillStyle = st.color;
-        g.fillText(text, x, y - 2);
+        g.fillText(main, x - w / 2, y - 2);
+        g.font = '11px sans-serif';
+        g.fillStyle = 'rgba(210,210,220,0.72)';
+        g.fillText(tail, x - w / 2 + wMain, y - 2);
+        g.font = '600 11px sans-serif';
+        g.textAlign = 'center';
       }
       g.textAlign = 'left';
     }

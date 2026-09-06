@@ -8,7 +8,8 @@
 //
 // It is derived, never stored: reading the same state the engines act on
 // means the badge cannot claim something the character is not doing.
-import type { GPScene, TGActor } from '../core/types';
+import type { GPScene, TGActor, TGActorLayer } from '../core/types';
+import { actorMixer } from './mixer';
 import { steerEngine } from './steering';
 import { gaitEngine } from './gait';
 
@@ -18,6 +19,9 @@ export interface ActorState {
   label: string;
   tone: StateTone;
   color: string;
+  /** WHICH system is producing the pose right now — the question you
+   *  actually have when several of them can. */
+  driver: string;
 }
 
 const COLOR: Record<StateTone, string> = {
@@ -33,6 +37,43 @@ const COLOR: Record<StateTone, string> = {
 /** Height gained per actor since the last sample, for the climb badge. */
 const lastUp = new Map<number, number>();
 
+/**
+ * Which system is posing this actor.
+ *
+ * Read off the live layer stack rather than guessed, and it names the
+ * BACKEND for a generated clip — "synth" and "ARDY" produce the same kind of
+ * object through the same seam, so from the outside they are otherwise
+ * indistinguishable, which is the point of the seam and also why you need to
+ * be told.
+ */
+function driverOf(scene: GPScene, actor: TGActor, possessed: boolean): string {
+  if (possessed) return 'you';
+  // The LOUDEST clip layer, not the first. During a crossfade two are live
+  // at once, and taking the first named the one on its way out — so the
+  // badge went on claiming ARDY after a synth clip had replaced it.
+  let live: TGActorLayer | undefined;
+  let best = 0.05;
+  for (const l of actor.layers ?? []) {
+    if (l.source !== 'CLIP' || !l.enabled || l.clipId == null) continue;
+    const w = l.weight * actorMixer.fadeFactor(actor.id, l.id);
+    if (w > best) { best = w; live = l; }
+  }
+  if (live) {
+    const clip = scene.clips.find((c) => c.id === live.clipId);
+    const src = clip?.source ?? '';
+    if (src.startsWith('ardy:') || src === 'generated:ardy') return 'ARDY';
+    if (src === 'generated:local') return 'synth';
+    if (src === 'generated:remote') return 'remote';
+    if (src.startsWith('gltf:')) return 'import';
+    return 'clip';
+  }
+  if (actor.rig?.mode && actor.rig.mode !== 'NONE' && actor.rig.mode !== 'MANUAL'
+    && actor.rig.streamId != null) return 'capture';
+  const gait = (actor.layers ?? []).find((l) => l.source === 'GAIT');
+  if (actor.gait?.enabled && (!gait || gait.enabled)) return 'gait';
+  return 'still';
+}
+
 export function actorState(
   scene: GPScene, actor: TGActor, upZ: boolean, possessedId: number | null,
 ): ActorState {
@@ -41,8 +82,9 @@ export function actorState(
   const rose = up - (lastUp.get(actor.id) ?? up);
   lastUp.set(actor.id, up);
 
+  const driver = driverOf(scene, actor, possessedId === actor.id);
   const mk = (label: string, tone: StateTone): ActorState =>
-    ({ label, tone, color: COLOR[tone] });
+    ({ label, tone, color: COLOR[tone], driver });
 
   if (possessedId === actor.id) return mk('driving', 'drive');
 
@@ -55,6 +97,11 @@ export function actorState(
   if (rose > 0.004) return mk('climbing', 'climb');
 
   const speed = gaitEngine.speedOf(actor.id);
+  // A gesture playing in place is not idling, whatever the feet are doing.
+  if (driver === 'synth' || driver === 'ARDY' || driver === 'remote'
+    || driver === 'import' || driver === 'clip') {
+    if (!steerEngine.active(actor) && speed < 0.15) return mk('performing', 'look');
+  }
   if (steerEngine.active(actor)) {
     return mk(speed > 0.15 ? 'walking' : 'setting off', 'walk');
   }
