@@ -109,7 +109,7 @@ function walkLoopPoints(): Vec3[] {
   // stride, and a world-locked stance foot then swings noticeably in body
   // space. Real walkers shorten their stride to corner; the gait does not
   // model that yet, so the demo gives it room.
-  const cx = 0, cy = 0, rx = 2.7, ry = 1.7;
+  const cx = 0, cy = 0, rx = 7.0, ry = 5.2;
   const n = 24;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
@@ -121,11 +121,17 @@ function walkLoopPoints(): Vec3[] {
 export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   const scene = createScene();
 
-  // ---- room shell: floor + four walls, sized to a small gallery room ----
-  // 7 x 5 x 2.6 m — real dimensions, since 1 unit = 1 metre is the scene's
-  // own convention (see the measure tool). Walls are unlit PLANE meshes so
-  // they read as a room without needing real lighting to look right.
-  const ROOM_W = 7, ROOM_D = 5, ROOM_H = 2.6;
+  // ---- room shell: floor + four walls -----------------------------------
+  // 20 x 20 x 5 m — real dimensions, since 1 unit = 1 metre is the scene's
+  // own convention (see the measure tool). A gallery-sized box rather than a
+  // room-sized one: the point of the demo is walking a space with things in
+  // it, and at 7 x 5 the visitor crossed the whole floor in four strides.
+  //
+  // The perimeter walls are WIREFRAME. A solid box you are standing outside
+  // of is just a grey rectangle — you cannot see the thing you are staging.
+  // Wireframe keeps the walls present for collision and for placing
+  // projections against, while leaving the space readable from any angle.
+  const ROOM_W = 20, ROOM_D = 20, ROOM_H = 5;
   const wallColor: Vec3 = [0.86, 0.85, 0.81];
   const room: ReturnType<typeof createMeshObject>[] = [];
   const addWall = (name: string, at: Vec3, rot: Vec3, w: number, h: number): void => {
@@ -143,6 +149,7 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
     m.unlit = false;
     m.doubleSided = true;
     m.drawTarget = true;
+    m.wireframe = name !== 'Floor';
     room.push(m);
   };
   if (upAxisZ) {
@@ -165,16 +172,103 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
     addWall('Wall West', [-ROOM_W / 2, ROOM_H / 2, 0], [0, Math.PI / 2, 0], ROOM_D, ROOM_H);
   }
 
-  // ---- props: two pedestals the walk loop threads between ----
-  const pedAt = (x: number, y: number): Vec3 => (upAxisZ ? [x, y, 0.55] : [x, 0.55, y]);
-  const ped1 = createMeshObject(genId(), 'BOX', pedAt(-1.6, 0));
-  ped1.name = 'Pedestal A';
-  ped1.scale = [0.5, 0.5, 1.1];
-  ped1.color = [0.93, 0.92, 0.9];
-  const ped2 = createMeshObject(genId(), 'BOX', pedAt(1.6, 0));
-  ped2.name = 'Pedestal B';
-  ped2.scale = [0.5, 0.5, 1.1];
-  ped2.color = [0.93, 0.92, 0.9];
+  // ---- the installations -------------------------------------------------
+  // A gallery, not an obstacle course: a handful of things with clear space
+  // between them, so there is somewhere to walk TO and something to walk
+  // AROUND. Everything here is a primitive with real bounds, which is what
+  // makes it collide and what makes it stand on.
+  const props: ReturnType<typeof createMeshObject>[] = [];
+  /** place in the scene's up-axis convention: (x, y) is the floor plane. */
+  const at = (x: number, y: number, up: number): Vec3 =>
+    (upAxisZ ? [x, y, up] : [x, up, y]);
+  /** size in the scene's up-axis convention. */
+  const size = (w: number, d: number, h: number): Vec3 =>
+    (upAxisZ ? [w, d, h] : [w, h, d]);
+
+  const prop = (
+    kind: 'BOX' | 'CYLINDER' | 'SPHERE' | 'PYRAMID' | 'PLANE',
+    name: string, pos: Vec3, sc: Vec3, color: Vec3,
+  ): ReturnType<typeof createMeshObject> => {
+    const m = createMeshObject(genId(), kind, pos);
+    m.name = name;
+    m.scale = sc;
+    m.color = color;
+    m.drawTarget = true;
+    props.push(m);
+    return m;
+  };
+
+  const stone: Vec3 = [0.93, 0.92, 0.90];
+  const plinth: Vec3 = [0.88, 0.87, 0.85];
+  const screen: Vec3 = [0.20, 0.21, 0.24];
+
+  // Two plinths, as before — the pieces the visitor is here to look at.
+  prop('BOX', 'Plinth A', at(-5.5, 2.0, 0.55), size(0.5, 0.5, 1.1), plinth);
+  prop('BOX', 'Plinth B', at(5.5, -2.0, 0.55), size(0.5, 0.5, 1.1), plinth);
+
+  // A bench: low enough to sit on, which for a character means low enough to
+  // STEP onto — 0.45 is under the 0.35 step height plus a bit of leg, so the
+  // walker treats it as ground rather than as a wall.
+  prop('BOX', 'Bench', at(0, -6.5, 0.22), size(2.4, 0.5, 0.45), plinth);
+
+  // Two free-standing partitions. These are the projection surfaces: solid,
+  // double-sided, dark enough that a projected image would read on them.
+  const p1 = prop('BOX', 'Partition (projection)', at(-2.0, 6.0, 1.6), size(6.0, 0.2, 3.2), screen);
+  p1.doubleSided = true;
+  const p2 = prop('BOX', 'Partition (projection) 2', at(6.5, 4.0, 1.6), size(0.2, 5.0, 3.2), screen);
+  p2.doubleSided = true;
+
+  // Columns, floor to ceiling. NOTE the 1.2: CylinderGeometry is 1.2 tall,
+  // not 1, so a cylinder's scale is its size divided by 1.2 — the same
+  // "scale is not size" trap PLANE has with its 2x2 geometry, sitting in the
+  // same switch. Getting it wrong here buried the columns 0.4 m in the floor.
+  const COLUMN_H = 4.8;
+  const colScale = size(0.6, 0.6, COLUMN_H / 1.2);
+  prop('CYLINDER', 'Column A', at(-6.0, -5.0, COLUMN_H / 2), colScale, stone);
+  prop('CYLINDER', 'Column B', at(-2.0, -5.0, COLUMN_H / 2), colScale, stone);
+
+  prop('PYRAMID', 'Pyramid', at(3.0, 6.5, 0.9), size(2.4, 2.4, 1.8), stone);
+
+  // Balls. NOTE: these do not roll — there is no rigid-body simulation for
+  // props, only the actor's own collision against their bounds. They are
+  // scenery you can walk around, and a target for "go to that object".
+  prop('SPHERE', 'Ball', at(1.5, 1.5, 0.45), size(0.9, 0.9, 0.9), [0.80, 0.35, 0.30]);
+  prop('SPHERE', 'Ball 2', at(2.6, 0.6, 0.30), size(0.6, 0.6, 0.6), [0.35, 0.45, 0.75]);
+
+  // ---- ramp and stairs ---------------------------------------------------
+  // Both are built as STACKED BOXES rather than as one tilted slab, and that
+  // is a deliberate consequence of how collision works here: the walking
+  // body tests world-space AABBs, so a rotated ramp would present one flat
+  // top at its highest point and the character would step onto the whole
+  // thing at once. Stepping is the rule that already works — anything whose
+  // top is within a step height counts as ground — so a ramp is simply a
+  // staircase with risers too small to notice, and a staircase is the same
+  // construction with honest ones.
+  const RAMP_STEPS = 12;
+  const RAMP_RISE = 1.8 / RAMP_STEPS;      // 0.15 m — reads as a slope
+  const RAMP_RUN = 0.55;
+  for (let i = 0; i < RAMP_STEPS; i++) {
+    const top = RAMP_RISE * (i + 1);
+    prop('BOX', `Ramp ${i + 1}`,
+      at(-7.0, -1.0 + i * RAMP_RUN, top / 2),
+      size(2.2, RAMP_RUN, top), plinth);
+  }
+  const STAIR_STEPS = 6;
+  const STAIR_RISE = 1.8 / STAIR_STEPS;    // 0.30 m — a real stair
+  for (let i = 0; i < STAIR_STEPS; i++) {
+    const top = STAIR_RISE * (i + 1);
+    // ascending in -x so the top step lands against the platform's edge;
+    // stairs that stop short of what they climb to are just furniture
+    prop('BOX', `Stair ${i + 1}`,
+      // the top step OVERLAPS the platform edge. A 7.5 cm gap between them
+      // is invisible and completely impassable: the walker sees floor level
+      // under that sliver, reads a 1.8 m drop, and refuses to cross.
+      at(-0.5 - i * 0.35, 6.2, top / 2),
+      size(0.35, 2.4, top), plinth);
+  }
+  // The raised platform both the ramp and the stairs arrive at. Ramp comes
+  // up its south edge, stairs up its east edge.
+  prop('BOX', 'Platform', at(-4.6, 6.2, 0.9), size(4.4, 3.2, 1.8), plinth);
 
   // ---- an interactive zone: a proximity bubble beside Pedestal A, so the
   // demo shows a probe firing as the walking visitor passes, exactly the way
@@ -189,15 +283,15 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   // it falls through to the sphere test where `radius` is the thing that
   // actually decides. Kept at floor level to match where the walking
   // visitor's root probe is.
-  const zoneObj = createMeshObject(genId(), 'EMPTY', upAxisZ ? [-1.6, 0, 0] : [-1.6, 0, 0]);
-  zoneObj.name = 'Zone · near Pedestal A';
+  const zoneObj = createMeshObject(genId(), 'EMPTY', at(-5.5, 2.0, 0));
+  zoneObj.name = 'Zone · near Plinth A';
   const zone: TGConstraint = createConstraint('TRIGGER');
   // `{name}` substitutes the CONSTRAINT's name into the address, so the name
   // has to be OSC-safe: no spaces, since an OSC address pattern is
   // whitespace-delimited on the wire and 'near Pedestal A' would split into
   // an address plus a stray argument at the far end.
   zone.name = 'pedestalA';
-  zone.radius = 1;
+  zone.radius = 1.6;
   zone.messages = [{ address: '/gallery/enter/{name}', argExprs: ['{x}', '{y}', '{z}'] }];
   zone.leaveMessages = [{ address: '/gallery/leave/{name}', argExprs: ['1'] }];
   zoneObj.constraints = [zone];
@@ -219,7 +313,11 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   if (actor.gait) actor.gait.enabled = true;   // walk the loop, don't glide it
   const follow = createConstraint('FOLLOW_PATH');
   follow.path = { objectIndex: 1, layerId: pathLayer.id, strokeId: stroke.id }; // index 1: pathObj is scene.objects[1]
-  follow.speed = 0.075;   // ~1.1 m/s around this loop — a walking pace
+  // Phase is a fraction of the loop per second, so it has to be re-derived
+  // when the loop changes size: this oval is ~39 m around, and 0.031 of it
+  // per second is a ~1.2 m/s walk. The old 0.075 was tuned for a loop a
+  // fifth as long and would sprint the visitor around this one.
+  follow.speed = 0.031;
   follow.loop = 'LOOP';
   follow.running = true;
   follow.orient = true;
@@ -263,7 +361,7 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   scene.paintClouds.push(scan);
 
   scene.objects.push(pathObj);
-  scene.meshes.push(...room, ped1, ped2, zoneObj);
+  scene.meshes.push(...room, ...props, zoneObj);
   scene.actors.push(actor);
   scene.cameras.push(secCam);
   scene.activeCamera = 0; // keep the user's main camera active; security cam is a second view

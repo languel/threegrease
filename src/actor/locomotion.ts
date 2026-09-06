@@ -103,14 +103,86 @@ export class WalkVolume {
    * the third-person boom (pull in rather than sit inside a wall) and for
    * steering's look-ahead.
    */
-  castDistance(from: THREE.Vector3, dir: THREE.Vector3, max: number): number {
+  castDistance(
+    from: THREE.Vector3, dir: THREE.Vector3, max: number,
+    accept?: (b: THREE.Box3) => boolean,
+  ): number {
     const ray = new THREE.Raycaster(from, dir, 0, max);
     const hit = new THREE.Vector3();
     let best = max;
     for (const b of this.boxes) {
+      if (accept && !accept(b)) continue;
       if (ray.ray.intersectBox(b, hit)) best = Math.min(best, from.distanceTo(hit));
     }
     return best;
+  }
+
+  /**
+   * Is this box a WALL for a body standing at `ground`? Exactly the test
+   * `resolve` uses, exposed so that obstacle avoidance can agree with
+   * collision about what counts as an obstacle.
+   *
+   * Without this the two disagree in the worst possible way: a ramp or a
+   * platform is something you walk ONTO, but a look-ahead ray at hip height
+   * sees it as a wall and steers around it — so the character circles the
+   * thing it is trying to climb and eventually reports itself stuck, having
+   * been prevented from using the geometry by the system meant to keep it
+   * from bumping into geometry.
+   */
+  blocks(b: THREE.Box3, ground: number, upAxis: number, body: WalkBody): boolean {
+    const ax = (['x', 'y', 'z'] as const)[upAxis];
+    if (b.max[ax] <= ground + body.stepHeight) return false;  // ground or a step
+    if (b.min[ax] >= ground + body.height) return false;      // overhead
+    return true;
+  }
+
+  /**
+   * Move a body from `from` toward `to`, refusing to walk off a ledge.
+   *
+   * There is no gravity here, so without this rule a character that walks
+   * over the edge of a platform simply TELEPORTS to the floor — and worse,
+   * the thing it just stepped off becomes a wall it can no longer climb, so
+   * it ends up circling a ramp it was halfway up. A drop of more than a step
+   * height is refused, which lets someone walk down a ramp (0.15 m risers)
+   * while keeping them on a 1.8 m platform.
+   *
+   * The refusal is per-axis, not all-or-nothing, so you can still walk ALONG
+   * an edge instead of sticking to it the moment one component would drop.
+   */
+  stepTo(
+    from: THREE.Vector3, to: THREE.Vector3, upAxis: number, body: WalkBody,
+  ): THREE.Vector3 {
+    const flat = (['x', 'y', 'z'] as const).filter((_, i) => i !== upAxis);
+    const startGround = this.groundAt(from, upAxis, body);
+    const safe = (p: THREE.Vector3): boolean =>
+      this.groundAt(p, upAxis, body) >= startGround - body.stepHeight;
+
+    let target = to.clone();
+    if (!safe(target)) {
+      // try each axis alone — sliding along the lip rather than stopping dead
+      const onlyA = from.clone(); onlyA[flat[0]] = to[flat[0]];
+      const onlyB = from.clone(); onlyB[flat[1]] = to[flat[1]];
+      if (safe(onlyA)) target = onlyA;
+      else if (safe(onlyB)) target = onlyB;
+      else target = from.clone();
+    }
+    this.resolve(target, upAxis, body);
+    return target;
+  }
+
+  /** The support height under a point — what `resolve` would stand on. */
+  groundAt(pos: THREE.Vector3, upAxis: number, body: WalkBody): number {
+    const ax = (['x', 'y', 'z'] as const)[upAxis];
+    const flat = (['x', 'y', 'z'] as const).filter((_, i) => i !== upAxis);
+    const feet = pos.getComponent(upAxis);
+    let ground = 0;
+    for (const b of this.boxes) {
+      if (b.max[ax] > feet + body.stepHeight || b.max[ax] < ground) continue;
+      if (pos[flat[0]] < b.min[flat[0]] || pos[flat[0]] > b.max[flat[0]]) continue;
+      if (pos[flat[1]] < b.min[flat[1]] || pos[flat[1]] > b.max[flat[1]]) continue;
+      ground = b.max[ax];
+    }
+    return ground;
   }
 
   /** Read-only, for debugging a scene where a character stops unexpectedly. */

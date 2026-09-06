@@ -106,7 +106,7 @@ export interface AppHandle {
   sim: { enabled: boolean; damping: number; stiffness: number; reset(): void };
   splats: { errors: Map<number, string> };
   meshes: { errors: Map<number, string> };
-  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'EMPTY'): void;
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'EMPTY'): void;
   /** Persist UVs on an editable mesh (App owns the camera for VIEW). */
   unwrapPoly(id: number, mode: UnwrapMode): void;
   /** Bake a source onto the selected object's base-color texture. */
@@ -889,6 +889,7 @@ export class UI {
       { label: 'Box', do: () => this.app.addMeshObject('BOX') },
       { label: 'Sphere', do: () => this.app.addMeshObject('SPHERE') },
       { label: 'Cylinder', do: () => this.app.addMeshObject('CYLINDER') },
+      { label: 'Pyramid', do: () => this.app.addMeshObject('PYRAMID') },
       { label: 'Empty', do: () => this.app.addMeshObject('EMPTY') },
       { sep: true },
       { label: 'Actor (mannequin)', do: () => this.app.addActor() },

@@ -216,13 +216,23 @@ export class SteerEngine {
       const look = Math.max(0.4, st.lookAhead);
       const { right } = headingBasis(headingOf(dir, upZ), upZ);
 
+      // Only steer around what would actually BLOCK this body from where it
+      // is standing. A ramp, a step or a platform edge is something you walk
+      // onto; treating it as an obstacle makes the character circle the very
+      // thing it was sent to climb, and then declare itself stuck.
+      const body = {
+        radius: st.radius, stepHeight: st.stepHeight, height: actorHeight(actor, upAxis),
+      };
+      const ground = walkVolume.groundAt(pos, upAxis, body);
+      const wall = (b: THREE.Box3): boolean => walkVolume.blocks(b, ground, upAxis, body);
+
       // THREE parallel whiskers, not one ray. A single ray from the centre
       // slips past the corner of a box the shoulders would still hit, and
       // the character then walks confidently into it.
       const ahead = Math.min(
-        walkVolume.castDistance(eye, dir, look),
-        walkVolume.castDistance(eye.clone().addScaledVector(right, st.radius), dir, look),
-        walkVolume.castDistance(eye.clone().addScaledVector(right, -st.radius), dir, look),
+        walkVolume.castDistance(eye, dir, look, wall),
+        walkVolume.castDistance(eye.clone().addScaledVector(right, st.radius), dir, look, wall),
+        walkVolume.castDistance(eye.clone().addScaledVector(right, -st.radius), dir, look, wall),
       );
 
       if (ahead < look) {
@@ -232,9 +242,9 @@ export class SteerEngine {
           // the two sides measure almost the same, the choice flickers, and
           // the character shuffles into the corner it was avoiding.
           const probeL = walkVolume.castDistance(
-            eye, rotateAboutUp(dir, -PROBE_ANGLE, upAxis), look);
+            eye, rotateAboutUp(dir, -PROBE_ANGLE, upAxis), look, wall);
           const probeR = walkVolume.castDistance(
-            eye, rotateAboutUp(dir, PROBE_ANGLE, upAxis), look);
+            eye, rotateAboutUp(dir, PROBE_ANGLE, upAxis), look, wall);
           state.dodge = probeR >= probeL ? 1 : -1;
         }
         // TURN the desired direction rather than adding a sideways force to
@@ -269,13 +279,12 @@ export class SteerEngine {
       actor.rotation = headingEuler(cur + delta, upZ);
     }
 
-    const next = pos.clone().addScaledVector(state.vel, dt);
-    walkVolume.gather(scene, this.frame)
-      .resolve(next, upAxis, {
-        radius: st.radius,
-        stepHeight: st.stepHeight,
-        height: actorHeight(actor, upAxis),
-      });
+    const want2 = pos.clone().addScaledVector(state.vel, dt);
+    const next = walkVolume.gather(scene, this.frame).stepTo(pos, want2, upAxis, {
+      radius: st.radius,
+      stepHeight: st.stepHeight,
+      height: actorHeight(actor, upAxis),
+    });
     actor.translation = [next.x, next.y, next.z];
 
     // ---- stuck detection ------------------------------------------------
@@ -308,7 +317,7 @@ export function defaultSteer(): TGActorSteer {
     slowRadius: 1.2,
     stopDistance: 0.35,
     radius: 0.28,
-    stepHeight: 0.35,
+    stepHeight: 0.45,
     avoid: true,
     lookAhead: 1.4,
     arrived: false,

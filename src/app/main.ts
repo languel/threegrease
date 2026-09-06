@@ -1908,7 +1908,7 @@ class App implements AppHandle {
     const add = (id: string, title: string, run: (args?: string) => unknown, keywords = '') =>
       reg.register({ id, title, keywords, run });
 
-    for (const kind of ['PLANE', 'BOX', 'SPHERE', 'CYLINDER', 'EMPTY'] as const) {
+    for (const kind of ['PLANE', 'BOX', 'SPHERE', 'CYLINDER', 'PYRAMID', 'EMPTY'] as const) {
       add(`add.${kind.toLowerCase()}`, `Add ${kind.toLowerCase()} at cursor`,
         () => this.addMeshObject(kind), 'object primitive mesh');
     }
@@ -2145,6 +2145,7 @@ class App implements AppHandle {
       { label: 'Plane', icon: 'square', do: () => this.addMeshObject('PLANE', undefined, cursorAt) },
       { label: 'Box', icon: 'cube', do: () => this.addMeshObject('BOX', undefined, cursorAt) },
       { label: 'Sphere', icon: 'circle', do: () => this.addMeshObject('SPHERE', undefined, cursorAt) },
+      { label: 'Pyramid', icon: 'cube', do: () => this.addMeshObject('PYRAMID', undefined, cursorAt) },
       { label: 'Cylinder', icon: 'cylinder', do: () => this.addMeshObject('CYLINDER', undefined, cursorAt) },
       { label: 'Editable Mesh', icon: 'wireframe', do: () => this.addPolyMeshObject(cursorAt) },
       { label: 'Empty', icon: 'target', do: () => this.addMeshObject('EMPTY', undefined, cursorAt) },
@@ -2480,6 +2481,7 @@ class App implements AppHandle {
     const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
     if (!actor?.steer) return;
     this.ctx.pushUndo();
+    steerEngine.reset(actorId);
     actor.steer.mode = 'POINT';
     actor.steer.point = [...point] as Vec3;
     actor.steer.target = null;
@@ -2494,6 +2496,7 @@ class App implements AppHandle {
     const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
     if (!actor?.steer) return;
     this.ctx.pushUndo();
+    steerEngine.reset(actorId);
     actor.steer.mode = 'OBJECT';
     actor.steer.target = ref;
     actor.steer.arrived = false;
@@ -2750,7 +2753,7 @@ class App implements AppHandle {
     URL.revokeObjectURL(a.href);
   }
 
-  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'EMPTY', src?: string, at?: [number, number, number]): void {
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'EMPTY', src?: string, at?: [number, number, number]): void {
     this.ctx.pushUndo();
     const id = Date.now() % 1e9;
     this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, at ?? [...this.ctx.scene.cursor], src));

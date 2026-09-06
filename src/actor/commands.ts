@@ -95,7 +95,10 @@ export function runMoveAction(
     return `${actor.name}: jump`;
   }
 
-  // GO
+  // GO — clear the previous goal's progress accounting, or a fresh
+  // destination inherits the last one's stall timer and reports itself stuck
+  // before it has taken a step.
+  steerEngine.reset(actorId);
   const speed = applyStyleToGait(actor, action.prompt);
   st.mode = 'POINT';
   st.point = [...point] as Vec3;

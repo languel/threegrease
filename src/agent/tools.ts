@@ -326,7 +326,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       };
       if (type === 'GP') host.addGPObject();
       else if (type === 'LIGHT') host.addLight(String(args.lightKind ?? 'SUN') as TGLight['kind'], at);
-      else host.addMeshObject(type as 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'EMPTY', undefined, at);
+      else host.addMeshObject(type as 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'EMPTY', undefined, at);
 
       // report what actually landed, and honour an explicit name
       const s = ctx.scene;

@@ -22,6 +22,9 @@ export function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
     // radius 1 (which made it visibly 2x the size of the default box).
     case 'SPHERE': return new THREE.SphereGeometry(0.5, 32, 24);
     case 'CYLINDER': return new THREE.CylinderGeometry(0.5, 0.5, 1.2, 24);
+    // a cone with four sides is a pyramid, and it needs no new geometry
+    // path — flat-shaded so the four faces read as facets, not as a cone
+    case 'PYRAMID': return new THREE.ConeGeometry(0.5, 1, 4, 1);
     default: return new THREE.BoxGeometry(1, 1, 1);
   }
 }

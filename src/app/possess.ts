@@ -48,7 +48,7 @@ export class Possession {
   /** body radius used for wall push-out */
   radius = 0.28;
   /** how tall a ledge may be and still count as ground rather than a wall */
-  stepHeight = 0.35;
+  stepHeight = 0.45;
   collide = true;
 
   private vel = new THREE.Vector3();
@@ -100,9 +100,12 @@ export class Possession {
     // as the legs teleporting into cadence; a ramp reads as setting off.
     this.vel.lerp(want, Math.min(1, dt * this.accel));
 
-    const pos = new THREE.Vector3(...actor.translation).addScaledVector(this.vel, dt);
+    const from = new THREE.Vector3(...actor.translation);
+    const pos = from.clone().addScaledVector(this.vel, dt);
     if (this.collide) {
-      walkVolume.gather(scene).resolve(pos, upAxis, this.bodyOf(actor, upAxis));
+      const next = walkVolume.gather(scene)
+        .stepTo(from, pos, upAxis, this.bodyOf(actor, upAxis));
+      pos.copy(next);
     }
     actor.translation = [pos.x, pos.y, pos.z];
   }

@@ -590,7 +590,7 @@ export interface TGMesh {
   /** EMPTY = Blender-style null object: an axes tripod with no surface —
    *  a parenting/grouping anchor and constraint target, never a draw
    *  target or export geometry. */
-  kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'MODEL' | 'EMPTY';
+  kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'MODEL' | 'EMPTY';
   src?: string;            // MODEL only: .glb/.gltf/.obj URL (blob = session)
   translation: Vec3;
   rotation: Vec3;
