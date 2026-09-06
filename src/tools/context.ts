@@ -98,6 +98,8 @@ export interface Settings {
   weight: { radius: number; strength: number; target: number };
   background: Vec3;
   emulateNumpad: boolean;   // 1..9 become view keys instead of mode switching
+  /** floor grid visible in the viewport (a VIEW pref, like shading) */
+  showGrid: boolean;
   emulate3Button: boolean;  // Alt+LMB orbits (Shift pan, Ctrl zoom) for trackpads
   gridStep: number;
   /** minor grid lines per major gridStep cell. Also the magnet's INCREMENT
@@ -184,7 +186,7 @@ export function snapIncrement(s: Settings): number {
 
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
-  'emulateNumpad', 'emulate3Button', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
+  'emulateNumpad', 'emulate3Button', 'showGrid', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'background', 'snap',
   'shading', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
 ] as const;
@@ -282,6 +284,7 @@ export function defaultSettings(): Settings {
     weight: { radius: 40, strength: 0.5, target: 1 },
     background: [0.11, 0.11, 0.12],
     emulateNumpad: true,
+    showGrid: true,
     emulate3Button: true,
     gridStep: 1,
     gridSubdivisions: 10,

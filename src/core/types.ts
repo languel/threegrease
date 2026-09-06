@@ -1170,6 +1170,21 @@ export interface TGWorld {
   sunAzimuth: number;     // degrees
   turbidity: number;
   rayleigh: number;
+  /** draw the sun's disc. Off leaves its LIGHT — the glow, the gradient and
+   *  the IBL are all still there, only the disc itself goes. */
+  sunDisc?: boolean;
+  /**
+   * Stylised sky: keep the physical brightness, replace the hue.
+   *
+   * A flat pink wash is not a sky; what makes one read is the gradient, the
+   * glow around the sun and the darkening overhead. So the tints multiply
+   * the physical LUMINANCE rather than replacing the colour, and mix by
+   * height so the horizon tint lands on the horizon. Off by default, which
+   * is the real Preetham sky.
+   */
+  skyStylize?: boolean;
+  skyTintZenith?: Vec3;
+  skyTintHorizon?: Vec3;
   /** shared controls */
   rotation: number;            // radians about the world up axis
   strength: number;            // IBL intensity

@@ -31,6 +31,12 @@ const IBL_H = 128;
  *  once the pole is re-framed, so no offset is needed. Kept named because
  *  it is an empirical fact about two independent mappings, not an identity
  *  — if either side changes, re-measure rather than assume it stays 0. */
+/** Sky cube face size. 512 left the sun a visible staircase; the cost of
+ *  1024 is one render of six faces, paid only when a sky value changes. */
+const SKY_CUBE = 1024;
+/** minimum gap between IBL rebuilds while sky values are being dragged */
+const SKY_ENV_MS = 140;
+
 const SKY_LON_OFFSET = 0;
 
 /** Scale applied to the physical sky before capture (see renderSky). Chosen
@@ -94,6 +100,13 @@ export class WorldManager {
     if (key !== this.key) {
       this.key = key;
       this.rebuild(scene, w);
+    }
+    if (this.skyEnvPending && w.lighting && this.source
+      && performance.now() - this.skyEnvAt >= SKY_ENV_MS) {
+      this.skyEnvAt = performance.now();
+      this.skyEnvPending = false;
+      this.envRT?.dispose();
+      this.envRT = this.pmrem.fromCubemap(this.source as THREE.CubeTexture);
     }
     // A VideoTexture uploads itself each frame; a CanvasTexture (the live
     // capture path, which has no readyState for VideoTexture to gate on)
@@ -219,10 +232,30 @@ export class WorldManager {
       case 'VIDEO': return w.videoSource === 'CAMERA'
         ? `vid:cam:${this.liveSource?.() ? 'on' : 'off'}`
         : `vid:url:${w.videoUrl}`;
-      case 'SKY': return `sky:${w.sunElevation},${w.sunAzimuth},${w.turbidity},${w.rayleigh}`;
+      case 'SKY': return `sky:${w.sunElevation},${w.sunAzimuth},${w.turbidity},${w.rayleigh}`
+        + `,${w.sunDisc !== false},${!!w.skyStylize},${(w.skyTintZenith ?? []).join('/')}`
+        + `,${(w.skyTintHorizon ?? []).join('/')},${w.lighting}`;
       default: return 'none';
     }
   }
+
+  /** The physical-sky mesh, BUILT ONCE.
+   *
+   *  Rebuilding it per change is what made the sun/turbidity sliders stutter:
+   *  every tick constructed a fresh `Sky`, which is a new ShaderMaterial, so
+   *  the browser recompiled the shader and reallocated a cube target before
+   *  rendering six faces. Keeping the mesh and the target means a drag only
+   *  costs the six face renders it actually needs. */
+  private skyObj: Sky | null = null;
+  private skyRT: THREE.WebGLCubeRenderTarget | null = null;
+  private skyCam: THREE.CubeCamera | null = null;
+  private skyScene: THREE.Scene | null = null;
+  /** last time the IBL was re-derived from the sky, for drag throttling */
+  private skyEnvAt = 0;
+  /** a throttled IBL rebuild still owed. Without this the LAST change of a
+   *  drag would keep whatever lighting the second-to-last one produced,
+   *  because the key already matches and nothing would rebuild. */
+  private skyEnvPending = false;
 
   private disposeSource(): void {
     // a VideoTexture's <video> is owned here; an image texture is not shared
@@ -236,6 +269,7 @@ export class WorldManager {
     }
     this.envRT?.dispose();
     this.envRT = null;
+    // NOT the sky target: it is reused across every sky change (see skyObj).
     this.cubeRT?.dispose();
     this.cubeRT = null;
   }
@@ -247,7 +281,20 @@ export class WorldManager {
     switch (w.mode) {
       case 'SOLID': this.setSource(rampTexture([w.color, w.color])); break;
       case 'GRADIENT': this.setSource(rampTexture([w.skyColor, w.groundColor])); break;
-      case 'SKY': this.setSource(this.renderSky(w)); break;
+      case 'SKY': {
+        const tex = this.renderSky(w);
+        // The IBL is the expensive half and it is only ever LOOKED at when
+        // the world lights the scene. Dragging the sun with lighting off
+        // should cost one cube render and nothing else; with it on, the pass
+        // is throttled so a drag stays interactive and the last change still
+        // lands (the trailing rebuild comes from the next update()).
+        const now = performance.now();
+        const skipEnv = !w.lighting || now - this.skyEnvAt < SKY_ENV_MS;
+        if (!skipEnv) this.skyEnvAt = now;
+        this.skyEnvPending = skipEnv && w.lighting;
+        this.setSource(tex, skipEnv);
+        break;
+      }
       case 'EQUIRECT': this.loadImage(scene, w); break;
       case 'VIDEO': this.loadVideo(w); break;
       default: break;
@@ -284,49 +331,84 @@ export class WorldManager {
     this.onChange?.();
   }
 
-  /** three.js physical sky, rendered once into a PMREM cube. Sky is a Mesh
-   *  with a shader, so it has to go through a scene render — it cannot be
-   *  sampled as a texture directly. */
+  /**
+   * three.js physical sky, rendered into a cube we keep.
+   *
+   * Sky is a Mesh with a shader, so it has to go through a scene render — it
+   * cannot be sampled as a texture directly. Everything expensive about that
+   * (the material, its compiled program, the render target, the camera) is
+   * built on the first call and reused, because these are SLIDERS: the cost
+   * of a change has to be one render, not a shader compile plus two
+   * allocations.
+   */
   private renderSky(w: TGWorld): THREE.Texture {
-    const sky = new Sky();
-    sky.scale.setScalar(10000);
-    // Preetham's model outputs open-ended radiance — three's own example
-    // pairs it with ACES tone mapping. This app renders with NoToneMapping,
-    // and tone mapping is skipped for render targets regardless, so the
-    // capture would clip to flat white. Scale it down in the shader instead.
-    // Inlined as a literal, NOT a uniform: three generates uniform
-    // declarations only for its built-in materials, so adding one to a
-    // ShaderMaterial's `uniforms` without also declaring it in the GLSL
-    // fails to compile and the capture comes back black.
-    sky.material.fragmentShader = sky.material.fragmentShader.replace(
-      'gl_FragColor = vec4( retColor, 1.0 );',
-      `gl_FragColor = vec4( retColor * ${SKY_EXPOSURE.toFixed(3)}, 1.0 );`);
-    const u = sky.material.uniforms;
+    if (!this.skyObj) {
+      const sky = new Sky();
+      sky.scale.setScalar(10000);
+      // Preetham's model outputs open-ended radiance — three's own example
+      // pairs it with ACES tone mapping. This app renders with NoToneMapping,
+      // and tone mapping is skipped for render targets regardless, so the
+      // capture would clip to flat white. Scale it down in the shader instead.
+      // Inlined as a literal, NOT a uniform: three generates uniform
+      // declarations only for its built-in materials, so adding one to a
+      // ShaderMaterial's `uniforms` without also declaring it in the GLSL
+      // fails to compile and the capture comes back black. Our own uniforms
+      // below are therefore declared by hand.
+      let frag = sky.material.fragmentShader;
+      frag = `uniform float uSunDisc;\nuniform float uStylize;\nuniform vec3 uTintZenith;\nuniform vec3 uTintHorizon;\n${frag}`;
+      // The sun is a hard-edged disc in the original — at any cube resolution
+      // that reads as a pixelated blob, so widen the falloff into a soft
+      // limb and let uSunDisc turn it off entirely.
+      frag = frag.replace(
+        'float sundisk = smoothstep( sunAngularDiameterCos, sunAngularDiameterCos + 0.00002, cosTheta );',
+        'float sundisk = uSunDisc * smoothstep( sunAngularDiameterCos - 0.00012, sunAngularDiameterCos + 0.00016, cosTheta );');
+      frag = frag.replace(
+        'gl_FragColor = vec4( retColor, 1.0 );',
+        `vec3 tinted = retColor * ${SKY_EXPOSURE.toFixed(3)};
+         // Stylised sky: keep the physical BRIGHTNESS (the gradient, the
+         // glow around the sun, the darkening overhead) and replace only the
+         // hue, so a pink or white sky still reads as a sky rather than as a
+         // flat wash. Mixing the two tints by height puts the horizon colour
+         // where the horizon is.
+         float luma = dot( tinted, vec3( 0.2126, 0.7152, 0.0722 ) );
+         float up = clamp( normalize( vWorldPosition - cameraPosition ).y * 0.5 + 0.5, 0.0, 1.0 );
+         vec3 styled = mix( uTintHorizon, uTintZenith, up ) * luma;
+         gl_FragColor = vec4( mix( tinted, styled, uStylize ), 1.0 );`);
+      sky.material.fragmentShader = frag;
+      sky.material.uniforms.uSunDisc = { value: 1 };
+      sky.material.uniforms.uStylize = { value: 0 };
+      sky.material.uniforms.uTintZenith = { value: new THREE.Color(1, 1, 1) };
+      sky.material.uniforms.uTintHorizon = { value: new THREE.Color(1, 1, 1) };
+      this.skyObj = sky;
+      this.skyScene = new THREE.Scene();
+      this.skyScene.add(sky);
+      this.skyRT = new THREE.WebGLCubeRenderTarget(SKY_CUBE, { generateMipmaps: false });
+      this.skyRT.texture.minFilter = THREE.LinearFilter;
+      this.skyCam = new THREE.CubeCamera(0.1, 100000, this.skyRT);
+    }
+    const u = this.skyObj.material.uniforms;
     u.turbidity.value = w.turbidity;
     u.rayleigh.value = w.rayleigh;
     u.mieCoefficient.value = 0.005;
     u.mieDirectionalG.value = 0.8;
+    u.uSunDisc.value = w.sunDisc === false ? 0 : 1;
+    u.uStylize.value = w.skyStylize ? 1 : 0;
+    const zen = w.skyTintZenith ?? [0.55, 0.72, 1];
+    const hor = w.skyTintHorizon ?? [1, 0.85, 0.72];
+    (u.uTintZenith.value as THREE.Color).setRGB(zen[0], zen[1], zen[2]);
+    (u.uTintHorizon.value as THREE.Color).setRGB(hor[0], hor[1], hor[2]);
     // Sky is authored Y-up internally, so build the sun vector in ITS frame
     // and let the scene rotation handle the app's up-axis convention.
     const phi = THREE.MathUtils.degToRad(90 - w.sunElevation);
     const theta = THREE.MathUtils.degToRad(w.sunAzimuth);
     u.sunPosition.value.setFromSphericalCoords(1, phi, theta);
 
-    const skyScene = new THREE.Scene();
-    skyScene.add(sky);
-
     // Capture to a CUBE, not straight to PMREM: PMREM's output is a packed
     // octahedral atlas that is only meaningful to the IBL sampler, so using
     // it as a background draws a swirl. A cube target is both a valid
     // scene.background and a valid PMREM input.
-    this.cubeRT?.dispose();
-    this.cubeRT = new THREE.WebGLCubeRenderTarget(512, { generateMipmaps: false });
-    const cam = new THREE.CubeCamera(0.1, 100000, this.cubeRT);
-    cam.update(this.renderer, skyScene);
-
-    sky.geometry.dispose();
-    (sky.material as THREE.Material).dispose();
-    return this.cubeRT.texture;
+    this.skyCam!.update(this.renderer, this.skyScene!);
+    return this.skyRT!.texture;
   }
 
   private loadImage(scene: GPScene, w: TGWorld): void {

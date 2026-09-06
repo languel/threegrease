@@ -2187,7 +2187,14 @@ export class UI {
   private worldPanel(): HTMLElement {
     const { ctx } = this.app;
     const w = ctx.scene.world;
-    const touch = () => { ctx.requestRender(); };
+    // NOT ctx.requestRender(): that is markDirty on the GP renderer, which
+    // rebuilds every layer's stroke ribbons and earcut fills. Nothing about
+    // the sky touches grease-pencil geometry, and paying for a full rebuild
+    // on every pixel of a slider drag is what made these sliders stutter and
+    // halt while the Lighting ones (which ask for no such thing) stayed
+    // smooth. The world re-derives itself from scene data every frame — it
+    // compares its own key — so an edit needs no notification at all.
+    const touch = () => { /* the frame loop already re-reads the world */ };
     // The world is scene data, so edits are undoable — but a slider drag
     // fires per pixel, and one undo step per pixel is useless. Push once
     // on the first edit of a burst, the way the other live fields do.
@@ -2259,6 +2266,17 @@ export class UI {
         slider('Sun azimuth', w.sunAzimuth, -180, 180, 1, (v) => edit(() => { w.sunAzimuth = v; }), { def: 180 }),
         slider('Turbidity', w.turbidity, 1, 20, 0.1, (v) => edit(() => { w.turbidity = v; }), { def: 4, title: 'haze / aerosol — higher is milkier' }),
         slider('Rayleigh', w.rayleigh, 0, 5, 0.05, (v) => edit(() => { w.rayleigh = v; }), { def: 2, title: 'how blue the scattering makes the sky' }),
+        checkbox('Sun disc', w.sunDisc !== false, (v) => edit(() => { w.sunDisc = v; }),
+          'draw the disc itself — its light, glow and gradient stay either way'),
+        checkbox('Stylize colours', !!w.skyStylize, (v) => { edit(() => { w.skyStylize = v; }); this.refresh(); },
+          'keep the physical brightness — gradient, glow, the darkening overhead — and '
+          + 'replace only the hue, so a pink or white sky still reads as a sky'),
+        ...(w.skyStylize ? [
+          fieldRow('Zenith', colorField('', [...(w.skyTintZenith ?? [0.55, 0.72, 1]), 1],
+            (rgb) => edit(() => { w.skyTintZenith = rgb; }))),
+          fieldRow('Horizon', colorField('', [...(w.skyTintHorizon ?? [1, 0.85, 0.72]), 1],
+            (rgb) => edit(() => { w.skyTintHorizon = rgb; }))),
+        ] : []),
       );
     }
 
@@ -2318,6 +2336,9 @@ export class UI {
         + 'Rapier: real shapes, rolling and toppling, stacks that hold, and a '
         + 'deterministic fixed step (loads ~1 MB of wasm on first use).')),
       el('div', { class: 'menu-header', text: 'Grid' }),
+      checkbox('Show grid', s.showGrid !== false, (v) => {
+        s.showGrid = v; this.app.rebuildGrid(); save(); this.refresh();
+      }, 'the floor grid and its axis lines'),
       fieldRow('Step', numField('', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5, { def: 1, min: 0.01 })),
       fieldRow('Subdivisions', numField('', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1, { def: 10, min: 1 })),
       fieldRow('Subdivision style', selectField('', s.gridSubdivStyle, [

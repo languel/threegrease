@@ -1616,7 +1616,7 @@ class App implements AppHandle {
   togglePresentation(): void {
     this.presentation = !this.presentation;
     document.getElementById('app')!.classList.toggle('presentation', this.presentation);
-    this.grid.visible = !this.presentation;
+    this.grid.visible = this.gridVisible();
     this.canvasGroup.visible = !this.presentation;
     this.cursorMarker.visible = !this.presentation;
     this.camHelper.visible = !this.presentation;
@@ -1646,7 +1646,7 @@ class App implements AppHandle {
   /** Alt+Shift+Z: floor grid + bottom-left status/info overlay. */
   toggleInfoOverlay(): void {
     this.infoOverlayHidden = !this.infoOverlayHidden;
-    this.grid.visible = !this.infoOverlayHidden && !this.presentation;
+    this.grid.visible = this.gridVisible();
     const status = document.getElementById('status');
     if (status) status.style.display = this.infoOverlayHidden ? 'none' : '';
   }
@@ -1778,9 +1778,18 @@ class App implements AppHandle {
 
   /** Rebuild the grid (colors/dash state are baked at construction, so any
    *  change means new geometry/materials). */
+  /** The grid answers to three things — the user's own switch, the info
+   *  overlay, and presentation mode — and they should be read in ONE place
+   *  or a rebuild quietly resurrects a grid someone turned off. */
+  private gridVisible(): boolean {
+    return this.ctx.settings.showGrid !== false
+      && !this.infoOverlayHidden && !this.presentation;
+  }
+
   rebuildGrid(): void {
     const old = this.grid;
     this.grid = this.makeGrid();
+    this.grid.visible = this.gridVisible();
     this.scene3.add(this.grid);
     if (old) {
       this.scene3.remove(old);
@@ -3860,7 +3869,14 @@ class App implements AppHandle {
     // frame's motion. Imperceptible while walking, and the same deliberate
     // one-frame lag simstream already documents.
     gaitEngine.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
-    if (actorSolver.update(ctx.scene, dt, ctx.settings.upAxis === 'Z')) ctx.requestRender();
+    // The solver moves JOINTS, and no stroke geometry depends on a joint —
+    // a GP object bound to one rides its group transform, which this loop
+    // re-applies every frame anyway. Marking the whole GP scene dirty here
+    // rebuilt every layer's ribbons and earcut fills on EVERY frame an actor
+    // was moving, which is most frames in a scene with a character in it.
+    // That is the cost that made other work (a sky slider, say) read as a
+    // stutter: it was landing on top of a rebuild that should not happen.
+    actorSolver.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
     this.actors.handlesVisible = !this.presentation && !this.infoOverlayHidden;
     this.actors.selectionColor =
       ctx.settings.mode === 'OBJECT' && !this.presentation ? this.highlightColor() : null;

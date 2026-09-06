@@ -250,6 +250,33 @@ the browser console or automated evals:
   Also: `DataTexture` defaults `flipY:false`, so row 0 is v=0, which
   `equirectUv` maps to `dir.y = -1` — fill these maps NADIR-first or the
   sky renders upside down.
+- **`ctx.requestRender()` is a GP GEOMETRY rebuild, not "redraw the
+  viewport".** With no layer id it sets `dirtyAll`, and the next frame
+  re-evaluates every layer's modifier stack and rebuilds its stroke ribbons
+  and earcut fills. The frame loop draws every frame regardless, so anything
+  that is NOT stroke data — the world, a light, a material — needs no call at
+  all. Two things this cost: the physical-sky sliders rebuilt the whole GP
+  scene per pixel of a drag (which is what made them stutter and halt while
+  the Lighting sliders stayed smooth), and `actorSolver.update` asked for one
+  on EVERY frame an actor was moving, so a scene with a character in it was
+  rebuilding all of its grease pencil sixty times a second forever. A GP
+  object bound to a joint follows through its GROUP TRANSFORM, which the loop
+  re-applies each frame — verified by binding one to `hand.L` and watching it
+  track with zero rebuilds — so the pose has no claim on stroke geometry.
+- **The physical sky is built ONCE and re-rendered, never rebuilt.** `Sky` is
+  a ShaderMaterial: constructing one per slider tick means a program compile
+  and a fresh cube target before the six face renders. `WorldManager.skyObj`
+  and `skyRT` are kept, so a change costs one cube render; the IBL (the
+  expensive half) is skipped entirely when `w.lighting` is off and throttled
+  when it is on, with a PENDING flag so the last change of a drag still gets
+  its lighting — without it the key already matches and nothing would ever
+  rebuild. The cube is 1024 per face because 512 left the sun a visible
+  staircase, and the sun's smoothstep is widened into a soft limb for the
+  same reason. `sunDisc` scales that term to zero — the glow, the gradient
+  and the IBL are unaffected, only the disc goes. `skyStylize` keeps the
+  physical LUMINANCE and replaces the hue, mixing two tints by height: a flat
+  pink wash is not a sky, but a pink sky with the gradient, the glow and the
+  darkening overhead still reads as one.
 - Background-tab rAF throttle (see Testing above) applies to constraint
   verification too — drive `constraintEngine.update(...)` and
   `score.update(...)` manually in a loop rather than awaiting wall-clock
