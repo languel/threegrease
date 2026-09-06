@@ -104,6 +104,17 @@ Key invariants:
   not "Kinematic (you move it)" — and put the explanation in the tip. Status
   and empty-state rows ("no clips yet", a vertex count) are not narrative and
   stay where they are.
+- **Nothing may rebuild the panels while a value is being scrubbed.** Panels
+  are rebuilt from scratch, so a refresh mid-drag replaces the very element
+  that captured the pointer: the gesture then has nothing left to drag, and
+  the detached widget keeps scrubbing its own dead copy. It reads as a slider
+  that stutters, halts, or jumps to an end stop — nothing like "a rebuild
+  happened". `UI.refresh()` therefore DEFERS while `numDragActive` (or while
+  a numdrag type-in field is open) and runs once when the gesture ends. Fix
+  the caller too where you can: `WorldManager.onChange` is wired to a full
+  sidebar rebuild and was firing on every sky change, so it now fires only on
+  a STATUS transition (loading -> ok, or an error), which is the only thing
+  the panel actually has to learn about.
 - The UI talks to the app only through the `AppHandle` interface (top of
   `ui.ts`) — add methods there, implement on `App` in `main.ts`.
 - New keyboard shortcuts: add an `ActionDef` to `ACTIONS` in

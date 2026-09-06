@@ -80,7 +80,26 @@ export class WorldManager {
   /** set when a source is loading/failed, surfaced in the UI */
   status: 'ok' | 'loading' | 'error' = 'ok';
   error = '';
+  /**
+   * Told when the panel needs redrawing — which is NOT every time the world
+   * changes.
+   *
+   * It is wired to a full sidebar rebuild, and the only thing the panel has
+   * to learn about is a STATUS transition (loading -> ok, or an error), so
+   * firing it on every rebuild meant a sky slider replaced its own DOM node
+   * on every pixel of a drag. The pointer then had nothing left to drag and
+   * the gesture died — the "stutter and halt" that looked like a physics or
+   * a render cost and was neither.
+   */
   onChange: (() => void) | null = null;
+  private notified = '';
+
+  private notify(): void {
+    const stamp = `${this.status}|${this.error}`;
+    if (stamp === this.notified) return;
+    this.notified = stamp;
+    this.onChange?.();
+  }
 
   /** Provides the live capture element for videoSource CAMERA (wired by App
    *  so this module doesn't depend on the capture stack). */
@@ -328,7 +347,7 @@ export class WorldManager {
       // degenerate atlas (see refreshVideoIbl); leaving env null for a tick
       // until the throttled refresh picks it up is the safe path.
     }
-    this.onChange?.();
+    this.notify();
   }
 
   /**
@@ -420,11 +439,11 @@ export class WorldManager {
       tex.colorSpace = THREE.SRGBColorSpace;
       this.setSource(tex);
       this.status = 'ok';
-      this.onChange?.();
+      this.notify();
     }, undefined, () => {
       this.status = 'error';
       this.error = `Could not decode "${rec.name}".`;
-      this.onChange?.();
+      this.notify();
     });
   }
 
@@ -461,12 +480,12 @@ export class WorldManager {
       tex.colorSpace = THREE.SRGBColorSpace;
       this.setSource(tex);
       this.status = 'ok';
-      this.onChange?.();
+      this.notify();
     }, { once: true });
     video.addEventListener('error', () => {
       this.status = 'error';
       this.error = 'Video failed to load (check the URL, format, and CORS).';
-      this.onChange?.();
+      this.notify();
     }, { once: true });
     void video.play().catch(() => { /* autoplay blocked until a gesture */ });
   }

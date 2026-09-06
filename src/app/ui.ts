@@ -235,6 +235,18 @@ let numKeysBound = false;
  *  rebuilds (the N-panel inspector refresh) must not run mid-drag or
  *  they'd remove the pointer-captured element out from under the user */
 let numDragActive = false;
+/** Rebuild the panels once the current scrub ends (see UI.refresh). */
+let deferredRefresh: (() => void) | null = null;
+function flushDeferredRefresh(): void {
+  const run = deferredRefresh;
+  deferredRefresh = null;
+  run?.();
+}
+
+function endNumDrag(): void {
+  numDragActive = false;
+  flushDeferredRefresh();
+}
 
 function isTextEditable(t: EventTarget | null): boolean {
   const e = t as HTMLElement | null;
@@ -319,6 +331,7 @@ function dragNumber(label: string, value: number, onChange: (v: number) => void,
       }
       input.remove();
       wrap.classList.remove('editing');
+      flushDeferredRefresh();
     };
     input.onkeydown = (e) => {
       e.stopPropagation();
@@ -346,7 +359,7 @@ function dragNumber(label: string, value: number, onChange: (v: number) => void,
     if (pid !== e.pointerId) return;
     pid = -1;
     dragging = false;
-    numDragActive = false;
+    endNumDrag();
     wrap.classList.remove('dragging');
   };
   wrap.onpointermove = (e) => {
@@ -366,7 +379,7 @@ function dragNumber(label: string, value: number, onChange: (v: number) => void,
     if (pid !== e.pointerId) return;
     wrap.releasePointerCapture(pid);
     pid = -1;
-    numDragActive = false;
+    endNumDrag();
     if (dragging) { dragging = false; wrap.classList.remove('dragging'); return; }
     const nudge = (dir: number) => set(cur + dir * step * (e.shiftKey ? 0.1 : 1));
     if (e.target === arrowL) nudge(-1);
@@ -779,6 +792,18 @@ export class UI {
   }
 
   refresh(): void {
+    // NEVER rebuild while a value is being scrubbed. Panels are rebuilt from
+    // scratch, so a refresh replaces the very element the pointer captured —
+    // the drag then has nothing left to drag and dies mid-gesture. That is
+    // what made the sky sliders "stutter and halt": the world manager told
+    // the UI it had changed on every tick, and each one killed the drag.
+    // Anything that asks during a scrub is answered once, at the end.
+    // Typing a value into one is the same hazard — the rebuild takes the
+    // input away mid-word — so it waits too.
+    if (numDragActive || document.querySelector('.numdrag-input')) {
+      deferredRefresh = () => this.refresh();
+      return;
+    }
     this.buildMenubar();
     this.buildTopbar();
     this.buildToolbar();
