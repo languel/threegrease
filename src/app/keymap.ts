@@ -77,6 +77,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'cameraView', label: 'Look through camera', combo: '0', category: 'View' },
   { id: 'cycleCamera', label: 'Next camera', combo: 'ctrl+shift+c', category: 'View' },
   { id: 'viewAll', label: 'Frame all (view fit)', combo: 'home', category: 'View' },
+  { id: 'viewSelected', label: 'Frame selection', combo: 'shift+home', category: 'View' },
   { id: 'centerCursorViewAll', label: 'Center cursor & frame all', combo: 'shift+c', category: 'View' },
   { id: 'quadView', label: 'Toggle Quad View', combo: 'ctrl+alt+q', category: 'View' },
   { id: 'cycleShading', label: 'Cycle viewport shading', combo: 'z', category: 'View' },

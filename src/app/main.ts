@@ -1308,6 +1308,7 @@ class App implements AppHandle {
       case 'open': void this.loadScene(); break;
       case 'newScene': this.newScene(); break;
       case 'viewAll': this.viewAll(); break;
+      case 'viewSelected': this.viewSelected(); break;
       case 'quadView': this.toggleQuadView(); break;
       case 'cycleShading': this.cycleShading(1); break;
       case 'cycleShadingBack': this.cycleShading(-1); break;
@@ -1351,7 +1352,16 @@ class App implements AppHandle {
         ctx.pushUndo();
         const empty = createMeshObject(genId(), 'EMPTY', at);
         empty.name = `Group (${refs.length})`;
-        ctx.scene.meshes.push(empty);
+        // Insert where the FIRST selected mesh sits rather than appending.
+        // The outliner renders in scene order, so pushing put every new
+        // group at the very bottom of the list, miles from the things it
+        // contains — you had to go hunting for what you just made.
+        const idxs = refs
+          .filter((r) => r.kind === 'MESH')
+          .map((r) => ctx.scene.meshes.findIndex((m) => m.id === r.id))
+          .filter((i) => i >= 0);
+        const at0 = idxs.length ? Math.min(...idxs) : ctx.scene.meshes.length;
+        ctx.scene.meshes.splice(at0, 0, empty);
         const parent: ObjRef = { kind: 'MESH', id: empty.id };
         let ok = 0;
         for (const r of refs) if (setParentKeepWorld(ctx.scene, r, parent)) ok++;
@@ -2114,6 +2124,29 @@ class App implements AppHandle {
     this.refreshWidget();
     this.viewAll();
     this.ui.refresh();
+  }
+
+  /** Frame just what is selected; falls back to framing everything. */
+  viewSelected(): void {
+    const refs = listSelected(this.ctx.scene);
+    if (!refs.length) { this.viewAll(); return; }
+    const box = new THREE.Box3();
+    for (const r of refs) {
+      const root = this.objectRoot(r);
+      if (!root) continue;
+      const b = new THREE.Box3().setFromObject(root);
+      if (!b.isEmpty()) box.union(b);
+    }
+    // actors have no entry in objectRoot — they are their own manager
+    for (const a of this.ctx.scene.actors) {
+      if (!a.select) continue;
+      const root = this.actors.rootFor(a.id);
+      if (!root) continue;
+      const b = new THREE.Box3().setFromObject(root);
+      if (!b.isEmpty()) box.union(b);
+    }
+    if (box.isEmpty()) { this.viewAll(); return; }
+    this.nav.frameAll(box);
   }
 
   viewAll(): void {

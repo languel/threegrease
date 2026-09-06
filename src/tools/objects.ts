@@ -74,6 +74,53 @@ export function isObjectLocked(scene: GPScene, ref: ObjRef): boolean {
   return !!(entityOf(scene, ref) as { lock?: boolean } | undefined)?.lock;
 }
 
+/**
+ * Hide or show one object.
+ *
+ * `visible` lives on every object kind but under no shared interface, so
+ * this is the one place that reaches through `entityOf` for it — the same
+ * trick `isObjectLocked` already uses.
+ */
+export function setObjectHidden(scene: GPScene, ref: ObjRef, hidden: boolean): void {
+  const e = entityOf(scene, ref) as { visible?: boolean } | undefined;
+  if (e && 'visible' in e) e.visible = !hidden;
+}
+
+export function isObjectHidden(scene: GPScene, ref: ObjRef): boolean {
+  const e = entityOf(scene, ref) as { visible?: boolean } | undefined;
+  return e ? e.visible === false : false;
+}
+
+export function setObjectLockedFlag(scene: GPScene, ref: ObjRef, locked: boolean): void {
+  const e = entityOf(scene, ref) as { lock?: boolean } | undefined;
+  if (e) e.lock = locked;
+}
+
+/** Direct children of an object, in whatever collections they live in. */
+export function childRefsOf(scene: GPScene, ref: ObjRef): ObjRef[] {
+  const key = `${ref.kind}:${ref.id}`;
+  return allRefs(scene).filter((r) => {
+    const p = getParent(scene, r);
+    return !!p && `${p.kind}:${p.id}` === key;
+  });
+}
+
+/**
+ * An object and everything parented beneath it, depth-first.
+ *
+ * Depth-guarded: `setParentKeepWorld` refuses cycles, but a hand-edited or
+ * migrated file has no such guarantee and an outliner click is not the place
+ * to discover that.
+ */
+export function descendantRefs(scene: GPScene, ref: ObjRef, depth = 0): ObjRef[] {
+  if (depth > 12) return [];
+  const out: ObjRef[] = [];
+  for (const c of childRefsOf(scene, ref)) {
+    out.push(c, ...descendantRefs(scene, c, depth + 1));
+  }
+  return out;
+}
+
 export function objectName(scene: GPScene, ref: ObjRef): string {
   return entityOf(scene, ref)?.name ?? `${ref.kind} ${ref.id}`;
 }

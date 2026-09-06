@@ -30,8 +30,10 @@ import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
 import { exportPaintCloudPly } from '../render/paintclouds';
 import type { ConstraintType, TGConstraint } from '../core/types';
 import {
-  deselectAllObjects, getObjectTransform, listSelected as listSelectedObjects, objectName,
-  selectionPivot, setObjectTransform, setParentKeepWorld, type ObjRef,
+  deselectAllObjects, descendantRefs, getObjectTransform,
+  listSelected as listSelectedObjects, objectName, selectionPivot,
+  setObjectHidden, setObjectLockedFlag, setObjectSelected, setObjectTransform,
+  setParentKeepWorld, type ObjRef,
 } from '../tools/objects';
 import {
   applyObjectTransformPartial, clearObjectTransform, geometryToOrigin, mirrorObject,
@@ -1355,6 +1357,8 @@ export class UI {
       { label: 'Duplicate', action: 'duplicate' },
       { label: 'Delete', action: 'delete' },
       { sep: true },
+      { label: 'Group under empty', action: 'groupToEmpty' },
+      { sep: true },
       {
         label: 'Set Origin', items: [
           { label: 'Geometry to Origin', do: () => this.runObjectOp((ref) => geometryToOrigin(ctx.scene, ref)), disabled: !gpOnly },
@@ -2281,11 +2285,17 @@ export class UI {
 
   /** N6: hierarchy outliner — tree by parent, drag-to-parent, dbl-click rename. */
   private outlinerCollapsed = new Set<string>();
+  /** row a shift-range is measured from — the last plainly-clicked one */
+  private outlinerAnchor: string | null = null;
 
   private objectsPanel(): HTMLElement {
     const { ctx } = this.app;
     const scene = ctx.scene;
 
+    // Blender's modifiers: Cmd/Ctrl EXTENDS the selection one row at a
+    // time, Shift selects the RANGE from the last row you clicked. Shift
+    // used to be the extend key here, which meant there was no range select
+    // at all and the muscle memory was wrong besides.
     const toggleSel = (apply: (v: boolean) => void, cur: boolean, shift: boolean) => {
       ctx.pushUndo();
       // plain click on the ONE currently-selected row toggles it off
@@ -2318,14 +2328,43 @@ export class UI {
     /** Outliner eye/lock pair, Blender-style — shared across every kind so
      *  they read consistently (view = renders, lock = blocks viewport
      *  click/box-select but the row itself still selects). */
+    /**
+     * Which rows an eye/lock click applies to.
+     *
+     * Everything BENEATH the row, always: a group whose contents stay
+     * visible after you hide it is not a group, it is a decoration. And if
+     * the row is part of a multi-selection, the whole selection — toggling
+     * one of five selected objects and having four stay put is the thing
+     * that makes people click five times.
+     */
+    const spread = (ref: ObjRef): ObjRef[] => {
+      const sel = listSelectedObjects(scene);
+      const inSel = sel.some((r: ObjRef) => r.kind === ref.kind && r.id === ref.id);
+      const heads = inSel && sel.length > 1 ? sel : [ref];
+      const out: ObjRef[] = [];
+      for (const h of heads) out.push(h, ...descendantRefs(scene, h));
+      return out;
+    };
+
     const viewLockBtns = (
+      ref: ObjRef,
       hidden: boolean, onHide: (v: boolean) => void,
       locked: boolean, onLock: (v: boolean) => void,
     ): Node[] => [
-      btn(hidden ? icon('eyeOff') : icon('eye'), () => { onHide(!hidden); this.refresh(); },
-        { cls: 'icon-btn', title: hidden ? 'Hidden (click to show)' : 'Visible (click to hide)' }),
-      btn(locked ? icon('lockClosed') : icon('lockOpen'), () => { onLock(!locked); this.refresh(); },
-        { cls: 'icon-btn', title: locked ? 'Locked (click to unlock)' : 'Unlocked (click to lock — blocks viewport click-select)' }),
+      btn(hidden ? icon('eyeOff') : icon('eye'), () => {
+        ctx.pushUndo();
+        onHide(!hidden);
+        for (const r of spread(ref)) setObjectHidden(scene, r, !hidden);
+        ctx.syncCanvases();
+        ctx.requestRender();
+        this.refresh();
+      }, { cls: 'icon-btn', title: hidden ? 'Hidden (click to show)' : 'Visible (click to hide — applies to children and to the whole selection)' }),
+      btn(locked ? icon('lockClosed') : icon('lockOpen'), () => {
+        ctx.pushUndo();
+        onLock(!locked);
+        for (const r of spread(ref)) setObjectLockedFlag(scene, r, !locked);
+        this.refresh();
+      }, { cls: 'icon-btn', title: locked ? 'Locked (click to unlock)' : 'Unlocked (click to lock — blocks viewport click-select)' }),
     ];
 
     scene.objects.forEach((ob, i) => nodes.push({
@@ -2334,11 +2373,12 @@ export class UI {
       onSelect: (e) => {
         scene.activeObject = i;
         this.app.setLastPicked({ kind: 'GP', id: ob.id });
-        toggleSel((v) => { ob.select = v; }, !!ob.select, !!e?.shiftKey);
+        toggleSel((v) => { ob.select = v; }, !!ob.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
         btn(icon('arrowDownTray'), () => this.app.exportActiveGP(), { cls: 'icon-btn', title: 'Export this GP object' }),
         ...viewLockBtns(
+          { kind: 'GP', id: ob.id },
           !!ob.hide, (v) => { ob.hide = v; ctx.requestRender(); },
           !!ob.lock, (v) => { ob.lock = v; },
         ),
@@ -2350,7 +2390,7 @@ export class UI {
       parent: c.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'CANVAS', id: c.id });
-        toggleSel((v) => { c.select = v; }, c.select, !!e?.shiftKey);
+        toggleSel((v) => { c.select = v; }, c.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
         btn(c.drawTarget ? icon('pencilSquare') : icon('dot'), () => { c.drawTarget = !c.drawTarget; ctx.syncCanvases(); this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
@@ -2363,13 +2403,14 @@ export class UI {
       selected: m.select, parent: m.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'MESH', id: m.id });
-        toggleSel((v) => { m.select = v; }, m.select, !!e?.shiftKey);
+        toggleSel((v) => { m.select = v; }, m.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
         colorField('', [...m.color, 1], (rgb) => { m.color = rgb; }),
         btn(m.drawTarget ? icon('pencilSquare') : icon('dot'), () => { m.drawTarget = !m.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
         btn(m.wireframe ? icon('wireframe') : icon('square'), () => { m.wireframe = !m.wireframe; this.refresh(); }, { cls: 'icon-btn', title: 'Wireframe (reference look)' }),
         ...viewLockBtns(
+          { kind: 'MESH', id: m.id },
           !m.visible, (v) => { m.visible = !v; },
           !!m.lock, (v) => { m.lock = v; },
         ),
@@ -2383,12 +2424,13 @@ export class UI {
       selected: p.select, parent: p.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'POLY', id: p.id });
-        toggleSel((v) => { p.select = v; }, p.select, !!e?.shiftKey);
+        toggleSel((v) => { p.select = v; }, p.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
         colorField('', [...p.color, 1], (rgb) => { p.color = rgb; }),
         btn(p.drawTarget ? icon('pencilSquare') : icon('dot'), () => { p.drawTarget = !p.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target' }),
         ...viewLockBtns(
+          { kind: 'POLY', id: p.id },
           !p.visible, (v) => { p.visible = !v; },
           !!p.lock, (v) => { p.lock = v; },
         ),
@@ -2400,7 +2442,7 @@ export class UI {
       selected: pc.select, parent: pc.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'PCLOUD', id: pc.id });
-        toggleSel((v) => { pc.select = v; }, pc.select, !!e?.shiftKey);
+        toggleSel((v) => { pc.select = v; }, pc.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
         el('span', { text: `${pc.points.length / 8}`, title: 'painted splats' }),
@@ -2414,6 +2456,7 @@ export class UI {
           URL.revokeObjectURL(a.href);
         }, { cls: 'icon-btn', title: 'Export as 3DGS PLY (world-space, PlayCanvas/SuperSplat compatible)' }),
         ...viewLockBtns(
+          { kind: 'PCLOUD', id: pc.id },
           !pc.visible, (v) => { pc.visible = !v; },
           !!pc.lock, (v) => { pc.lock = v; },
         ),
@@ -2425,7 +2468,7 @@ export class UI {
       selected: a.select, parent: a.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'ACTOR', id: a.id });
-        toggleSel((v) => { a.select = v; }, a.select, !!e?.shiftKey);
+        toggleSel((v) => { a.select = v; }, a.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
         el('span', { text: a.rig.mode === 'NONE' ? '' : a.rig.mode.toLowerCase(), title: 'rig mode' }),
@@ -2433,6 +2476,7 @@ export class UI {
           () => { a.physics.enabled = !a.physics.enabled; this.refresh(); },
           { cls: 'icon-btn', title: 'Simulate (ragdoll physics)' }),
         ...viewLockBtns(
+          { kind: 'ACTOR', id: a.id },
           !a.visible, (v) => { a.visible = !v; },
           !!a.lock, (v) => { a.lock = v; },
         ),
@@ -2444,7 +2488,7 @@ export class UI {
       selected: l.select, parent: l.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'LIGHT', id: l.id });
-        toggleSel((v) => { l.select = v; }, l.select, !!e?.shiftKey);
+        toggleSel((v) => { l.select = v; }, l.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
         el('span', { text: l.kind.toLowerCase(), title: 'light type' }),
@@ -2452,6 +2496,7 @@ export class UI {
           () => { l.castShadow = !l.castShadow; this.refresh(); },
           { cls: 'icon-btn', title: 'Cast shadows' })] : []),
         ...viewLockBtns(
+          { kind: 'LIGHT', id: l.id },
           !l.visible, (v) => { l.visible = !v; },
           !!l.lock, (v) => { l.lock = v; },
         ),
@@ -2463,12 +2508,13 @@ export class UI {
       parent: s.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'SPLAT', id: s.id });
-        toggleSel((v) => { s.select = v; }, s.select, !!e?.shiftKey);
+        toggleSel((v) => { s.select = v; }, s.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
         btn(s.drawTarget ? icon('pencilSquare') : icon('dot'), () => { s.drawTarget = !s.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target (GP surface placement raycasts the splat)' }),
         btn('⬇.ply', () => this.app.exportSplatPly(s.id), { cls: 'icon-btn', title: 'Export as 3DGS PLY (PlayCanvas/SuperSplat compatible)' }),
         ...viewLockBtns(
+          { kind: 'SPLAT', id: s.id },
           !s.visible, (v) => { s.visible = !v; },
           !!s.lock, (v) => { s.lock = v; },
         ),
@@ -2480,12 +2526,13 @@ export class UI {
       parent: t.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'TRIGGER', id: t.id });
-        toggleSel((v) => { t.select = v; }, !!t.select, !!e?.shiftKey);
+        toggleSel((v) => { t.select = v; }, !!t.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
         btn(t.zone ? icon('wave') : t.follow ? icon('link') : ctx.scene.mediamime.rigs.some((r) => r.target.kind === 'TRIGGER' && r.target.id === t.id) ? icon('camera') : icon('dot'),
           () => {}, { cls: 'icon-btn', title: t.zone ? 'Stroke zone' : t.follow ? 'Follows an object' : 'Static / capture-rigged' }),
         ...viewLockBtns(
+          { kind: 'TRIGGER', id: t.id },
           !!t.hide, (v) => { t.hide = v; },
           !!t.lock, (v) => { t.lock = v; },
         ),
@@ -2497,9 +2544,10 @@ export class UI {
       parent: st.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'STREAM', id: st.id });
-        toggleSel((v) => { st.select = v; }, !!st.select, !!e?.shiftKey);
+        toggleSel((v) => { st.select = v; }, !!st.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: viewLockBtns(
+        { kind: 'STREAM', id: st.id },
         !st.visible, (v) => { st.visible = !v; },
         !!st.lock, (v) => { st.lock = v; },
       ),
@@ -2532,13 +2580,41 @@ export class UI {
     };
 
     const rows: Node[] = [];
+    // The rows in the order they are actually DRAWN — a range select has to
+    // follow what you can see, not the order the collections happen to be
+    // stored in, and collapsed children are not on screen to be ranged over.
+    const visible: ObjRef[] = [];
     const emit = (n: NodeDesc, depth: number) => {
       const key = keyOf(n.ref);
       const kids = children.get(key) ?? [];
       const collapsed = this.outlinerCollapsed.has(key);
       const item = el('div', { class: `list-item ${n.selected ? 'active' : ''}`, 'data-ref': key });
       item.style.paddingLeft = `${6 + depth * 14}px`;
-      item.onclick = (e) => n.onSelect(e as MouseEvent);
+      visible.push(n.ref);
+      item.onclick = (e) => {
+        const me = e as MouseEvent;
+        const anchor = this.outlinerAnchor;
+        if (me.shiftKey && anchor) {
+          const a = visible.findIndex((r) => keyOf(r) === anchor);
+          const b = visible.findIndex((r) => keyOf(r) === key);
+          if (a >= 0 && b >= 0) {
+            ctx.pushUndo();
+            const [lo, hi] = a <= b ? [a, b] : [b, a];
+            // Extends rather than replaces, which is what makes
+            // shift-then-shift widen a range instead of restarting one.
+            for (let i = lo; i <= hi; i++) setObjectSelected(scene, visible[i], true);
+            ctx.syncCanvases();
+            ctx.requestRender();
+            this.app.refreshWidget();
+            this.refresh();
+            return;
+          }
+        }
+        // The anchor only moves on a NON-range click, so a range is always
+        // measured from where you started rather than from its own end.
+        this.outlinerAnchor = key;
+        n.onSelect(me);
+      };
       item.oncontextmenu = (e) => {
         e.preventDefault();
         if (!n.selected) n.onSelect(undefined);
