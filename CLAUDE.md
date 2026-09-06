@@ -560,6 +560,43 @@ the browser console or automated evals:
   walk THROUGH a ball rather than edging round it, because the joints are
   what move it and stopping the body would prevent the contact that does the
   work. Steering's whiskers skip them for the same reason.
+- **There are TWO physics backends behind one seam** (`actor/physics.ts`),
+  chosen by `scene.physicsEngine` — scene data, not a preference, because a
+  scene staged in one does not behave the same in the other. Both answer the
+  same three questions: step the world, hold a prop under the cursor, let it
+  go. `SIMPLE` is `props.ts` above. `RAPIER` (`actor/rapierphys.ts`) is a real
+  rigid-body world and is what to reach for when you need what the sphere
+  model cannot give: true convex shapes, rotation (a crate lands on a FACE),
+  stacks that hold, and a fixed-step deterministic solver.
+  - Rapier owns a world built FROM `GPScene`, never the other way round —
+    every step writes back into the scene, so undo, save, load, the outliner
+    and the transform widget all keep working. No `body` -> fixed; DYNAMIC ->
+    dynamic; KINEMATIC -> kinematicPositionBased driven from the data; every
+    actor JOINT -> a kinematic ball, so kicking still needs no special case.
+  - An EXTERNAL edit is detected against the last transform WE wrote, not
+    against the previous frame: a falling body rewrites its own translation
+    every step, so "changed since last frame" is true of everything in
+    motion. Anything that differs from OUR value came from the widget, a
+    constraint, an undo or a load, and must be applied as a teleport with the
+    velocities cleared, or the body springs back.
+  - A held prop stays DYNAMIC with gravity scaled to 0 and its velocity
+    steered. Making it kinematic is the obvious move and is wrong: kinematic
+    bodies pass through everything, so the ball you are dragging ends up
+    inside the wall.
+  - A PLANE's collider is a thin slab SUNK by its own half-thickness, so the
+    top face is exactly the plane you can see. Centre it instead and the whole
+    room rests 2 cm in the air, which reads as floaty contact rather than as a
+    collider in the wrong place. The platonics have no analytic collider and
+    become convex hulls built from `primitiveGeometry` — the same factory the
+    renderer draws from, so the two can never disagree.
+  - DETERMINISM is per input, not per wall clock: the same scene stepped by
+    hand at a fixed dt is bit-identical run to run (verified: three runs, zero
+    drift), but ACTORS are an input. A scene with characters walking in it
+    reproduces only if their motion does.
+  - Not yet on Rapier: the ACTOR solver. `actor/solver.ts` is positional
+    (a joint is a particle, a bone a distance constraint) and Rapier's
+    ragdoll would be bodies + joints with real angular state — a different
+    representation of the same character, not a setting.
 - **The shared walking body** (`actor/locomotion.ts`) is where collision and
   ground live, so a character does not collide differently depending on who
   is steering it. `walkVolume.gather(scene, frame)` is idempotent per frame.

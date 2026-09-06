@@ -63,6 +63,7 @@ import { autoRig } from '../actor/rig';
 import { MASK_LABELS, SOURCE_LABELS, nextLayerId } from '../actor/mixer';
 import { MOVE_ACTIONS, runMoveAction } from '../actor/commands';
 import { nextMacroId } from '../actor/macros';
+import { resetPhysics } from '../actor/physics';
 import { defaultBody, propRadius } from '../actor/props';
 import { ACTOR_LOOKS, LOOK_OPTIONS } from '../render/actorlooks';
 import type { ActorLayerSource } from '../core/types';
@@ -2257,6 +2258,24 @@ export class UI {
 
     return panel('Scene',
       panelHint('Magnet Increment/Grid snap unit = the subdivision lines (Step ÷ Subdivisions).'),
+      el('div', { class: 'menu-header', text: 'Physics' }),
+      fieldRow('Engine', selectField('', ctx.scene.physicsEngine ?? 'SIMPLE', [
+        ['SIMPLE', 'Simple (spheres)'],
+        ['RAPIER', 'Rapier (rigid bodies)'],
+      ], (v) => {
+        ctx.pushUndo();
+        ctx.scene.physicsEngine = v as 'SIMPLE' | 'RAPIER';
+        // Both worlds are dropped, never handed over: they hold different
+        // state (one has angular velocity and contact islands, the other has
+        // neither) and a half-migrated body would just be a bug with physics.
+        resetPhysics();
+        this.refresh();
+      })),
+      el('div', { class: 'row hint', text: ctx.scene.physicsEngine === 'RAPIER'
+        ? 'Rapier: real convex shapes, rotation, stacking and a deterministic '
+          + 'fixed step. Loads ~1 MB of wasm the first time a scene uses it.'
+        : 'Simple: every prop collides as a sphere and never rotates. Small, '
+          + 'no download, and enough for kicking a ball around.' }),
       el('div', { class: 'menu-header', text: 'Grid' }),
       fieldRow('Step', numField('', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5, { def: 1, min: 0.01 })),
       fieldRow('Subdivisions', numField('', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1, { def: 10, min: 1 })),

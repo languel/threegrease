@@ -23,7 +23,8 @@ import type { TGActor, TGMesh } from '../core/types';
 import { objectToScreen } from './projection';
 import { actorMixer } from '../actor/mixer';
 import { actorSolver } from '../actor/solver';
-import { defaultBody, propEngine, propRadius } from '../actor/props';
+import { defaultBody, propRadius } from '../actor/props';
+import { holdProp, releaseProp } from '../actor/physics';
 import { meshLocalBounds, worldAABB } from './objectops';
 import { worldMatrixOf } from '../tools/objects';
 
@@ -322,7 +323,7 @@ export class ActorPoseTool implements Tool {
     this.propHover = hit;
     ctx.canvas.style.cursor = 'grabbing';
     this.paintHighlight(ctx);
-    propEngine.hold(hit.meshId, hit.world);
+    holdProp(ctx.scene, hit.meshId, hit.world);
   }
 
   onMove(ctx: AppCtx, e: ToolEvent): void {
@@ -330,7 +331,7 @@ export class ActorPoseTool implements Tool {
       const at = new THREE.Vector3();
       if (this.ray(ctx, e).intersectPlane(this.propGrab.plane, at)) {
         at.add(this.propGrab.offset);
-        propEngine.hold(this.propGrab.meshId, at);
+        holdProp(ctx.scene, this.propGrab.meshId, at);
       }
       ctx.requestRender();
       return;
@@ -366,7 +367,7 @@ export class ActorPoseTool implements Tool {
     if (this.propGrab) {
       // Letting go just stops steering it: the chase velocity IS the throw,
       // and gravity resumes on the next step.
-      propEngine.release(this.propGrab.meshId);
+      releaseProp(ctx.scene, this.propGrab.meshId);
       this.propGrab = null;
       ctx.canvas.style.cursor = 'grab';
       this.paintHighlight(ctx);

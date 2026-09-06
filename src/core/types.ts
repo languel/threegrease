@@ -1172,6 +1172,16 @@ export interface TGWorld {
 }
 
 export interface GPScene {
+  /**
+   * Which physics backend runs the props.
+   *
+   * SIMPLE is `actor/props.ts` — spheres, no rotation, small and predictable.
+   * RAPIER is a real rigid-body world (`actor/rapierphys.ts`): true convex
+   * shapes, toppling, stacking that holds, and a fixed-step deterministic
+   * solver, at the cost of loading its wasm. Scene data, not a preference,
+   * because a scene staged in one does not behave the same in the other.
+   */
+  physicsEngine?: 'SIMPLE' | 'RAPIER';
   objects: GPObject[];
   activeObject: number;
   frame: number;

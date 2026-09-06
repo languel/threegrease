@@ -43,6 +43,8 @@ export function deserializeScene(json: string): GPScene {
   scene.io ??= { wsUrl: '', midiInId: null, midiOutId: null };
   scene.score ??= { cursors: [], triggers: [], attachments: [] };
   scene.routes ??= [];
+  // older saves predate the second physics backend and were all simple
+  scene.physicsEngine ??= 'SIMPLE';
   scene.attractors ??= [];
   scene.mediamime ??= { prefix: '/mm', rigs: [] };
   scene.mmStreams ??= [];

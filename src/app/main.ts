@@ -126,6 +126,8 @@ import { ARDY_NOTICES, ardyBackend, ardyDownloadHint } from '../actor/ardy';
 import { bindHumanoid, poseHumanoid } from '../render/vrmpose';
 import { vrmManager } from '../render/vrm';
 import { propEngine } from '../actor/props';
+import { rapierPhysics } from '../actor/rapierphys';
+import { engineOf, resetPhysics } from '../actor/physics';
 import { walkVolume } from '../actor/locomotion';
 import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
@@ -275,7 +277,7 @@ class App implements AppHandle {
   readonly sys = {
     streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
     gaitEngine, possession, actorMixer, steerEngine, ardyBackend,
-    behaviourEngine, actorLog, propEngine,
+    behaviourEngine, actorLog, propEngine, rapierPhysics,
     bindHumanoid, poseHumanoid, vrmManager,
     /** the app's own three, so an eval never pulls a second copy in
      *  (importing 'three' makes vite re-optimize and silently reload) */
@@ -2116,7 +2118,7 @@ class App implements AppHandle {
   loadDemoScene(playground = false): void {
     this.ctx.pushUndo();
     const upZ = this.ctx.settings.upAxis === 'Z';
-    propEngine.reset();
+    resetPhysics();
     const wiring = playground ? buildPlaygroundScene(upZ) : buildDemoScene(upZ);
     this.ctx.replaceScene(wiring.scene);
     // runtime wiring: which stream reads from which virtual source. This is
@@ -3768,7 +3770,16 @@ class App implements AppHandle {
     // pose — a foot's velocity is the kick, and it has to be the real one.
     // Static geometry only: props resolve against each other separately, and
     // a crate solved against its own box would shove itself across the room.
-    if (propEngine.update(
+    if (engineOf(ctx.scene) === 'RAPIER') {
+      // Lazy: the wasm only loads for a scene that asks for it, and until it
+      // has, the frame simply has no prop simulation rather than stalling.
+      const upZ = ctx.settings.upAxis === 'Z';
+      if (rapierPhysics.ready) {
+        if (rapierPhysics.update(ctx.scene, dt, upZ)) this.meshes.sync(ctx.scene, this.nav.active);
+      } else {
+        void rapierPhysics.init(upZ);
+      }
+    } else if (propEngine.update(
       ctx.scene, dt, ctx.settings.upAxis === 'Z',
       walkVolume.gather(ctx.scene).staticBoxes)) {
       this.meshes.sync(ctx.scene, this.nav.active);
