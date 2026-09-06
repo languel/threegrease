@@ -507,6 +507,15 @@ the browser console or automated evals:
   chase velocity IS the throw. A held prop carries no gravity, so it stays
   where you park it in mid-air until you release — staging a scene wants
   that, and falling on release is the same rule as everything else.
+  Two things the highlight taught: a sphere's SILHOUETTE is not its centre
+  projected plus a projected radius — under perspective an off-axis sphere
+  projects to an ellipse displaced outward, and the visible radius is the
+  tangent cone's, up to ~20% larger than the distance to a point one radius
+  sideways. `screenDisc` projects the real tangent circle instead, and refuses
+  to answer for a prop the eye is inside or that straddles the near plane
+  (that case reported a 49,000 px disc that swallowed every other pick).
+  And ALT IS NOT AVAILABLE as a viewport modifier: `emulate3Button` (on by
+  default) makes Alt+LMB orbit, so an Alt gesture never reaches a tool at all.
   Prop positions are read and written THROUGH the parent transform, because
   `mesh.translation` is parent-local and one Cmd-G puts every ball under an
   empty; the simulation itself works in world space.

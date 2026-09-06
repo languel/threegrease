@@ -19,20 +19,35 @@
 import * as THREE from 'three';
 import type { AppCtx } from './context';
 import type { Tool, ToolEvent } from './toolsys';
-import type { TGActor } from '../core/types';
+import type { TGActor, TGMesh } from '../core/types';
 import { objectToScreen } from './projection';
 import { actorMixer } from '../actor/mixer';
 import { actorSolver } from '../actor/solver';
-import { propEngine, propRadius } from '../actor/props';
+import { defaultBody, propEngine, propRadius } from '../actor/props';
+import { meshLocalBounds, worldAABB } from './objectops';
 import { worldMatrixOf } from '../tools/objects';
 
 /** screen-space grab radius, px */
 const GRAB_PX = 22;
-/** a prop is grabbable anywhere over its own silhouette, but never from
- *  further than this — otherwise a big crate swallows the whole viewport */
+/** a prop is grabbable anywhere over its own silhouette, plus this much
+ *  slack, so a marble is not a pixel hunt */
 const PROP_SLACK_PX = 10;
+/** how big a STATIC mesh may be before Alt-drag stops offering to make it a
+ *  loose prop. Dropping the floor into the simulation is not a feature. */
+const STATIC_GRAB_MAX_R = 1.5;
 
-interface PropHit { meshId: number; world: THREE.Vector3; screenR: number; }
+interface Disc { x: number; y: number; r: number }
+
+interface PropHit {
+  meshId: number;
+  world: THREE.Vector3;
+  /** the prop's silhouette on screen: where to draw the ring, and the
+   *  area the grab covers */
+  disc: Disc;
+  /** true when this mesh has no `body` yet — hoverable, but it takes a
+   *  modifier to turn it into something the world can push around */
+  static: boolean;
+}
 
 interface Grab {
   actorId: number;
@@ -77,32 +92,102 @@ export class ActorPoseTool implements Tool {
   }
 
   /**
-   * The loose prop under a screen point.
+   * A sphere's SILHOUETTE on screen, which is not the projection of its
+   * centre plus a projected radius.
    *
-   * Its own drawn size is the grab area (plus a little slack), not a fixed
-   * radius: a beach ball you have to hit within 22 px of its centre feels
-   * broken, and a marble you can grab from 22 px away steals clicks from
-   * whatever is behind it.
+   * Under perspective a sphere off the view axis projects to an ellipse
+   * whose centre sits further out than the projected centre, and the visible
+   * radius is the TANGENT cone's, always larger than the distance to a point
+   * one radius sideways. Measuring it the naive way puts the ring off-centre
+   * and slightly small — visible as a highlight that does not sit on the
+   * ball, and worse the closer and more off-axis it is. So take the real
+   * tangent circle (radius R*sqrt(1-R^2/d^2), at distance d-R^2/d along the
+   * eye ray) and project points around IT.
+   */
+  private screenDisc(ctx: AppCtx, world: THREE.Vector3, radius: number): Disc | null {
+    const eye = new THREE.Vector3().setFromMatrixPosition(ctx.camera.matrixWorld);
+    const axis = world.clone().sub(eye);
+    const d = axis.length();
+    // Standing inside a prop, or with one straddling the near plane, has no
+    // silhouette to speak of: the projection blows up and a single ball
+    // reports a 49,000 px disc that swallows every other pick on screen.
+    // Nothing to grab is the honest answer.
+    if (d <= radius * 1.2 || d < 1e-6) return null;
+    axis.divideScalar(d);
+    const k = 1 - (radius * radius) / (d * d);
+    const centre = eye.clone().addScaledVector(axis, d * k);
+    const r3 = radius * Math.sqrt(k);
+    // any two directions perpendicular to the eye ray
+    const u = new THREE.Vector3(0, 0, 1).cross(axis);
+    if (u.lengthSq() < 1e-8) u.set(1, 0, 0).cross(axis);
+    u.normalize();
+    const v = axis.clone().cross(u).normalize();
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const p = centre.clone()
+        .addScaledVector(u, Math.cos(a) * r3)
+        .addScaledVector(v, Math.sin(a) * r3);
+      // objectToScreen has no opinion about points behind the eye, and a
+      // projected one lands mirrored somewhere plausible — so test depth
+      // here rather than trusting the screen coordinates.
+      if (p.clone().applyMatrix4(ctx.camera.matrixWorldInverse).z > -1e-3) return null;
+      const sp = objectToScreen(ctx, [p.x, p.y, p.z]);
+      minX = Math.min(minX, sp.x); maxX = Math.max(maxX, sp.x);
+      minY = Math.min(minY, sp.y); maxY = Math.max(maxY, sp.y);
+    }
+    if (!Number.isFinite(minX)) return null;
+    return {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      r: Math.max(maxX - minX, maxY - minY) / 2,
+    };
+  }
+
+  /** The prop's grab radius in world units: its own drawn bounding sphere. */
+  private radiusOf(ctx: AppCtx, m: TGMesh): number {
+    const local = meshLocalBounds(m);
+    if (!local) return propRadius(m);
+    const box = worldAABB(local, worldMatrixOf(ctx.scene, { kind: 'MESH', id: m.id }));
+    const size = box.getSize(new THREE.Vector3());
+    return Math.max(0.03, Math.max(size.x, size.y, size.z) * 0.5);
+  }
+
+  /**
+   * The prop under a screen point.
+   *
+   * Its own drawn silhouette is the grab area, not a fixed radius: a beach
+   * ball you have to hit within 22 px of its centre feels broken, and a
+   * marble you can grab from 22 px away steals clicks from whatever is
+   * behind it.
+   *
+   * Meshes with no `body` are picked too, and reported as `static`. They are
+   * not draggable — but "why can I not grab that ball" is a question the
+   * viewport should answer, and Alt turns one into a prop on the spot.
    */
   private pickProp(ctx: AppCtx, x: number, y: number): PropHit | null {
     let best: PropHit | null = null;
     let bestD = Infinity;
     for (const m of ctx.scene.meshes) {
-      if (!m.body || m.visible === false || m.lock) continue;
+      if (m.visible === false || m.lock) continue;
+      const isStatic = !m.body;
+      // A wall or a floor is not something to accidentally drop into the
+      // simulation, so only bodies already made loose, and small enough
+      // objects, are offered at all.
+      if (isStatic && (m.kind === 'PLANE' || m.kind === 'EMPTY')) continue;
       const world = new THREE.Vector3()
         .setFromMatrixPosition(worldMatrixOf(ctx.scene, { kind: 'MESH', id: m.id }));
-      const s0 = objectToScreen(ctx, [world.x, world.y, world.z]);
-      // project the radius by measuring a point one radius to the camera's
-      // right — the only way to get a screen size that survives perspective
-      const right = new THREE.Vector3().setFromMatrixColumn(ctx.camera.matrixWorld, 0);
-      const edge = world.clone().addScaledVector(right, propRadius(m));
-      const s1 = objectToScreen(ctx, [edge.x, edge.y, edge.z]);
-      const screenR = Math.hypot(s1.x - s0.x, s1.y - s0.y);
-      const d = Math.hypot(s0.x - x, s0.y - y);
-      if (d > screenR + PROP_SLACK_PX) continue;
-      // nearest to the CENTRE wins, so overlapping props resolve the way
-      // they look rather than by scene order
-      if (d < bestD) { bestD = d; best = { meshId: m.id, world, screenR }; }
+      const radius = this.radiusOf(ctx, m);
+      if (isStatic && radius > STATIC_GRAB_MAX_R) continue;
+      const disc = this.screenDisc(ctx, world, radius);
+      if (!disc) continue;
+      const d = Math.hypot(disc.x - x, disc.y - y);
+      if (d > disc.r + PROP_SLACK_PX) continue;
+      // Live props win over static scenery at any distance, then nearest to
+      // the centre — so overlapping props resolve the way they look rather
+      // than by scene order.
+      const rank = (isStatic ? 1e6 : 0) + d;
+      if (rank < bestD) { bestD = rank; best = { meshId: m.id, world, disc, static: isStatic }; }
     }
     return best;
   }
@@ -156,9 +241,25 @@ export class ActorPoseTool implements Tool {
   private downProp(ctx: AppCtx, e: ToolEvent): void {
     const hit = this.pickProp(ctx, e.x, e.y);
     if (!hit) return;
+    const mesh = ctx.scene.meshes.find((m) => m.id === hit.meshId);
+    if (!mesh) return;
     // The prop's resting place is scene data, so the drag is undoable even
     // though the motion itself came out of the simulation.
     ctx.pushUndo();
+    if (hit.static) {
+      // Shift says "make this one loose and grab it now". Without a modifier
+      // the answer to a static mesh is nothing at all: quietly dropping the
+      // scenery into the simulation on a stray click is how a gallery ends
+      // up on the floor. NOT Alt — Alt+LMB is the trackpad orbit
+      // (`emulate3Button`, on by default) and never reaches a tool. Shift is
+      // free here: on a JOINT it toggles a pin, and a joint is picked first,
+      // so the two never contend for the same click.
+      if (!e.shift) return;
+      mesh.body = defaultBody(this.radiusOf(ctx, mesh));
+      hit.static = false;
+      // the Physics rows in the properties panel now apply to it
+      ctx.refreshUI();
+    }
     const normal = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, hit.world);
     const at = new THREE.Vector3();
@@ -184,7 +285,8 @@ export class ActorPoseTool implements Tool {
     this.propHover = this.hover ? null : this.pickProp(ctx, e.x, e.y);
     // A cursor that changes under the pointer is the cheapest way to say
     // "this one is grabbable" — the ring below says which one.
-    ctx.canvas.style.cursor = (this.hover || this.propHover) ? 'grab' : 'default';
+    ctx.canvas.style.cursor =
+      (this.hover || (this.propHover && !this.propHover.static)) ? 'grab' : 'default';
     if (!this.grab) return;
     const actor = ctx.scene.actors.find((a) => a.id === this.grab!.actorId);
     if (!actor) return;
@@ -236,10 +338,13 @@ export class ActorPoseTool implements Tool {
       if (mesh) {
         const w = new THREE.Vector3()
           .setFromMatrixPosition(worldMatrixOf(ctx.scene, { kind: 'MESH', id: p.meshId }));
-        const s = objectToScreen(ctx, [w.x, w.y, w.z]);
-        const r = Math.max(12, p.screenR + 4);
+        const disc = this.screenDisc(ctx, w, this.radiusOf(ctx, mesh)) ?? p.disc;
+        const s = { x: disc.x, y: disc.y };
+        const r = Math.max(12, disc.r + 3);
         const held = !!this.propGrab;
-        const tint = held ? '#ffc84d' : '#7fd4ff';
+        // Static scenery gets a muted ring: it says "I see it, and here is
+        // why nothing happens when you drag".
+        const tint = held ? '#ffc84d' : p.static ? '#9aa4ad' : '#7fd4ff';
         hud.save();
         // Drawn twice: a dark casing under a bright line. The viewport is a
         // room, so a single thin stroke lands on pale floor as often as on
@@ -257,7 +362,10 @@ export class ActorPoseTool implements Tool {
         hud.fillStyle = tint;
         hud.beginPath(); hud.arc(s.x, s.y, held ? 3 : 2, 0, Math.PI * 2); hud.fill();
         hud.font = '11px system-ui, sans-serif';
-        const label = `${mesh.name || 'prop'} · ${held ? 'release to throw' : 'drag / throw'}`;
+        const label = `${mesh.name || 'prop'} · ${
+          held ? 'release to throw'
+            : p.static ? 'no physics — Shift-drag to make it a prop'
+              : 'drag / throw'}`;
         // A big prop's ring can be wider than the viewport, so the label has
         // to fall back to the inside edge rather than off the canvas.
         const tw = hud.measureText(label).width;
