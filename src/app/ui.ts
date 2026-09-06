@@ -136,6 +136,7 @@ export interface AppHandle {
   modelMotions(): { meshId: number; name: string; clips: string[] }[];
   avatarChoices(): { id: number; name: string }[];
   setActorAvatar(actorId: number, meshId: number | null): void;
+  clearGeneratedMotion(actorId: number): void;
   motionBackendIds(): { id: string; label: string }[];
   motionEndpoint(): string;
   motionStatus(): { text: string; busy: boolean; notices: string[]; hint: string } | null;
@@ -1684,6 +1685,11 @@ export class UI {
       el('div', { class: 'panel-hint', text: 'Saved with the scene, so a piece '
         + 'travels with its own vocabulary.' }),
       ...macroRows,
+      fieldRow('', el('div', { class: 'field-group' },
+        btn('Back to the walk cycle', () => this.app.clearGeneratedMotion(actor.id),
+          { title: 'Drop the generated motion and hand the body back to the '
+            + 'procedural gait' }),
+      ), { full: true }),
       fieldRow('', btn('+ Button', () => {
         ctx.pushUndo();
         ctx.scene.motionMacros = [...macros, {

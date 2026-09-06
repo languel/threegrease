@@ -374,6 +374,24 @@ the browser console or automated evals:
   - ORT loads its wasm host BY URL, not through the bundler, so
     `scripts/copy-ort-assets.mjs` stages it into `public/ort/` on dev/build
     (gitignored, 66 MB).
+- **There is ONE generated-motion layer per actor, and a new one crossfades
+  the old out.** Appending instead of swapping is what makes a character look
+  "conflicted": every press of a Motion button used to add another CLIP layer
+  at full weight, and the solver dutifully averaged ten different walks into
+  one that was none of them. `App.swapGeneratedLayer` fades the previous out
+  and prunes it on the NEXT swap, so at most two exist at a time and no timer
+  is needed. Layers made this way carry `generated: true`; hand-authored CLIP
+  layers (an import masked to the upper body, say) are left alone.
+- **A clip that TRAVELS is phased by distance, not by time**
+  (`TGActorLayer.phaseBy`, `TGClip.impliedSpeed`). Play a 1.4 m/s walk on a
+  character moving at 0.7 and, timed, its feet skate; distance-phased it takes
+  half-length steps — which is exactly what the gait has always done, so the
+  two locomotion systems finally behave the same way. `impliedSpeed` is
+  measured in `retarget.ts` from the source's own travel BEFORE that travel is
+  stripped, so glTF imports and generated clips both get it for free. A clip
+  that stays put (a wave, a sit) must stay on the clock or it freezes the
+  moment the character stops — hence the 0.35 m/s threshold when a generated
+  layer picks its mode.
 - **`src/actor/retarget.ts` is the ONE retargeter** for foreign motion —
   frames of named joint positions in, a pose clip on our skeleton out. Both
   the glTF importer and ARDY go through it. The traps it encodes: scale

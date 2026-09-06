@@ -418,6 +418,16 @@ export interface TGClip {
    * back to where it was performed.
    */
   space?: 'WORLD' | 'ACTOR_LOCAL';
+  /**
+   * Metres per second this clip's own motion implies, measured from the
+   * source's travel BEFORE it was stripped. It is what lets a locomotion
+   * clip be phased by DISTANCE rather than by time — play a 1.4 m/s walk on
+   * a character moving at 0.7 m/s and, timed, its feet skate; distance-phased
+   * it simply takes half-speed steps, which is what the procedural gait has
+   * always done. 0 or absent means the clip does not travel (a wave, a sit)
+   * and must stay on the clock.
+   */
+  impliedSpeed?: number;
   /** ACTOR_LOCAL only: joint NAME per point, index-aligned with each
    *  frame's data. Names rather than indices so a performance recorded on
    *  one actor plays on another with the same vocabulary. */
@@ -906,6 +916,15 @@ export interface TGActorLayer {
   speed?: number;
   loop?: LoopMode;
   playing?: boolean;
+  /** TIME advances on the clock; DISTANCE advances on ground covered, which
+   *  is what stops a walk clip sliding when the character travels at a
+   *  different speed than the clip was generated at. */
+  phaseBy?: 'TIME' | 'DISTANCE';
+  /** created by the Motion panel rather than by hand. There is only ever
+   *  ONE live generated layer per actor: a new one crossfades the previous
+   *  out, because stacking them averages several different walks into
+   *  something that is none of them. */
+  generated?: boolean;
 }
 
 /**

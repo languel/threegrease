@@ -33,6 +33,8 @@
 import type { GPScene, TGActor, TGActorLayer, ActorLayerSource, LoopMode } from '../core/types';
 import { actorSolver } from './solver';
 import { clipWindowSeconds, sampleClipFrame } from '../mm/clips';
+import { worldMatrixOf } from '../tools/objects';
+import * as THREE from 'three';
 import { advancePhase } from '../score/engine';
 
 /** Which joints a mask covers. Names are the skeleton's own vocabulary
@@ -127,11 +129,12 @@ export class ActorMixer {
    * anything asks `gain()`, and a clip is the one source the mixer drives
    * itself (nothing else owns a recorded performance).
    */
-  update(scene: GPScene, dt: number): void {
+  update(scene: GPScene, dt: number, upZ = true): void {
     this.advanceFades(scene, dt);
     for (const actor of scene.actors) {
+      const moved = this.travelled(scene, actor, upZ);
       for (const layer of actor.layers ?? []) {
-        if (layer.source === 'CLIP') this.playClip(scene, actor, layer, dt);
+        if (layer.source === 'CLIP') this.playClip(scene, actor, layer, dt, moved);
       }
     }
   }
@@ -158,15 +161,28 @@ export class ActorMixer {
    * path recording, not a pose — those replay as CLIP streams instead, and
    * driving joints with them would plant the character at the origin.
    */
-  private playClip(scene: GPScene, actor: TGActor, layer: TGActorLayer, dt: number): void {
+  private playClip(
+    scene: GPScene, actor: TGActor, layer: TGActorLayer, dt: number, moved: number,
+  ): void {
     if (!layer.enabled || layer.clipId == null) return;
     const clip = scene.clips.find((c) => c.id === layer.clipId);
     if (!clip?.frames.length || !clip.joints?.length) return;
 
     const loop = (layer.loop ?? 'LOOP') as LoopMode;
     if (layer.playing !== false) {
-      const [p, running] = advancePhase(
-        layer.phase ?? 0, (layer.speed ?? 1) / clipWindowSeconds(clip), dt, loop);
+      const windowSec = clipWindowSeconds(clip);
+      let rate = (layer.speed ?? 1) / windowSec;
+      let step = dt;
+      if (layer.phaseBy === 'DISTANCE' && (clip.impliedSpeed ?? 0) > 0.05) {
+        // Advance on ground covered instead of on the clock: one clip's
+        // worth of phase per (impliedSpeed * window) metres. A character
+        // walking at half the speed the clip was made at now takes
+        // half-length steps instead of skating.
+        const metresPerCycle = clip.impliedSpeed! * windowSec;
+        rate = (layer.speed ?? 1) / metresPerCycle;
+        step = moved;
+      }
+      const [p, running] = advancePhase(layer.phase ?? 0, rate, step, loop);
       layer.phase = p;
       if (!running) layer.playing = false;
     }
@@ -197,6 +213,27 @@ export class ActorMixer {
 
   /** name -> joint index, rebuilt only when the skeleton changes shape */
   private nameCache = new Map<number, { n: number; map: Map<string, number> }>();
+  /** last world position per actor, for distance-phased clips */
+  private lastPos = new Map<number, THREE.Vector3>();
+
+  /**
+   * Ground covered by this actor since the previous frame.
+   *
+   * Vertical motion is excluded — that is bob, not progress — and a jump
+   * across the room is rejected as a teleport rather than fast-forwarding
+   * the clip through several strides, the same guard the gait uses.
+   */
+  private travelled(scene: GPScene, actor: TGActor, upZ: boolean): number {
+    const p = new THREE.Vector3().setFromMatrixPosition(
+      worldMatrixOf(scene, { kind: 'ACTOR', id: actor.id }));
+    const prev = this.lastPos.get(actor.id);
+    this.lastPos.set(actor.id, p.clone());
+    if (!prev) return 0;
+    const d = p.clone().sub(prev);
+    d.setComponent(upZ ? 2 : 1, 0);
+    const len = d.length();
+    return len > 1.5 ? 0 : len;
+  }
 
   private jointIndex(actor: TGActor): Map<string, number> {
     const hit = this.nameCache.get(actor.id);

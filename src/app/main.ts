@@ -5,7 +5,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
 import { History } from '../core/history';
-import type { GPScene, TGLight, Vec3, ViewportShading } from '../core/types';
+import type { GPScene, TGActor, TGActorLayer, TGLight, Vec3, ViewportShading } from '../core/types';
 import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { defaultSettings, loadPrefs, savePrefs, snapIncrement, type AppCtx } from '../tools/context';
@@ -2558,24 +2558,7 @@ class App implements AppHandle {
     }
     this.ctx.pushUndo();
     this.ctx.scene.clips.push(report.clip);
-    actor.layers = [...(actor.layers ?? []), {
-      id: nextLayerId(actor),
-      name: source.name || 'Imported',
-      enabled: true,
-      weight: 1,
-      mask: 'ALL',
-      source: 'CLIP',
-      clipId: report.clip.id,
-      phase: 0,
-      speed: 1,
-      loop: 'LOOP',
-      playing: true,
-    }];
-    // An imported walk and the procedural one both want the legs, and
-    // blending two walks at once reads as neither. Stand the gait down and
-    // let the stack say so out loud rather than silently halving both.
-    const gaitLayer = actor.layers.find((l) => l.source === 'GAIT');
-    if (gaitLayer) gaitLayer.enabled = false;
+    this.swapGeneratedLayer(actor, report.clip.id, source.name || 'Imported');
     this.setStatusHint(
       `Retargeted ${report.matched.length} joints, ${report.frames} frames`
       + `${report.missing.length ? ` (unmatched: ${report.missing.join(', ')})` : ''}`, 8000);
@@ -2643,23 +2626,7 @@ class App implements AppHandle {
     this.ardyStatus = '';
     this.ctx.pushUndo();
     this.ctx.scene.clips.push(clip);
-    actor.layers = [...(actor.layers ?? []), {
-      id: nextLayerId(actor),
-      name: clip.name,
-      enabled: true,
-      weight: 1,
-      mask: 'ALL',
-      source: 'CLIP',
-      clipId: clip.id,
-      phase: 0,
-      speed: 1,
-      loop: 'LOOP',
-      playing: true,
-    }];
-    // a generated walk and the procedural one both want the legs, and two
-    // walks blended at once reads as neither
-    const gaitLayer = actor.layers.find((l) => l.source === 'GAIT');
-    if (gaitLayer) gaitLayer.enabled = false;
+    this.swapGeneratedLayer(actor, clip.id, clip.name);
     this.setStatusHint(
       `Generated ${clip.frames.length} frames over ${(clip.duration / 1000).toFixed(1)}s`
       + ` on ${clip.count} joints`, 6000);
@@ -2679,6 +2646,67 @@ class App implements AppHandle {
     if (!actor) return;
     this.ctx.pushUndo();
     actor.avatar = meshId;
+    this.ui.refresh();
+  }
+
+  /**
+   * Put a clip on the actor's ONE generated-motion layer, crossfading
+   * whatever was there before.
+   *
+   * Appending instead of swapping is what made a character look
+   * "conflicted": every press of a Motion button added another layer at
+   * full weight, and the solver dutifully averaged ten different walks into
+   * one that was none of them. There is a single live generated layer, and
+   * a new one fades in as the old fades out.
+   *
+   * Stale layers are pruned HERE rather than on a timer: at most two ever
+   * exist at once, and the faded-out one is collected on the next swap.
+   */
+  private swapGeneratedLayer(actor: TGActor, clipId: number, name: string): void {
+    const FADE = 0.35;
+    const layers = actor.layers ?? [];
+    const alive = layers.filter((l) => !(l.generated
+      && actorMixer.fadeFactor(actor.id, l.id) < 0.01));
+    for (const l of alive) {
+      if (l.generated) actorMixer.fadeTo(actor.id, l.id, 0, FADE);
+    }
+    const layer: TGActorLayer = {
+      id: nextLayerId(actor),
+      name,
+      enabled: true,
+      weight: 1,
+      mask: 'ALL',
+      source: 'CLIP',
+      clipId,
+      phase: 0,
+      speed: 1,
+      loop: 'LOOP',
+      playing: true,
+      generated: true,
+      // A clip whose source actually walked somewhere is locomotion and is
+      // phased on distance, so it never skates. One that stayed put — a
+      // wave, a sit — must stay on the clock, or it would freeze the moment
+      // the character stopped.
+      phaseBy: (this.ctx.scene.clips.find((c) => c.id === clipId)?.impliedSpeed ?? 0) > 0.35
+        ? 'DISTANCE' : 'TIME',
+    };
+    actor.layers = [...alive, layer];
+    actorMixer.fadeTo(actor.id, layer.id, 0, 0);      // start silent...
+    actorMixer.fadeTo(actor.id, layer.id, 1, FADE);   // ...and come up
+    // a generated walk and the procedural one both want the legs
+    const gaitLayer = actor.layers.find((l) => l.source === 'GAIT');
+    if (gaitLayer) gaitLayer.enabled = false;
+  }
+
+  /** Drop every generated layer and hand the body back to the gait. */
+  clearGeneratedMotion(actorId: number): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === actorId);
+    if (!actor) return;
+    this.ctx.pushUndo();
+    actor.layers = (actor.layers ?? []).filter((l) => !(l.generated || l.source === 'CLIP'));
+    const gaitLayer = actor.layers.find((l) => l.source === 'GAIT');
+    if (gaitLayer) gaitLayer.enabled = true;
+    if (actor.gait) actor.gait.enabled = true;
     this.ui.refresh();
   }
 
@@ -3628,7 +3656,7 @@ class App implements AppHandle {
     // Mixer first: it only advances crossfades, but every source below asks
     // it how loudly it may speak this frame, so the fades must be current
     // before any of them emit.
-    actorMixer.update(ctx.scene, dt);
+    actorMixer.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
     // Steering moves the ROOT, like possession and like a FOLLOW_PATH
     // constraint — and like both of those it touches no joint: the gait
     // below sees the root move and produces the walking. Before the gait so

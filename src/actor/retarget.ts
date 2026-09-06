@@ -187,6 +187,18 @@ export function retargetPoseFrames(
     frames.push({ t: f.t, data });
   }
 
+  // How fast the SOURCE was travelling, measured before the travel was
+  // stripped out. Horizontal only: vertical motion is bob, not progress.
+  let path = 0;
+  for (let i = 1; i < src.frames.length; i++) {
+    const a0 = at(src.frames[i - 1].pos, iHips);
+    const b0 = at(src.frames[i].pos, iHips);
+    path += Math.hypot(b0.x - a0.x, b0.z - a0.z);
+  }
+  const spanSec = Math.max(0.001,
+    (src.frames[src.frames.length - 1].t - src.frames[0].t) / 1000);
+  const impliedSpeed = +((path * scale) / spanSec).toFixed(3);
+
   const clip: TGClip = {
     id: genId(),
     name: opts.name ?? 'retargeted motion',
@@ -196,6 +208,7 @@ export function retargetPoseFrames(
     frames,
     space: 'ACTOR_LOCAL',
     joints: outNames,
+    impliedSpeed,
   };
   return {
     clip, matched: outNames, missing: [], scale: +scale.toFixed(4),
