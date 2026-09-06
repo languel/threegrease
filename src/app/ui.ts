@@ -1488,9 +1488,43 @@ export class UI {
   openTab(id: string): void { this.propsTab = id; this.refresh(); }
   private lastMode = '';
 
+  /**
+   * Scroll offsets of the sidebar's scrollable regions, carried across a
+   * rebuild.
+   *
+   * Panels are rebuilt from scratch on every refresh (by design — see
+   * CLAUDE.md), which means the scrolling elements are NEW elements, and a
+   * new element starts at scrollTop 0. Selecting an object triggers a
+   * refresh, so the outliner threw you back to the top the instant you
+   * clicked anything below the fold — and the thing you had just clicked
+   * scrolled out from under the pointer. Grouping made it obvious because it
+   * lengthens the list, but any long scene had it.
+   */
+  private scrollMemory = new Map<string, number>();
+  private static readonly SCROLLERS = ['.sidebar-outliner', '.props-content'];
+
+  private rememberScroll(root: ParentNode): void {
+    for (const sel of UI.SCROLLERS) {
+      const node = root.querySelector(sel) as HTMLElement | null;
+      if (node) this.scrollMemory.set(sel, node.scrollTop);
+    }
+  }
+
+  private restoreScroll(root: ParentNode): void {
+    for (const sel of UI.SCROLLERS) {
+      const node = root.querySelector(sel) as HTMLElement | null;
+      const at = this.scrollMemory.get(sel);
+      if (!node || !at) continue;
+      // The browser clamps this to the content height, so it is safe even
+      // when the rebuild made the list shorter.
+      node.scrollTop = at;
+    }
+  }
+
   private buildSidebar(): void {
     const { ctx } = this.app;
     const side = $('sidebar');
+    this.rememberScroll(side);
     side.replaceChildren();
 
     // mode changes nudge the tab the way Blender's context tabs follow mode
@@ -1579,6 +1613,7 @@ export class UI {
     const outliner = el('div', { class: 'sidebar-outliner' }, this.objectsPanel());
     const tabsRow = el('div', { class: 'sidebar-tabsrow' }, strip, content);
     side.append(outliner, tabsRow);
+    this.restoreScroll(side);
   }
 
   /** Actor tab: the mannequin's shape, its physics, and its rig.

@@ -81,6 +81,13 @@ Key invariants:
   `selectField()`, `panel()`.
 - Panels are **rebuilt from scratch** on `UI.refresh()` (called via
   `ctx.refreshUI()`); don't keep references to DOM nodes across refreshes.
+  The corollary that bites: a rebuilt scroll container is a NEW element, and
+  a new element starts at `scrollTop` 0. Selecting an object triggers a
+  refresh, so the outliner used to throw you back to the top the moment you
+  clicked anything below the fold — and the row you had just clicked slid
+  out from under the pointer. `UI.rememberScroll`/`restoreScroll` carry the
+  offsets of `.sidebar-outliner` and `.props-content` across the rebuild;
+  add any new scrollable region to `UI.SCROLLERS`.
 - The UI talks to the app only through the `AppHandle` interface (top of
   `ui.ts`) — add methods there, implement on `App` in `main.ts`.
 - New keyboard shortcuts: add an `ActionDef` to `ACTIONS` in
