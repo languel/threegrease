@@ -119,6 +119,7 @@ import { retargetGltfClip } from '../actor/gltfclip';
 import {
   motionBackends, proceduralBackend, remoteBackend, type MotionRequest,
 } from '../actor/generate';
+import { ARDY_NOTICES, ardyBackend, ardyDownloadHint } from '../actor/ardy';
 import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
 import { buildDemoScene } from './demoscene';
@@ -266,7 +267,7 @@ class App implements AppHandle {
    */
   readonly sys = {
     streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
-    gaitEngine, possession, actorMixer, steerEngine,
+    gaitEngine, possession, actorMixer, steerEngine, ardyBackend,
     /** the app's own three, so an eval never pulls a second copy in
      *  (importing 'three' makes vite re-optimize and silently reload) */
     THREE,
@@ -2582,6 +2583,18 @@ class App implements AppHandle {
   }
 
   motionEndpoint(): string { return remoteBackend.endpoint; }
+
+  /** Download/inference progress for the on-device model, for the panel. */
+  motionStatus(): { text: string; busy: boolean; notices: string[]; hint: string } | null {
+    return {
+      text: this.ardyStatus,
+      busy: ardyBackend.busy,
+      notices: ARDY_NOTICES,
+      hint: ardyDownloadHint(),
+    };
+  }
+
+  private ardyStatus = '';
   setMotionEndpoint(url: string): void { remoteBackend.endpoint = url.trim(); }
 
   /**
@@ -2603,14 +2616,25 @@ class App implements AppHandle {
       speed: actor.steer?.speed,
       goal: actor.steer?.mode === 'POINT' ? (actor.steer.point ?? null) : null,
     };
-    this.setStatusHint(`Generating "${prompt}" (${backend.label})…`, 20000);
+    ardyBackend.onProgress = (p) => {
+      const pct = p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0;
+      this.ardyStatus = `${p.stage.replace(/-/g, ' ')} ${pct}%`
+        + (p.message ? ` — ${p.message}` : '');
+      this.setStatusHint(`ARDY: ${this.ardyStatus}`, 30000);
+    };
+    this.setStatusHint(`Generating "${prompt}" (${backend.label})…`, 30000);
     let clip;
     try {
       clip = await backend.generate(req, actor, this.ctx.settings.upAxis === 'Z');
     } catch (err) {
-      this.setStatusHint(`Generate failed — ${String(err)}`, 8000);
+      this.ardyStatus = '';
+      this.setStatusHint(`Generate failed — ${String(err)}`, 10000);
+      this.ui.refresh();
       return;
+    } finally {
+      ardyBackend.onProgress = null;
     }
+    this.ardyStatus = '';
     this.ctx.pushUndo();
     this.ctx.scene.clips.push(clip);
     actor.layers = [...(actor.layers ?? []), {

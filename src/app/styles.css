@@ -648,3 +648,12 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
   padding: 1px 8px 5px 8px;
   line-height: 1.35;
 }
+
+/* mandatory third-party model attributions - small, but never hidden */
+.panel-note {
+  font-size: 9.5px;
+  color: var(--muted, #8a8a92);
+  padding: 0 8px 3px 8px;
+  line-height: 1.4;
+  opacity: 0.85;
+}

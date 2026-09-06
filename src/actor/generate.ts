@@ -34,6 +34,7 @@
 // than a project.
 import type { TGActor, TGClip, Vec3 } from '../core/types';
 import { genId } from '../core/gpdata';
+import { ardyBackend } from './ardy';
 
 export interface MotionRequest {
   /** free text: "walk", "tired shuffle", "march", "limp on the left" */
@@ -291,6 +292,9 @@ export class RemoteBackend implements MotionBackend {
 export const proceduralBackend = new ProceduralBackend();
 export const remoteBackend = new RemoteBackend();
 
+// ardy.ts imports only a TYPE from this module, so the import is erased and
+// there is no runtime cycle — the list is built when it is called, by which
+// point both modules exist.
 export function motionBackends(): MotionBackend[] {
-  return [proceduralBackend, remoteBackend];
+  return [proceduralBackend, ardyBackend, remoteBackend];
 }

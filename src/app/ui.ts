@@ -135,6 +135,7 @@ export interface AppHandle {
   modelMotions(): { meshId: number; name: string; clips: string[] }[];
   motionBackendIds(): { id: string; label: string }[];
   motionEndpoint(): string;
+  motionStatus(): { text: string; busy: boolean; notices: string[]; hint: string } | null;
   setMotionEndpoint(url: string): void;
   generateMotion(actorId: number, prompt: string, seconds: number, backendId?: string): Promise<void>;
   importMotion(meshId: number, clipIndex: number, actorId: number): void;
@@ -1732,6 +1733,17 @@ export class UI {
           this.app.motionBackendIds().map((b) => [b.id, b.label] as [string, string]),
           (v) => { this.genBackend = v; this.refresh(); })),
       ] : []),
+      ...(this.genBackend === 'ardy' ? (() => {
+        const st = this.app.motionStatus();
+        return [
+          el('div', { class: 'panel-hint', text: st?.busy && st.text
+            ? st.text
+            : `On-device diffusion model \u2014 ${st?.hint ?? ''}. Text only: it `
+              + 'makes the motion, the destination is still the root\u2019s job.' }),
+          // The composite model terms REQUIRE these to be shown.
+          ...(st?.notices ?? []).map((n) => el('div', { class: 'panel-note', text: n })),
+        ];
+      })() : []),
       ...(this.genBackend === 'remote' ? [
         fieldRow('Endpoint', textField(this.app.motionEndpoint(),
           (v: string) => { this.app.setMotionEndpoint(v); },

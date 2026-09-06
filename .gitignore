@@ -1,3 +1,6 @@
 node_modules
 dist
 .DS_Store
+
+# ONNX Runtime web assets, copied from node_modules by `npm run ort-assets`
+public/ort/
