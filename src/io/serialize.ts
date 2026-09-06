@@ -2,6 +2,7 @@ import type { GPObject, GPScene, TGMaterial, Vec3 } from '../core/types';
 import { defaultGait } from '../actor/gait';
 import { defaultLayers } from '../actor/mixer';
 import { defaultSteer } from '../actor/steering';
+import { defaultMotionMacros } from '../actor/macros';
 import { rebuildLimbRules } from '../actor/skeleton';
 import { bumpIdCounter, createDefaultCamera, createImage, createMaterialDB, createWorld, defaultLights, genId } from '../core/gpdata';
 import { defaultStyle } from '../core/brushes';
@@ -70,6 +71,7 @@ export function deserializeScene(json: string): GPScene {
     delete legacyPen.landmark;
   }
   scene.clips ??= [];
+  scene.motionMacros ??= defaultMotionMacros();
   for (const c of scene.clips) {
     c.trimStart ??= 0;
     c.trimEnd ??= 1;

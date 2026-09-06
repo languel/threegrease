@@ -914,6 +914,22 @@ export interface TGActorLayer {
  * constraint and possession — and the one a generative motion model wants,
  * since you tell it WHERE, not how.
  */
+/**
+ * One button in the Motion panel: a phrase, and optionally what to do with
+ * the character as well as how it should move. Scene data on purpose — a
+ * class or a piece builds its own vocabulary and saves it with the work.
+ */
+export interface TGMotionMacro {
+  id: number;
+  label: string;
+  /** the description handed to the motion generator */
+  prompt: string;
+  /** seconds of motion to generate; 0 uses the panel's current setting */
+  seconds?: number;
+  /** optionally also issue a Direct verb (see actor/commands.ts MOVE_ACTIONS) */
+  action?: string;
+}
+
 export interface TGActorSteer {
   mode: 'NONE' | 'POINT' | 'OBJECT';
   /** POINT: a world position */
@@ -1140,6 +1156,8 @@ export interface GPScene {
   mmStreams: MMStream[];
   /** recorded point clips (mm streams / object trajectories) */
   clips: TGClip[];
+  /** Motion panel buttons — see TGMotionMacro */
+  motionMacros?: TGMotionMacro[];
   /** rigged characters (ragdoll / mannequin), see actor/ */
   actors: TGActor[];
   /** persisted rulers / annotations for real-world blockout */

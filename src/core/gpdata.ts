@@ -1,3 +1,4 @@
+import { defaultMotionMacros } from '../actor/macros';
 import type {
   GPCamera, GPFrame, GPLayer, GPMaterial, GPObject, GPPoint, GPScene, GPStroke,
   TGImage, TGLight, TGMaterial, TGWorld, Vec3, Vec4,
@@ -275,6 +276,7 @@ export function createScene(): GPScene {
     mediamime: { prefix: '/mp', rigs: [] },
     mmStreams: [],
     clips: [],
+    motionMacros: defaultMotionMacros(),
     actors: [],
     measures: [],
   };

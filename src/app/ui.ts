@@ -59,7 +59,8 @@ import { selectAll, selectLinked, selectMoreLess } from '../tools/select';
 import { icon, type IconName } from './icons';
 import { autoRig } from '../actor/rig';
 import { MASK_LABELS, SOURCE_LABELS, nextLayerId } from '../actor/mixer';
-import { MOVE_ACTIONS } from '../actor/commands';
+import { MOVE_ACTIONS, runMoveAction } from '../actor/commands';
+import { nextMacroId } from '../actor/macros';
 import { ACTOR_LOOKS, LOOK_OPTIONS } from '../render/actorlooks';
 import type { ActorLayerSource } from '../core/types';
 
@@ -138,6 +139,7 @@ export interface AppHandle {
   motionBackendIds(): { id: string; label: string }[];
   motionEndpoint(): string;
   motionStatus(): { text: string; busy: boolean; notices: string[]; hint: string } | null;
+  setStatusHint(text: string, ms?: number): void;
   setMotionEndpoint(url: string): void;
   generateMotion(actorId: number, prompt: string, seconds: number, backendId?: string): Promise<void>;
   importMotion(meshId: number, clipIndex: number, actorId: number): void;
@@ -1521,6 +1523,11 @@ export class UI {
         build: () => [this.actorPanel()],
       },
       {
+        id: 'motion', icon: 'sparkles',
+        title: 'Motion — describe how a character moves, and save it as a button',
+        build: () => [this.motionPanel()],
+      },
+      {
         id: 'mods', icon: 'wrench', title: 'Modifiers, effects & constraints',
         build: () => [this.modifiersPanel(), this.effectsPanel(), this.constraintsPanel()],
       },
@@ -1570,6 +1577,127 @@ export class UI {
 
   /** Actor tab: the mannequin's shape, its physics, and its rig.
    *  Everything here is per-actor, so it needs one selected. */
+  /**
+   * The Motion panel: say what a character should do, in words.
+   *
+   * Deliberately its own panel rather than a section of the Agent chat. The
+   * agent panel is a CONVERSATION; this is a control surface you come back
+   * to and press repeatedly, and a grid of buttons inside a transcript makes
+   * both of them worse. The Direct HUD keeps what it is good at — pointing
+   * at the floor — and everything verbal lives here.
+   */
+  private motionPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const actors = ctx.scene.actors;
+    if (!actors.length) {
+      return panel('Motion', el('div', { class: 'row', text: 'Add an actor to direct.' }));
+    }
+    const actor = actors.find((a) => a.select) ?? actors[0];
+    const macros = ctx.scene.motionMacros ?? [];
+    const status = this.app.motionStatus();
+    const touch = (): void => { ctx.requestRender(); };
+
+    const run = (prompt: string, seconds?: number, action?: string): void => {
+      if (action) {
+        const verb = MOVE_ACTIONS.find((m) => m.id === action);
+        // a verb that needs a point cannot fire from a button — arm it in
+        // the HUD instead of guessing where the user meant
+        if (verb && verb.kind === 'STOP') {
+          runMoveAction(ctx.scene, actor.id, verb, null, ctx.settings.upAxis === 'Z');
+        } else if (verb) {
+          ctx.settings.directAction = verb.id;
+          this.app.setStatusHint(`${verb.label} — now click the floor`);
+        }
+      }
+      if (prompt.trim()) {
+        void this.app.generateMotion(
+          actor.id, prompt, seconds && seconds > 0 ? seconds : this.genSeconds, this.genBackend);
+      }
+    };
+
+    const macroRows = macros.flatMap((mac) => [
+      fieldRow('', el('div', { class: 'field-group' },
+        btn(mac.label, () => run(mac.prompt, mac.seconds, mac.action),
+          { title: mac.prompt + (mac.action ? ` · then ${mac.action}` : '') }),
+        btn(icon('pencil'), () => {
+          this.macroEdit = this.macroEdit === mac.id ? 0 : mac.id;
+          this.refresh();
+        }, { cls: 'icon-btn', title: 'Edit this button' }),
+        btn(icon('trash'), () => {
+          ctx.pushUndo();
+          ctx.scene.motionMacros = macros.filter((m) => m.id !== mac.id);
+          touch();
+          this.refresh();
+        }, { cls: 'icon-btn', title: 'Remove' }),
+      ), { full: true }),
+      ...(this.macroEdit === mac.id ? [
+        fieldRow('Label', textField(mac.label, (v: string) => {
+          ctx.pushUndo(); mac.label = v; touch(); this.refresh();
+        })),
+        fieldRow('Says', textField(mac.prompt, (v: string) => {
+          ctx.pushUndo(); mac.prompt = v; touch();
+        })),
+        fieldRow('Seconds', numField('', mac.seconds ?? 0, (v) => {
+          ctx.pushUndo(); mac.seconds = Math.max(0, v); touch();
+        }, 0.5)),
+        fieldRow('Then', selectField('', mac.action ?? '', [
+          ['', '(nothing)'],
+          ...MOVE_ACTIONS.map((m) => [m.id, m.label] as [string, string]),
+        ], (v) => { ctx.pushUndo(); mac.action = v || undefined; touch(); this.refresh(); })),
+      ] : []),
+    ]);
+
+    return panel(`Motion — ${actor.name}`,
+      ...(actors.length > 1 ? [
+        fieldRow('Character', selectField('', String(actor.id),
+          actors.map((a) => [String(a.id), a.name] as [string, string]),
+          (v) => {
+            for (const a of actors) a.select = a.id === Number(v);
+            this.refresh();
+          })),
+      ] : []),
+
+      el('div', { class: 'menu-header', text: 'Say it' }),
+      fieldRow('', textField(this.genPrompt, (v: string) => { this.genPrompt = v; },
+        'walk slowly and look around'), { full: true }),
+      slider('Seconds', this.genSeconds, 0.5, 10, 0.5, (v) => { this.genSeconds = v; }, { def: 2 }),
+      fieldRow('Using', selectField('', this.genBackend,
+        this.app.motionBackendIds().map((b) => [b.id, b.label] as [string, string]),
+        (v) => { this.genBackend = v; this.refresh(); })),
+      ...(this.genBackend === 'remote' ? [
+        fieldRow('Endpoint', textField(this.app.motionEndpoint(),
+          (v: string) => { this.app.setMotionEndpoint(v); },
+          'https://\u2026 a service holding real weights')),
+      ] : []),
+      fieldRow('', btn('Generate', () => run(this.genPrompt, this.genSeconds),
+        { title: 'Make a clip from the description and put it on a mixer layer' }),
+        { full: true }),
+      ...(this.genBackend === 'ardy' ? [
+        el('div', { class: 'panel-hint', text: status?.busy && status.text
+          ? status.text
+          : `On-device model \u2014 ${status?.hint ?? ''}. Text only: it makes the `
+            + 'motion, where to go is still the character\u2019s own job.' }),
+        ...(status?.notices ?? []).map((n) => el('div', { class: 'panel-note', text: n })),
+      ] : []),
+
+      el('div', { class: 'menu-header', text: 'Buttons' }),
+      el('div', { class: 'panel-hint', text: 'Saved with the scene, so a piece '
+        + 'travels with its own vocabulary.' }),
+      ...macroRows,
+      fieldRow('', btn('+ Button', () => {
+        ctx.pushUndo();
+        ctx.scene.motionMacros = [...macros, {
+          id: nextMacroId(ctx.scene),
+          label: this.genPrompt.trim().slice(0, 18) || 'New',
+          prompt: this.genPrompt,
+          seconds: this.genSeconds,
+        }];
+        touch();
+        this.refresh();
+      }, { title: 'Save what you just typed as a reusable button' }), { full: true }),
+    );
+  }
+
   private actorPanel(): HTMLElement {
     const { ctx } = this.app;
     const scene = ctx.scene;
@@ -1741,40 +1869,8 @@ export class UI {
       })() : []),
 
       el('div', { class: 'menu-header', text: 'Generate' }),
-      fieldRow('Describe', textField(this.genPrompt, (v: string) => { this.genPrompt = v; },
-        'walk · tired shuffle · march · sneak · limp on the left · swagger · idle')),
-      slider('Seconds', this.genSeconds, 0.5, 10, 0.5,
-        (v) => { this.genSeconds = v; }, { def: 2 }),
-      ...(this.app.motionBackendIds().length > 1 ? [
-        fieldRow('Using', selectField('', this.genBackend,
-          this.app.motionBackendIds().map((b) => [b.id, b.label] as [string, string]),
-          (v) => { this.genBackend = v; this.refresh(); })),
-      ] : []),
-      ...(this.genBackend === 'ardy' ? (() => {
-        const st = this.app.motionStatus();
-        return [
-          el('div', { class: 'panel-hint', text: st?.busy && st.text
-            ? st.text
-            : `On-device diffusion model \u2014 ${st?.hint ?? ''}. Text only: it `
-              + 'makes the motion, the destination is still the root\u2019s job.' }),
-          // The composite model terms REQUIRE these to be shown.
-          ...(st?.notices ?? []).map((n) => el('div', { class: 'panel-note', text: n })),
-        ];
-      })() : []),
-      ...(this.genBackend === 'remote' ? [
-        fieldRow('Endpoint', textField(this.app.motionEndpoint(),
-          (v: string) => { this.app.setMotionEndpoint(v); },
-          'https://… — a service holding real weights (e.g. Kimodo). '
-          + 'Never contacted unless you set this: it sends a description of '
-          + 'your scene to a third party.')),
-      ] : []),
-      fieldRow('', btn('Generate motion', () => {
-        void this.app.generateMotion(
-          actor.id, this.genPrompt, this.genSeconds, this.genBackend);
-      }, { title: 'Make a motion clip from the description and put it on a '
-        + 'new layer. The built-in generator is procedural synthesis, not a '
-        + 'learned model — a service with real weights answers the same '
-        + 'request and lands in exactly the same place.' }), { full: true }),
+      el('div', { class: 'panel-hint', text: 'Describing motion in words now '
+        + 'lives in the Motion tab, together with the buttons you save.' }),
 
       el('div', { class: 'menu-header', text: 'Mixer' }),
       ...(actor.layers ?? []).flatMap((layer) => [
@@ -3676,6 +3772,8 @@ export class UI {
   settingsOpen = false;
   /** which imported animation the Actor panel's retarget row is pointing at */
   private motionPick = '';
+  /** which macro row is expanded for editing, 0 = none */
+  private macroEdit = 0;
   /** Actor panel's motion-generation row (transient, not scene data) */
   private genPrompt = 'walk';
   private genSeconds = 2;

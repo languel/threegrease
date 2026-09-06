@@ -184,7 +184,10 @@ animation, and generated clips.
 
 ### Generated motion
 
-`Actor ▸ Generate` turns a description into a clip on a mixer layer. Three
+The **Motion** tab is where you say what a character should do, in words. It
+turns a description into a clip on a mixer layer, and lets you save any
+phrase as a reusable **button** — those live in the scene, so a piece
+travels with its own vocabulary rather than with whoever authored it. Three
 interchangeable backends answer the same request:
 
 - **Built-in** — procedural synthesis, not a learned model, and labelled as
