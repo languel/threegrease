@@ -3338,7 +3338,12 @@ class App implements AppHandle {
     const scene = this.ctx.scene;
     const active = this.ctx.settings.mode === 'OBJECT' && !this.presentation;
     this.selGlyphs.visible = active;
-    if (!active) return;
+    if (!active) {
+      // out of object mode there is no selection to show, and a stale hull
+      // would sit lit up over a scene nobody is selecting in
+      this.meshes.setSelectionOutlines(new Map());
+      return;
+    }
     const wanted = new Set<string>();
     const refs = listSelected(scene);
     // Blender: the last object touched (click, box-select, shift/cmd-add)
@@ -3347,6 +3352,26 @@ class App implements AppHandle {
     // object so something is always highlighted even before any click.
     const activeRef = this.objectPick.lastPicked
       ?? (scene.objects[scene.activeObject] ? { kind: 'GP' as const, id: scene.objects[scene.activeObject].id } : null);
+    // Mesh objects wear a SILHOUETTE, not a box (MeshManager draws it as an
+    // inverted hull, the same one hover uses). A box is world-axis-aligned,
+    // so a rotated object gets a cage that fits nothing and changes size as
+    // it rolls — which, now that props tumble, is most of them. Everything
+    // with no surface to outline (an EMPTY, a GP object, a splat) keeps the
+    // box, where a box is genuinely what there is to show.
+    const hulls = new Map<number, string>();
+    for (const ref of refs) {
+      if (ref.kind !== 'MESH') continue;
+      const md = scene.meshes.find((m) => m.id === ref.id);
+      // EMPTY has no surface, and a PLANE has no THICKNESS: an inverted hull
+      // of a flat quad is coincident with the quad, so it z-fights instead of
+      // making a rim. A flat thing's edge loop is already its silhouette, so
+      // those keep the line outline (meshEdgePositions handles PLANE).
+      if (!md || md.kind === 'EMPTY' || md.kind === 'PLANE') continue;
+      const isActive = !!activeRef && activeRef.kind === 'MESH' && activeRef.id === ref.id;
+      hulls.set(ref.id, `#${this.highlightColor(isActive).getHexString()}`);
+    }
+    this.meshes.setSelectionOutlines(hulls);
+
     for (const ref of refs) {
       const key = `${ref.kind}:${ref.id}`;
       const root = this.objectRoot(ref);
@@ -3377,8 +3402,15 @@ class App implements AppHandle {
       const box = this.computeObjectBox(ref);
       if (box) entry.box.copy(box);
       const meshKind = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id)?.kind : undefined;
-      const realEdges = meshKind ? meshEdgePositions(root, meshKind) : null;
-      entry.helper.geometry.setPositions(realEdges ?? boxEdgePositions(entry.box));
+      // A hulled object needs no line at all; the origin dot stays, because
+      // the pivot is the one thing a silhouette cannot show.
+      entry.helper.visible = !hulls.has(ref.id);
+      if (entry.helper.visible) {
+        // EdgesGeometry every frame is not free, so only for the outlines
+        // that are actually drawn
+        const realEdges = meshKind ? meshEdgePositions(root, meshKind) : null;
+        entry.helper.geometry.setPositions(realEdges ?? boxEdgePositions(entry.box));
+      }
       const isActive = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
       entry.helper.material.color.copy(this.highlightColor(isActive));
       (entry.dot.material as THREE.PointsMaterial).color.copy(this.highlightColor(isActive));

@@ -537,8 +537,17 @@ the browser console or automated evals:
   sideways. `screenDisc` projects the real tangent circle instead, and refuses
   to answer for a prop the eye is inside or that straddles the near plane
   (that case reported a 49,000 px disc that swallowed every other pick).
-  In the end the 2D marker went away entirely: `MeshManager.setHover` draws
-  an INVERTED HULL — the object's own geometry again, fattened ~4.5%, back
+  In the end the 2D marker went away entirely: the inverted hull is now the
+  ONE outline in the app — `MeshManager.setHover` for what is under the
+  cursor and `setSelectionOutlines` for what is selected, any colour, and the
+  hover wins where they overlap. Selection used to be a world-axis-aligned
+  Box3, which is a lie about most shapes and became a visible one when props
+  started to tumble: a rotated dodecahedron wore a loose cage that grew and
+  shrank as it rolled. Two kinds still keep the line outline, and should:
+  an EMPTY has no surface, and a PLANE has no THICKNESS — an inverted hull of
+  a flat quad is coincident with the quad and z-fights instead of making a
+  rim, while a flat thing's edge loop already IS its silhouette.
+  `MeshManager.setHover` draws an INVERTED HULL — the object's own geometry again, fattened ~4.5%, back
   faces only — so the highlight is the real silhouette of whatever shape is
   under the cursor, rides the object's transform (including the physics
   moving it), and has no projection left to get wrong. Every 2D approach

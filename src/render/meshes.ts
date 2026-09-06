@@ -66,11 +66,24 @@ export class MeshManager {
    * projection to get wrong.
    */
   private hover: { id: number; color: string } | null = null;
-  private hoverHull: THREE.Group | null = null;
+  /** selection outlines, id -> colour; hover wins where they overlap */
+  private selected = new Map<number, string>();
+  private hulls = new Map<number, { group: THREE.Group; color: string }>();
 
   setHover(id: number | null, color = '#7fd4ff'): void {
-    if (this.hover?.id === id && this.hover?.color === color) return;
     this.hover = id === null ? null : { id, color };
+  }
+
+  /**
+   * Outline the SELECTED objects the same way.
+   *
+   * A selection box is a lie about most shapes: it is world-axis-aligned, so
+   * a tumbling dodecahedron wears a loose cage that grows and shrinks as it
+   * rolls and has nothing to do with the thing inside it. The silhouette is
+   * the object, always, and it costs one more shell.
+   */
+  setSelectionOutlines(map: Map<number, string>): void {
+    this.selected = map;
   }
 
   /** Rebuild/update mesh objects to mirror scene.meshes (camera for view locks). */
@@ -139,48 +152,56 @@ export class MeshManager {
    * the object.
    */
   private syncHover(): void {
-    if (this.hoverHull && this.hoverHull.userData.forId !== this.hover?.id) {
-      this.hoverHull.removeFromParent();
-      for (const o of this.hoverHull.children) {
+    const want = new Map(this.selected);
+    if (this.hover) want.set(this.hover.id, this.hover.color);
+
+    for (const [id, hull] of this.hulls) {
+      const colour = want.get(id);
+      if (colour && this.entries.has(id)) continue;
+      hull.group.removeFromParent();
+      for (const o of hull.group.children) {
         (((o as THREE.Mesh).material) as THREE.Material)?.dispose();
       }
-      this.hoverHull = null;
+      this.hulls.delete(id);
     }
-    if (!this.hover) return;
-    const entry = this.entries.get(this.hover.id);
-    if (!entry) return;
-    if (!this.hoverHull) {
-      const hull = new THREE.Group();
-      hull.userData.forId = this.hover.id;
-      entry.root.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (!m.isMesh || !m.geometry) return;
-        const shell = new THREE.Mesh(m.geometry, new THREE.MeshBasicMaterial({
-          color: this.hover!.color,
-          // Back faces only, fattened a little: the front faces are then
-          // covered by the object itself and only the rim survives. It is
-          // the cheapest true silhouette there is, and it needs no shader.
-          side: THREE.BackSide,
-          transparent: true,
-          opacity: 0.9,
-          depthWrite: false,
-        }));
-        shell.raycast = () => {};
-        shell.userData.hoverShell = true;
-        shell.renderOrder = 2;
-        m.updateMatrix();
-        shell.matrixAutoUpdate = false;
-        // relative to the entry root, plus the outward fatten
-        shell.matrix.copy(m === (entry.root as THREE.Mesh) ? new THREE.Matrix4() : m.matrix)
-          .multiply(new THREE.Matrix4().makeScale(HULL_GROW, HULL_GROW, HULL_GROW));
-        hull.add(shell);
-      });
-      if (!hull.children.length) return;
-      entry.root.add(hull);
-      this.hoverHull = hull;
-    }
-    for (const o of this.hoverHull.children) {
-      ((o as THREE.Mesh).material as THREE.MeshBasicMaterial).color.set(this.hover.color);
+    for (const [id, colour] of want) {
+      const entry = this.entries.get(id);
+      if (!entry) continue;
+      let hull = this.hulls.get(id);
+      if (!hull) {
+        const group = new THREE.Group();
+        group.userData.forId = id;
+        entry.root.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh || !m.geometry || o.userData.hoverShell) return;
+          const shell = new THREE.Mesh(m.geometry, new THREE.MeshBasicMaterial({
+            color: colour,
+            // Back faces only, fattened a little: the front faces are then
+            // covered by the object itself and only the rim survives. It is
+            // the cheapest true silhouette there is, and it needs no shader.
+            side: THREE.BackSide,
+            transparent: true,
+            opacity: 0.9,
+            depthWrite: false,
+          }));
+          shell.raycast = () => {};
+          shell.userData.hoverShell = true;
+          shell.renderOrder = 2;
+          m.updateMatrix();
+          shell.matrixAutoUpdate = false;
+          shell.matrix.copy(m === (entry.root as THREE.Mesh) ? new THREE.Matrix4() : m.matrix)
+            .multiply(new THREE.Matrix4().makeScale(HULL_GROW, HULL_GROW, HULL_GROW));
+          group.add(shell);
+        });
+        if (!group.children.length) continue;
+        entry.root.add(group);
+        hull = { group, color: colour };
+        this.hulls.set(id, hull);
+      }
+      if (hull.color !== colour) hull.color = colour;
+      for (const o of hull.group.children) {
+        ((o as THREE.Mesh).material as THREE.MeshBasicMaterial).color.set(colour);
+      }
     }
   }
 
