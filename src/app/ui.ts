@@ -1524,7 +1524,7 @@ export class UI {
         build: () => [this.actorPanel()],
       },
       {
-        id: 'motion', icon: 'sparkles',
+        id: 'motion', icon: 'motion',
         title: 'Motion — describe how a character moves, and save it as a button',
         build: () => [this.motionPanel()],
       },

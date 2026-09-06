@@ -83,6 +83,9 @@ const PATHS: Record<string, string> = {
   // you would drag, which is the whole verb of that tool.
   actorPose: 'M9.5 5.6a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM9.5 7.6v7m0-7L5.5 9.4M9.5 7.6l4 1.8M9.5 14.6 6.5 22M9.5 14.6 12.5 22M18.4 10.6a2.6 2.6 0 1 1-5.2 0 2.6 2.6 0 1 1 5.2 0',
   // Direct: the figure plus somewhere to GO — a target on the ground ahead.
+  // Motion: a figure mid-stride with speed lines behind it. Distinct from
+  // the Agent panel's sparkles, which it used to share and be invisible next to.
+  motion: 'M14.5 5.4a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM13.6 8.2 10 10.6l1.8 2.6M13.6 8.2l3.6 1.4 1.2 3.4M13.6 8.2l-.5 5.4 3 3.1.9 4.3M13.1 13.6l-3.4 3.2-.6 4.2M2.5 8h4m-5.5 4h4m-3 4h3',
   actorDirect: 'M8 5.6a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM8 7.6v7m0-7L4.5 9.4M8 7.6l3.5 1.6M8 14.6 5.5 22M8 14.6 10.5 22M21 18.5a3 3 0 1 1-6 0 3 3 0 1 1 6 0M18 14.2v1.3M18 21.5v1.3M13.7 18.5H15m6 0h1.3',
   shadeWire: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 0c-2.485 0-4.5-4.03-4.5-9s2.015-9 4.5-9 4.5 4.03 4.5 9-2.015 9-4.5 9ZM3.6 9h16.8M3.6 15h16.8M12 3v18',
   shadeSolid: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',

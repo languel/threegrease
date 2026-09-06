@@ -279,6 +279,13 @@ the browser console or automated evals:
   with no geometry (an EMPTY). Putting a proximity zone on a box therefore
   silently gives you a box-sized zone and no error. Use an EMPTY for
   "within N metres of", a primitive for "inside this volume".
+- **Primitive geometries are authored Y-UP, so in a Z-up scene a CYLINDER or
+  PYRAMID lies on its side.** CylinderGeometry's axis and ConeGeometry's apex
+  both run along +Y, and nothing rotates them for you: an unrotated column in
+  a Z-up scene is a disc lying on the floor, and scaling it "taller" only
+  widens the disc. Stand them up with +90 degrees about X — and remember
+  scale is then in the primitive's OWN axes (Y is the height), because
+  `composeLocal` builds T*R*S.
 - **A PLANE mesh's `scale` is its HALF size.** `PlaneGeometry(2, 2)` (see
   `render/meshes.ts`) means the primitive spans -1..1 before scaling, so a
   7 m wall is `scale.x = 3.5`. BOX/SPHERE/CYLINDER are unit-sized, so their

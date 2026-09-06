@@ -29,6 +29,7 @@ import {
   actorHeight, angleDelta, headingBasis, headingEuler, headingOf, walkVolume,
 } from './locomotion';
 import { actorMixer } from './mixer';
+import { actorLog } from '../app/actorlog';
 
 /** How long a character may make no progress before it gives up. */
 const STUCK_SECONDS = 1.2;
@@ -159,7 +160,9 @@ export class SteerEngine {
   goalOf(scene: GPScene, actor: TGActor): THREE.Vector3 | null {
     const st = actor.steer;
     if (!st) return null;
-    if (st.mode === 'POINT') return new THREE.Vector3(...(st.point ?? [0, 0, 0]));
+    if (st.mode === 'POINT' || st.mode === 'FACE') {
+      return new THREE.Vector3(...(st.point ?? [0, 0, 0]));
+    }
     if (st.mode === 'OBJECT' && st.target) {
       return new THREE.Vector3().setFromMatrixPosition(
         worldMatrixOf(scene, st.target as ObjRef));
@@ -183,6 +186,20 @@ export class SteerEngine {
     const to = goal.clone().sub(pos);
     to.setComponent(upAxis, 0);          // walking is a horizontal problem
     const dist = to.length();
+
+    // ---- FACE: turn on the spot, do not travel -------------------------
+    if (st.mode === 'FACE') {
+      state.vel.set(0, 0, 0);
+      if (dist < 1e-4) { st.arrived = true; return; }
+      const target = headingOf(to.clone().divideScalar(dist), upZ);
+      const curH = upZ ? actor.rotation[2] : actor.rotation[1];
+      const maxTurn = THREE.MathUtils.degToRad(st.turnRate) * dt;
+      const delta = THREE.MathUtils.clamp(angleDelta(curH, target), -maxTurn, maxTurn);
+      actor.rotation = headingEuler(curH + delta, upZ);
+      // done once we are pointing at it, within a couple of degrees
+      if (Math.abs(angleDelta(curH + delta, target)) < 0.03) st.arrived = true;
+      return;
+    }
 
     // ---- arrival ------------------------------------------------------
     const stop = Math.max(0.05, st.stopDistance);
@@ -299,6 +316,7 @@ export class SteerEngine {
       if (state.stalled > STUCK_SECONDS) {
         st.stuck = true;
         st.arrived = true;      // stop trying; the caller decides what next
+        actorLog.say(actor.id, actor.name, 'I can\u2019t get through this way.');
       }
     }
   }

@@ -73,20 +73,16 @@ export function runMoveAction(
   if (!point) return null;
 
   if (action.kind === 'FACE') {
-    const upAxis = upZ ? 2 : 1;
-    const d = [point[0] - actor.translation[0], point[1] - actor.translation[1],
-      point[2] - actor.translation[2]];
-    d[upAxis] = 0;
-    if (Math.hypot(d[0], d[1], d[2]) < 1e-4) return null;
-    // reuse the steer goal machinery: a FACE is a goal you are already
-    // standing on, so the turn-rate limit applies and it does not snap
-    st.mode = 'POINT';
-    st.point = [
-      actor.translation[0] + d[0], actor.translation[1] + d[1], actor.translation[2] + d[2],
-    ] as Vec3;
-    st.stopDistance = Math.max(st.stopDistance, 0.35);
+    // Look means LOOK. The first version reused the walk goal and set it to
+    // the clicked point, which of course walked there — the turn-rate limit
+    // made it look deliberate rather than broken, which is worse. FACE is
+    // its own mode: it turns on the spot and never translates.
+    st.mode = 'FACE';
+    st.point = [...point] as Vec3;
+    st.target = null;
     st.arrived = false;
     st.stuck = false;
+    steerEngine.reset(actorId);
     return `${actor.name}: look`;
   }
 

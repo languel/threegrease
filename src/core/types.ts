@@ -950,7 +950,8 @@ export interface TGMotionMacro {
 }
 
 export interface TGActorSteer {
-  mode: 'NONE' | 'POINT' | 'OBJECT';
+  /** FACE turns on the spot toward `point` and never translates. */
+  mode: 'NONE' | 'POINT' | 'OBJECT' | 'FACE';
   /** POINT: a world position */
   point?: Vec3;
   /** OBJECT: whatever it is, wherever it is now */

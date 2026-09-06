@@ -22,10 +22,14 @@ import {
 import { createMeshObject } from '../render/meshes';
 import { createPaintCloud } from '../render/paintclouds';
 import { createHumanoid } from '../actor/skeleton';
+import type { TGActor } from '../core/types';
+import type { Step } from '../actor/behaviour';
 import { createConstraint } from '../score/constraints';
 import { createStream } from '../mm/streams';
 
 export interface DemoWiring {
+  /** the goal-driven second visitor, scripted by the caller */
+  wandererId?: number;
   scene: GPScene;
   /** ids the caller needs to wire the RUNTIME sim drivers, which live
    *  outside GPScene (they are live wiring, not document state — see
@@ -116,6 +120,40 @@ function walkLoopPoints(): Vec3[] {
     pts.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry, 0]);
   }
   return pts;
+}
+
+/**
+ * What the goal-driven visitor intends to do, in its own words.
+ *
+ * A tour of the things the scene is built to exercise: open-floor steering,
+ * walking around furniture, climbing the ziggurat, taking the ramp up to the
+ * platform and the stairs back down, and standing still long enough for the
+ * idle to show. Every line is spoken at the moment the goal is set, so the
+ * log cannot drift from what is actually happening.
+ */
+export function wandererScript(upAxisZ: boolean): Step[] {
+  const P = (x: number, y: number, up = 0): Vec3 => (upAxisZ ? [x, y, up] : [x, up, y]);
+  return [
+    { say: 'Let me have a look at the piece on the far plinth.',
+      goto: P(-5.5, 2.0), style: 'walk' },
+    { say: 'Standing here a moment.', wait: 3 },
+    { say: 'I want to see the room from higher up \u2014 the ziggurat first.',
+      goto: P(6.0, -3.5, 1.7), style: 'walk' },
+    { say: 'Made it to the top. Looking back across the gallery.',
+      face: P(-6.0, 4.0) },
+    { say: 'Taking my time up here.', wait: 4 },
+    { say: 'Back down, and around the columns.', goto: P(-4.0, -5.0), style: 'walk' },
+    { say: 'Now the ramp up to the platform.', goto: P(-7.0, 3.5), style: 'sneak' },
+    { say: 'Up the slope.', goto: P(-7.0, 5.6, 1.8), style: 'walk' },
+    { say: 'On the platform. Turning to face the projection.',
+      face: P(-2.0, 6.0) },
+    { say: 'Watching for a bit.', wait: 5 },
+    { say: 'Down the stairs on the east side.', goto: P(-1.0, 6.2, 1.8), style: 'walk' },
+    { say: 'And back to the floor.', goto: P(2.0, 6.2), style: 'walk' },
+    { say: 'Circling round to the bench.', goto: P(0, -6.0), style: 'shuffle' },
+    { say: 'Sitting this one out.', wait: 5 },
+    { say: 'Round again.', goto: P(4.0, -8.0), style: 'walk' },
+  ];
 }
 
 export function buildDemoScene(upAxisZ: boolean): DemoWiring {
@@ -215,25 +253,50 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   // double-sided, dark enough that a projected image would read on them.
   const p1 = prop('BOX', 'Partition (projection)', at(-2.0, 6.0, 1.6), size(6.0, 0.2, 3.2), screen);
   p1.doubleSided = true;
-  const p2 = prop('BOX', 'Partition (projection) 2', at(6.5, 4.0, 1.6), size(0.2, 5.0, 3.2), screen);
+  const p2 = prop('BOX', 'Partition (projection) 2', at(4.5, -7.5, 1.6), size(5.0, 0.2, 3.2), screen);
   p2.doubleSided = true;
 
-  // Columns, floor to ceiling. NOTE the 1.2: CylinderGeometry is 1.2 tall,
-  // not 1, so a cylinder's scale is its size divided by 1.2 — the same
-  // "scale is not size" trap PLANE has with its 2x2 geometry, sitting in the
-  // same switch. Getting it wrong here buried the columns 0.4 m in the floor.
+  // Columns, floor to ceiling.
+  //
+  // NOTE the rotation, which is not optional. Primitive geometries are
+  // authored Y-UP (three's convention): CylinderGeometry's axis and
+  // ConeGeometry's apex both run along +Y. In a Z-up scene an UNROTATED
+  // cylinder therefore lies on its side, and scaling it "tall" widens the
+  // disc instead — which is exactly what these were, 4 m saucers lying on
+  // the floor. Stand them up with +90 degrees about X, and remember that
+  // scale is then in the primitive's OWN axes: Y is the height.
+  const upright: Vec3 = upAxisZ ? [Math.PI / 2, 0, 0] : [0, 0, 0];
   const COLUMN_H = 4.8;
-  const colScale = size(0.6, 0.6, COLUMN_H / 1.2);
-  prop('CYLINDER', 'Column A', at(-6.0, -5.0, COLUMN_H / 2), colScale, stone);
-  prop('CYLINDER', 'Column B', at(-2.0, -5.0, COLUMN_H / 2), colScale, stone);
+  for (const [name, x, y] of [
+    ['Column A', -6.0, -5.0], ['Column B', -2.0, -5.0], ['Column C', 2.0, -5.0],
+  ] as [string, number, number][]) {
+    const c = prop('CYLINDER', name, at(x, y, COLUMN_H / 2),
+      [0.62, COLUMN_H / 1.2, 0.62], stone);
+    c.rotation = upright;
+  }
 
-  prop('PYRAMID', 'Pyramid', at(3.0, 6.5, 0.9), size(2.4, 2.4, 1.8), stone);
+  const pyr = prop('PYRAMID', 'Pyramid', at(7.0, 7.0, 1.1), [2.6, 2.2, 2.6], stone);
+  pyr.rotation = upright;
 
   // Balls. NOTE: these do not roll — there is no rigid-body simulation for
   // props, only the actor's own collision against their bounds. They are
   // scenery you can walk around, and a target for "go to that object".
   prop('SPHERE', 'Ball', at(1.5, 1.5, 0.45), size(0.9, 0.9, 0.9), [0.80, 0.35, 0.30]);
   prop('SPHERE', 'Ball 2', at(2.6, 0.6, 0.30), size(0.6, 0.6, 0.6), [0.35, 0.45, 0.75]);
+
+  // ---- the ziggurat: a snub pyramid you can actually climb ---------------
+  // A smooth frustum would be a lie here. Collision tests world AABBs, so a
+  // tapered solid presents one box and the character would stand on thin air
+  // out at its corners. Tiers are honest: each is a real ledge, each riser
+  // is inside the step height, and the shape still reads as a snub pyramid
+  // from across the room.
+  const ZIG_TIERS = 5;
+  const ZIG_RISE = 0.34;
+  for (let i = 0; i < ZIG_TIERS; i++) {
+    const w = 5.2 - i * 0.9;
+    const top = ZIG_RISE * (i + 1);
+    prop('BOX', `Ziggurat ${i + 1}`, at(6.0, -3.5, top / 2), size(w, w, top), plinth);
+  }
 
   // ---- ramp and stairs ---------------------------------------------------
   // Both are built as STACKED BOXES rather than as one tilted slab, and that
@@ -306,22 +369,39 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   frame.strokes.push(stroke);
   pathLayer.frames.push(frame);
 
-  // ---- the visitor: a rigged actor walking the loop ----
-  const actor = createHumanoid(genId(), 'Visitor', upAxisZ);
-  actor.physics.enabled = true;
-  actor.physics.tone = 0.08; // holds a walking stance rather than ragdolling
-  if (actor.gait) actor.gait.enabled = true;   // walk the loop, don't glide it
+  // ---- two visitors --------------------------------------------------
+  // TWO on purpose. One walks a fixed route, the other is given goals and
+  // finds its own way — the two halves of how a character can be driven,
+  // side by side and running at once, which is the thing that is hard to
+  // believe until you watch them share a room.
+  const makeVisitor = (name: string, at0: Vec3, look: NonNullable<TGActor['look']>,
+    color: Vec3): TGActor => {
+    const a = createHumanoid(genId(), name, upAxisZ);
+    a.translation = at0;
+    a.physics.enabled = true;
+    a.physics.tone = 0.08;   // holds a walking stance rather than ragdolling
+    if (a.gait) a.gait.enabled = true;
+    a.look = look;
+    a.color = color;
+    return a;
+  };
+
+  // Walker: on rails, following the drawn loop.
+  const walker = makeVisitor('Walker', at(-7.0, 0, 0), 'WOOD', [0.78, 0.58, 0.34]);
   const follow = createConstraint('FOLLOW_PATH');
   follow.path = { objectIndex: 1, layerId: pathLayer.id, strokeId: stroke.id }; // index 1: pathObj is scene.objects[1]
   // Phase is a fraction of the loop per second, so it has to be re-derived
   // when the loop changes size: this oval is ~39 m around, and 0.031 of it
-  // per second is a ~1.2 m/s walk. The old 0.075 was tuned for a loop a
-  // fifth as long and would sprint the visitor around this one.
+  // per second is a ~1.2 m/s walk.
   follow.speed = 0.031;
   follow.loop = 'LOOP';
   follow.running = true;
   follow.orient = true;
-  actor.constraints = [follow];
+  walker.constraints = [follow];
+
+  // Wanderer: no path at all. It is handed goals by a behaviour script and
+  // has to steer, climb and avoid its own way there.
+  const wanderer = makeVisitor('Wanderer', at(4.0, -8.0, 0), 'CLAY', [0.91, 0.70, 0.58]);
 
   // ---- the security camera: a fixed, elevated corner camera looking
   // across the room — the "installed webcam" the sim streams are seen
@@ -362,13 +442,14 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
 
   scene.objects.push(pathObj);
   scene.meshes.push(...room, ...props, zoneObj);
-  scene.actors.push(actor);
+  scene.actors.push(walker, wanderer);
   scene.cameras.push(secCam);
   scene.activeCamera = 0; // keep the user's main camera active; security cam is a second view
   scene.frameEnd = Math.max(scene.frameEnd, 250);
 
   return {
-    scene, actorId: actor.id, poseStreamId: poseStream.id, detectStreamId: detectStream.id,
+    scene, actorId: walker.id, wandererId: wanderer.id,
+    poseStreamId: poseStream.id, detectStreamId: detectStream.id,
     camIndex: scene.cameras.length - 1,
   };
 }

@@ -115,6 +115,8 @@ import {
 } from '../actor/simstream';
 import { actorMixer } from '../actor/mixer';
 import { steerEngine } from '../actor/steering';
+import { behaviourEngine } from '../actor/behaviour';
+import { actorLog } from './actorlog';
 import { retargetGltfClip } from '../actor/gltfclip';
 import {
   motionBackends, proceduralBackend, remoteBackend, type MotionRequest,
@@ -124,7 +126,7 @@ import { bindHumanoid, poseHumanoid } from '../render/vrmpose';
 import { vrmManager } from '../render/vrm';
 import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
-import { buildDemoScene } from './demoscene';
+import { buildDemoScene, wandererScript } from './demoscene';
 import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
 import { DirectTool } from '../tools/direct';
 import { createHumanoid, resetPose } from '../actor/skeleton';
@@ -270,6 +272,7 @@ class App implements AppHandle {
   readonly sys = {
     streamStore, mmStreamEngine, actorSolver, actorRig, autoRig, resetPose,
     gaitEngine, possession, actorMixer, steerEngine, ardyBackend,
+    behaviourEngine, actorLog,
     bindHumanoid, poseHumanoid, vrmManager,
     /** the app's own three, so an eval never pulls a second copy in
      *  (importing 'three' makes vite re-optimize and silently reload) */
@@ -2046,6 +2049,13 @@ class App implements AppHandle {
     // rather than living inside the scene the undo snapshot just captured.
     driveStreamFromActor(wiring.poseStreamId, wiring.actorId, wiring.camIndex);
     driveStreamFromObject(wiring.detectStreamId, { kind: 'ACTOR', id: wiring.actorId }, wiring.camIndex);
+    // The second visitor's script is runtime wiring too, for the same reason
+    // the stream drivers are: it is not part of the document.
+    behaviourEngine.clear();
+    actorLog.clear();
+    if (wiring.wandererId != null) {
+      behaviourEngine.run(wiring.wandererId, wandererScript(upZ), true);
+    }
     this.refreshWidget();
     this.viewAll();
     this.ui.refresh();
@@ -3663,7 +3673,11 @@ class App implements AppHandle {
     // this frame's motion is this frame's stride, and the constraint pass
     // is told to stand down for anything actually steering, or a path would
     // snap the character back every frame.
+    // Scripted intent BEFORE steering: a behaviour sets the goal, steering
+    // is what walks to it.
+    behaviourEngine.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
     steerEngine.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
+    actorLog.tick();
     for (const a of ctx.scene.actors) {
       constraintEngine.setDriven({ kind: 'ACTOR', id: a.id },
         possession.actorId === a.id || steerEngine.hasGoal(a));

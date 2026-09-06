@@ -53,6 +53,8 @@ const TELEPORT_M = 1.5;
 
 export class GaitEngine {
   private states = new Map<number, GaitState>();
+  /** free-running clock per actor for the standing idle */
+  private idleClock = new Map<number, number>();
 
   reset(actorId?: number): void {
     if (actorId === undefined) this.states.clear();
@@ -104,7 +106,15 @@ export class GaitEngine {
     // stopped actor settles onto both feet instead of holding one aloft.
     const moving = Math.min(1, st.speed / Math.max(0.05, g.walkSpeed * 0.25));
     const w = g.strength * moving;
-    if (w < 0.01) return;
+    if (w < 0.01) {
+      // ...and then IDLE, because a character that has finished walking and
+      // simply stops moving does not read as "waiting", it reads as the
+      // program having crashed. A little breathing and weight-shifting is
+      // the difference between a paused animation and a person standing
+      // there. It rides the same fade, so arriving somewhere eases into it.
+      this.idle(actor, dt, upAxis);
+      return;
+    }
 
     // Plant at the ankle's REST height, not at zero: the ankle joint sits
     // above the sole, so targeting the floor plane drags the whole leg
@@ -210,6 +220,40 @@ export class GaitEngine {
         actorSolver.addTarget(actor.id, { index: hi, pos: p, weight: hipW });
       }
     }
+  }
+
+  /**
+   * Standing-still motion: breath, a slow weight shift, a drifting head.
+   *
+   * Deliberately tiny and deliberately not a walk cycle — the amplitudes are
+   * centimetres. It is emitted at a low weight so anything else (a clip, a
+   * capture, a hand drag) simply wins, which is why it can be left running
+   * rather than switched on and off.
+   */
+  private idle(actor: TGActor, dt: number, upAxis: number): void {
+    const g = actor.gait!;
+    let t = this.idleClock.get(actor.id) ?? Math.random() * 10;
+    t += dt;
+    this.idleClock.set(actor.id, t);
+
+    const breath = Math.sin(t * 1.6) * 0.008;
+    const sway = Math.sin(t * 0.45) * 0.012;
+    const w = 0.25 * g.strength;
+    const idxOf = (n: string): number => actor.joints.findIndex((j) => j.name === n);
+    const emit = (name: string, dx: number, dUp: number): void => {
+      const i = idxOf(name);
+      if (i < 0) return;
+      const gain = actorMixer.gain(actor, 'GAIT', name);
+      if (gain < 0.01) return;
+      const rest = actor.joints[i].rest;
+      const p: Vec3 = [...rest] as Vec3;
+      p[0] += dx;
+      p[upAxis] += dUp;
+      actorSolver.addTarget(actor.id, { index: i, pos: p, weight: w * gain });
+    };
+    emit('hips', sway, breath);
+    emit('chest', sway * 0.6, breath * 1.6);
+    emit('head', sway * 0.3 + Math.sin(t * 0.31) * 0.01, breath * 1.2);
   }
 
   /** Plant both feet either side of the actor's current position. */
