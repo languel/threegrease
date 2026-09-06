@@ -1,0 +1,16 @@
+Copyright (c) 2026 languel. All rights reserved.
+
+threegrease (3𝜻) is an internal research and teaching tool. It is not
+currently offered under an open-source licence.
+
+No permission is granted to copy, modify, distribute, sublicense or make
+available this software or derivative works, except by the copyright holder
+or with their written permission.
+
+This is a DELIBERATELY reversible position: everything stays available to
+relicense later, which is not true in the other direction — code released
+under an open licence cannot be recalled from the versions that carry it.
+If and when this is opened up, replace this file.
+
+Third-party components carry their own licences, and those are unaffected by
+the above. See THIRD_PARTY_NOTICES.md.

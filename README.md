@@ -163,6 +163,72 @@ event scores, MIDI/OSC/WS, string/wire art solvers, Gaussian splats),
 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) (phased plan),
 and [docs/HANDOFF.md](docs/HANDOFF.md) (technical handoff for contributors).
 
+## Characters and motion
+
+Actors are rigged characters with a **positional** skeleton (a joint is a
+particle, a bone is a distance constraint), so one solver covers ragdoll
+physics, motion capture, IK and retargeting. Their root has exactly three
+drivers, and none of them touches the pose — a procedural gait watches the
+root move and produces the walking, so all three read as one character:
+
+- a **Follow Path** constraint (a recorded route),
+- **possession** — `Shift+P`, then mouse to look, WASD to move, `V` for
+  first/third person, `R` to record the walk, `Enter`/`Esc` to hand back,
+- a **destination** — `Actor ▸ Go to`, or the Direct tool's HUD, where you
+  arm a verb (walk / run / sneak / march / jump / look) and click the space.
+
+Pose comes from an **animation mixer**: layers with weights and body masks,
+so a capture can own the upper body while the walk owns the legs. Sources
+include the capture rig, the gait, recorded takes, imported `.glb`
+animation, and generated clips.
+
+### Generated motion
+
+`Actor ▸ Generate` turns a description into a clip on a mixer layer. Three
+interchangeable backends answer the same request:
+
+- **Built-in** — procedural synthesis, not a learned model, and labelled as
+  such everywhere it appears. Instant, no download.
+- **ARDY Mini** — a real diffusion model running locally on WebGPU (see
+  below).
+- **Remote** — any service you point at, for weights that cannot run here.
+
+Generation is *in place*. Travel stays the root's job, which is what lets a
+generated style and a destination combine instead of competing.
+
+#### About the on-device model
+
+Choosing **ARDY Mini** downloads roughly **653 MiB** the first time and
+caches it in your browser; it needs **WebGPU**. Nothing is fetched until you
+pick that backend.
+
+It is [ARDY](https://research.nvidia.com/labs/sil/projects/ardy/) (NVIDIA,
+SIGGRAPH 2026) — autoregressive diffusion for interactive human motion — in
+[intsuc's browser export](https://huggingface.co/intsuc/Llama-3-ARDY-Mini-Core40-Browser),
+which is only possible because it distils ARDY's gated Llama-3-8B text
+encoder down to MiniLM. **It is text-only:** upstream ARDY accepts waypoints
+and keyframes, this export does not, so it says *how* to move and never
+*where* to go. Steering already handles the where.
+
+The model's weights are **not** part of this repository and are not
+redistributed by it — your browser fetches them from Hugging Face. They
+carry composite **NVIDIA Open Model** and **Meta Llama 3 Community** terms
+rather than the Apache-2.0 of the runtime code. The required attributions
+are shown in the app beside the backend selector.
+
+## Licensing
+
+threegrease is proprietary — see [LICENSE](LICENSE). It is an internal
+research and teaching tool, not an open-source release.
+
+Third-party components, and the distinction between what this repository
+*redistributes* and what your browser merely *fetches at runtime*, are
+recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The short
+version: one Apache-2.0 runtime is vendored into `src/vendor/ardy/`, npm
+dependencies are bundled as usual, and every **model** — motion, tracking
+and detection alike — is downloaded on demand from its own host and never
+stored here.
+
 ## Shortcuts
 
 A Blender-style menubar (File / Edit / Add / View / Help) holds save/load,

@@ -1,6 +1,8 @@
 {
   "name": "threegrease",
   "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
   "description": "Blender Grease Pencil implemented in three.js — foundation for an interactive action painting lab",
   "type": "module",
   "scripts": {
