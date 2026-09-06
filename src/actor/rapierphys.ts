@@ -62,6 +62,14 @@ export class RapierPhysics {
   private accum = 0;
   private upZ = true;
   private loading: Promise<void> | null = null;
+  /**
+   * Where triangles come from for HULL and MESH colliders.
+   *
+   * A MODEL's geometry exists only in the render tree — the document knows a
+   * URL, not a vertex — so the app hands this in rather than the physics
+   * reaching into the renderer.
+   */
+  geometrySource: ((id: number) => { positions: Float32Array; indices: Uint32Array } | null) | null = null;
 
   get ready(): boolean { return !!this.world; }
 
@@ -175,7 +183,7 @@ export class RapierPhysics {
       .setRotation({ x: quat.x, y: quat.y, z: quat.z, w: quat.w });
     if (m.body?.vel) desc.setLinvel(m.body.vel[0], m.body.vel[1], m.body.vel[2]);
     const body = world.createRigidBody(desc);
-    const cd = colliderDesc(R, m, scale);
+    const cd = colliderDesc(R, m, scale, kind, this.geometrySource);
     if (!cd) { world.removeRigidBody(body); return null; }
     if (m.body) {
       // Our own field names are the physical ones, so they carry over: mass
@@ -335,7 +343,7 @@ function near(a: Vec3, b: Vec3): boolean {
 
 /** What a rebuild depends on: change any of it and the collider is remade. */
 function shapeKey(m: TGMesh): string {
-  return `${m.kind}|${m.scale.join(',')}|${m.src ?? ''}`;
+  return `${m.kind}|${m.scale.join(',')}|${m.src ?? ''}|${m.body?.shape ?? 'AUTO'}`;
 }
 
 function worldTRS(scene: GPScene, m: TGMesh): {
@@ -359,12 +367,75 @@ function worldTRS(scene: GPScene, m: TGMesh): {
  * disagree — becomes a convex hull.
  */
 function colliderDesc(
-  R: Rapier, m: TGMesh, scale: THREE.Vector3,
+  R: Rapier, m: TGMesh, scale: THREE.Vector3, bodyKind: Entry['bodyKind'],
+  geometry: RapierPhysics['geometrySource'],
 ): RAPIER_NS.ColliderDesc | null {
   const sx = Math.abs(scale.x), sy = Math.abs(scale.y), sz = Math.abs(scale.z);
+  const half = (v: number) => Math.max(0.01, v / 2);
+  const shape = m.body?.shape ?? 'AUTO';
+
+  /** the object's own triangles, scaled — primitives build theirs, a MODEL
+   *  can only come from the render tree */
+  const tris = (): { positions: Float32Array; indices: Uint32Array } | null => {
+    if (m.kind === 'MODEL') {
+      const got = geometry?.(m.id);
+      if (!got) return null;
+      const p = Float32Array.from(got.positions);
+      for (let i = 0; i < p.length; i += 3) { p[i] *= sx; p[i + 1] *= sy; p[i + 2] *= sz; }
+      return { positions: p, indices: got.indices };
+    }
+    const geo = primitiveGeometry(m.kind);
+    const src = geo.getAttribute('position');
+    const p = new Float32Array(src.count * 3);
+    for (let i = 0; i < src.count; i++) {
+      p[i * 3] = src.getX(i) * sx;
+      p[i * 3 + 1] = src.getY(i) * sy;
+      p[i * 3 + 2] = src.getZ(i) * sz;
+    }
+    const index = geo.getIndex();
+    const idx = index
+      ? Uint32Array.from({ length: index.count }, (_, i) => index.getX(i))
+      : Uint32Array.from({ length: src.count }, (_, i) => i);
+    geo.dispose();
+    return { positions: p, indices: idx };
+  };
+
+  const fallback = () => R.ColliderDesc.ball(Math.max(0.05, propRadius(m)));
+
+  switch (shape) {
+    case 'BALL': return R.ColliderDesc.ball(Math.max(sx, sy, sz) / 2);
+    case 'BOX': return R.ColliderDesc.cuboid(half(sx), half(sy), half(sz));
+    case 'CAPSULE': {
+      const r = Math.max(sx, sz) / 2;
+      // a capsule is a cylinder with hemispherical caps, so the straight
+      // part is what is left after the caps eat a radius from each end
+      return R.ColliderDesc.capsule(Math.max(0.01, sy / 2 - r), Math.max(0.01, r));
+    }
+    case 'CYLINDER': return R.ColliderDesc.cylinder(half(sy), Math.max(sx, sz) / 2);
+    case 'CONE': return R.ColliderDesc.cone(half(sy), Math.max(sx, sz) / 2);
+    case 'HULL': {
+      const t = tris();
+      return (t && R.ColliderDesc.convexHull(t.positions)) ?? fallback();
+    }
+    case 'MESH': {
+      const t = tris();
+      if (!t) return fallback();
+      // A TRIMESH IS A SURFACE, NOT A SOLID: it has no inside, so a dynamic
+      // body built from one sinks through anything it lands on and lets
+      // small things pass straight through it. Exact collision is for the
+      // room; a body that MOVES gets the hull of the same triangles.
+      if (bodyKind !== 'fixed') {
+        return R.ColliderDesc.convexHull(t.positions) ?? fallback();
+      }
+      return R.ColliderDesc.trimesh(t.positions, t.indices) ?? fallback();
+    }
+    default: break;
+  }
+
+  // AUTO: the analytic shape that matches what it is drawn as.
   switch (m.kind) {
     case 'BOX':
-      return R.ColliderDesc.cuboid(sx / 2, sy / 2, sz / 2);
+      return R.ColliderDesc.cuboid(half(sx), half(sy), half(sz));
     case 'SPHERE':
       return R.ColliderDesc.ball(Math.max(sx, sy, sz) / 2);
     // A PLANE's scale is its HALF size (PlaneGeometry(2,2)), and it is drawn
@@ -383,29 +454,25 @@ function colliderDesc(
       // CylinderGeometry(0.5, 0.5, 1.2) — height 1.2 in the primitive's own Y
       return R.ColliderDesc.cylinder(sy * 0.6, Math.max(sx, sz) / 2);
     case 'PYRAMID':
-      return R.ColliderDesc.cone(sy / 2, Math.max(sx, sz) / 2);
+      return R.ColliderDesc.cone(half(sy), Math.max(sx, sz) / 2);
     case 'MODEL': {
-      // loaded geometry is not in the data layer; its bounds are the honest
-      // approximation, and it is nearly always scenery anyway
+      // Loaded geometry has no analytic shape to match, so AUTO gives it the
+      // hull of its own triangles — right for a rock or a chair leg, and
+      // overridable to MESH when it is scenery you need to be exact.
+      const t = tris();
+      if (t) {
+        const hull = R.ColliderDesc.convexHull(t.positions);
+        if (hull) return hull;
+      }
       const local = meshLocalBounds(m);
-      if (!local) return R.ColliderDesc.ball(Math.max(0.05, propRadius(m)));
+      if (!local) return fallback();
       const size = worldAABB(local, new THREE.Matrix4().makeScale(sx, sy, sz))
         .getSize(new THREE.Vector3());
-      return R.ColliderDesc.cuboid(
-        Math.max(0.01, size.x / 2), Math.max(0.01, size.y / 2), Math.max(0.01, size.z / 2));
+      return R.ColliderDesc.cuboid(half(size.x), half(size.y), half(size.z));
     }
     default: {
-      const geo = primitiveGeometry(m.kind);
-      const src = geo.getAttribute('position');
-      const pts = new Float32Array(src.count * 3);
-      for (let i = 0; i < src.count; i++) {
-        pts[i * 3] = src.getX(i) * sx;
-        pts[i * 3 + 1] = src.getY(i) * sy;
-        pts[i * 3 + 2] = src.getZ(i) * sz;
-      }
-      geo.dispose();
-      return R.ColliderDesc.convexHull(pts)
-        ?? R.ColliderDesc.ball(Math.max(0.05, propRadius(m)));
+      const t = tris();
+      return (t && R.ColliderDesc.convexHull(t.positions)) ?? fallback();
     }
   }
 }

@@ -88,6 +88,16 @@ Key invariants:
   out from under the pointer. `UI.rememberScroll`/`restoreScroll` carry the
   offsets of `.sidebar-outliner` and `.props-content` across the rebuild;
   add any new scrollable region to `UI.SCROLLERS`.
+- **Explanations hang off controls, never underneath them.** A paragraph in
+  a panel is read once and then re-read every time you come back for the
+  control it explains, and it pushes the actual settings off screen.
+  `panelHint(...)` puts a panel's one-line summary on its header as a
+  tooltip; `tip(node, text)` does the same for a single field (it also sets
+  the title on the inner `select`/`input`, since that is what the pointer is
+  usually over). Keep option labels to the NAME of the thing — "Kinematic",
+  not "Kinematic (you move it)" — and put the explanation in the tip. Status
+  and empty-state rows ("no clips yet", a vertex count) are not narrative and
+  stay where they are.
 - The UI talks to the app only through the `AppHandle` interface (top of
   `ui.ts`) — add methods there, implement on `App` in `main.ts`.
 - New keyboard shortcuts: add an `ActionDef` to `ACTIONS` in
@@ -593,6 +603,16 @@ the browser console or automated evals:
     hand at a fixed dt is bit-identical run to run (verified: three runs, zero
     drift), but ACTORS are an input. A scene with characters walking in it
     reproduces only if their motion does.
+  - `body.shape` picks the COLLIDER: AUTO gives the analytic shape matching
+    what the object is drawn as (and a hull for a MODEL, whose triangles only
+    exist in the render tree — `MeshManager.collisionMesh` hands them over,
+    so the physics never reaches into the renderer). The overrides are
+    ball/box/capsule/cylinder/cone/hull/trimesh, because collision fidelity
+    is a choice: a hull of a lamp-post is cheap and right, a hull of a chair
+    is a wedge you cannot sit in. **A TRIMESH IS A SURFACE, NOT A SOLID** —
+    it has no inside, so a dynamic body built from one sinks through whatever
+    it lands on; a moving body silently gets the hull of the same triangles
+    instead, and exact collision stays for the room.
   - Not yet on Rapier: the ACTOR solver. `actor/solver.ts` is positional
     (a joint is a particle, a bone a distance constraint) and Rapier's
     ragdoll would be bodies + joints with real angular state — a different

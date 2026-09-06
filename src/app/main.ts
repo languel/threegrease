@@ -3777,6 +3777,9 @@ class App implements AppHandle {
       if (rapierPhysics.ready) {
         if (rapierPhysics.update(ctx.scene, dt, upZ)) this.meshes.sync(ctx.scene, this.nav.active);
       } else {
+        // the render tree is where a MODEL's triangles live, and hull/mesh
+        // colliders need them
+        rapierPhysics.geometrySource = (id) => this.meshes.collisionMesh(id);
         void rapierPhysics.init(upZ);
       }
     } else if (propEngine.update(

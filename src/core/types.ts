@@ -633,6 +633,15 @@ export interface TGMesh {
      * one, and a loose prop is what the field is usually for.
      */
     type?: 'DYNAMIC' | 'KINEMATIC';
+    /**
+     * The collider Rapier gives it. AUTO (the default) picks the analytic
+     * shape that matches the primitive it is drawn as; the rest are the
+     * override, because collision fidelity is a CHOICE — a hull of a
+     * lamp-post is a cheap accurate thing, a hull of a chair is a wedge you
+     * cannot sit in, and a full triangle mesh is exact and hollow.
+     * Ignored by the simple backend, which is spheres either way.
+     */
+    shape?: 'AUTO' | 'BALL' | 'BOX' | 'CAPSULE' | 'CYLINDER' | 'CONE' | 'HULL' | 'MESH';
     mass: number;
     /** 0 = dead stop, 1 = perfectly elastic */
     bounce: number;

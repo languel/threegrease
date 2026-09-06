@@ -63,7 +63,7 @@ import { autoRig } from '../actor/rig';
 import { MASK_LABELS, SOURCE_LABELS, nextLayerId } from '../actor/mixer';
 import { MOVE_ACTIONS, runMoveAction } from '../actor/commands';
 import { nextMacroId } from '../actor/macros';
-import { resetPhysics } from '../actor/physics';
+import { engineOf, resetPhysics } from '../actor/physics';
 import { defaultBody, propRadius } from '../actor/props';
 import { ACTOR_LOOKS, LOOK_OPTIONS } from '../render/actorlooks';
 import type { ActorLayerSource } from '../core/types';
@@ -502,6 +502,16 @@ function panelCollapsed(): Record<string, boolean> {
  *  sitting in the body as a permanently-visible row. */
 interface PanelHint { __panelHint: string }
 function panelHint(text: string): PanelHint { return { __panelHint: text }; }
+
+/** Hang an explanation off a control instead of printing it underneath.
+ *  A sentence of prose in a panel is read once and then read again every
+ *  time you come back for the control it is explaining. */
+function tip<T extends HTMLElement>(node: T, text: string): T {
+  node.title = text;
+  const inner = node.querySelector('select, input, button');
+  if (inner instanceof HTMLElement) inner.title = text;
+  return node;
+}
 function isPanelHint(c: unknown): c is PanelHint {
   return typeof c === 'object' && c !== null && !(c instanceof Node) && '__panelHint' in c;
 }
@@ -2259,9 +2269,9 @@ export class UI {
     return panel('Scene',
       panelHint('Magnet Increment/Grid snap unit = the subdivision lines (Step ÷ Subdivisions).'),
       el('div', { class: 'menu-header', text: 'Physics' }),
-      fieldRow('Engine', selectField('', ctx.scene.physicsEngine ?? 'SIMPLE', [
-        ['SIMPLE', 'Simple (spheres)'],
-        ['RAPIER', 'Rapier (rigid bodies)'],
+      fieldRow('Engine', tip(selectField('', ctx.scene.physicsEngine ?? 'SIMPLE', [
+        ['SIMPLE', 'Simple'],
+        ['RAPIER', 'Rapier'],
       ], (v) => {
         ctx.pushUndo();
         ctx.scene.physicsEngine = v as 'SIMPLE' | 'RAPIER';
@@ -2270,12 +2280,9 @@ export class UI {
         // neither) and a half-migrated body would just be a bug with physics.
         resetPhysics();
         this.refresh();
-      })),
-      el('div', { class: 'row hint', text: ctx.scene.physicsEngine === 'RAPIER'
-        ? 'Rapier: real convex shapes, rotation, stacking and a deterministic '
-          + 'fixed step. Loads ~1 MB of wasm the first time a scene uses it.'
-        : 'Simple: every prop collides as a sphere and never rotates. Small, '
-          + 'no download, and enough for kicking a ball around.' }),
+      }), 'Simple: every prop is a sphere and never rotates — small, no download. '
+        + 'Rapier: real shapes, rolling and toppling, stacks that hold, and a '
+        + 'deterministic fixed step (loads ~1 MB of wasm on first use).')),
       el('div', { class: 'menu-header', text: 'Grid' }),
       fieldRow('Step', numField('', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5, { def: 1, min: 0.01 })),
       fieldRow('Subdivisions', numField('', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1, { def: 10, min: 1 })),
@@ -2932,14 +2939,13 @@ export class UI {
     if (ref.kind === 'MESH') {
       const m = ctx.scene.meshes.find((x) => x.id === ref.id)!;
       rows.push(
-        selectField('Lock', m.billboard ?? 'NONE', [
+        tip(selectField('Lock', m.billboard ?? 'NONE', [
           ['NONE', 'World'], ['FACE_VIEW', 'Face view'], ['CAMERA', 'Camera (HUD)'],
         ], (v) => { m.billboard = v as typeof m.billboard; this.refresh(); }),
+        'World: an ordinary object · Face view: always turned to the camera · '
+        + 'Camera (HUD): Loc/Rot/Scale become a view-space offset, so keep z '
+        + 'negative for depth'),
         checkbox('Draw target', m.drawTarget, (v) => { m.drawTarget = v; }),
-        ...(m.billboard === 'CAMERA' ? [el('div', {
-          class: 'row',
-          text: 'Camera lock: Loc/Rot/Scale become a view-space offset (keep z negative for depth)',
-        })] : []),
         ...this.physicsRows(m),
         ...(m.kind === 'MODEL' || m.kind === 'EMPTY'
           ? [] // MODEL owns its imported materials; EMPTY has no surface
@@ -3049,13 +3055,14 @@ export class UI {
   private physicsRows(m: TGMesh): Node[] {
     const { ctx } = this.app;
     const mode = !m.body ? 'STATIC' : (m.body.type ?? 'DYNAMIC');
+    const rapier = engineOf(ctx.scene) === 'RAPIER';
     const rows: Node[] = [
       el('div', { class: 'menu-sep' }),
       el('div', { class: 'menu-header', text: 'Physics' }),
-      fieldRow('Body', selectField('', mode, [
-        ['STATIC', 'Static (world)'],
-        ['DYNAMIC', 'Dynamic (loose prop)'],
-        ['KINEMATIC', 'Kinematic (you move it)'],
+      fieldRow('Body', tip(selectField('', mode, [
+        ['STATIC', 'Static'],
+        ['DYNAMIC', 'Dynamic'],
+        ['KINEMATIC', 'Kinematic'],
       ], (v) => {
         ctx.pushUndo();
         // Static is the ABSENCE of a body, not a body with a flag: a wall
@@ -3065,19 +3072,28 @@ export class UI {
           ? undefined
           : { ...(m.body ?? defaultBody(propRadius(m))), type: v as 'DYNAMIC' | 'KINEMATIC' };
         this.refresh();
-      })),
-      el('div', { class: 'row hint', text:
-        'Static collides and never moves · Dynamic falls and can be pushed, kicked or thrown '
-        + '· Kinematic keeps the position you give it and shoves dynamics out of the way' }),
+      }), 'Static collides and never moves · Dynamic falls and can be pushed, '
+        + 'kicked or thrown · Kinematic keeps the position you give it (by hand, '
+        + 'a constraint or an animation) and shoves dynamics out of the way')),
     ];
     if (!m.body) return rows;
     const b = m.body;
-    if (b.type === 'KINEMATIC') {
-      rows.push(el('div', { class: 'row', text:
-        'Kinematic: nothing pushes it back, so mass, bounce and friction do not apply. '
-        + 'Move it by hand, with a constraint, or from an animation.' }));
-      return rows;
+    if (rapier) {
+      rows.push(fieldRow('Collider', tip(selectField('', b.shape ?? 'AUTO', [
+        ['AUTO', 'Auto'], ['BALL', 'Ball'], ['BOX', 'Box'], ['CAPSULE', 'Capsule'],
+        ['CYLINDER', 'Cylinder'], ['CONE', 'Cone'], ['HULL', 'Convex hull'],
+        ['MESH', 'Triangle mesh'],
+      ], (v) => {
+        ctx.pushUndo();
+        b.shape = v as NonNullable<TGMesh['body']>['shape'];
+        resetPhysics();
+        this.refresh();
+      }), 'The shape it collides as — Auto matches what it is drawn as. '
+        + 'Convex hull wraps its own triangles (a chair becomes a wedge). '
+        + 'Triangle mesh is exact but hollow, so it only applies to Static '
+        + 'bodies; anything that moves falls back to the hull.')));
     }
+    if (b.type === 'KINEMATIC') return rows;
     rows.push(
       el('div', { class: 'row' },
         numField('Mass', b.mass, (v) => { b.mass = Math.max(0.01, v); }, 0.1,
@@ -3088,7 +3104,6 @@ export class UI {
       el('div', { class: 'row' },
         btn('Stop', () => { b.vel = [0, 0, 0]; ctx.requestRender(); },
           { title: 'park it where it is — the drop that put it there keeps trying otherwise' }),
-        el('span', { class: 'hint', text: 'sphere collision only — a cube will not topple onto a face' }),
       ),
     );
     return rows;

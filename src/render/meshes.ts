@@ -302,6 +302,42 @@ export class MeshManager {
 
   rootFor(id: number): THREE.Object3D | null { return this.entries.get(id)?.root ?? null; }
 
+  /**
+   * The object's triangles in its OWN unscaled frame, for physics.
+   *
+   * A MODEL's geometry only exists here — the data layer knows a URL, not a
+   * vertex — so a convex hull or a triangle-mesh collider for one has to
+   * come from the render tree. The root's world matrix is divided back out
+   * so the result is comparable to `primitiveGeometry`: local, unscaled, and
+   * the caller applies the object's own scale.
+   */
+  collisionMesh(id: number): { positions: Float32Array; indices: Uint32Array } | null {
+    const entry = this.entries.get(id);
+    if (!entry) return null;
+    entry.root.updateWorldMatrix(true, true);
+    const toLocal = entry.root.matrixWorld.clone().invert();
+    const pos: number[] = [];
+    const idx: number[] = [];
+    const v = new THREE.Vector3();
+    entry.root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry || o.userData.hoverShell) return;
+      const attr = mesh.geometry.getAttribute('position');
+      if (!attr) return;
+      const base = pos.length / 3;
+      const m = toLocal.clone().multiply(mesh.matrixWorld);
+      for (let i = 0; i < attr.count; i++) {
+        v.fromBufferAttribute(attr as THREE.BufferAttribute, i).applyMatrix4(m);
+        pos.push(v.x, v.y, v.z);
+      }
+      const index = mesh.geometry.getIndex();
+      if (index) for (let i = 0; i < index.count; i++) idx.push(base + index.getX(i));
+      else for (let i = 0; i < attr.count; i++) idx.push(base + i);
+    });
+    if (pos.length < 9 || idx.length < 3) return null;
+    return { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
+  }
+
   /** Meshes flagged as draw targets, for ctx.surfaces (empties never). */
   drawTargets(scene: GPScene): THREE.Object3D[] {
     return scene.meshes
