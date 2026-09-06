@@ -3078,21 +3078,30 @@ export class UI {
     ];
     if (!m.body) return rows;
     const b = m.body;
-    if (rapier) {
-      rows.push(fieldRow('Collider', tip(selectField('', b.shape ?? 'AUTO', [
-        ['AUTO', 'Auto'], ['BALL', 'Ball'], ['BOX', 'Box'], ['CAPSULE', 'Capsule'],
-        ['CYLINDER', 'Cylinder'], ['CONE', 'Cone'], ['HULL', 'Convex hull'],
-        ['MESH', 'Triangle mesh'],
-      ], (v) => {
-        ctx.pushUndo();
-        b.shape = v as NonNullable<TGMesh['body']>['shape'];
-        resetPhysics();
-        this.refresh();
-      }), 'The shape it collides as — Auto matches what it is drawn as. '
-        + 'Convex hull wraps its own triangles (a chair becomes a wedge). '
-        + 'Triangle mesh is exact but hollow, so it only applies to Static '
-        + 'bodies; anything that moves falls back to the hull.')));
+    // Shown even on the simple backend, which ignores it. Hiding a control
+    // that does not apply yet leaves no trace of the setting OR of the engine
+    // that would honour it — a disabled row with a tip saying where the
+    // switch lives is the shorter path to both.
+    const collider = fieldRow('Collider', tip(selectField('', b.shape ?? 'AUTO', [
+      ['AUTO', 'Auto'], ['BALL', 'Ball'], ['BOX', 'Box'], ['CAPSULE', 'Capsule'],
+      ['CYLINDER', 'Cylinder'], ['CONE', 'Cone'], ['HULL', 'Convex hull'],
+      ['MESH', 'Triangle mesh'],
+    ], (v) => {
+      ctx.pushUndo();
+      b.shape = v as NonNullable<TGMesh['body']>['shape'];
+      resetPhysics();
+      this.refresh();
+    }), 'The shape it collides as — Auto matches what it is drawn as. '
+      + 'Convex hull wraps its own triangles (a chair becomes a wedge). '
+      + 'Triangle mesh is exact but hollow, so it applies to Static and '
+      + 'Kinematic bodies; anything dynamic falls back to the hull.'
+      + (rapier ? '' : ' Needs the Rapier engine — switch it in the Scene panel, '
+        + 'Physics ▸ Engine. The simple backend collides everything as a sphere.')));
+    if (!rapier) {
+      const sel = collider.querySelector('select');
+      if (sel instanceof HTMLSelectElement) sel.disabled = true;
     }
+    rows.push(collider);
     if (b.type === 'KINEMATIC') return rows;
     rows.push(
       el('div', { class: 'row' },
