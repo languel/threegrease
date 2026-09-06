@@ -1,15 +1,12 @@
-// Landing foreign motion on our skeleton.
+// The one retargeter, for every source of foreign motion.
 //
 // A glTF import and an on-device generator hand us the same thing in the
 // end — frames of NAMED joint positions on somebody else's skeleton — so
-// they should get the same landing procedure rather than two that drift
-// apart. Everything here was learned the hard way on the glTF path; each
-// comment marks a way to get motion that "imports fine" and moves wrong.
-//
-// NOTE: `gltfclip.ts` still carries its own copy of this math, because it
-// was written first and is verified against a test harness. Folding it onto
-// this function is a mechanical follow-up, not a rewrite — until then, fix
-// bugs in BOTH.
+// they get the same landing procedure rather than two that drift apart.
+// Callers differ only in how they produce those frames, and in where the
+// floor is (see `groundRef`). Everything here was learned the hard way on
+// the glTF path; each comment marks a way to get motion that "imports fine"
+// and moves wrong.
 //
 // Sources speak Y-UP world space (glTF's convention, and ARDY's). The
 // scene's own up axis is a setting, so the conversion happens once, here.
@@ -54,6 +51,9 @@ export interface RetargetReport {
   /** yaw applied to face the source the way the actor faces, degrees */
   yaw?: number;
   frames: number;
+  /** source bone actually used for each output joint, for debugging a bad
+   *  import — filled in by callers that know their source's own names */
+  bones?: Record<string, string>;
   error?: string;
 }
 

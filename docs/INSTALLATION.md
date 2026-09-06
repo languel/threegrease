@@ -397,6 +397,32 @@ longer torso, and the solver's bone lengths then pull it back — visible as
 a slight pop at the knees and mid-spine. Per-limb scaling is the fix and is
 not built.
 
+### A real motion model, on the machine
+
+`Actor ▸ Generate ▸ ARDY Mini` runs an actual diffusion model client-side.
+ARDY (NVIDIA, SIGGRAPH 2026) is autoregressive diffusion for interactive
+human motion; intsuc's browser export of it is what makes it possible here,
+and the trick is a single substitution — upstream ARDY encodes prompts with
+a gated Llama-3-8B-Instruct at ~14 GB of VRAM, and the browser build distils
+that down to MiniLM-L6-v2. Three ONNX graphs chained on WebGPU: text encoder,
+denoiser (10-step DDIM over a latent body embedding plus explicit root
+features), decoder to posed joints on a 27-joint skeleton at 20 fps,
+generated 40 frames at a time with the previous 40 recentred as history.
+
+**It is text-only.** The ARDY paper offers root paths, waypoints, keyframes
+and sparse joint constraints; this export does not expose them. So it says
+how to move, never where to go. That is workable here for the reason the
+whole actor design already assumed: travel belongs to whatever drives the
+ROOT — the gait, a path, a steer goal, your hands — and the pose is its own
+layer. A generated clip composes with a destination instead of fighting it.
+
+Costs, plainly: ~653 MiB on first use (cached in the browser afterwards),
+WebGPU required, and the weights carry composite **NVIDIA Open Model** and
+**Meta Llama 3 Community** terms rather than the Apache-2.0 of the runtime.
+Nothing is fetched until that backend is chosen, and the required
+attributions sit next to the choice. Read those licences before shipping
+this publicly — see `src/vendor/ardy/README.md`.
+
 ### Generated motion, and where Kimodo actually goes
 
 `Actor ▸ Generate` makes a motion clip from a description ("tired

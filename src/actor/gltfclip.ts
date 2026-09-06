@@ -38,7 +38,19 @@
 // that is the bob, and it belongs to the pose.
 import * as THREE from 'three';
 import type { TGActor, TGClip, Vec3 } from '../core/types';
-import { genId } from '../core/gpdata';
+import { retargetPoseFrames } from './retarget';
+import type { RetargetReport } from './retarget';
+
+export type { RetargetReport } from './retarget';
+
+export interface RetargetOptions {
+  /** samples per second; 30 is plenty for a positional rig */
+  fps?: number;
+  upZ: boolean;
+  /** keep the source's horizontal travel instead of stripping it */
+  keepTravel?: boolean;
+  name?: string;
+}
 
 /** Our joint <- source bone. First match wins, so put the specific first. */
 const NAME_MAP: [string, string[]][] = [
@@ -94,31 +106,7 @@ export function matchBones(root: THREE.Object3D): BoneMatch[] {
   return out;
 }
 
-export interface RetargetOptions {
-  /** samples per second; 30 is plenty for a positional rig */
-  fps?: number;
-  /** scene up axis */
-  upZ: boolean;
-  /** keep the source's horizontal travel instead of stripping it */
-  keepTravel?: boolean;
-  name?: string;
-}
 
-export interface RetargetReport {
-  clip: TGClip | null;
-  matched: string[];
-  missing: string[];
-  /** how much the source was scaled to fit the actor */
-  scale: number;
-  /** the two rigs label their sides oppositely, so the names were swapped */
-  swapSides?: boolean;
-  /** yaw applied to face the source the way the actor faces, degrees */
-  yaw?: number;
-  /** source bone actually used for each output joint, for debugging */
-  bones?: Record<string, string>;
-  frames: number;
-  error?: string;
-}
 
 /**
  * Sample a glTF AnimationClip into a pose TGClip on `actor`'s skeleton.
@@ -137,143 +125,56 @@ export function retargetGltfClip(
     return { ...base, error: `only ${matches.length} bones matched — is this a character rig?` };
   }
 
-  const upAxis = opts.upZ ? 2 : 1;
   const fps = Math.max(5, Math.min(120, opts.fps ?? 30));
-
-  const at = (name: string): THREE.Object3D | undefined =>
-    matches.find((m) => m.joint === name)?.bone;
-  const world = (o: THREE.Object3D): THREE.Vector3 =>
-    new THREE.Vector3().setFromMatrixPosition(o.matrixWorld);
-
-  // ---- the BIND pose establishes the source's frame ---------------------
-  // Measured before any mixer exists, and averaged across both sides. Both
-  // matter: sampling the clip's first frame instead reads whatever pose the
-  // animation happens to start in, and a clip that opens mid-stride then
-  // hands you a "forward" taken from a leg that is swung 30 degrees out.
-  // The character imports rotated, and every joint is subtly wrong in a way
-  // that looks like bad retargeting rather than a bad measurement.
-  root.updateWorldMatrix(true, true);
-
-  const srcHips = at('hips');
-  if (!srcHips) return { ...base, error: 'no hips in the source rig' };
-  const ankleBones = [at('ankle.L'), at('ankle.R')].filter(Boolean) as THREE.Object3D[];
-  const toeBones = [at('foot.L'), at('foot.R')].filter(Boolean) as THREE.Object3D[];
-  if (!ankleBones.length) return { ...base, error: 'no ankles in the source rig' };
-
-  const mid = (list: THREE.Object3D[]): THREE.Vector3 => {
-    const v = new THREE.Vector3();
-    for (const o of list) v.add(world(o));
-    return v.divideScalar(list.length);
+  const world = (o: THREE.Object3D, into: Float32Array, i: number): void => {
+    into[i * 3] = o.matrixWorld.elements[12];
+    into[i * 3 + 1] = o.matrixWorld.elements[13];
+    into[i * 3 + 2] = o.matrixWorld.elements[14];
   };
-  // glTF is Y-up. Everything here works in that source frame and is mapped
-  // into the scene's convention at the very end.
-  const hips0 = world(srcHips);
-  const ankle0 = mid(ankleBones);
-  const srcHeight = Math.max(0.01, hips0.y - ankle0.y);
 
-  // Scale about the FEET, the same rule live capture uses (rig.matchScale).
-  // About the origin instead leaves a short source floating and a tall one
-  // buried.
-  const restOf = (n: string): Vec3 | undefined =>
-    actor.joints.find((j) => j.name === n)?.rest;
-  const aHips = restOf('hips'); const aAnkle = restOf('ankle.L');
-  const dstHeight = aHips && aAnkle
-    ? Math.max(0.01, aHips[upAxis] - aAnkle[upAxis]) : 1;
-  const scale = dstHeight / srcHeight;
-
-  // Facing from the skeleton, not assumed: the toes sit ahead of the ankles
-  // in every humanoid rig, so a source facing +Z and one facing -X both land
-  // the same way round.
-  let yaw = 0;
-  if (toeBones.length) {
-    const toe = mid(toeBones);
-    const fwd = new THREE.Vector2(toe.x - ankle0.x, toe.z - ankle0.z);
-    // our target forward, expressed in the source's Y-up frame, is -Z:
-    // it becomes +Y once mapped to a Z-up scene, which is the actor's own
-    if (fwd.lengthSq() > 1e-8) yaw = Math.atan2(fwd.x, fwd.y) - Math.atan2(0, -1);
-  }
-  const spin = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -yaw);
-
-  // The actor's ankle is not on the floor — the joint sits above the sole.
-  // Grounding the source at zero instead sinks the whole figure by exactly
-  // that much, the same trap the gait hit when it planted feet on the floor
-  // plane rather than at the ankle's rest height.
-  const groundUp = aAnkle ? aAnkle[upAxis] : 0;
-
-  // ---- which side is which ---------------------------------------------
-  // A rig's idea of "Left" is a LABEL, and this skeleton's is its own (see
-  // skeleton.ts: `.L` is the +X side). Turning a character round to face the
-  // way ours faces must not mirror it, so handedness is checked rather than
-  // assumed: compare the source's ankle-to-ankle direction, once spun into
-  // our frame, against the actor's own. If they disagree the two rigs label
-  // their sides oppositely, and the fix is to swap the NAMES — mirroring the
-  // geometry instead would give a character whose knees bend outward.
-  let swapSides = false;
-  const srcL = at('ankle.L'); const srcR = at('ankle.R');
-  const aAnkleR = restOf('ankle.R');
-  if (srcL && srcR && aAnkle && aAnkleR) {
-    const d = world(srcL).sub(world(srcR)).applyQuaternion(spin);
-    if (d.x * (aAnkle[0] - aAnkleR[0]) < 0) swapSides = true;
-  }
-  const flip = (n: string): string =>
-    !swapSides ? n : n.endsWith('.L') ? `${n.slice(0, -2)}.R`
-      : n.endsWith('.R') ? `${n.slice(0, -2)}.L` : n;
+  // ---- the BIND pose, read BEFORE any mixer exists ----------------------
+  // Sampling the clip's first frame instead reads whatever pose the
+  // animation opens in, and one that starts mid-stride hands the retargeter
+  // a "forward" taken from a leg swung 30 degrees out: the character lands
+  // rotated, and it looks like bad retargeting rather than a bad
+  // measurement. A glTF rig's bind pose shares a world with its animation,
+  // so it is also where the floor is (groundRef 'bind' below).
+  root.updateWorldMatrix(true, true);
+  const bind = new Float32Array(matches.length * 3);
+  for (let i = 0; i < matches.length; i++) world(matches[i].bone, bind, i);
 
   // ---- now, and only now, drive the clip --------------------------------
   const mixer = new THREE.AnimationMixer(root);
   const action = mixer.clipAction(source);
   action.play();
 
-  // ---- sample ----------------------------------------------------------
-  const names = matches.map((m) => flip(m.joint));
   const dur = Math.max(1 / fps, source.duration);
   const count = Math.max(2, Math.round(dur * fps) + 1);
-  const frames: { t: number; data: number[] }[] = [];
-  const v = new THREE.Vector3();
-
+  const frames: { t: number; pos: Float32Array }[] = [];
   for (let f = 0; f < count; f++) {
     const t = (f / (count - 1)) * dur;
     mixer.setTime(t);
     root.updateWorldMatrix(true, true);
-    const hips = world(srcHips);
-    const data = new Array<number>(names.length * 4);
-    for (let i = 0; i < matches.length; i++) {
-      v.copy(world(matches[i].bone));
-      // origin: under the hips (travel removed) and on the ground plane
-      v.x -= opts.keepTravel ? 0 : hips.x;
-      v.z -= opts.keepTravel ? 0 : hips.z;
-      v.y -= ankle0.y;
-      v.multiplyScalar(scale);
-      v.applyQuaternion(spin);
-      // Y-up source -> the scene's convention. The actor's own skeleton is
-      // authored the same way (skeleton.ts `place`), so this is the one
-      // place that has to know it.
-      const p: Vec3 = opts.upZ ? [v.x, -v.z, v.y] : [v.x, v.y, v.z];
-      p[upAxis] += groundUp;
-      data[i * 4] = +p[0].toFixed(5);
-      data[i * 4 + 1] = +p[1].toFixed(5);
-      data[i * 4 + 2] = +p[2].toFixed(5);
-      data[i * 4 + 3] = 1;
-    }
-    frames.push({ t: Math.round(t * 1000), data });
+    const pos = new Float32Array(matches.length * 3);
+    for (let i = 0; i < matches.length; i++) world(matches[i].bone, pos, i);
+    frames.push({ t: Math.round(t * 1000), pos });
   }
   action.stop();
   mixer.uncacheClip(source);
 
-  const clip: TGClip = {
-    id: genId(),
-    name: opts.name ?? source.name ?? 'imported motion',
-    source: `gltf:${source.name || 'clip'}`,
-    count: names.length,
-    duration: frames[frames.length - 1].t,
-    frames,
-    space: 'ACTOR_LOCAL',
-    joints: names,
-  };
+  const report = retargetPoseFrames(
+    { names: matched, bind, frames }, actor,
+    {
+      upZ: opts.upZ,
+      keepTravel: opts.keepTravel,
+      groundRef: 'bind',
+      name: opts.name ?? source.name ?? 'imported motion',
+      source: `gltf:${source.name || 'clip'}`,
+    },
+  );
+  if (!report.clip) return { ...base, ...report, matched, missing };
+
   const bones: Record<string, string> = {};
-  matches.forEach((m, i) => { bones[names[i]] = m.bone.name; });
-  return {
-    clip, matched, missing, scale: +scale.toFixed(4), frames: frames.length,
-    swapSides, yaw: +THREE.MathUtils.radToDeg(yaw).toFixed(1), bones,
-  };
+  report.matched.forEach((n, i) => { bones[n] = matches[i].bone.name; });
+  return { ...report, matched, missing, bones };
 }

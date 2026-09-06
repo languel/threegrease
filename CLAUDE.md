@@ -355,6 +355,34 @@ the browser console or automated evals:
     figure — the same trap the gait hit planting feet.
   Horizontal root travel is stripped: the clip is an actor-LOCAL pose, and
   travel belongs to whatever drives the root.
+- **Generated motion has a backend seam** (`src/actor/generate.ts`):
+  `MotionRequest {prompt, seconds, joints[], goal?} -> TGClip` of named
+  joint positions. Three backends answer it — a procedural synthesiser, an
+  HTTP service, and **ARDY Mini** (`src/actor/ardy.ts`), a real diffusion
+  model running on WebGPU. Things to know:
+  - The vendored runtime (`src/vendor/ardy/`) is intsuc's Apache-2.0 code,
+    copied UNMODIFIED. Do not "tidy" it — the DDIM update, the window
+    recentring and the latent quantisation are numerical details that fail
+    silently (the motion just looks slightly off). Our adapter is separate.
+  - **The browser export is TEXT-ONLY.** Upstream ARDY takes waypoints and
+    keyframes; these graphs have no such input. It answers "move like this",
+    never "go there" — which only works here because travel belongs to the
+    ROOT and the pose is a separate layer.
+  - The WEIGHTS are not Apache-2.0: composite NVIDIA Open Model + Meta Llama
+    3 Community terms. Nothing downloads until the user picks that backend,
+    and `ARDY_NOTICES` must stay rendered next to the choice.
+  - ORT loads its wasm host BY URL, not through the bundler, so
+    `scripts/copy-ort-assets.mjs` stages it into `public/ort/` on dev/build
+    (gitignored, 66 MB).
+- **`src/actor/retarget.ts` is the ONE retargeter** for foreign motion —
+  frames of named joint positions in, a pose clip on our skeleton out. Both
+  the glTF importer and ARDY go through it. The traps it encodes: scale
+  about the FEET, facing recovered from the BIND pose (frame 0 of a clip
+  that opens mid-stride gives a "forward" from a swung leg), ground at the
+  ankle's REST height, and the `.L`-is-+X side swap. `groundRef` is the one
+  real difference between sources: a glTF rig's bind pose shares a world
+  with its animation, while ARDY's neutral pose is a hips-centred TEMPLATE,
+  so its floor has to come from the frames.
 - **The animation mixer** (`src/actor/mixer.ts`) is where every source of
   motion is weighed. Sources ask `gain(actor, source, jointName)` for their
   own multiplier rather than the mixer calling them, so each producer keeps
