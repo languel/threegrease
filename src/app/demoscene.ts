@@ -261,7 +261,7 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
 
   // Two plinths, as before — the pieces the visitor is here to look at.
   prop('BOX', 'Plinth A', at(-5.5, 2.0, 0.55), size(0.5, 0.5, 1.1), plinth);
-  prop('BOX', 'Plinth B', at(5.5, -2.0, 0.55), size(0.5, 0.5, 1.1), plinth);
+  prop('BOX', 'Plinth B', at(8.2, 1.2, 0.55), size(0.5, 0.5, 1.1), plinth);
 
   // A bench: low enough to sit on, which for a character means low enough to
   // STEP onto — 0.45 is under the 0.35 step height plus a bit of leg, so the

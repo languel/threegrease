@@ -468,8 +468,15 @@ the browser console or automated evals:
   rotating makes the forward component fall away as the obstacle closes;
   (b) re-picking the side to pass on every frame flickers when the two sides
   measure the same, so the side is committed until the way is clear. When it
-  wedges anyway it sets `stuck` rather than shuffling forever while the gait
-  dutifully animates a walk going nowhere. The heading turns at a bounded
+  wedges anyway it does not simply give up: a reactive steerer WILL find
+  local minima (an inside corner, a gap it keeps re-entering), and the way
+  out of one is not to push harder but to go somewhere else briefly and
+  re-approach. It takes up to three sideways DETOURS, alternating sides and
+  biased backwards since the wedge is in front, resetting its progress
+  accounting each time — and only then sets `stuck`. Arrival always tests
+  the REAL goal, never the detour. Verified: open routes arrive with no
+  detour at all, and a goal reachable only by stairs tries twice, says so,
+  and gives up in a bounded 23 s instead of shuffling forever. The heading turns at a bounded
   RATE — snapping it spins the body under a world-locked stance foot.
 - **The shared walking body** (`actor/locomotion.ts`) is where collision and
   ground live, so a character does not collide differently depending on who

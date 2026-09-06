@@ -31,9 +31,13 @@ import {
 import { actorMixer } from './mixer';
 import { actorLog } from '../app/actorlog';
 
-/** How long a character may make no progress before it gives up. */
+/** How long a character may make no progress before it tries something. */
 const STUCK_SECONDS = 1.2;
 const STUCK_METRES = 0.05;
+/** How many sideways escapes to attempt before admitting defeat. */
+const MAX_ESCAPES = 3;
+/** How long to commit to an escape before re-aiming at the real goal. */
+const DETOUR_SECONDS = 2.2;
 /** how wide the "which way round?" probes fan out */
 const PROBE_ANGLE = Math.PI / 3;
 
@@ -59,6 +63,11 @@ interface SteerState {
   stalled: number;
   /** which way we committed to go round the current obstacle, 0 = clear */
   dodge: number;
+  /** a temporary goal we are using to escape a wedge, and its clock */
+  detour: THREE.Vector3 | null;
+  detourT: number;
+  /** how many escapes we have already tried for the CURRENT goal */
+  attempts: number;
 }
 
 export class SteerEngine {
@@ -178,14 +187,34 @@ export class SteerEngine {
 
     let state = this.states.get(actor.id);
     if (!state) {
-      state = { vel: new THREE.Vector3(), bestDist: Infinity, stalled: 0, dodge: 0 };
+      state = {
+        vel: new THREE.Vector3(), bestDist: Infinity, stalled: 0, dodge: 0,
+        detour: null, detourT: 0, attempts: 0,
+      };
       this.states.set(actor.id, state);
     }
 
     const pos = new THREE.Vector3(...actor.translation);
-    const to = goal.clone().sub(pos);
+
+    // ---- escape in progress: aim at the detour, not at the goal ---------
+    if (state.detour) {
+      state.detourT += dt;
+      const reached = state.detour.distanceTo(pos) < 0.45;
+      if (reached || state.detourT > DETOUR_SECONDS) {
+        state.detour = null;
+        // start the progress accounting over: the point of the detour was
+        // to reach somewhere the old "best distance" no longer describes
+        state.bestDist = Infinity;
+        state.stalled = 0;
+      }
+    }
+    const aim = state.detour ?? goal;
+
+    const to = aim.clone().sub(pos);
     to.setComponent(upAxis, 0);          // walking is a horizontal problem
     const dist = to.length();
+    const goalDist = state.detour
+      ? goal.clone().sub(pos).setComponent(upAxis, 0).length() : dist;
 
     // ---- FACE: turn on the spot, do not travel -------------------------
     if (st.mode === 'FACE') {
@@ -203,7 +232,7 @@ export class SteerEngine {
 
     // ---- arrival ------------------------------------------------------
     const stop = Math.max(0.05, st.stopDistance);
-    if (dist <= stop) {
+    if (goalDist <= stop) {
       state.vel.multiplyScalar(Math.max(0, 1 - dt * 8));
       actor.translation = [
         pos.x + state.vel.x * dt, pos.y + state.vel.y * dt, pos.z + state.vel.z * dt,
@@ -308,15 +337,39 @@ export class SteerEngine {
     // A steering character with no pathfinder WILL wedge in a concave
     // corner. Saying so is much better than shuffling in place forever
     // while the gait dutifully animates a walk that goes nowhere.
-    if (dist < state.bestDist - STUCK_METRES) {
-      state.bestDist = dist;
+    if (goalDist < state.bestDist - STUCK_METRES) {
+      state.bestDist = goalDist;
       state.stalled = 0;
-    } else {
+    } else if (!state.detour) {
       state.stalled += dt;
       if (state.stalled > STUCK_SECONDS) {
-        st.stuck = true;
-        st.arrived = true;      // stop trying; the caller decides what next
-        actorLog.say(actor.id, actor.name, 'I can\u2019t get through this way.');
+        if (state.attempts < MAX_ESCAPES) {
+          // A reactive steerer WILL find local minima — an inside corner, a
+          // gap it keeps re-entering — and the way out of one is not to push
+          // harder but to go somewhere else briefly and re-approach. Sides
+          // alternate so a failed escape is not simply repeated, and the
+          // detour is biased BACKWARD because the wedge is in front.
+          state.attempts += 1;
+          const side = state.attempts % 2 === 1 ? 1 : -1;
+          const dirNow = to.clone().divideScalar(Math.max(0.001, dist));
+          const { right } = headingBasis(headingOf(dirNow, upZ), upZ);
+          const away = pos.clone()
+            .addScaledVector(right, side * (1.4 + state.attempts * 0.4))
+            .addScaledVector(dirNow, -0.7);
+          away.setComponent(upAxis, pos.getComponent(upAxis));
+          state.detour = away;
+          state.detourT = 0;
+          state.stalled = 0;
+          state.dodge = 0;
+          actorLog.say(actor.id, actor.name,
+            state.attempts === 1 ? 'That\u2019s blocked \u2014 let me go round.'
+              : 'Still blocked. Trying the other side.');
+        } else {
+          st.stuck = true;
+          st.arrived = true;    // stop trying; the caller decides what next
+          actorLog.say(actor.id, actor.name,
+            'I can\u2019t get through this way. Moving on.');
+        }
       }
     }
   }
