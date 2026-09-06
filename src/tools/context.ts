@@ -3,6 +3,7 @@ import type { GPScene, GPStroke, StrokeStyle, Vec3 } from '../core/types';
 import { defaultStyle } from '../core/brushes';
 import type { History } from '../core/history';
 import type { EditorMode, GPSceneRenderer } from '../render/GPSceneRenderer';
+import type { ObjRef } from './objects';
 
 /** SURFACE_PERP = "Surface ⊥": the stroke/quilt STARTS on the surface
  *  under the first point, then grows on the plane that stands
@@ -233,6 +234,15 @@ export interface AppCtx {
   refreshUI(): void;
   /** transient one-line message in the viewport status area */
   setStatus(text: string, ms?: number): void;
+  /**
+   * Light one object up in the viewport itself (a silhouette drawn around
+   * the real geometry), or clear it with null.
+   *
+   * A 3D outline rather than a 2D marker on the HUD, because the shape is
+   * already there: a ring or a box has to RE-DERIVE the silhouette by
+   * projection and gets it wrong the moment the object is not a sphere.
+   */
+  highlightObject(ref: ObjRef | null, color?: string): void;
 }
 
 export function defaultSettings(): Settings {

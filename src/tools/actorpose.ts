@@ -321,6 +321,7 @@ export class ActorPoseTool implements Tool {
     this.propGrab = { meshId: hit.meshId, plane, offset: hit.world.clone().sub(at) };
     this.propHover = hit;
     ctx.canvas.style.cursor = 'grabbing';
+    this.paintHighlight(ctx);
     propEngine.hold(hit.meshId, hit.world);
   }
 
@@ -341,6 +342,7 @@ export class ActorPoseTool implements Tool {
     // "this one is grabbable" — the ring below says which one.
     ctx.canvas.style.cursor =
       (this.hover || (this.propHover && !this.propHover.static)) ? 'grab' : 'default';
+    this.paintHighlight(ctx);
     if (!this.grab) return;
     const actor = ctx.scene.actors.find((a) => a.id === this.grab!.actorId);
     if (!actor) return;
@@ -367,6 +369,7 @@ export class ActorPoseTool implements Tool {
       propEngine.release(this.propGrab.meshId);
       this.propGrab = null;
       ctx.canvas.style.cursor = 'grab';
+      this.paintHighlight(ctx);
       ctx.requestRender();
       return;
     }
@@ -380,68 +383,54 @@ export class ActorPoseTool implements Tool {
     ctx.requestRender();
   }
 
-  onCancel(ctx: AppCtx): void { this.onUp(ctx, {} as ToolEvent); }
+  onCancel(ctx: AppCtx): void {
+    this.onUp(ctx, {} as ToolEvent);
+    this.propHover = null;
+    ctx.highlightObject(null);
+  }
+
+  /** Amber while you hold it, blue when it can be grabbed, grey when it has
+   *  no physics and Shift would be needed. */
+  private paintHighlight(ctx: AppCtx): void {
+    const p = this.propHover;
+    ctx.highlightObject(
+      p ? { kind: 'MESH', id: p.meshId } : null,
+      this.propGrab ? '#ffc84d' : p?.static ? '#9aa4ad' : '#7fd4ff',
+    );
+  }
 
   drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
     const p = this.propHover;
     if (p) {
-      // Re-measured every frame rather than cached: the prop is being
-      // simulated, so where it was when you started hovering is not where
-      // it is now — a stale ring reads as the highlight lagging the ball.
+      // The RING is gone: the silhouette is drawn in 3D around the real
+      // geometry (see MeshManager.setHover), which is the one marker that
+      // cannot disagree with the shape it is marking. What is left here is
+      // the part a silhouette cannot say — the object's name and what the
+      // drag will do.
       const mesh = ctx.scene.meshes.find((m) => m.id === p.meshId);
       if (mesh) {
         const w = new THREE.Vector3()
           .setFromMatrixPosition(worldMatrixOf(ctx.scene, { kind: 'MESH', id: p.meshId }));
+        const at = objectToScreen(ctx, [w.x, w.y, w.z]);
         const disc = this.discFor(ctx, mesh, w) ?? p.disc;
-        const s = { x: disc.x, y: disc.y };
-        const r = Math.max(12, disc.r + 3);
         const held = !!this.propGrab;
-        // Static scenery gets a muted ring: it says "I see it, and here is
-        // why nothing happens when you drag".
         const tint = held ? '#ffc84d' : p.static ? '#9aa4ad' : '#7fd4ff';
-        hud.save();
-        // Drawn twice: a dark casing under a bright line. The viewport is a
-        // room, so a single thin stroke lands on pale floor as often as on
-        // dark wall and disappears against one of them.
-        const outline = () => {
-          hud.beginPath();
-          if (disc.rect) {
-            const rr = Math.min(8, disc.rect.w / 4, disc.rect.h / 4);
-            hud.roundRect(s.x - disc.rect.w / 2, s.y - disc.rect.h / 2, disc.rect.w, disc.rect.h, rr);
-          } else {
-            hud.arc(s.x, s.y, r, 0, Math.PI * 2);
-          }
-          hud.stroke();
-        };
-        hud.setLineDash(held ? [] : [5, 4]);
-        hud.strokeStyle = 'rgba(0,0,0,0.55)';
-        hud.lineWidth = held ? 4.5 : 4;
-        outline();
-        hud.strokeStyle = tint;
-        hud.lineWidth = held ? 2.2 : 1.8;
-        outline();
-        hud.setLineDash([]);
-        // a dot at the centre: the ring says WHERE, the dot says the grab
-        // acts on the prop's origin, which is what the drag actually moves
-        hud.fillStyle = tint;
-        hud.beginPath(); hud.arc(s.x, s.y, held ? 3 : 2, 0, Math.PI * 2); hud.fill();
-        hud.font = '11px system-ui, sans-serif';
         const label = `${mesh.name || 'prop'} · ${
           held ? 'release to throw'
             : p.static ? 'no physics — Shift-drag to make it a prop'
               : 'drag / throw'}`;
-        // A big prop's ring can be wider than the viewport, so the label has
-        // to fall back to the inside edge rather than off the canvas.
+        hud.save();
+        hud.font = '11px system-ui, sans-serif';
         const tw = hud.measureText(label).width;
-        const right = s.x + (disc.rect ? disc.rect.w / 2 : r) + 6;
-        const lx = right + tw < hud.canvas.width / (window.devicePixelRatio || 1)
-          ? right
-          : Math.max(4, Math.min(s.x - (disc.rect ? disc.rect.w / 2 : r) - 6 - tw, s.x + 8));
+        const half = (disc.rect ? disc.rect.w / 2 : disc.r) + 8;
+        const wide = hud.canvas.width / (window.devicePixelRatio || 1);
+        const lx = at.x + half + tw < wide ? at.x + half : Math.max(4, at.x - half - tw);
+        const ly = disc.rect ? at.y - disc.rect.h / 2 - 6 : at.y - disc.r - 6;
         hud.lineWidth = 3;
         hud.strokeStyle = 'rgba(0,0,0,0.6)';
-        hud.strokeText(label, lx, s.y + 4);
+        hud.strokeText(label, lx, ly);
         hud.fillStyle = tint;
-        hud.fillText(label, lx, s.y + 4);
+        hud.fillText(label, lx, ly);
         hud.restore();
       }
     }

@@ -36,6 +36,10 @@ export function primitiveGeometry(kind: TGMesh['kind']): THREE.BufferGeometry {
   }
 }
 
+/** how far the silhouette shell is pushed out past the surface. Small
+ *  enough to read as an outline, big enough to survive at a distance. */
+const HULL_GROW = 1.045;
+
 export class MeshManager {
   readonly group = new THREE.Group();
   private entries = new Map<number, { root: THREE.Object3D; src?: string; kind: string; unlit?: boolean; originOffset: Vec3; live?: boolean }>();
@@ -48,6 +52,26 @@ export class MeshManager {
   readonly modelAnimations = new Map<number, {
     root: THREE.Object3D; clips: THREE.AnimationClip[];
   }>();
+
+  /**
+   * Hover silhouette — RUNTIME state, set by whichever tool is pointing at
+   * something (see `AppCtx.highlightObject`).
+   *
+   * Drawn as an inverted hull: the object's own geometry again, slightly
+   * fattened, back faces only, so what you see is exactly the silhouette of
+   * the thing under the cursor whatever shape it is. A 2D ring or box on the
+   * HUD has to re-derive that silhouette by projection, and every primitive
+   * reports the same unit bounds, so the marker fits a sphere and misses
+   * everything else. Here the geometry does the work and there is no
+   * projection to get wrong.
+   */
+  private hover: { id: number; color: string } | null = null;
+  private hoverHull: THREE.Group | null = null;
+
+  setHover(id: number | null, color = '#7fd4ff'): void {
+    if (this.hover?.id === id && this.hover?.color === color) return;
+    this.hover = id === null ? null : { id, color };
+  }
 
   /** Rebuild/update mesh objects to mirror scene.meshes (camera for view locks). */
   sync(scene: GPScene, camera?: THREE.Camera): void {
@@ -100,6 +124,63 @@ export class MeshManager {
         entry.originOffset = [...off];
       }
       this.apply(entry.root, data, scene, camera, entry.live);
+    }
+    this.syncHover();
+  }
+
+  /**
+   * Build/move/drop the hover hull.
+   *
+   * It rides as a CHILD of the object's own root, so it inherits every
+   * transform for free — including the physics that is moving the thing
+   * while you point at it, which a HUD marker can only follow a frame late.
+   * The clones share the original's geometry (never dispose it here) and
+   * refuse raycasts, so nothing downstream can pick the outline instead of
+   * the object.
+   */
+  private syncHover(): void {
+    if (this.hoverHull && this.hoverHull.userData.forId !== this.hover?.id) {
+      this.hoverHull.removeFromParent();
+      for (const o of this.hoverHull.children) {
+        (((o as THREE.Mesh).material) as THREE.Material)?.dispose();
+      }
+      this.hoverHull = null;
+    }
+    if (!this.hover) return;
+    const entry = this.entries.get(this.hover.id);
+    if (!entry) return;
+    if (!this.hoverHull) {
+      const hull = new THREE.Group();
+      hull.userData.forId = this.hover.id;
+      entry.root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.geometry) return;
+        const shell = new THREE.Mesh(m.geometry, new THREE.MeshBasicMaterial({
+          color: this.hover!.color,
+          // Back faces only, fattened a little: the front faces are then
+          // covered by the object itself and only the rim survives. It is
+          // the cheapest true silhouette there is, and it needs no shader.
+          side: THREE.BackSide,
+          transparent: true,
+          opacity: 0.9,
+          depthWrite: false,
+        }));
+        shell.raycast = () => {};
+        shell.userData.hoverShell = true;
+        shell.renderOrder = 2;
+        m.updateMatrix();
+        shell.matrixAutoUpdate = false;
+        // relative to the entry root, plus the outward fatten
+        shell.matrix.copy(m === (entry.root as THREE.Mesh) ? new THREE.Matrix4() : m.matrix)
+          .multiply(new THREE.Matrix4().makeScale(HULL_GROW, HULL_GROW, HULL_GROW));
+        hull.add(shell);
+      });
+      if (!hull.children.length) return;
+      entry.root.add(hull);
+      this.hoverHull = hull;
+    }
+    for (const o of this.hoverHull.children) {
+      ((o as THREE.Mesh).material as THREE.MeshBasicMaterial).color.set(this.hover.color);
     }
   }
 
@@ -186,7 +267,11 @@ export class MeshManager {
     root.visible = data.visible;
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh || o.userData.emptyHelper) return;
+      // The hover shell rides inside the object's own tree so it inherits
+      // every transform, which means this pass would otherwise repaint it
+      // with the object's material — turning a thin silhouette into a solid
+      // block of colour over the whole prop.
+      if (!mesh.isMesh || o.userData.emptyHelper || o.userData.hoverShell) return;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       if (!mat || Array.isArray(mat)) return;
       // shadows are per-light opt-in; meshes always participate so turning

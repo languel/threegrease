@@ -622,6 +622,17 @@ export interface TGMesh {
    * simulation does and, more importantly, what it does not.
    */
   body?: {
+    /**
+     * DYNAMIC falls and is pushed around; KINEMATIC is moved by YOU (or by
+     * a constraint, or an animation) and shoves dynamics aside without ever
+     * being shoved back. A mesh with no `body` at all is STATIC: it collides
+     * as part of the world and nothing can move it, which is why a floor
+     * needs no physics settings for balls to bounce off it.
+     *
+     * Absent means DYNAMIC — every body that existed before this field was
+     * one, and a loose prop is what the field is usually for.
+     */
+    type?: 'DYNAMIC' | 'KINEMATIC';
     mass: number;
     /** 0 = dead stop, 1 = perfectly elastic */
     bounce: number;

@@ -378,6 +378,11 @@ class App implements AppHandle {
         this.ui?.refresh();
       },
       refreshUI: () => this.ui?.refresh(),
+      highlightObject: (ref, color) => {
+        // meshes are the only kind with a silhouette to draw so far; a null
+        // ref (or any other kind) simply clears it
+        this.meshes.setHover(ref && ref.kind === 'MESH' ? ref.id : null, color);
+      },
       setStatus: (t: string, ms?: number) => this.setStatusHint(t, ms),
     };
 

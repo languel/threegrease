@@ -60,8 +60,15 @@ export class PropEngine {
   private accum = 0;
   /** props under a cursor right now: mesh id -> world target */
   private held = new Map<number, THREE.Vector3>();
+  /** kinematic props' last positions, for the velocity they impart */
+  private lastKine = new Map<number, THREE.Vector3>();
 
-  reset(): void { this.lastJoints.clear(); this.held.clear(); this.accum = 0; }
+  reset(): void {
+    this.lastJoints.clear();
+    this.lastKine.clear();
+    this.held.clear();
+    this.accum = 0;
+  }
 
   /**
    * Drag a prop by steering it, never by placing it.
@@ -89,10 +96,29 @@ export class PropEngine {
     return out;
   }
 
+  /** this frame's kinematic colliders, handed from update() to step() */
+  private kine: { pos: THREE.Vector3; vel: THREE.Vector3; radius: number }[] = [];
+
   update(scene: GPScene, dt: number, upZ: boolean, staticBoxes: THREE.Box3[]): boolean {
     const live: Live[] = [];
+    // Kinematic props are colliders, not bodies: they keep whatever position
+    // the author, a constraint or an animation gave them, and the only thing
+    // the simulation asks of them is how fast they are moving — which is
+    // exactly what it already asks of a character's joints, so they push
+    // things through the same contact.
+    const kine: { pos: THREE.Vector3; vel: THREE.Vector3; radius: number }[] = [];
     for (const m of scene.meshes) {
       if (!m.body || m.visible === false || m.lock) continue;
+      if (m.body.type === 'KINEMATIC') {
+        const pos = new THREE.Vector3(...m.translation)
+          .applyMatrix4(parentWorldMatrixOf(scene, { kind: 'MESH', id: m.id }));
+        const prev = this.lastKine.get(m.id);
+        const vel = prev && dt > 1e-6
+          ? pos.clone().sub(prev).divideScalar(dt) : new THREE.Vector3();
+        this.lastKine.set(m.id, pos.clone());
+        kine.push({ pos, vel, radius: propRadius(m) });
+        continue;
+      }
       m.body.vel ??= [0, 0, 0];
       const parent = parentWorldMatrixOf(scene, { kind: 'MESH', id: m.id });
       live.push({
@@ -106,6 +132,7 @@ export class PropEngine {
       });
     }
     if (!live.length) return false;
+    this.kine = kine;
 
     // Fixed slices, so a stutter does not launch everything through a wall.
     this.accum = Math.min(this.accum + dt, MAX_STEP * 5);
@@ -153,6 +180,11 @@ export class PropEngine {
     // ---- each other -----------------------------------------------------
     for (let i = 0; i < live.length; i++) {
       for (let j = i + 1; j < live.length; j++) this.hitProp(live[i], live[j]);
+    }
+
+    // ---- kinematic props: the same contact a joint makes ------------------
+    for (const k of this.kine) {
+      for (const b of live) this.hitJoint(b, k.pos, k.vel, k.radius);
     }
 
     // ---- characters: every joint is already a sphere ---------------------

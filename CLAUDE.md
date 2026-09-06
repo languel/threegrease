@@ -527,15 +527,35 @@ the browser console or automated evals:
   sideways. `screenDisc` projects the real tangent circle instead, and refuses
   to answer for a prop the eye is inside or that straddles the near plane
   (that case reported a 49,000 px disc that swallowed every other pick).
-  Only a SPHERE gets a circle: every primitive reports the same unit box from
-  `meshLocalBounds`, so a tetrahedron's "radius" is its box's — over twice the
-  silhouette it draws. The others get the projected bounds RECTANGLE, which
-  reads as bounds instead of as a badly fitted ring.
+  In the end the 2D marker went away entirely: `MeshManager.setHover` draws
+  an INVERTED HULL — the object's own geometry again, fattened ~4.5%, back
+  faces only — so the highlight is the real silhouette of whatever shape is
+  under the cursor, rides the object's transform (including the physics
+  moving it), and has no projection left to get wrong. Every 2D approach
+  before it failed the same way: a circle fits a sphere, and every primitive
+  reports the same unit box from `meshLocalBounds`, so a tetrahedron's
+  "radius" is its box's — over twice the silhouette it draws. The trap when
+  parenting a shell inside the object: `MeshManager.apply` traverses the
+  whole entry tree each sync and repaints every material from the object's
+  data, which turned the thin rim into a solid block of colour over the whole
+  prop. Shells are marked `userData.hoverShell` and skipped there.
   And ALT IS NOT AVAILABLE as a viewport modifier: `emulate3Button` (on by
   default) makes Alt+LMB orbit, so an Alt gesture never reaches a tool at all.
   Prop positions are read and written THROUGH the parent transform, because
   `mesh.translation` is parent-local and one Cmd-G puts every ball under an
   empty; the simulation itself works in world space.
+  **Three body kinds, and STATIC is the absence of a body.** `TGMesh.body`
+  present means the simulation moves it: `type: 'DYNAMIC'` (falls, is pushed,
+  the default when the field is absent) or `'KINEMATIC'` (keeps whatever
+  position you, a constraint or an animation give it, and shoves dynamics
+  aside without ever being shoved back). No `body` at all is STATIC — it
+  still collides, as part of the same world AABBs the characters walk on,
+  which is why balls bounce off a floor that has no physics settings of its
+  own. A kinematic prop needs no mass, bounce or friction, because nothing
+  ever pushes back on it; it reuses `hitJoint`, since "a moving sphere that
+  imparts its own velocity and does not react" is exactly what a character's
+  joint already is. Dragging a prop is the same thing with the cursor
+  supplying the motion.
   A loose prop is GROUND but never a WALL: you can stand on a crate, and you
   walk THROUGH a ball rather than edging round it, because the joints are
   what move it and stopping the body would prevent the contact that does the

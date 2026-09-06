@@ -3029,18 +3029,36 @@ export class UI {
    */
   private physicsRows(m: TGMesh): Node[] {
     const { ctx } = this.app;
-    const on = !!m.body;
+    const mode = !m.body ? 'STATIC' : (m.body.type ?? 'DYNAMIC');
     const rows: Node[] = [
       el('div', { class: 'menu-sep' }),
       el('div', { class: 'menu-header', text: 'Physics' }),
-      checkbox('Loose prop', on, (v) => {
+      fieldRow('Body', selectField('', mode, [
+        ['STATIC', 'Static (world)'],
+        ['DYNAMIC', 'Dynamic (loose prop)'],
+        ['KINEMATIC', 'Kinematic (you move it)'],
+      ], (v) => {
         ctx.pushUndo();
-        m.body = v ? defaultBody(propRadius(m)) : undefined;
+        // Static is the ABSENCE of a body, not a body with a flag: a wall
+        // already collides as part of the world, which is why balls bounce
+        // off a floor that has no physics settings of its own.
+        m.body = v === 'STATIC'
+          ? undefined
+          : { ...(m.body ?? defaultBody(propRadius(m))), type: v as 'DYNAMIC' | 'KINEMATIC' };
         this.refresh();
-      }, 'falls, rolls, and can be pushed, kicked or thrown — drag it with the Pose tool'),
+      })),
+      el('div', { class: 'row hint', text:
+        'Static collides and never moves · Dynamic falls and can be pushed, kicked or thrown '
+        + '· Kinematic keeps the position you give it and shoves dynamics out of the way' }),
     ];
     if (!m.body) return rows;
     const b = m.body;
+    if (b.type === 'KINEMATIC') {
+      rows.push(el('div', { class: 'row', text:
+        'Kinematic: nothing pushes it back, so mass, bounce and friction do not apply. '
+        + 'Move it by hand, with a constraint, or from an animation.' }));
+      return rows;
+    }
     rows.push(
       el('div', { class: 'row' },
         numField('Mass', b.mass, (v) => { b.mass = Math.max(0.01, v); }, 0.1,
