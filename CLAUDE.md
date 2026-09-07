@@ -764,6 +764,22 @@ the browser console or automated evals:
     (a joint is a particle, a bone a distance constraint) and Rapier's
     ragdoll would be bodies + joints with real angular state — a different
     representation of the same character, not a setting.
+- **There is NO SKINNING.** A body is capsules per bone and beads per joint —
+  no bind pose, no weights, and the skeleton stores no rotations to skin
+  against. The CLAY look answers the same want a different way
+  (`render/blob.ts`): field sources at every joint and along every bone,
+  polygonised each frame with MarchingCubes, so limbs MERGE where they meet —
+  the thing skinning is usually for — straight from the positional skeleton
+  with no rigging step. ~1.1 ms per actor per frame at resolution 48, so it
+  is opt-in per look (`LookSpec.blob`). The two numbers that matter and why:
+  a source's surface sits where `strength/d^2 - subtract == isolation`, so
+  the strength for a wanted radius is `(isolation + subtract) * r^2` —
+  leaving isolation out draws every limb at a THIRD of its thickness while
+  the joints, where fields overlap and sum, still bulge (a stick figure with
+  knobbles). And a source REACHES `sqrt((isolation + subtract) / subtract)`
+  times its radius with everything inside that adding, so a low `subtract`
+  inflates the whole figure into a snowman with its arms absorbed; 64 keeps
+  the reach at 1.5 radii and confines merging to where parts actually meet.
 - **The shared walking body** (`actor/locomotion.ts`) is where collision and
   ground live, so a character does not collide differently depending on who
   is steering it. `walkVolume.gather(scene, frame)` is idempotent per frame.

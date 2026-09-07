@@ -64,6 +64,16 @@ export interface LookSpec {
   /** how deep the relief is cut, 1 being the reference. A softer material
    *  takes a shallower cut; a stick figure takes none at all. */
   faceRelief: number;
+  /**
+   * Draw the body as ONE implicit surface instead of capsules and beads.
+   *
+   * The limbs then MERGE where they meet — a shoulder becomes a shoulder
+   * rather than two shapes overlapping — which is the thing skinning is
+   * normally for, obtained here from the positional skeleton with no rig.
+   * It costs a polygonisation every frame, so it is per look rather than
+   * something every actor pays for.
+   */
+  blob?: boolean;
   /** applied to actor.color when the look is chosen */
   color: Vec3;
   hint: string;
@@ -136,10 +146,11 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     emphasis: { head: 1.6, hand: 1.55, foot: 1.35, hips: 1.15, chest: 1.1 },
     // clay takes a softer, shallower impression than turned wood
     face: true, faceRelief: 0.8,
+    blob: true,
     limbEmphasis: { spine: 1.25, chest: 1.25, neck: 0.8, head: 0.85, hand: 1.2, foot: 1.2 },
     headOvoid: 1.1,
     color: [0.91, 0.70, 0.58],
-    hint: 'stop-motion chunk — big head and hands, stocky torso, matte clay',
+    hint: 'stop-motion chunk — one continuous surface, big head and hands',
   },
 };
 

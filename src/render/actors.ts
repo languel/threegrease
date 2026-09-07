@@ -18,6 +18,7 @@ import type { GPScene, TGActor } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 import { materialManager } from './materialmgr';
 import { jointEmphasis, limbEmphasis, lookSpec, type LookSpec } from './actorlooks';
+import { BlobBody } from './blob';
 import { actorHasAvatar } from './vrm';
 
 /** Which local axis the actor stands up along, from its own rest skeleton. */
@@ -100,6 +101,8 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 interface Entry {
   root: THREE.Group;
+  /** built lazily, only for looks that ask for one continuous surface */
+  blob?: BlobBody;
   limbs: THREE.Mesh[];
   joints: THREE.Mesh[];
   sticks: THREE.LineSegments;
@@ -306,6 +309,25 @@ export class ActorManager {
         }
       }
       mesh.visible = showLimbs || showSticks;
+    }
+
+    // ---- one continuous surface, for looks that want it ----------------
+    if (spec.blob && showLimbs && !wearing) {
+      if (!entry.blob) {
+        entry.blob = new BlobBody(entry.limbs[0]?.material as THREE.Material);
+        root.add(entry.blob.mesh);
+      }
+      entry.blob.setMaterial(entry.limbs[0]?.material as THREE.Material);
+      entry.blob.update(actor, spec.limb, spec.joint);
+      // the parts are what the surface is BUILT from, so they stay out of
+      // the picture — except the head, which keeps its carved face
+      for (const m of entry.limbs) m.visible = false;
+      for (let i = 0; i < entry.joints.length; i++) {
+        entry.joints[i].visible = showSticks
+          || actor.joints[i].name === 'head' || actor.joints[i].pin;
+      }
+    } else if (entry.blob) {
+      entry.blob.mesh.visible = false;
     }
   }
 
