@@ -22,45 +22,64 @@ import { actorHasAvatar } from './vrm';
 
 /** Which local axis the actor stands up along, from its own rest skeleton. */
 /**
- * Two brow arcs and a nose ridge, built in HEAD-RADIUS units.
+ * A head with the face CARVED INTO IT, not stuck onto it.
  *
- * Brancusi rather than anatomy: the whole point is to say which way the head
- * is pointing with as little as possible. Everything sits just proud of the
- * sphere so it reads as carved into the head rather than stuck onto it, and
- * the geometry is shared — one arc, one ridge, three instances.
+ * Same sphere, moved: two eye sockets pressed in and a ridge raised between
+ * them, by displacing the vertices along their own normals. That is what a
+ * modeller would do and what a carver does, and it costs no extra draw, no
+ * extra material and nothing to keep aligned — the features cannot drift off
+ * the head because they ARE the head. Built once per look and shared.
+ *
+ * Authored looking down +Z with +Y up, the same frame the facing basis
+ * builds, so the head mesh only has to be turned the way the body faces.
  */
-function buildFace(): THREE.Group {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x2b2723, roughness: 0.6, metalness: 0,
-  });
-  // a half-torus, opening downward: the brow over an eye
-  // The head is a UNIT sphere scaled to its radius (jointGeo), so 1.0 here
-  // is the surface — features go just outside it, not at some fraction of
-  // the way in, or they are simply buried and nothing draws.
-  const arc = new THREE.TorusGeometry(0.30, 0.045, 6, 18, Math.PI);
-  for (const s of [-1, 1]) {
-    const m = new THREE.Mesh(arc, mat);
-    m.position.set(s * 0.34, 0.08, 0.90);
-    // A half-torus sweeps the UPPER half in its own XY, and the face's +Y
-    // is the head's up — but the arc has to ARCH OVER the eye, so it is
-    // turned to bring the dome down over it. Tilted slightly outward too,
-    // or the pair reads as a pair of spectacles.
-    m.rotation.set(0, 0, Math.PI + s * 0.14);
-    m.scale.set(1, 0.78, 1);
-    g.add(m);
+function buildFaceHead(strength: number): THREE.SphereGeometry {
+  const geo = new THREE.SphereGeometry(1, 96, 72);
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  const eyes = [
+    new THREE.Vector3(0.40, 0.10, 0.86).normalize(),
+    new THREE.Vector3(-0.40, 0.10, 0.86).normalize(),
+  ];
+  // the ridge as a short arc of directions from the brow down to the tip,
+  // so "near the nose" is a distance to a LINE rather than to a point
+  const ridge: THREE.Vector3[] = [];
+  const from = new THREE.Vector3(0, 0.30, 0.95).normalize();
+  const to = new THREE.Vector3(0, -0.24, 0.97).normalize();
+  for (let i = 0; i <= 8; i++) ridge.push(from.clone().lerp(to, i / 8).normalize());
+
+  // Angular radii, not exponents. A dot product raised to a power is a
+  // pinpoint — at the powers needed to keep a feature small it lands on a
+  // handful of vertices and reads as nothing at all. An angle with a smooth
+  // falloff says how BIG the feature is in degrees, which is how a face is
+  // actually proportioned.
+  // Deep enough to throw a shadow of its own. A shallow dish on a smooth
+  // sphere reads at arm's length and disappears across a room, which is
+  // exactly the distance a figure in an installation is looked at from.
+  const EYE_R = 0.36; const EYE_DEPTH = 0.19;
+  const NOSE_R = 0.115; const NOSE_RISE = 0.10;
+  const fall = (a: number, r: number) => {
+    if (a >= r) return 0;
+    const t = 1 - a / r;
+    return t * t * (3 - 2 * t); // smoothstep
+  };
+  const angle = (a: THREE.Vector3, b: THREE.Vector3) =>
+    Math.acos(Math.max(-1, Math.min(1, a.dot(b))));
+
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    let d = 0;
+    for (const e of eyes) d -= EYE_DEPTH * strength * fall(angle(v, e), EYE_R);
+    let near = Infinity;
+    for (const r of ridge) near = Math.min(near, angle(v, r));
+    d += NOSE_RISE * strength * fall(near, NOSE_R);
+    if (d !== 0) {
+      v.multiplyScalar(1 + d);
+      pos.setXYZ(i, v.x, v.y, v.z);
+    }
   }
-  // the ridge: a thin wedge down the middle, meeting the arcs at the top
-  // the ridge runs down from where the two arcs meet, which is what ties
-  // them together into a face rather than two marks and a line
-  const nose = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.40, 0.10), mat);
-  nose.position.set(0, -0.12, 0.96);
-  g.add(nose);
-  for (const child of g.children) {
-    (child as THREE.Mesh).castShadow = false;
-    (child as THREE.Mesh).receiveShadow = false;
-  }
-  return g;
+  geo.computeVertexNormals();
+  return geo;
 }
 
 function actorUpAxis(actor: TGActor): number {
@@ -83,8 +102,6 @@ interface Entry {
   root: THREE.Group;
   limbs: THREE.Mesh[];
   joints: THREE.Mesh[];
-  /** the minimal face, oriented from the shoulder line each frame */
-  face: THREE.Group;
   sticks: THREE.LineSegments;
   jointCount: number;
   boneCount: number;
@@ -104,6 +121,8 @@ export class ActorManager {
    *  thinning into a wrist, which is the whole silhouette of a lay figure. */
   private limbSolid = new Map<number, THREE.CylinderGeometry>();
   private jointGeo = new THREE.SphereGeometry(1, 16, 12);
+  /** carved heads, cached per look (they differ only in relief depth) */
+  private faceGeo = new Map<number, THREE.SphereGeometry>();
   /** tint applied to selected actors, set by the App like LightManager's */
   selectionColor: THREE.Color | null = null;
   /** joint handles are hidden in presentation mode along with other gizmos */
@@ -162,10 +181,8 @@ export class ActorManager {
     );
     sticks.renderOrder = 900;
     root.add(sticks);
-    const face = buildFace();
-    root.add(face);
     return {
-      root, limbs, joints, sticks, face,
+      root, limbs, joints, sticks,
       jointCount: actor.joints.length, boneCount: actor.bones.length, unlit: false,
       look: '',
     };
@@ -268,15 +285,28 @@ export class ActorManager {
       const emph = jointEmphasis(spec, j.name);
       const r = j.radius * emph * (j.pin ? base * 1.7 : base);
       mesh.scale.setScalar(r);
-      // the head is an ovoid, stretched along the actor's own up axis —
-      // read off the skeleton (head above hips) rather than from the scene
-      // setting, so it is right for an actor built in either convention
-      if (j.name === 'head' && spec.headOvoid !== 1) {
-        mesh.scale.setComponent(actorUpAxis(actor), r * spec.headOvoid);
+      if (j.name === 'head') {
+        const carved = spec.face && showLimbs && !wearing;
+        const want = carved ? this.carvedHead(spec.faceRelief) : this.jointGeo;
+        if (mesh.geometry !== want) mesh.geometry = want;
+        if (carved) {
+          // turned to face the way the body does, which also puts the
+          // ovoid's stretch on the head's OWN up axis (+Y in that frame)
+          this.faceTheHead(actor, mesh, i);
+          if (spec.headOvoid !== 1) mesh.scale.y = r * spec.headOvoid;
+        } else {
+          mesh.quaternion.identity();
+          // the head is an ovoid, stretched along the actor's own up axis —
+          // read off the skeleton (head above hips) rather than from the
+          // scene setting, so it is right for an actor built in either
+          // convention
+          if (spec.headOvoid !== 1) {
+            mesh.scale.setComponent(actorUpAxis(actor), r * spec.headOvoid);
+          }
+        }
       }
       mesh.visible = showLimbs || showSticks;
     }
-    this.poseFace(actor, entry, spec, showLimbs && !wearing);
   }
 
   /**
@@ -288,13 +318,9 @@ export class ActorManager {
    * up; their cross product is the direction the figure faces, and it
    * follows the body for free: turn the shoulders and the face turns.
    */
-  private poseFace(
-    actor: TGActor, entry: Entry, spec: LookSpec, show: boolean,
+  private faceTheHead(
+    actor: TGActor, mesh: THREE.Mesh, iHead: number,
   ): void {
-    const face = entry.face;
-    const iHead = actor.joints.findIndex((j) => j.name === 'head');
-    face.visible = show && spec.face && iHead >= 0;
-    if (!face.visible) return;
     const iL = actor.joints.findIndex((j) => j.name === 'shoulder.L');
     const iR = actor.joints.findIndex((j) => j.name === 'shoulder.R');
     const upAxis = actorUpAxis(actor);
@@ -320,12 +346,15 @@ export class ActorManager {
     // express, so it silently returns something near identity and the face
     // ends up on top of the head instead of on the front of it.
     side.crossVectors(up, fwd).normalize();
-    face.position.fromArray(actor.pose[iHead]);
-    face.quaternion.setFromRotationMatrix(
+    mesh.quaternion.setFromRotationMatrix(
       new THREE.Matrix4().makeBasis(side, up, fwd));
-    const head = actor.joints[iHead];
-    const r = head.radius * jointEmphasis(spec, 'head') * spec.joint;
-    face.scale.setScalar(r);
+  }
+
+  private carvedHead(relief: number): THREE.SphereGeometry {
+    const key = Math.round(relief * 100) / 100;
+    let g = this.faceGeo.get(key);
+    if (!g) { g = buildFaceHead(key); this.faceGeo.set(key, g); }
+    return g;
   }
 
   private taperedGeo(taper: number): THREE.CylinderGeometry {

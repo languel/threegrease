@@ -116,6 +116,14 @@ export function deserializeScene(json: string): GPScene {
     // created, so a saved figure would keep the funnel forever. Rewrite the
     // two — and ONLY when they still hold the old default for this actor's
     // own height, so a deliberately fat neck survives.
+    // Same story as the neck below: the toe was authored below its own
+    // collision radius, so every saved figure stands on tiptoe with bent
+    // knees until the rest position is lifted onto the floor.
+    for (const j of a.joints) {
+      if (!/^foot\./.test(j.name)) continue;
+      const up = Math.abs(j.rest[2]) < Math.abs(j.rest[1]) ? 1 : 2;
+      if (j.rest[up] > 0 && j.rest[up] < j.radius * 0.9) j.rest[up] = j.radius;
+    }
     const headJoint = a.joints.find((j) => j.name === 'head');
     const h = headJoint ? headJoint.radius / 0.067 : 0;
     if (h > 0) {

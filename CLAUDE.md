@@ -346,9 +346,17 @@ the browser console or automated evals:
     of their own — a prop parented to `hand.R` therefore also tips with
     the forearm, not just translates with the hand.
 
+- **A rest pose the FLOOR cannot accept bends the whole figure.** The foot
+  joint was authored at 0.012 of height with a collision radius of 0.030, so
+  it sat inside the floor: the floor constraint lifted the toe by 0.032, that
+  pivoted the foot onto its toes, dragged the ankle up with it, and the knee
+  buckled to 154 degrees to absorb the difference. It looks like the ragdoll
+  misbehaving and it is arithmetic — any joint's rest position along the up
+  axis must be at least its own radius. Fixed at 0.030 (knees now 178) and
+  migrated for saved actors.
 - **A head is a BALL, so which way it faces has to be derived.** The minimal
-  face (`buildFace` in `render/actors.ts`, on by default for every look but
-  MINIMAL) exists for exactly that: a bare sphere gives you no way to read a
+  face (`buildFaceHead` in `render/actors.ts`, on by default for every look
+  but MINIMAL) exists for exactly that: a bare sphere gives you no way to read a
   head turn, and a figure with its back to you looks like one facing you. The
   basis comes from the SHOULDER LINE crossed with the neck-to-head direction,
   so the face follows the body for free. Two traps: features are placed in
@@ -358,6 +366,12 @@ the browser console or automated evals:
   -1 — a REFLECTION, which `setFromRotationMatrix` cannot express, so it
   returns something near identity and the face lands on top of the head
   rather than on the front of it. Same trap as the VRM `toRig` mirror.
+  The face is CARVED, not added: the head's own sphere has its vertices
+  displaced (sockets pressed in, a ridge raised between them) rather than
+  three extra meshes stuck to the front, so there is nothing to keep aligned
+  and no extra draw. Shape it with ANGULAR radii and a smoothstep, never
+  `dot(v, c)` raised to a power — at the exponent needed to keep a feature
+  small it lands on a handful of vertices and reads as nothing at all.
 - **`Object3D.lookAt` branches on `isCamera`.** A camera is oriented so
   **-Z** faces the target (the direction it looks); everything else so +Z
   does. Building a camera's transform from a plain `new THREE.Object3D()`

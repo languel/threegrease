@@ -61,6 +61,9 @@ export interface LookSpec {
    * has eyes with pupils it starts to have an expression it cannot back up.
    */
   face: boolean;
+  /** how deep the relief is cut, 1 being the reference. A softer material
+   *  takes a shallower cut; a stick figure takes none at all. */
+  faceRelief: number;
   /** applied to actor.color when the look is chosen */
   color: Vec3;
   hint: string;
@@ -77,7 +80,7 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     // canonical figure, and back in proportion with the other looks
     // (WOOD 0.86*1.05, CLAY 1.05*1.6).
     emphasis: { head: 1.85 },
-    face: true,
+    face: true, faceRelief: 1,
     limbEmphasis: {},
     headOvoid: 1,
     color: [0.72, 0.74, 0.80],
@@ -91,7 +94,7 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     limb: 0.92, joint: 0.86, taper: 0.68, capped: true,
     roughness: 0.45, metalness: 0, flat: false, unlit: false,
     emphasis: { head: 1.05, hips: 1.15, chest: 1.1, hand: 0.85, foot: 0.9 },
-    face: true,
+    face: true, faceRelief: 1.1,
     // the neck is a slim PEG between the shoulder line and the head, which
     // is the join a lay figure shows off rather than hides
     // was 0.55/0.62 against the old fat base — same drawn thickness, now
@@ -112,7 +115,7 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     emphasis: { head: 1.75, hand: 0.7, foot: 0.7 },
     // a drawn figure reads its facing from the line of the shoulders; a
     // face on a flat graphic just muddies it
-    face: false,
+    face: false, faceRelief: 0,
     // a stick figure's neck should match its other strokes, and the thinner
     // base would otherwise make it the one line that vanishes
     limbEmphasis: { neck: 1.6, head: 1.65 },
@@ -131,7 +134,8 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     limb: 1.12, joint: 1.05, taper: 0.9, capped: true,
     roughness: 0.95, metalness: 0, flat: false, unlit: false,
     emphasis: { head: 1.6, hand: 1.55, foot: 1.35, hips: 1.15, chest: 1.1 },
-    face: true,
+    // clay takes a softer, shallower impression than turned wood
+    face: true, faceRelief: 0.8,
     limbEmphasis: { spine: 1.25, chest: 1.25, neck: 0.8, head: 0.85, hand: 1.2, foot: 1.2 },
     headOvoid: 1.1,
     color: [0.91, 0.70, 0.58],

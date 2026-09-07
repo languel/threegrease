@@ -41,7 +41,13 @@ function limbSpecs(s: number, side: string): JointSpec[] {
     { name: `hip.${side}`, at: [0.055 * s, 0, 0.528], radius: 0.048 },
     { name: `knee.${side}`, at: [0.058 * s, 0, 0.285], radius: 0.042 },
     { name: `ankle.${side}`, at: [0.058 * s, 0, 0.045], radius: 0.034 },
-    { name: `foot.${side}`, at: [0.058 * s, 0.075, 0.012], radius: 0.030 },
+    // The toe rests ON the floor, so its centre sits at its own RADIUS. At
+    // 0.012 it was authored INSIDE the floor: the floor constraint then
+    // lifted it 0.032 (of height), which pivots the foot onto its toes,
+    // drags the ankle up with it and buckles the knee to 154 degrees to
+    // absorb the difference. That is the bent-kneed tiptoe stance — not the
+    // ragdoll misbehaving, just a rest pose the floor could not accept.
+    { name: `foot.${side}`, at: [0.058 * s, 0.075, 0.030], radius: 0.030 },
   ];
 }
 
