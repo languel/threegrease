@@ -1264,6 +1264,22 @@ export interface TGPost {
   /** wash the render toward paper so the LINES carry the image */
   paper: number;
   paperColor: Vec3;
+  /**
+   * The GRADE, applied to the finished image before the ink lands on it.
+   *
+   * Levels first (a black point, a white point and a gamma between them, then
+   * an output range), then brightness/contrast/saturation — the order every
+   * other grading tool uses, and the only one where the gamma means what it
+   * says: it has to read a signal already normalised to 0..1.
+   */
+  inBlack: number;
+  inWhite: number;
+  gamma: number;
+  outBlack: number;
+  outWhite: number;
+  brightness: number;
+  contrast: number;
+  saturation: number;
   /** dither. A smooth field bands visibly in 8 bits, and this is the cure */
   grain: number;
   vignette: number;

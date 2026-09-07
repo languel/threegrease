@@ -48,6 +48,11 @@ export function deserializeScene(json: string): GPScene {
   scene.physicsEngine ??= 'SIMPLE';
   scene.poses ??= [];
   scene.post ??= defaultPost();
+  // the grade postdates the two original looks; an identity one leaves every
+  // saved scene looking exactly as it did
+  scene.post.inBlack ??= 0; scene.post.inWhite ??= 1; scene.post.gamma ??= 1;
+  scene.post.outBlack ??= 0; scene.post.outWhite ??= 1;
+  scene.post.brightness ??= 0; scene.post.contrast ??= 1; scene.post.saturation ??= 1;
   scene.world.fog ??= 0;
   scene.world.fogColor ??= [0.6, 0.65, 0.75];
   scene.attractors ??= [];

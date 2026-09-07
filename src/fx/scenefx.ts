@@ -81,6 +81,13 @@ uniform float uEdgeWidth;
 uniform vec3 uInk;
 uniform float uPaper;
 uniform vec3 uPaperColor;
+uniform float uGrade;
+uniform vec2 uLevelsIn;
+uniform float uGamma;
+uniform vec2 uLevelsOut;
+uniform float uBrightness;
+uniform float uContrast;
+uniform float uSaturation;
 uniform float uGrain;
 uniform float uVignette;
 uniform float uTime;
@@ -130,6 +137,21 @@ void main() {
   // ---- bloom ------------------------------------------------------------
   if (uBloom > 0.0) c += texture2D(tBloom, vUv).rgb * uBloom;
 
+  // ---- grade: levels, then brightness/contrast/saturation ---------------
+  // Placed after bloom so it grades the finished image, and BEFORE the ink so
+  // a line stays exactly the ink colour you picked — crushing the blacks of a
+  // drawing should darken the paper, not repaint the pen.
+  if (uGrade > 0.5) {
+    c = clamp((c - uLevelsIn.x) / max(1e-4, uLevelsIn.y - uLevelsIn.x), 0.0, 1.0);
+    c = pow(c, vec3(1.0 / max(0.01, uGamma)));
+    c = uLevelsOut.x + c * (uLevelsOut.y - uLevelsOut.x);
+    // contrast pivots on MIDDLE grey; pivoting on black is a brightness
+    // control wearing the wrong name, and darkens everything as it bites
+    c = (c - 0.5) * uContrast + 0.5 + uBrightness;
+    c = mix(vec3(luma(c)), c, uSaturation);
+    c = max(c, 0.0);
+  }
+
   // ---- ink --------------------------------------------------------------
   c = mix(c, uInk, edge);
 
@@ -147,6 +169,48 @@ void main() {
 
   gl_FragColor = vec4(c, 1.0);
 }`;
+
+/**
+ * Hide, for the duration of the edge prepass, everything that does not shape
+ * the depth buffer of the ordinary render.
+ *
+ * `scene.overrideMaterial` replaces each object's material outright, and
+ * every flag on it goes too — `visible`, `colorWrite`, `depthWrite`, and the
+ * object's own vertex shader. Two families of thing then come back to life
+ * for exactly one pass, write depth and normals, and get inked:
+ *
+ *  - GREASE PENCIL strokes, which are the loud one. A stroke's ribbon is
+ *    built in its vertex shader from a centreline plus corner attributes, so
+ *    under a foreign material only the raw centreline points survive and
+ *    they are drawn as plain triangles — a stroke on the view plane becomes
+ *    a big flat polygon at one constant depth. What you see is a giant
+ *    square ruled across the middle of the room with nothing inside it,
+ *    because the thing never draws a pixel in colour. They belong out of the
+ *    pass on their own merits too: `depthWrite: false` means they do not
+ *    occlude anything in the real render either, and a stroke is already a
+ *    line.
+ *  - The invisible helpers — the pick proxies on empties and lights, and the
+ *    gizmo's drag plane — whose materials are simply `visible: false`.
+ *
+ * Object visibility is checked by the renderer BEFORE the override is
+ * consulted, so `visible` is the one lever that still works here. Outline
+ * shells go too, on the principle that an overlay on the drawing is not part
+ * of the drawn world.
+ */
+function hideNonDrawing(root: THREE.Object3D): THREE.Object3D[] {
+  const hidden: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    if (!o.visible) return;
+    if (o.userData.hoverShell) { o.visible = false; hidden.push(o); return; }
+    const mat = (o as THREE.Mesh).material;
+    if (!mat) return;
+    const list = Array.isArray(mat) ? mat : [mat];
+    const skip = (m: THREE.Material) => m.visible === false || m.colorWrite === false
+      || (m.depthWrite === false && m.transparent);
+    if (list.every(skip)) { o.visible = false; hidden.push(o); }
+  });
+  return hidden;
+}
 
 /** Normals in rgb, view depth in alpha — one prepass feeds every edge. */
 const NORMAL_DEPTH = {
@@ -228,6 +292,10 @@ export class ScenePost {
         uEdge: { value: 0 }, uEdgeWidth: { value: 1 },
         uInk: { value: new THREE.Color(0.1, 0.1, 0.12) },
         uPaper: { value: 0 }, uPaperColor: { value: new THREE.Color(1, 1, 1) },
+        uGrade: { value: 0 },
+        uLevelsIn: { value: new THREE.Vector2(0, 1) }, uGamma: { value: 1 },
+        uLevelsOut: { value: new THREE.Vector2(0, 1) },
+        uBrightness: { value: 0 }, uContrast: { value: 1 }, uSaturation: { value: 1 },
         uGrain: { value: 0 }, uVignette: { value: 0 }, uTime: { value: 0 },
       },
     });
@@ -276,10 +344,12 @@ export class ScenePost {
       const savedOverride = scene.overrideMaterial;
       scene.background = null;
       scene.overrideMaterial = this.normalMat;
+      const hidden = hideNonDrawing(scene);
       renderer.setRenderTarget(this.rtNormal);
       renderer.setClearColor(0x000000, 0);
       renderer.clear();
       renderer.render(scene, camera);
+      for (const o of hidden) o.visible = true;
       scene.overrideMaterial = savedOverride;
       scene.background = savedBg;
       u.tNormal.value = this.rtNormal.texture;
@@ -312,6 +382,13 @@ export class ScenePost {
     (u.uInk.value as THREE.Color).setRGB(...post.inkColor);
     u.uPaper.value = post.paper;
     (u.uPaperColor.value as THREE.Color).setRGB(...post.paperColor);
+    (u.uLevelsIn.value as THREE.Vector2).set(post.inBlack, post.inWhite);
+    u.uGamma.value = post.gamma;
+    (u.uLevelsOut.value as THREE.Vector2).set(post.outBlack, post.outWhite);
+    u.uBrightness.value = post.brightness;
+    u.uContrast.value = post.contrast;
+    u.uSaturation.value = post.saturation;
+    u.uGrade.value = gradeActive(post) ? 1 : 0;
     u.uGrain.value = post.grain;
     u.uVignette.value = post.vignette;
     u.uTime.value = time;
@@ -338,6 +415,8 @@ export const POST_PRESETS: Record<string, Omit<TGPost, 'preset'> & { fog: number
     duotone: 0, duotoneLow: [0.05, 0.03, 0.12], duotoneHigh: [1, 0.9, 0.78], lift: 0,
     edge: 0, edgeWidth: 1, inkColor: [0.1, 0.1, 0.12],
     paper: 0, paperColor: [1, 1, 1],
+    inBlack: 0, inWhite: 1, gamma: 1, outBlack: 0, outWhite: 1,
+    brightness: 0, contrast: 1, saturation: 1,
     grain: 0, vignette: 0,
     fog: 0, fogColor: [0.6, 0.65, 0.75],
   },
@@ -349,6 +428,8 @@ export const POST_PRESETS: Record<string, Omit<TGPost, 'preset'> & { fog: number
     duotone: 0.72, duotoneLow: [0.10, 0.05, 0.28], duotoneHigh: [1.0, 0.72, 0.55], lift: 0.06,
     edge: 0, edgeWidth: 1, inkColor: [0.1, 0.1, 0.12],
     paper: 0, paperColor: [1, 1, 1],
+    inBlack: 0, inWhite: 1, gamma: 1, outBlack: 0, outWhite: 1,
+    brightness: 0, contrast: 1, saturation: 1,
     grain: 0.020, vignette: 0.18,
     fog: 0.075, fogColor: [0.55, 0.45, 0.70],
   },
@@ -361,6 +442,8 @@ export const POST_PRESETS: Record<string, Omit<TGPost, 'preset'> & { fog: number
     duotone: 0.85, duotoneLow: [0.80, 0.79, 0.76], duotoneHigh: [1, 1, 0.99], lift: 0.26,
     edge: 1, edgeWidth: 1.15, inkColor: [0.13, 0.12, 0.16],
     paper: 0.72, paperColor: [0.99, 0.98, 0.96],
+    inBlack: 0, inWhite: 1, gamma: 1, outBlack: 0, outWhite: 1,
+    brightness: 0, contrast: 1, saturation: 1,
     grain: 0.012, vignette: 0.05,
     fog: 0, fogColor: [1, 1, 1],
   },
@@ -370,8 +453,22 @@ export function defaultPost(): TGPost {
   return { preset: 'NONE', ...POST_PRESETS.NONE };
 }
 
+/**
+ * True when the grade is anything other than a pass-through.
+ *
+ * Checked on the CPU so a look that does not grade pays nothing for the
+ * branch — the identity grade is a normalise, a pow and a mix per pixel, and
+ * every look but a graded one would run all three to arrive back where it
+ * started.
+ */
+export function gradeActive(p: TGPost): boolean {
+  return p.inBlack !== 0 || p.inWhite !== 1 || p.gamma !== 1
+    || p.outBlack !== 0 || p.outWhite !== 1
+    || p.brightness !== 0 || p.contrast !== 1 || p.saturation !== 1;
+}
+
 /** True when the chain would change anything — otherwise skip it entirely. */
 export function postActive(p: TGPost | undefined): p is TGPost {
   return !!p && (p.bloom > 0 || p.duotone > 0 || p.edge > 0
-    || p.paper > 0 || p.grain > 0 || p.vignette > 0);
+    || p.paper > 0 || p.grain > 0 || p.vignette > 0 || gradeActive(p));
 }

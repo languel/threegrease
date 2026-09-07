@@ -3390,6 +3390,17 @@ export class UI {
       );
     }
     rows.push(
+      el('div', { class: 'menu-header', text: 'Grade' }),
+      slider('Brightness', p.brightness, -0.5, 0.5, 0.01, (v) => edit(() => { p.brightness = v; }), { def: 0 }),
+      slider('Contrast', p.contrast, 0, 3, 0.01, (v) => edit(() => { p.contrast = v; }), { def: 1, title: 'pivots on middle grey, so it opens and closes the range without shifting the midtone' }),
+      slider('Saturation', p.saturation, 0, 3, 0.01, (v) => edit(() => { p.saturation = v; }), { def: 1, title: '0 is greyscale, above 1 pushes the colour past the render' }),
+      el('div', { class: 'menu-header', text: 'Levels' }),
+      slider('In black', p.inBlack, 0, 1, 0.01, (v) => edit(() => { p.inBlack = Math.min(v, p.inWhite - 0.01); }), { def: 0, title: 'everything at or below this becomes black — the standard way to set a black point' }),
+      slider('In white', p.inWhite, 0, 1, 0.01, (v) => edit(() => { p.inWhite = Math.max(v, p.inBlack + 0.01); }), { def: 1 }),
+      slider('Gamma', p.gamma, 0.1, 3, 0.01, (v) => edit(() => { p.gamma = v; }), { def: 1, title: 'midtones only, between the two input points' }),
+      slider('Out black', p.outBlack, 0, 1, 0.01, (v) => edit(() => { p.outBlack = v; }), { def: 0, title: 'lift the blacks off zero — a print never reaches pure black' }),
+      slider('Out white', p.outWhite, 0, 1, 0.01, (v) => edit(() => { p.outWhite = v; }), { def: 1 }),
+      el('div', { class: 'menu-header', text: 'Film' }),
       slider('Grain', p.grain, 0, 0.1, 0.002, (v) => edit(() => { p.grain = v; }), { def: 0, title: 'dither — a smooth field bands visibly without it' }),
       slider('Vignette', p.vignette, 0, 1, 0.01, (v) => edit(() => { p.vignette = v; }), { def: 0 }),
       el('div', { class: 'menu-header', text: 'Atmosphere' }),

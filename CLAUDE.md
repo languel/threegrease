@@ -326,6 +326,24 @@ the browser console or automated evals:
     extra render of the scene with a normal+depth override material, only
     when `edge > 0`. Normals find creases, depth finds silhouettes, and
     either alone looks broken.
+  - THE PREPASS MUST DRAW WHAT THE REAL RENDER DRAWS, and
+    `scene.overrideMaterial` makes that untrue by default: it replaces each
+    object's material outright, so `visible`, `colorWrite`, `depthWrite` and
+    the object's OWN VERTEX SHADER all go with it. Grease pencil is the loud
+    casualty — a stroke's ribbon is built in its vertex shader from a
+    centreline plus corner attributes, so under a foreign material only the
+    raw centreline survives and is drawn as plain triangles: a stroke made on
+    the view plane becomes a big flat polygon at one constant depth, and what
+    you see is a giant square ruled across the middle of the room with
+    nothing inside it, flickering as the camera moves. Nothing is wrong with
+    the geometry and nothing draws a pixel of it in colour. `hideNonDrawing`
+    turns off, for that one pass, everything whose material says it does not
+    shape the depth buffer (`visible: false`, `colorWrite: false`, or
+    `depthWrite: false` while transparent) plus the outline shells; object
+    visibility is checked BEFORE the override is consulted, so `visible` is
+    the only lever that still works there. Measured on the demo scene: the
+    prepass read a flat 14.1 m across the middle of the floor and jittered
+    frame to frame, against a smooth 21.2 -> 23.4 with the cull in place.
   - DEPTH PRECISION is the trap. The prepass stores view depth in the alpha
     channel, and a HALF float carries about three decimal digits — across a
     20 m room that quantises depth to centimetres, and the edge pass reads
@@ -335,6 +353,14 @@ the browser console or automated evals:
     as a fraction of the sample's own distance) because an absolute threshold
     cannot serve both ends of a room — tuned for a near fold it inks the far
     floor, tuned for the far floor it misses the fold.
+  - THE GRADE (levels, then brightness/contrast/saturation) sits after bloom
+    and BEFORE the ink, so a line keeps exactly the ink colour it was given —
+    crushing the blacks of a drawing should darken the paper, not repaint the
+    pen. Levels run first because a gamma only means anything on a signal
+    already normalised to 0..1, and contrast pivots on MIDDLE GREY (pivoting
+    on black is a brightness control wearing the wrong name). An identity
+    grade is skipped on the CPU (`gradeActive`) rather than computed and
+    thrown away.
   - GRAIN is dither, not texture. A smooth gradient across a thousand pixels
     BANDS in 8 bits, which is exactly the image a light-field look produces.
   - Ordering matters: edges are read from the untouched image (before bloom

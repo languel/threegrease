@@ -67,9 +67,16 @@ body {
 #viewport { flex: 1; position: relative; min-width: 0; }
 #gl, #hud { position: absolute; inset: 0; width: 100%; height: 100%; }
 #hud { pointer-events: none; }
+/* The status line sits ON the viewport, so it cannot assume the viewport is
+   dark: a scene look can paint the render white (the line drawing does), and
+   dim grey with a black glow on white paper is the least readable thing in
+   the app. It carries its own ground instead — a panel-coloured chip that
+   reads over any render, in any look. */
 #status {
-  position: absolute; left: 8px; bottom: 6px; color: var(--dim);
-  font-size: 11px; pointer-events: none; text-shadow: 0 1px 2px #000;
+  position: absolute; left: 8px; bottom: 6px; color: var(--text);
+  font-size: 11px; pointer-events: none;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px;
 }
 #sidebar {
   width: 288px; background: var(--panel); border-left: 1px solid var(--border);
