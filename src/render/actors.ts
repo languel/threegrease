@@ -17,10 +17,52 @@ import * as THREE from 'three';
 import type { GPScene, TGActor } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 import { materialManager } from './materialmgr';
-import { jointEmphasis, limbEmphasis, lookSpec } from './actorlooks';
+import { jointEmphasis, limbEmphasis, lookSpec, type LookSpec } from './actorlooks';
 import { actorHasAvatar } from './vrm';
 
 /** Which local axis the actor stands up along, from its own rest skeleton. */
+/**
+ * Two brow arcs and a nose ridge, built in HEAD-RADIUS units.
+ *
+ * Brancusi rather than anatomy: the whole point is to say which way the head
+ * is pointing with as little as possible. Everything sits just proud of the
+ * sphere so it reads as carved into the head rather than stuck onto it, and
+ * the geometry is shared — one arc, one ridge, three instances.
+ */
+function buildFace(): THREE.Group {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x2b2723, roughness: 0.6, metalness: 0,
+  });
+  // a half-torus, opening downward: the brow over an eye
+  // The head is a UNIT sphere scaled to its radius (jointGeo), so 1.0 here
+  // is the surface — features go just outside it, not at some fraction of
+  // the way in, or they are simply buried and nothing draws.
+  const arc = new THREE.TorusGeometry(0.30, 0.045, 6, 18, Math.PI);
+  for (const s of [-1, 1]) {
+    const m = new THREE.Mesh(arc, mat);
+    m.position.set(s * 0.34, 0.08, 0.90);
+    // A half-torus sweeps the UPPER half in its own XY, and the face's +Y
+    // is the head's up — but the arc has to ARCH OVER the eye, so it is
+    // turned to bring the dome down over it. Tilted slightly outward too,
+    // or the pair reads as a pair of spectacles.
+    m.rotation.set(0, 0, Math.PI + s * 0.14);
+    m.scale.set(1, 0.78, 1);
+    g.add(m);
+  }
+  // the ridge: a thin wedge down the middle, meeting the arcs at the top
+  // the ridge runs down from where the two arcs meet, which is what ties
+  // them together into a face rather than two marks and a line
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.40, 0.10), mat);
+  nose.position.set(0, -0.12, 0.96);
+  g.add(nose);
+  for (const child of g.children) {
+    (child as THREE.Mesh).castShadow = false;
+    (child as THREE.Mesh).receiveShadow = false;
+  }
+  return g;
+}
+
 function actorUpAxis(actor: TGActor): number {
   const head = actor.joints.find((j) => j.name === 'head')?.rest;
   const hips = actor.joints.find((j) => j.name === 'hips')?.rest;
@@ -41,6 +83,8 @@ interface Entry {
   root: THREE.Group;
   limbs: THREE.Mesh[];
   joints: THREE.Mesh[];
+  /** the minimal face, oriented from the shoulder line each frame */
+  face: THREE.Group;
   sticks: THREE.LineSegments;
   jointCount: number;
   boneCount: number;
@@ -118,8 +162,10 @@ export class ActorManager {
     );
     sticks.renderOrder = 900;
     root.add(sticks);
+    const face = buildFace();
+    root.add(face);
     return {
-      root, limbs, joints, sticks,
+      root, limbs, joints, sticks, face,
       jointCount: actor.joints.length, boneCount: actor.bones.length, unlit: false,
       look: '',
     };
@@ -230,6 +276,56 @@ export class ActorManager {
       }
       mesh.visible = showLimbs || showSticks;
     }
+    this.poseFace(actor, entry, spec, showLimbs && !wearing);
+  }
+
+  /**
+   * Put the face on the head and turn it the way the body is facing.
+   *
+   * A head joint is a BALL with no rotation of its own — this skeleton
+   * stores no rotations anywhere — so "which way is it looking" has to be
+   * derived. The shoulder line gives the side axis and the skeleton gives
+   * up; their cross product is the direction the figure faces, and it
+   * follows the body for free: turn the shoulders and the face turns.
+   */
+  private poseFace(
+    actor: TGActor, entry: Entry, spec: LookSpec, show: boolean,
+  ): void {
+    const face = entry.face;
+    const iHead = actor.joints.findIndex((j) => j.name === 'head');
+    face.visible = show && spec.face && iHead >= 0;
+    if (!face.visible) return;
+    const iL = actor.joints.findIndex((j) => j.name === 'shoulder.L');
+    const iR = actor.joints.findIndex((j) => j.name === 'shoulder.R');
+    const upAxis = actorUpAxis(actor);
+    const up = new THREE.Vector3(); up.setComponent(upAxis, 1);
+    const side = new THREE.Vector3(1, 0, 0);
+    if (iL >= 0 && iR >= 0) {
+      side.fromArray(actor.pose[iL]).sub(new THREE.Vector3().fromArray(actor.pose[iR]));
+      if (side.lengthSq() < 1e-9) side.set(1, 0, 0);
+    }
+    side.normalize();
+    // up from the neck if we have one, so a bowed head takes the face with it
+    const iNeck = actor.joints.findIndex((j) => j.name === 'neck');
+    if (iNeck >= 0) {
+      const u = new THREE.Vector3().fromArray(actor.pose[iHead])
+        .sub(new THREE.Vector3().fromArray(actor.pose[iNeck]));
+      if (u.lengthSq() > 1e-9) up.copy(u.normalize());
+    }
+    const fwd = new THREE.Vector3().crossVectors(up, side).normalize();
+    // Re-square the basis as x = y CROSS z, not the other way round. The
+    // shoulder line and the neck are not exactly perpendicular once a
+    // character is moving, and picking the wrong order gives a basis with
+    // determinant -1 — a REFLECTION, which setFromRotationMatrix cannot
+    // express, so it silently returns something near identity and the face
+    // ends up on top of the head instead of on the front of it.
+    side.crossVectors(up, fwd).normalize();
+    face.position.fromArray(actor.pose[iHead]);
+    face.quaternion.setFromRotationMatrix(
+      new THREE.Matrix4().makeBasis(side, up, fwd));
+    const head = actor.joints[iHead];
+    const r = head.radius * jointEmphasis(spec, 'head') * spec.joint;
+    face.scale.setScalar(r);
   }
 
   private taperedGeo(taper: number): THREE.CylinderGeometry {

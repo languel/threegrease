@@ -346,6 +346,18 @@ the browser console or automated evals:
     of their own — a prop parented to `hand.R` therefore also tips with
     the forearm, not just translates with the hand.
 
+- **A head is a BALL, so which way it faces has to be derived.** The minimal
+  face (`buildFace` in `render/actors.ts`, on by default for every look but
+  MINIMAL) exists for exactly that: a bare sphere gives you no way to read a
+  head turn, and a figure with its back to you looks like one facing you. The
+  basis comes from the SHOULDER LINE crossed with the neck-to-head direction,
+  so the face follows the body for free. Two traps: features are placed in
+  HEAD-RADIUS units against a unit sphere (`jointGeo`), so anything under 1.0
+  is buried inside the head and simply never appears; and the re-squared
+  basis must be `x = y CROSS z`, because the other order gives determinant
+  -1 — a REFLECTION, which `setFromRotationMatrix` cannot express, so it
+  returns something near identity and the face lands on top of the head
+  rather than on the front of it. Same trap as the VRM `toRig` mirror.
 - **`Object3D.lookAt` branches on `isCamera`.** A camera is oriented so
   **-Z** faces the target (the direction it looks); everything else so +Z
   does. Building a camera's transform from a plain `new THREE.Object3D()`
