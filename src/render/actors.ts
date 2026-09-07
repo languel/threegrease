@@ -445,6 +445,14 @@ export class ActorManager {
     return g;
   }
 
+  /** Every visible actor's root, for the 3D exporters. */
+  exportRoots(scene: GPScene): THREE.Object3D[] {
+    return scene.actors
+      .filter((a) => a.visible)
+      .map((a) => this.entries.get(a.id)?.root)
+      .filter((r): r is THREE.Group => !!r);
+  }
+
   /** Actors flagged as draw targets, for ctx.surfaces. */
   drawTargets(scene: GPScene): THREE.Object3D[] {
     return scene.actors

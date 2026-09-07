@@ -366,6 +366,7 @@ class App implements AppHandle {
         faceMeshes: () => this.polys.pickTargets(self.ctx.scene),
         faceIdAt: (polyId, tri) => this.polys.faceIdAt(polyId, tri),
       },
+      actorRoots: () => this.actors.exportRoots(this.ctx.scene),
       syncCanvases: () => this.syncCanvases(),
       copyBuffer: [],
       requestRender: (layerId?: number) => {

@@ -797,6 +797,18 @@ the browser console or automated evals:
   times its radius with everything inside that adding, so a low `subtract`
   inflates the whole figure into a snowman with its arms absorbed; 64 keeps
   the reach at 1.5 radii and confines merging to where parts actually meet.
+- **The mannequin's shape parameters are catalogued in `docs/MANNEQUIN.md`** —
+  proportions, look multipliers, the head's profile and face relief, and the
+  clay surface's constants, each with what it controls and which file it is
+  in. Update it when you change one; it exists so shape feedback can name a
+  number instead of a feeling.
+  The 3D exporters INCLUDE actors (`ctx.actorRoots()` hands the live meshes
+  to `buildExportGroup`), because an actor's geometry is built by the
+  renderer and nowhere else — rebuilding it in the exporter would be a second
+  copy that drifts from the one you are looking at. MarchingCubes hands back
+  a fixed-size buffer and reports the real extent in `drawRange`, so a blob
+  body must be trimmed to that or the file carries tens of thousands of
+  degenerate triangles at the origin.
 - **An actor can be a DRAW TARGET** (`TGActor.drawTarget`, the pencil icon on
   its outliner row). `ActorManager.drawTargets` joins the mesh, splat and poly
   lists in `ctx.surfaces`, so Placement: Surface lands strokes on the body

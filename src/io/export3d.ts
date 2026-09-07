@@ -205,6 +205,48 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
     group.add(mesh);
   }
 
+  // ACTORS. Their geometry is only ever built by the renderer (capsules and
+  // beads, or a marching-cubes surface, plus the carved head), so the live
+  // meshes are copied out rather than rebuilt here — a second construction
+  // would drift from the one you are actually looking at, which is the whole
+  // reason to export a mannequin in the first place.
+  for (const root of ctx.actorRoots()) {
+    root.updateWorldMatrix(true, true);
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      // sticks are a debug overlay, hover/selection shells are UI
+      if (!mesh.isMesh || !mesh.visible || !mesh.geometry) return;
+      if (o.userData.hoverShell) return;
+      const src = mesh.geometry;
+      const pos = src.getAttribute('position');
+      if (!pos || !pos.count) return;
+      // MarchingCubes hands back a FIXED-SIZE buffer and says how much of it
+      // is real through drawRange — copying the whole thing exports tens of
+      // thousands of degenerate triangles sitting at the origin.
+      const used = Math.min(
+        src.drawRange.count === Infinity ? pos.count : src.drawRange.count,
+        pos.count);
+      const geo = new THREE.BufferGeometry();
+      const copyAttr = (name: string) => {
+        const a = src.getAttribute(name);
+        if (!a) return;
+        geo.setAttribute(name, new THREE.BufferAttribute(
+          (a.array as Float32Array).slice(0, used * a.itemSize), a.itemSize));
+      };
+      copyAttr('position');
+      copyAttr('normal');
+      if (src.getIndex() && used === pos.count) geo.setIndex(src.getIndex());
+      geo.applyMatrix4(mesh.matrixWorld);
+      if (!geo.getAttribute('normal')) geo.computeVertexNormals();
+      const srcMat = mesh.material as THREE.MeshStandardMaterial;
+      group.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color: srcMat?.color?.clone() ?? new THREE.Color(0.8, 0.8, 0.8),
+        roughness: srcMat?.roughness ?? 0.8,
+        metalness: srcMat?.metalness ?? 0,
+      })));
+    });
+  }
+
   // painted splat clouds (TGPaintCloud): no gaussian ellipsoids in a plain
   // export, so represent each point as a colored vertex (GLB carries a
   // POINTS-mode primitive with vertex color; PLYExporter also understands

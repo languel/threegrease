@@ -228,6 +228,16 @@ export interface AppCtx {
     faceMeshes(): THREE.Object3D[];
     faceIdAt(polyId: number, triangleIndex: number): number | null;
   } | null;
+  /**
+   * The actors' rendered bodies.
+   *
+   * An actor's geometry exists ONLY in the render tree — the document holds
+   * joints, bones and a look, and the capsules, beads, carved head and clay
+   * surface are all derived from those every frame. So anything that needs
+   * the actual triangles (the 3D exporters) has to be handed them rather
+   * than rebuilding a second copy that would drift.
+   */
+  actorRoots(): THREE.Object3D[];
   syncCanvases(): void;
   copyBuffer: GPStroke[];
   /** mark for rebuild; pass a layerId for the cheap single-layer path (P10) */
