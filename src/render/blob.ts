@@ -20,8 +20,10 @@ import * as THREE from 'three';
 import { MarchingCubes } from 'three/examples/jsm/objects/MarchingCubes.js';
 import type { TGActor } from '../core/types';
 
-/** grid resolution per axis — 48 costs ~110k cells and still shows knuckles */
-const RES = 48;
+/** Grid resolution per axis. 36 is deliberately coarse: the surface is meant
+ *  to read as modelled clay, and the faceting at this resolution helps rather
+ *  than hurts — precision was never the point. */
+const RES = 36;
 /**
  * How sharply a field source falls off.
  *

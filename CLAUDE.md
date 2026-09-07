@@ -372,6 +372,23 @@ the browser console or automated evals:
   and no extra draw. Shape it with ANGULAR radii and a smoothstep, never
   `dot(v, c)` raised to a power — at the exponent needed to keep a feature
   small it lands on a handful of vertices and reads as nothing at all.
+  The same pass carries the head's PROFILE (width against height): a sphere,
+  or an ovoid, reads as an EGG, and an egg has no chin — widest in the middle
+  and closing symmetrically at both ends. The profile squeezes the horizontal
+  axes by a curve so the head is broad across the cranium and narrows through
+  the jaw, which is most of what makes a head read as carved. Apply it BEFORE
+  the features and measure their falloff against the vertex's DIRECTION, or
+  the sockets come out oval wherever the profile has narrowed the head.
+  Two shaping traps: a nose ridge of constant width running up to the brow is
+  a CREST down the skull rather than a nose (taper its width and rise toward
+  the tip, and fade it in only at the brow — fading at BOTH ends puts a zero
+  exactly where the nose should be strongest and the feature disappears);
+  and take the STRONGEST ridge sample rather than the sum, or the overlapping
+  ones stack into a hard spine.
+  Poly counts here are an AESTHETIC choice, not a precision one: the head is
+  40x30 (2320 triangles, down from 96x72), joints 12x9, limbs 8-sided, the
+  clay blob's grid 36. A whole actor is ~7k triangles and the faceting reads
+  as carving.
 - **`Object3D.lookAt` branches on `isCamera`.** A camera is oriented so
   **-Z** faces the target (the direction it looks); everything else so +Z
   does. Building a camera's transform from a plain `new THREE.Object3D()`

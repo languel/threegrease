@@ -35,30 +35,40 @@ import { actorHasAvatar } from './vrm';
  * builds, so the head mesh only has to be turned the way the body faces.
  */
 function buildFaceHead(strength: number): THREE.SphereGeometry {
-  const geo = new THREE.SphereGeometry(1, 96, 72);
+  // Low poly ON PURPOSE. The relief needs enough vertices to shape a socket
+  // and no more — 96x72 was seven thousand of them for two dishes and a
+  // ridge, and the extra resolution buys nothing you can see on a head 40 px
+  // tall. This is a sculpture, not a scan.
+  const geo = new THREE.SphereGeometry(1, 40, 30);
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const v = new THREE.Vector3();
   const eyes = [
     new THREE.Vector3(0.40, 0.10, 0.86).normalize(),
     new THREE.Vector3(-0.40, 0.10, 0.86).normalize(),
   ];
-  // the ridge as a short arc of directions from the brow down to the tip,
-  // so "near the nose" is a distance to a LINE rather than to a point
-  const ridge: THREE.Vector3[] = [];
-  const from = new THREE.Vector3(0, 0.30, 0.95).normalize();
-  const to = new THREE.Vector3(0, -0.24, 0.97).normalize();
-  for (let i = 0; i <= 8; i++) ridge.push(from.clone().lerp(to, i / 8).normalize());
+  // The ridge as a short arc of directions, each with its OWN width and
+  // rise. A constant-width line running up to the brow reads as a CREST
+  // down the skull rather than as a nose — the shape wanted is a soft
+  // wedge that starts between the eyes, swells toward the tip and stops
+  // well short of the forehead.
+  const ridge: { dir: THREE.Vector3; r: number; rise: number }[] = [];
+  const from = new THREE.Vector3(0, 0.10, 0.98).normalize();
+  const to = new THREE.Vector3(0, -0.30, 0.94).normalize();
+  const STEPS = 10;
+  for (let i = 0; i <= STEPS; i++) {
+    const t = i / STEPS;
+    ridge.push({
+      dir: from.clone().lerp(to, t).normalize(),
+      r: 0.09 + 0.08 * t,
+      // Prouder toward the TIP, fading in only at the brow so it melts into
+      // the forehead rather than starting with a step. Fading at BOTH ends
+      // (the obvious symmetric thing) puts a zero exactly where the nose is
+      // meant to be strongest, and the whole feature vanishes.
+      rise: (0.030 + 0.075 * t) * Math.min(1, t / 0.22),
+    });
+  }
 
-  // Angular radii, not exponents. A dot product raised to a power is a
-  // pinpoint — at the powers needed to keep a feature small it lands on a
-  // handful of vertices and reads as nothing at all. An angle with a smooth
-  // falloff says how BIG the feature is in degrees, which is how a face is
-  // actually proportioned.
-  // Deep enough to throw a shadow of its own. A shallow dish on a smooth
-  // sphere reads at arm's length and disappears across a room, which is
-  // exactly the distance a figure in an installation is looked at from.
   const EYE_R = 0.36; const EYE_DEPTH = 0.19;
-  const NOSE_R = 0.115; const NOSE_RISE = 0.10;
   const fall = (a: number, r: number) => {
     if (a >= r) return 0;
     const t = 1 - a / r;
@@ -67,15 +77,58 @@ function buildFaceHead(strength: number): THREE.SphereGeometry {
   const angle = (a: THREE.Vector3, b: THREE.Vector3) =>
     Math.acos(Math.max(-1, Math.min(1, a.dot(b))));
 
+  /**
+   * The head's PROFILE, as width against height.
+   *
+   * A sphere (or an ovoid, which is a sphere with one axis stretched) reads
+   * as an egg, and an egg has no chin: the widest point is in the middle and
+   * it closes symmetrically at both ends. A carved head is the opposite —
+   * broad across the cranium, narrowing through the cheek into a jaw and a
+   * chin. Squeezing the horizontal axes by a curve in height is the whole
+   * difference, and it costs nothing: the vertices are already there.
+   */
+  const PROFILE: [number, number][] = [
+    [0.00, 0.52], // chin
+    [0.18, 0.68],
+    [0.35, 0.84], // jaw
+    [0.55, 0.97],
+    [0.72, 1.05], // cranium, the widest point — high, not central
+    [0.88, 1.02],
+    [1.00, 0.96], // crown, closing gently rather than to a point
+  ];
+  const widthAt = (t: number) => {
+    for (let i = 1; i < PROFILE.length; i++) {
+      const [t1, w1] = PROFILE[i];
+      if (t <= t1) {
+        const [t0, w0] = PROFILE[i - 1];
+        const u = (t - t0) / Math.max(1e-6, t1 - t0);
+        return w0 + (w1 - w0) * (u * u * (3 - 2 * u));
+      }
+    }
+    return PROFILE[PROFILE.length - 1][1];
+  };
+
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i);
+    // profile first, so the features are cut into the shaped head rather
+    // than shaped along with it
+    const w = widthAt((v.y + 1) / 2);
+    v.x *= w; v.z *= w;
+    pos.setXYZ(i, v.x, v.y, v.z);
     let d = 0;
-    for (const e of eyes) d -= EYE_DEPTH * strength * fall(angle(v, e), EYE_R);
-    let near = Infinity;
-    for (const r of ridge) near = Math.min(near, angle(v, r));
-    d += NOSE_RISE * strength * fall(near, NOSE_R);
+    // measured against the DIRECTION the vertex sits in, so the sockets stay
+    // round after the profile has squeezed the head narrower at that height
+    const dir = v.clone().normalize();
+    for (const e of eyes) d -= EYE_DEPTH * strength * fall(angle(dir, e), EYE_R);
+    // the STRONGEST sample rather than the sum, or the overlapping ones
+    // stack into a hard spine down the middle
+    let rise = 0;
+    for (const seg of ridge) {
+      rise = Math.max(rise, seg.rise * fall(angle(dir, seg.dir), seg.r));
+    }
+    d += rise * strength;
     if (d !== 0) {
-      v.multiplyScalar(1 + d);
+      v.addScaledVector(dir, d);
       pos.setXYZ(i, v.x, v.y, v.z);
     }
   }
@@ -117,13 +170,13 @@ export class ActorManager {
   readonly group = new THREE.Group();
   private entries = new Map<number, Entry>();
   /** shared geometry: every limb/joint is the same unit primitive */
-  private limbGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
+  private limbGeo = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
   /** capped tubes, cached per taper ratio. The cylinder's +Y end is the
    *  CHILD joint (setFromUnitVectors maps +Y onto a->b), so a radiusTop
    *  below 1 narrows the limb INTO the joint it points at — a forearm
    *  thinning into a wrist, which is the whole silhouette of a lay figure. */
   private limbSolid = new Map<number, THREE.CylinderGeometry>();
-  private jointGeo = new THREE.SphereGeometry(1, 16, 12);
+  private jointGeo = new THREE.SphereGeometry(1, 12, 9);
   /** carved heads, cached per look (they differ only in relief depth) */
   private faceGeo = new Map<number, THREE.SphereGeometry>();
   /** tint applied to selected actors, set by the App like LightManager's */
@@ -386,7 +439,7 @@ export class ActorManager {
     const key = Math.round(taper * 100) / 100;
     let g = this.limbSolid.get(key);
     if (!g) {
-      g = new THREE.CylinderGeometry(key, 1, 1, 16, 1, false);
+      g = new THREE.CylinderGeometry(key, 1, 1, 10, 1, false);
       this.limbSolid.set(key, g);
     }
     return g;
