@@ -326,6 +326,15 @@ the browser console or automated evals:
     extra render of the scene with a normal+depth override material, only
     when `edge > 0`. Normals find creases, depth finds silhouettes, and
     either alone looks broken.
+  - DEPTH PRECISION is the trap. The prepass stores view depth in the alpha
+    channel, and a HALF float carries about three decimal digits — across a
+    20 m room that quantises depth to centimetres, and the edge pass reads
+    the quantisation as detail: ink speckle crawling over every big flat
+    surface as the camera moves, which reads exactly like z-fighting on a
+    plane. The buffer is FULL float, and the depth test is RELATIVE (the jump
+    as a fraction of the sample's own distance) because an absolute threshold
+    cannot serve both ends of a room — tuned for a near fold it inks the far
+    floor, tuned for the far floor it misses the fold.
   - GRAIN is dither, not texture. A smooth gradient across a thousand pixels
     BANDS in 8 bits, which is exactly the image a light-field look produces.
   - Ordering matters: edges are read from the untouched image (before bloom

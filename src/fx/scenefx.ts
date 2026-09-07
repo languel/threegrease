@@ -106,10 +106,15 @@ void main() {
     // creases only misses where a shape ends, depth only misses every fold.
     float dn = length(n1.rgb - n2.rgb) + length(n3.rgb - n4.rgb);
     float dd = abs(n1.a - n2.a) + abs(n3.a - n4.a);
-    // depth is scaled by the sample's own distance so a far wall does not
-    // out-shout a near fold
-    edge = clamp(dn * 1.6 + dd * 220.0 / max(0.05, n0.a * 40.0), 0.0, 1.0);
-    edge = smoothstep(0.25, 0.9, edge) * uEdge;
+    // RELATIVE depth: the jump as a fraction of the sample's own distance.
+    // An absolute threshold cannot work at both ends of a room — tuned for a
+    // near fold it draws the whole far floor, tuned for the far floor it
+    // misses the fold — and the leftover distance term amplified the depth
+    // buffer's own noise into a shimmering speckle along every grazing
+    // surface, which is what read as z-fighting on the big flat planes.
+    float rel = dd / max(0.001, n0.a);
+    edge = clamp(dn * 1.6 + rel * 12.0, 0.0, 1.0);
+    edge = smoothstep(0.30, 0.9, edge) * uEdge;
   }
 
   // ---- duotone ----------------------------------------------------------
@@ -184,8 +189,15 @@ export class ScenePost {
     // the difference — it halves the fill for the most expensive pass here
     this.rtA = new THREE.WebGLRenderTarget(Math.max(1, w >> 1), Math.max(1, h >> 1), opts);
     this.rtB = new THREE.WebGLRenderTarget(Math.max(1, w >> 1), Math.max(1, h >> 1), opts);
-    this.rtNormal = new THREE.WebGLRenderTarget(w, h, opts);
+    // FULL float for the normal+depth buffer. Half float carries about three
+    // decimal digits, so view depth across a 20 m room quantises to
+    // centimetres and the edge pass reads that quantisation as detail —
+    // visible as ink speckle crawling over big flat surfaces as the camera
+    // moves. The colour buffer stays half float; only depth needs the range.
+    this.rtNormal = new THREE.WebGLRenderTarget(w, h, { type: THREE.FloatType });
     this.rtNormal.depthBuffer = true;
+    this.rtNormal.texture.minFilter = THREE.NearestFilter;
+    this.rtNormal.texture.magFilter = THREE.NearestFilter;
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
     this.quadScene.add(this.quad);
 
