@@ -1019,6 +1019,17 @@ export interface TGActorSteer {
 
 export interface TGActor {
   /**
+   * Draw on me.
+   *
+   * Surface placement raycasts whatever is in `ctx.surfaces`, and an actor's
+   * body is geometry like any other — so a note can be pinned to a
+   * character's chest, an arrow drawn along an arm, a label left on a
+   * visitor. The strokes are ordinary grease pencil in world space: they do
+   * not follow the pose afterwards unless the GP object is parented to a
+   * joint, which is the existing constraint and stays a separate choice.
+   */
+  drawTarget?: boolean;
+  /**
    * A pose the actor is being HELD in, by joint name (actor-local).
    *
    * Applying a pose cannot just write `pose`: `physics.tone` pulls every

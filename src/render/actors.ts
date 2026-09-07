@@ -183,6 +183,9 @@ export class ActorManager {
       geo, new THREE.LineBasicMaterial({ color: 0xffb24d, depthTest: false, transparent: true, opacity: 0.95 }),
     );
     sticks.renderOrder = 900;
+    // the stick overlay is an annotation, not a surface: raycasting it would
+    // let a drawn stroke land on a debug line rather than on the body
+    sticks.raycast = () => {};
     root.add(sticks);
     return {
       root, limbs, joints, sticks,
@@ -387,6 +390,14 @@ export class ActorManager {
       this.limbSolid.set(key, g);
     }
     return g;
+  }
+
+  /** Actors flagged as draw targets, for ctx.surfaces. */
+  drawTargets(scene: GPScene): THREE.Object3D[] {
+    return scene.actors
+      .filter((a) => a.visible && a.drawTarget)
+      .map((a) => this.entries.get(a.id)?.root)
+      .filter((r): r is THREE.Group => !!r);
   }
 
   /** Root object for an actor, so picking can map a hit back to it. */

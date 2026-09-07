@@ -106,6 +106,7 @@ export function deserializeScene(json: string): GPScene {
     a.limits ??= [];
     a.shape ??= 'BOTH';
     a.look ??= 'DEFAULT';
+    a.drawTarget ??= false;
     a.gait ??= defaultGait();
     a.layers ??= defaultLayers();
     a.steer ??= defaultSteer();

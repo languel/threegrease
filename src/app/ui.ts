@@ -2157,6 +2157,11 @@ export class UI {
         fieldRow('', el('div', { class: 'hint', text: 'No bindings yet — pick a stream and Auto-bind.' })),
       ] : []),
 
+      checkbox('Draw target', !!actor.drawTarget, (v) => { actor.drawTarget = v; },
+        'Placement: Surface then lands strokes on the body — a note pinned to '
+        + 'a chest, an arrow along an arm. The strokes stay in world space '
+        + 'unless the GP object is parented to a joint.'),
+
       el('div', { class: 'menu-header', text: 'Pose' }),
       fieldRow('', el('div', { class: 'row' },
         btn('Stance', () => this.app.setActorStance(actor.id, 'REST'),
@@ -2641,6 +2646,9 @@ export class UI {
         btn(a.physics.enabled ? icon('boltCircle') : icon('dot'),
           () => { a.physics.enabled = !a.physics.enabled; this.refresh(); },
           { cls: 'icon-btn', title: 'Simulate (ragdoll physics)' }),
+        btn(a.drawTarget ? icon('pencilSquare') : icon('dot'),
+          () => { a.drawTarget = !a.drawTarget; this.refresh(); },
+          { cls: 'icon-btn', title: 'Draw target — Placement: Surface lands strokes on the body' }),
         ...viewLockBtns(
           { kind: 'ACTOR', id: a.id },
           !a.visible, (v) => { a.visible = !v; },

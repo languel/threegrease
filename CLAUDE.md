@@ -780,6 +780,16 @@ the browser console or automated evals:
   times its radius with everything inside that adding, so a low `subtract`
   inflates the whole figure into a snowman with its arms absorbed; 64 keeps
   the reach at 1.5 radii and confines merging to where parts actually meet.
+- **An actor can be a DRAW TARGET** (`TGActor.drawTarget`, the pencil icon on
+  its outliner row). `ActorManager.drawTargets` joins the mesh, splat and poly
+  lists in `ctx.surfaces`, so Placement: Surface lands strokes on the body
+  like any other geometry — verified by drawing across a chest and measuring
+  every point 0.4-0.9 mm from the surface. The stick overlay is excluded
+  (`sticks.raycast = () => {}`): it is an annotation, and a stroke landing on
+  a debug line rather than on the body is not a thing anyone wants. Strokes
+  stay in WORLD space; a note that should travel with the character needs the
+  GP object parented to a joint, which is the existing constraint and stays a
+  separate decision.
 - **The shared walking body** (`actor/locomotion.ts`) is where collision and
   ground live, so a character does not collide differently depending on who
   is steering it. `walkVolume.gather(scene, frame)` is idempotent per frame.

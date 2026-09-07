@@ -832,7 +832,11 @@ class App implements AppHandle {
       this.ctx.canvasMeshes.push(mesh);
       if (c.drawTarget) this.canvasSurfaces.push(mesh); // reference planes are not draw targets
     }
-    this.ctx.surfaces = [...this.canvasSurfaces, ...this.meshes.drawTargets(this.ctx.scene)];
+    this.ctx.surfaces = [
+      ...this.canvasSurfaces,
+      ...this.meshes.drawTargets(this.ctx.scene),
+      ...this.actors.drawTargets(this.ctx.scene),
+    ];
   }
 
   snapView(view: 'FRONT' | 'BACK' | 'RIGHT' | 'LEFT' | 'TOP' | 'BOTTOM'): void { this.nav.snapView(view); }
@@ -3978,6 +3982,7 @@ class App implements AppHandle {
       ...this.meshes.drawTargets(ctx.scene),
       ...this.splats.drawTargets(ctx.scene),
       ...this.polys.drawTargets(ctx.scene),
+      ...this.actors.drawTargets(ctx.scene),
     ];
     // constraint stacks (FOLLOW_PATH/FOLLOW_STREAM/TRIGGER/...) — after the
     // score engine (trigger probes include this frame's cursors) and after
