@@ -8,10 +8,12 @@ Three ways to work on it:
 
 1. **Change a number below**, reload, look. Each row says which file and what
    it does.
-2. **Export the mesh** — `File ▸ Export ▸ GLB (recommended for Blender)` or
-   `OBJ` now includes every visible actor, posed as it stands (T-pose it
-   first from the Actor panel for a clean reference). Sculpt or annotate
-   there, and come back with either new numbers or a picture.
+2. **Export the mesh** — `File ▸ Export` for the whole scene, `Export
+   selection` for just what is selected, or right-click a selection in the
+   viewport and pick `Export selection as…`. Either way an actor comes out
+   posed as it stands, so T-pose it from the Actor panel first for a clean
+   reference. Sculpt or annotate in Blender and come back with new numbers or
+   a picture.
 3. **Say what is wrong in words.** The vocabulary below ("the profile's
    widest point sits too high", "the collar tube is too fat relative to the
    head") maps one-to-one onto a value, which is most of why this file

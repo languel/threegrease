@@ -802,6 +802,12 @@ the browser console or automated evals:
   clay surface's constants, each with what it controls and which file it is
   in. Update it when you change one; it exists so shape feedback can name a
   number instead of a feeling.
+  `selectedOnly` narrows every kind, not just strokes: an object that is
+  itself selected exports whole, and a GP object that is not can still
+  contribute individually selected strokes (edit-mode selection, which
+  predates it). `App.export3D(format, selectedOnly)` is the one door — the
+  File menu and the viewport right-click both go through it and share
+  `EXPORT_FORMATS`, so the two lists cannot drift.
   The 3D exporters INCLUDE actors (`ctx.actorRoots()` hands the live meshes
   to `buildExportGroup`), because an actor's geometry is built by the
   renderer and nowhere else — rebuilding it in the exporter would be a second

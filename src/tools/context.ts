@@ -237,7 +237,7 @@ export interface AppCtx {
    * the actual triangles (the 3D exporters) has to be handed them rather
    * than rebuilding a second copy that would drift.
    */
-  actorRoots(): THREE.Object3D[];
+  actorRoots(selectedOnly?: boolean): THREE.Object3D[];
   syncCanvases(): void;
   copyBuffer: GPStroke[];
   /** mark for rebuild; pass a layerId for the cheap single-layer path (P10) */

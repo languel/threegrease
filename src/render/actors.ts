@@ -446,9 +446,9 @@ export class ActorManager {
   }
 
   /** Every visible actor's root, for the 3D exporters. */
-  exportRoots(scene: GPScene): THREE.Object3D[] {
+  exportRoots(scene: GPScene, selectedOnly = false): THREE.Object3D[] {
     return scene.actors
-      .filter((a) => a.visible)
+      .filter((a) => a.visible && (!selectedOnly || a.select))
       .map((a) => this.entries.get(a.id)?.root)
       .filter((r): r is THREE.Group => !!r);
   }

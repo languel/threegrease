@@ -34,6 +34,20 @@ export interface Export3DOptions {
 export const DEFAULT_EXPORT3D: Export3DOptions = {
   pxToWorld: 0.005, radialSegments: 6, minRadius: 0.002, selectedOnly: false, includePointClouds: true,
 };
+/** The same export, narrowed to what is selected. */
+export const SELECTION_EXPORT3D: Export3DOptions = { ...DEFAULT_EXPORT3D, selectedOnly: true };
+
+/** Format list, so the File menu and the right-click menu offer the same
+ *  set and cannot drift apart. */
+export const EXPORT_FORMATS: {
+  id: string; label: string; run: (ctx: AppCtx, opts: Export3DOptions) => unknown;
+}[] = [
+  { id: 'glb', label: 'GLB — recommended for Blender', run: (c, o) => exportGLB(c, o) },
+  { id: 'obj', label: 'OBJ', run: (c, o) => exportOBJ(c, o) },
+  { id: 'stl', label: 'STL', run: (c, o) => exportSTL(c, o) },
+  { id: 'ply', label: 'PLY (geometry only)', run: (c, o) => exportPLY(c, o) },
+  { id: 'plyscene', label: 'PLY (incl. splats)', run: (c, o) => exportScenePLY(c, o) },
+];
 
 const textureLoader = new THREE.TextureLoader();
 /** Loads and decodes a texture (dataURL or blob/http URL) for embedding
@@ -53,7 +67,15 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
   group.name = 'threegrease';
   const scene = ctx.scene;
 
+  // What "selection" means, once: an object that is itself selected exports
+  // whole, and a GP object that is not can still contribute individually
+  // selected strokes (that is edit-mode selection, and it predates this).
+  const wanted = (sel: boolean | undefined) => !opts.selectedOnly || !!sel;
+
   scene.objects.forEach((ob) => {
+    if (opts.selectedOnly && !ob.select
+      && !ob.layers.some((l) => l.frames.some((f) => f.strokes.some(
+        (st) => st.select || st.points.some((p) => p.select))))) return;
     const obMatrix = new THREE.Matrix4().compose(
       new THREE.Vector3(...ob.translation),
       new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
@@ -64,7 +86,8 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
       const kf = frameAt(layer, remapTime(ob, layer, scene.frame));
       if (!kf) continue;
       const strokes = evaluateModifiers(kf.strokes, ob, layer, scene.frame, kf.frameNumber)
-        .filter((s) => !opts.selectedOnly || s.select || s.points.some((p) => p.select));
+        .filter((s) => !opts.selectedOnly || ob.select
+          || s.select || s.points.some((p) => p.select));
       const layerMatrix = new THREE.Matrix4().compose(
         new THREE.Vector3(...layer.translation),
         new THREE.Quaternion().setFromEuler(new THREE.Euler(...layer.rotation)),
@@ -113,6 +136,7 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
   // objects, so there faces export and points/edges are skipped — never
   // silently converted into unrelated geometry).
   for (const pm of scene.polyMeshes) {
+    if (!wanted(pm.select)) continue;
     if (!pm.visible) continue;
     const matrix = worldMatrixOf(scene, { kind: 'POLY', id: pm.id });
     const co = new Map(pm.vertices.map((v) => [v.id, v.co] as const));
@@ -186,6 +210,7 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
   // treatment of EMPTY.
   for (const m of scene.meshes) {
     if (!m.visible || m.kind === 'EMPTY' || m.kind === 'MODEL') continue;
+    if (!wanted(m.select)) continue;
     const geo = primitiveGeometry(m.kind).clone();
     geo.applyMatrix4(worldMatrixOf(scene, { kind: 'MESH', id: m.id }));
     geo.computeVertexNormals();
@@ -210,7 +235,7 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
   // meshes are copied out rather than rebuilt here — a second construction
   // would drift from the one you are actually looking at, which is the whole
   // reason to export a mannequin in the first place.
-  for (const root of ctx.actorRoots()) {
+  for (const root of ctx.actorRoots(opts.selectedOnly)) {
     root.updateWorldMatrix(true, true);
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -254,6 +279,7 @@ export async function buildExportGroup(ctx: AppCtx, opts: Export3DOptions): Prom
   // where THREE's own PLYExporter can't mix points and faces correctly).
   for (const pc of opts.includePointClouds ? scene.paintClouds : []) {
     if (!pc.visible || !pc.points.length) continue;
+    if (!wanted(pc.select)) continue;
     const n = pc.points.length / PAINT_STRIDE;
     const pos = new Float32Array(n * 3);
     const col = new Float32Array(n * 3);

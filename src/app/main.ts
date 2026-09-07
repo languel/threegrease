@@ -366,7 +366,7 @@ class App implements AppHandle {
         faceMeshes: () => this.polys.pickTargets(self.ctx.scene),
         faceIdAt: (polyId, tri) => this.polys.faceIdAt(polyId, tri),
       },
-      actorRoots: () => this.actors.exportRoots(this.ctx.scene),
+      actorRoots: (sel) => this.actors.exportRoots(this.ctx.scene, sel),
       syncCanvases: () => this.syncCanvases(),
       copyBuffer: [],
       requestRender: (layerId?: number) => {
@@ -3027,6 +3027,22 @@ class App implements AppHandle {
 
   /** Drop an actor back to its T-pose and clear the simulation's velocity
    *  (otherwise the ragdoll keeps whatever momentum it had). */
+  /**
+   * One door for every 3D export, so the File menu and the right-click menu
+   * cannot offer different sets or different behaviour.
+   */
+  async export3D(format: string, selectedOnly: boolean): Promise<void> {
+    const m = await import('../io/export3d');
+    const fmt = m.EXPORT_FORMATS.find((f) => f.id === format);
+    if (!fmt) return;
+    if (selectedOnly && !listSelected(this.ctx.scene).length) {
+      this.setStatusHint('Nothing selected to export');
+      return;
+    }
+    await fmt.run(this.ctx, selectedOnly ? m.SELECTION_EXPORT3D : m.DEFAULT_EXPORT3D);
+    this.setStatusHint(`Exported ${selectedOnly ? 'selection' : 'scene'} as ${format.toUpperCase()}`);
+  }
+
   resetActor(id: number): void {
     const actor = this.ctx.scene.actors.find((a) => a.id === id);
     if (!actor) return;

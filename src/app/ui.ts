@@ -77,6 +77,7 @@ export interface AppHandle {
   scaleSceneToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string };
   addActor(at?: [number, number, number]): void;
   resetActor(id: number): void;
+  export3D(format: string, selectedOnly: boolean): void;
   setActorStance(id: number, kind: 'REST' | 'T' | 'A'): void;
   savePoseSlot(id: number, poseId?: number): void;
   applyPoseSlot(id: number, poseId: number): void;
@@ -530,6 +531,15 @@ function panelCollapsed(): Record<string, boolean> {
 interface PanelHint { __panelHint: string }
 function panelHint(text: string): PanelHint { return { __panelHint: text }; }
 
+/** Formats offered by BOTH export menus — one list so they cannot drift. */
+const EXPORT_FORMAT_LABELS: [string, string][] = [
+  ['glb', 'GLB — recommended for Blender'],
+  ['obj', 'OBJ'],
+  ['stl', 'STL'],
+  ['ply', 'PLY (geometry only)'],
+  ['plyscene', 'PLY (incl. splats)'],
+];
+
 /** One pose thumbnail, in normalised 0..1 coordinates. */
 function poseThumb(
   lines: [number, number, number, number][], dots: [number, number][],
@@ -935,11 +945,11 @@ export class UI {
       { sep: true },
       { header: 'Export' },
       { label: 'GP object (.threegrease.json)', do: () => this.app.exportActiveGP() },
-      { label: 'GLB (full scene, incl. splats) — recommended for Blender', do: async () => { const m = await import('../io/export3d'); m.exportGLB(ctx); } },
-      { label: 'OBJ', do: async () => { const m = await import('../io/export3d'); m.exportOBJ(ctx); } },
-      { label: 'STL', do: async () => { const m = await import('../io/export3d'); m.exportSTL(ctx); } },
-      { label: 'PLY (geometry only)', do: async () => { const m = await import('../io/export3d'); m.exportPLY(ctx); } },
-      { label: 'PLY (full scene, incl. splats)', do: async () => { const m = await import('../io/export3d'); m.exportScenePLY(ctx); } },
+      ...EXPORT_FORMAT_LABELS.map(([id, label]) => (
+        { label, do: () => this.app.export3D(id, false) } as const)),
+      { header: 'Export selection' },
+      ...EXPORT_FORMAT_LABELS.map(([id, label]) => (
+        { label, do: () => this.app.export3D(id, true) } as const)),
       { label: 'PNG snapshot', do: () => this.app.exportPng() },
     ]);
 
@@ -1432,6 +1442,12 @@ export class UI {
       { label: 'Delete', action: 'delete' },
       { sep: true },
       { label: 'Group under empty', action: 'groupToEmpty' },
+      {
+        label: 'Export selection as…',
+        items: EXPORT_FORMAT_LABELS.map(([id, label]) => ({
+          label, do: () => this.app.export3D(id, true),
+        })),
+      },
       { sep: true },
       {
         label: 'Set Origin', items: [
