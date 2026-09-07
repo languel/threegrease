@@ -2235,9 +2235,17 @@ export class UI {
       ], (v) => { ctx.pushUndo(); w.mode = v; touch(); this.refresh(); })),
     ];
 
-    if (w.mode === 'SOLID') {
-      rows.push(fieldRow('Color', colorField('', [...w.color, 1], (rgb) => edit(() => { w.color = rgb; }))));
-    } else if (w.mode === 'GRADIENT') {
+    // Shown in EVERY mode, because it is the viewport background in every
+    // mode: the world's own colour in Solid, and the fallback that Solid /
+    // Wireframe shading and a hidden background fall back TO in the others.
+    // Scene used to carry a second copy of this as a view pref; they were one
+    // value under two names and could drift (a holdout stroke paints this
+    // colour, and it took whichever copy it was handed).
+    rows.push(fieldRow('Color', tip(colorField('', [...w.color, 1],
+      (rgb) => { this.app.setBackground(rgb); }),
+      w.mode === 'SOLID' ? 'the world itself'
+        : 'seen in Solid and Wireframe shading, and whenever the background is hidden')));
+    if (w.mode === 'GRADIENT') {
       rows.push(
         fieldRow('Sky', colorField('', [...w.skyColor, 1], (rgb) => edit(() => { w.skyColor = rgb; }))),
         fieldRow('Ground', colorField('', [...w.groundColor, 1], (rgb) => edit(() => { w.groundColor = rgb; }))),
@@ -2370,14 +2378,12 @@ export class UI {
         ['dashed', 'Dashed'], ['solid', 'Solid'],
       ], (v) => { s.gridSubdivStyle = v as 'dashed' | 'solid'; this.app.rebuildGrid(); save(); })),
       checkbox('Auto color', !s.gridColor, (v) => {
-        s.gridColor = v ? null : [...s.background];
+        s.gridColor = v ? null : [...ctx.scene.world.color];
         this.app.rebuildGrid(); save(); this.refresh();
       }, 'grid color matches the background'),
       ...(s.gridColor ? [fieldRow('Color', colorField('', [...s.gridColor, 1], (rgb) => {
         s.gridColor = rgb; this.app.rebuildGrid(); save();
       }))] : []),
-      el('div', { class: 'menu-header', text: 'Background' }),
-      fieldRow('Color', colorField('', [...s.background, 1], (rgb) => { this.app.setBackground(rgb); save(); })),
       el('div', { class: 'menu-header', text: 'Shading' }),
       checkbox('Strokes cast shadows', s.gpCastShadows, (v) => {
         s.gpCastShadows = v; save(); this.app.ctx.requestRender();

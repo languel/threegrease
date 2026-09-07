@@ -389,7 +389,8 @@ class App implements AppHandle {
     };
 
     // scene dressing
-    this.scene3.background = srgbColor(settings.background);
+    // first frame only; WorldManager owns it from then on
+    this.scene3.background = srgbColor(scene.world.color);
     this.grid = this.makeGrid();
     this.grid.position.y = -2;
     this.scene3.add(this.grid);
@@ -668,7 +669,10 @@ class App implements AppHandle {
     const ctx = this.ctx;
     return {
       mode: this.presentation ? 'DRAW' : ctx.settings.mode,
-      background: ctx.settings.background,
+      // what the viewport actually shows behind the strokes, which is what a
+      // HOLDOUT material paints. It is the WORLD's colour, not a view pref —
+      // those were two names for one thing and could drift apart.
+      background: ctx.scene.world.color,
       playing: this.player.playing || this.presentation, // also hides onion in presentation
       selectMode: ctx.settings.selectMode,
       castShadows: ctx.settings.gpCastShadows,
@@ -1687,10 +1691,9 @@ class App implements AppHandle {
   }
 
   setBackground(rgb: [number, number, number]): void {
-    this.ctx.settings.background = rgb;
     // The world owns scene3.background (it may be an equirect texture, not a
     // Color — the old unconditional `as THREE.Color` cast would throw once a
-    // 360 environment is active). Keep the SOLID world in step and let
+    // 360 environment is active), so this writes the DATA and lets
     // WorldManager.update apply it on the next frame.
     this.ctx.scene.world.color = [...rgb];
     this.rebuildGrid(); // auto grid color tracks background unless overridden
@@ -1723,7 +1726,9 @@ class App implements AppHandle {
    *  snapIncrement() in tools/context.ts — not this rendering. */
   private makeGrid(): THREE.Group {
     const s = this.ctx.settings;
-    const main = s.gridColor ? srgbColor(s.gridColor) : this.autoGridColor(s.background);
+    const main = s.gridColor
+      ? srgbColor(s.gridColor)
+      : this.autoGridColor(this.ctx.scene.world.color);
     const sub = main.clone().multiplyScalar(0.6);
     const majorCells = 20;
     const step = s.gridStep;

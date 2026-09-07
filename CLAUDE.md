@@ -261,6 +261,15 @@ the browser console or automated evals:
   Also: `DataTexture` defaults `flipY:false`, so row 0 is v=0, which
   `equirectUv` maps to `dir.y = -1` — fill these maps NADIR-first or the
   sky renders upside down.
+- **The viewport background is `scene.world.color` and nothing else.** There
+  used to be a second copy as a view pref (`settings.background`, shown as
+  Scene ▸ Background ▸ Color) — one value under two names, and they drifted:
+  editing the World panel left the pref stale, and a HOLDOUT material paints
+  whichever copy the renderer was handed, so a holdout stroke could punch a
+  hole in the wrong colour. The world's own Color row is shown in EVERY mode
+  now, because it is the background in every mode: the world itself in Solid,
+  and what Solid/Wireframe shading and a hidden background fall back TO in the
+  others. The auto grid colour reads it too.
 - **`ctx.requestRender()` is a GP GEOMETRY rebuild, not "redraw the
   viewport".** With no layer id it sets `dirtyAll`, and the next frame
   re-evaluates every layer's modifier stack and rebuilds its stroke ribbons
