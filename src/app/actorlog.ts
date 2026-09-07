@@ -30,6 +30,8 @@ export class ActorLog {
   private lastKey = '';
 
   enabled = true;
+  /** what `enabled` was when the box was last drawn */
+  private shown = true;
 
   say(actorId: number, who: string, text: string): void {
     const key = `${actorId}:${text}`;
@@ -48,6 +50,13 @@ export class ActorLog {
 
   /** Called from the frame loop so old lines fade without a timer. */
   tick(): void {
+    // `enabled` is a switch someone flips, and only render() reads it — so
+    // catch a change here rather than leaving the log on screen until the
+    // next line happens to arrive.
+    if (this.enabled !== this.shown) {
+      this.shown = this.enabled;
+      this.render();
+    }
     if (!this.lines.length) return;
     const now = performance.now();
     const before = this.lines.length;

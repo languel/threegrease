@@ -452,13 +452,22 @@ function checkbox(label: string, value: boolean, onChange: (v: boolean) => void,
   const input = el('input', { type: 'checkbox' }) as HTMLInputElement;
   input.checked = value;
   input.onchange = () => onChange(input.checked);
-  const el2 = el('label', { class: 'inline' }, input, label);
-  if (title) el2.title = title;
-  // A checkbox carries its own text, so its label cell stays blank — that
-  // is what drops it into the value column under the fields above it.
-  // (Blank label = zero-width column, so in a flex topbar this still
-  // renders as a plain inline checkbox.)
-  return fieldRow('', el2);
+  // The NAME goes in the label column and the box in the value column, like
+  // every other row. Carrying its own text put a checkbox the other way
+  // round — box first, name second, both adrift in the value column — so a
+  // panel of settings had one row in three reading backwards against the
+  // rest and no shared edge to scan down.
+  const box = el('label', { class: 'inline' }, input);
+  const row = fieldRow(label, box);
+  if (title) row.title = title;
+  // The name stays clickable, which is what makes a checkbox comfortable to
+  // hit; it is a span rather than a <label for>, so wire it by hand.
+  const name = row.querySelector('.field-row-label') as HTMLElement | null;
+  if (name) {
+    name.classList.add('clickable');
+    name.onclick = () => { input.checked = !input.checked; onChange(input.checked); };
+  }
+  return row;
 }
 
 /** Icon-only checkbox (no visible text) with a hover tooltip. */
@@ -2372,6 +2381,11 @@ export class UI {
       checkbox('Show grid', s.showGrid !== false, (v) => {
         s.showGrid = v; this.app.rebuildGrid(); save(); this.refresh();
       }, 'the floor grid and its axis lines'),
+      el('div', { class: 'menu-header', text: 'Overlays' }),
+      checkbox('Actor overlay', s.showActorOverlay !== false, (v) => {
+        s.showActorOverlay = v; save();
+      }, 'the characters\u2019 first-person monologue and the state badge over each head '
+        + '\u2014 what they intend, and what is actually happening to them'),
       fieldRow('Step', numField('', s.gridStep, (v) => { s.gridStep = Math.max(0.01, v); this.app.rebuildGrid(); save(); }, 0.5, { def: 1, min: 0.01 })),
       fieldRow('Subdivisions', numField('', s.gridSubdivisions, (v) => { s.gridSubdivisions = Math.max(1, Math.round(v)); this.app.rebuildGrid(); save(); }, 1, { def: 10, min: 1 })),
       fieldRow('Subdivision style', selectField('', s.gridSubdivStyle, [

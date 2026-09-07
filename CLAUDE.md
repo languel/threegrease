@@ -94,6 +94,17 @@ Key invariants:
   selection key actually changed AND the row is off screen; anything more
   eager is the original bug (the list moving out from under someone reading
   it) wearing a different hat. Frame-selection asks for it explicitly.
+- **A checkbox's NAME goes in the label column and the box in the value
+  column**, like every other row. It used to carry its own text, which put it
+  the other way round — box first, name second, both adrift in the value
+  column — so one row in three read backwards against the rest with no shared
+  edge to scan down. `checkbox()` builds a normal `fieldRow` now and wires the
+  name to toggle by hand (it is a span, not a `<label for>`).
+- **`el.hidden` does nothing when a class sets a `display`.** The UA rule
+  `[hidden] { display: none }` loses to any class rule with its own display,
+  so `.actor-log { display: flex }` kept the monologue on screen while the
+  attribute said otherwise. Every such class needs its own
+  `.thing[hidden] { display: none }`.
 - **Explanations hang off controls, never underneath them.** A paragraph in
   a panel is read once and then re-read every time you come back for the
   control it explains, and it pushes the actual settings off screen.

@@ -3861,6 +3861,9 @@ class App implements AppHandle {
     // is what walks to it.
     behaviourEngine.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
     steerEngine.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
+    // The monologue and the badges are one overlay: both say what the
+    // characters are up to, and you want them together or not at all.
+    actorLog.enabled = ctx.settings.showActorOverlay !== false && !this.presentation;
     actorLog.tick();
     for (const a of ctx.scene.actors) {
       constraintEngine.setDriven({ kind: 'ACTOR', id: a.id },
@@ -4090,7 +4093,8 @@ class App implements AppHandle {
     // Above the head, in the same hues the log uses. The monologue says what
     // a character INTENDS; this says what is actually happening to it, and
     // the two disagreeing is the most useful thing on screen.
-    if (!this.presentation && !this.infoOverlayHidden) {
+    if (!this.presentation && !this.infoOverlayHidden
+      && this.ctx.settings.showActorOverlay !== false) {
       const upZ = this.ctx.settings.upAxis === 'Z';
       const upAxis = upZ ? 2 : 1;
       const head = new THREE.Vector3();
