@@ -308,6 +308,33 @@ the browser console or automated evals:
   physical LUMINANCE and replaces the hue, mixing two tints by height: a flat
   pink wash is not a sky, but a pink sky with the gradient, the glow and the
   darkening overhead still reads as one.
+- **Scene-level look is a SECOND fx axis** (`src/fx/scenefx.ts`,
+  `scene.post`), distinct from `fx/effects.ts`, which isolates and composites
+  ONE GP object. This one treats the finished frame as an image: bright-pass
+  bloom, a two-colour duotone ramp, ink edges, grain and a vignette, driven
+  by presets (`POST_PRESETS`) rather than by a pile of sliders — what someone
+  wants is "a Turrell room" or "a line drawing", and the numbers that get
+  there are a package. Editing any of them flips the preset to CUSTOM so the
+  panel never claims to be a look it no longer is.
+  - FOG IS NOT POST. It lives in `world.fog`/`world.fogColor` and becomes
+    `scene.fog`, because fog has to be LIT — a depth haze applied after the
+    fact cannot know a light is shining through it, and the Turrell look is
+    mostly that. Post supplies the bloom and the palette on top.
+  - EDGES come from DEPTH AND NORMALS, never from colour: a colour-difference
+    detector misses the boundary between two objects of the same colour
+    (most of a grey scene) and invents lines inside textures. That costs one
+    extra render of the scene with a normal+depth override material, only
+    when `edge > 0`. Normals find creases, depth finds silhouettes, and
+    either alone looks broken.
+  - GRAIN is dither, not texture. A smooth gradient across a thousand pixels
+    BANDS in 8 bits, which is exactly the image a light-field look produces.
+  - Ordering matters: edges are read from the untouched image (before bloom
+    smears it), then colour is remapped, then bloom adds, then grain and
+    vignette land on everything.
+  - The per-object FX composite into whatever render target is BOUND
+    (`EffectsPipeline.apply` restores it), so binding the post target first
+    puts them inside the look rather than making them the one thing it never
+    touches.
 - Background-tab rAF throttle (see Testing above) applies to constraint
   verification too — drive `constraintEngine.update(...)` and
   `score.update(...)` manually in a loop rather than awaiting wall-clock
@@ -851,6 +878,12 @@ the browser console or automated evals:
   sim landmarks reach TRIGGER probing one frame late — deliberate.
   `File ▸ New — Demo gallery scene` (`app/demoscene.ts`) is the worked
   example and is code, not a saved .json, so it cannot rot as shapes change.
+  Everything in it is filed under EMPTY groups at the origin — Room, Props,
+  Cast, Drawing, Sensors — with identity transforms, so parenting is filing
+  and not a transform. Sixty objects in a flat list is a scene you navigate
+  by reading names. The cast is three characters in three looks (wooden on
+  rails, clay on a script, a MINIMAL stick figure on a shorter round that
+  crosses the others' paths on purpose).
 
 ## Where to pick up (roadmap, rough priority)
 

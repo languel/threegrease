@@ -1,6 +1,6 @@
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
-import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
+import type { GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
 import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
@@ -64,6 +64,7 @@ import { MASK_LABELS, SOURCE_LABELS, nextLayerId } from '../actor/mixer';
 import { MOVE_ACTIONS, runMoveAction } from '../actor/commands';
 import { nextMacroId } from '../actor/macros';
 import { poseSegments } from '../actor/poses';
+import { POST_PRESETS } from '../fx/scenefx';
 import { engineOf, resetPhysics } from '../actor/physics';
 import { defaultBody, propRadius } from '../actor/props';
 import { ACTOR_LOOKS, LOOK_OPTIONS } from '../render/actorlooks';
@@ -2439,6 +2440,31 @@ export class UI {
       checkbox('Show grid', s.showGrid !== false, (v) => {
         s.showGrid = v; this.app.rebuildGrid(); save(); this.refresh();
       }, 'the floor grid and its axis lines'),
+      el('div', { class: 'menu-header', text: 'Look' }),
+      fieldRow('Style', tip(selectField('', ctx.scene.post?.preset ?? 'NONE', [
+        ['NONE', 'Plain'], ['TURRELL', 'Light field'], ['SKETCH', 'Line drawing'],
+        ['CUSTOM', 'Custom'],
+      ], (v) => {
+        ctx.pushUndo();
+        const preset = v as NonNullable<GPScene['post']>['preset'];
+        if (preset !== 'CUSTOM') {
+          const p = POST_PRESETS[preset] ?? POST_PRESETS.NONE;
+          const { fog, fogColor, ...rest } = p;
+          ctx.scene.post = { preset, ...rest };
+          // fog is WORLD data, not post — it has to be lit — so a look sets
+          // it alongside rather than owning it
+          ctx.scene.world.fog = fog;
+          ctx.scene.world.fogColor = [...fogColor];
+        } else if (ctx.scene.post) {
+          ctx.scene.post.preset = 'CUSTOM';
+        }
+        this.refresh();
+      }), 'Light field: bloom, a two-colour ramp and haze — a room made of '
+        + 'light. Line drawing: ink edges from depth and normals over paper, '
+        + 'for documentation. Both stay editable; changing anything makes it '
+        + 'Custom.')),
+      ...this.postRows(),
+
       el('div', { class: 'menu-header', text: 'Overlays' }),
       checkbox('Actor overlay', s.showActorOverlay !== false, (v) => {
         s.showActorOverlay = v; save();
@@ -3328,6 +3354,49 @@ export class UI {
     slots.push(empty);
 
     return fieldRow('', el('div', { class: 'pose-grid' }, ...slots), { full: true });
+  }
+
+  /** The look's own knobs, shown once a look is doing something. */
+  private postRows(): Node[] {
+    const { ctx } = this.app;
+    const p = ctx.scene.post;
+    if (!p || p.preset === 'NONE') return [];
+    const w = ctx.scene.world;
+    // any edit makes it Custom, so the dropdown never claims to be a preset
+    // it no longer is
+    const edit = (fn: () => void) => { fn(); p.preset = 'CUSTOM'; };
+    const rows: Node[] = [
+      slider('Bloom', p.bloom, 0, 2, 0.01, (v) => edit(() => { p.bloom = v; }), { def: 0 }),
+      slider('Threshold', p.bloomThreshold, 0, 1.5, 0.01,
+        (v) => edit(() => { p.bloomThreshold = v; }), { def: 0.75, title: 'how bright a pixel must be before it blooms' }),
+      slider('Duotone', p.duotone, 0, 1, 0.01, (v) => edit(() => { p.duotone = v; }), { def: 0 }),
+    ];
+    if (p.duotone > 0) {
+      rows.push(
+        fieldRow('Shadow', colorField('', [...p.duotoneLow, 1], (rgb) => edit(() => { p.duotoneLow = rgb; }))),
+        fieldRow('Light', colorField('', [...p.duotoneHigh, 1], (rgb) => edit(() => { p.duotoneHigh = rgb; }))),
+        slider('Lift', p.lift, -0.3, 0.6, 0.01, (v) => edit(() => { p.lift = v; }), { def: 0 }),
+      );
+    }
+    rows.push(
+      slider('Ink', p.edge, 0, 1, 0.01, (v) => { edit(() => { p.edge = v; }); this.refresh(); }, { def: 0, title: 'lines at depth and normal discontinuities' }),
+    );
+    if (p.edge > 0) {
+      rows.push(
+        slider('Line width', p.edgeWidth, 0.5, 4, 0.05, (v) => edit(() => { p.edgeWidth = v; }), { def: 1 }),
+        fieldRow('Ink colour', colorField('', [...p.inkColor, 1], (rgb) => edit(() => { p.inkColor = rgb; }))),
+        slider('Paper', p.paper, 0, 1, 0.01, (v) => edit(() => { p.paper = v; }), { def: 0, title: 'wash the render out so the lines carry the image' }),
+        fieldRow('Paper colour', colorField('', [...p.paperColor, 1], (rgb) => edit(() => { p.paperColor = rgb; }))),
+      );
+    }
+    rows.push(
+      slider('Grain', p.grain, 0, 0.1, 0.002, (v) => edit(() => { p.grain = v; }), { def: 0, title: 'dither — a smooth field bands visibly without it' }),
+      slider('Vignette', p.vignette, 0, 1, 0.01, (v) => edit(() => { p.vignette = v; }), { def: 0 }),
+      el('div', { class: 'menu-header', text: 'Atmosphere' }),
+      slider('Haze', w.fog ?? 0, 0, 0.3, 0.002, (v) => { w.fog = v; }, { def: 0, title: 'fog density — lit, so light fills the air rather than sitting on it' }),
+      fieldRow('Haze colour', colorField('', [...(w.fogColor ?? [0.6, 0.65, 0.75]), 1], (rgb) => { w.fogColor = rgb; })),
+    );
+    return rows;
   }
 
   /** Blender-style brush Advanced panel; edits are baked into future strokes only. */

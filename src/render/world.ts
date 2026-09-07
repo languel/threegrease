@@ -182,6 +182,21 @@ export class WorldManager {
     // direction, so the spin sign is flipped relative to the image.
     //   Z-up:  sample = Rx(-90) * Rz(-rotation) * dir  ->  euler (PI/2, 0, rot)
     //   Y-up:  sample = Ry(-rotation) * dir            ->  euler (0, rot, 0)
+    // Atmospheric haze, applied to the SCENE so it is lit: three fogs every
+    // lit material by view depth, which is what makes a light source read as
+    // filling the air rather than as a bright rectangle.
+    const density = w.fog ?? 0;
+    if (density > 0) {
+      const fc = w.fogColor ?? [0.6, 0.65, 0.75];
+      const col = new THREE.Color().setRGB(fc[0], fc[1], fc[2], THREE.SRGBColorSpace);
+      const fog = scene3.fog instanceof THREE.FogExp2 ? scene3.fog : new THREE.FogExp2(0, density);
+      fog.color.copy(col);
+      fog.density = density;
+      scene3.fog = fog;
+    } else if (scene3.fog) {
+      scene3.fog = null;
+    }
+
     const rot = scene3.backgroundRotation;
     if (upAxisZ) rot.set(Math.PI / 2, 0, w.rotation);
     else rot.set(0, w.rotation, 0);

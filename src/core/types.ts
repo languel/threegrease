@@ -1215,6 +1215,14 @@ export interface TGWorld {
   blur: number;                // 0..1 background blur
   /** Light objects from the world. Off = background only, no IBL. */
   lighting: boolean;
+  /**
+   * Atmospheric haze. In the SCENE rather than in post because fog is lit —
+   * it takes the colour of the air and thickens with distance, and a
+   * post-process depth haze cannot know that a light is shining through it.
+   * 0 is off; a room-sized space wants something like 0.03-0.12.
+   */
+  fog?: number;
+  fogColor?: Vec3;
 }
 
 /**
@@ -1230,6 +1238,37 @@ export interface TGPose {
   joints: Record<string, Vec3>;
 }
 
+/**
+ * Scene-level post: what the finished FRAME looks like.
+ *
+ * Distinct from `GPEffect`, which is per GP object. These are presets first
+ * and knobs second — the point is "make it look like a Turrell room" or
+ * "make it a line drawing", not a pile of sliders.
+ */
+export interface TGPost {
+  preset: 'NONE' | 'TURRELL' | 'SKETCH' | 'CUSTOM';
+  /** how much of the blurred bright-pass is added back */
+  bloom: number;
+  bloomThreshold: number;
+  bloomRadius: number;
+  /** collapse the palette onto two colours by luminance */
+  duotone: number;
+  duotoneLow: Vec3;
+  duotoneHigh: Vec3;
+  /** raise the whole luminance before the duotone ramp reads it */
+  lift: number;
+  /** ink lines from depth+normal discontinuities */
+  edge: number;
+  edgeWidth: number;
+  inkColor: Vec3;
+  /** wash the render toward paper so the LINES carry the image */
+  paper: number;
+  paperColor: Vec3;
+  /** dither. A smooth field bands visibly in 8 bits, and this is the cure */
+  grain: number;
+  vignette: number;
+}
+
 export interface GPScene {
   /**
    * Which physics backend runs the props.
@@ -1243,6 +1282,8 @@ export interface GPScene {
   physicsEngine?: 'SIMPLE' | 'RAPIER';
   /** the pose library — shared by every actor in the scene */
   poses?: TGPose[];
+  /** scene-level look (bloom / duotone / edges / grain) */
+  post?: TGPost;
   objects: GPObject[];
   activeObject: number;
   frame: number;

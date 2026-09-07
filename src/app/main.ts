@@ -8,6 +8,7 @@ import { History } from '../core/history';
 import type { GPScene, TGActor, TGActorLayer, TGLight, Vec3, ViewportShading } from '../core/types';
 import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
+import { ScenePost, postActive } from '../fx/scenefx';
 import { defaultSettings, loadPrefs, savePrefs, snapIncrement, type AppCtx } from '../tools/context';
 import { ToolManager, type ToolEvent } from '../tools/toolsys';
 import { DrawTool, EraseTool, SmoothTool, TintTool, CutterTool, EyedropperTool } from '../tools/draw';
@@ -135,7 +136,7 @@ import { engineOf, resetPhysics } from '../actor/physics';
 import { walkVolume } from '../actor/locomotion';
 import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
-import { buildDemoScene, buildPlaygroundScene, wandererScript } from './demoscene';
+import { buildDemoScene, buildPlaygroundScene, sketcherScript, wandererScript } from './demoscene';
 import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
 import { DirectTool } from '../tools/direct';
 import { createHumanoid, resetPose } from '../actor/skeleton';
@@ -214,6 +215,8 @@ class App implements AppHandle {
   private scene3 = new THREE.Scene();
   private gp = new GPSceneRenderer();
   private fx: EffectsPipeline;
+  /** scene-level look: bloom, duotone, ink lines, grain */
+  readonly post = new ScenePost(2, 2);
   private tools = new ToolManager();
   private modal = new ModalTransform();
   private player = new Player();
@@ -2165,6 +2168,9 @@ class App implements AppHandle {
     if (wiring.wandererId != null) {
       behaviourEngine.run(wiring.wandererId, wandererScript(upZ), true);
     }
+    if (wiring.sketcherId != null) {
+      behaviourEngine.run(wiring.sketcherId, sketcherScript(upZ), true);
+    }
     this.refreshWidget();
     this.viewAll();
     this.ui.refresh();
@@ -3803,6 +3809,7 @@ class App implements AppHandle {
     }
     this.gp.setSize(w * devicePixelRatio, h * devicePixelRatio);
     this.fx.setSize(w * devicePixelRatio, h * devicePixelRatio);
+    this.post.setSize(w * devicePixelRatio, h * devicePixelRatio);
     this.hud.width = w * devicePixelRatio;
     this.hud.height = h * devicePixelRatio;
     for (const entry of this.selHelpers.values()) entry.helper.material.resolution.set(w, h);
@@ -4086,6 +4093,16 @@ class App implements AppHandle {
       // just render without their effect while quad view is on.
       for (const job of fxJobs) job.group.visible = true;
     } else {
+      // With a scene look on, the frame is drawn into a target and the post
+      // chain presents it. The per-object FX composite into whatever target
+      // is BOUND (EffectsPipeline.apply restores it), so they land inside
+      // the look rather than being the one thing it never touches.
+      const look = ctx.scene.post;
+      const styled = postActive(look);
+      if (styled) {
+        this.glRenderer.setRenderTarget(this.post.target);
+        this.glRenderer.clear();
+      }
       this.glRenderer.render(this.scene3, this.nav.active);
       for (const job of fxJobs) {
         const ob = ctx.scene.objects[job.obIndex];
@@ -4105,6 +4122,10 @@ class App implements AppHandle {
           this.gp.objectGroups.forEach((g, i) => { g.visible = savedGroups[i]; });
         }, ob.effects);
         job.group.visible = true;
+      }
+      if (styled) {
+        this.post.present(this.glRenderer, this.scene3, this.nav.active, look, now / 1000);
+        this.glRenderer.setRenderTarget(null);
       }
     }
 

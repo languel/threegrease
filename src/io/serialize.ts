@@ -1,3 +1,4 @@
+import { defaultPost } from '../fx/scenefx';
 import type { GPObject, GPScene, TGMaterial, Vec3 } from '../core/types';
 import { defaultGait } from '../actor/gait';
 import { defaultLayers } from '../actor/mixer';
@@ -46,6 +47,9 @@ export function deserializeScene(json: string): GPScene {
   // older saves predate the second physics backend and were all simple
   scene.physicsEngine ??= 'SIMPLE';
   scene.poses ??= [];
+  scene.post ??= defaultPost();
+  scene.world.fog ??= 0;
+  scene.world.fogColor ??= [0.6, 0.65, 0.75];
   scene.attractors ??= [];
   scene.mediamime ??= { prefix: '/mm', rigs: [] };
   scene.mmStreams ??= [];

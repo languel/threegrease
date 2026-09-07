@@ -32,6 +32,8 @@ import { createStream } from '../mm/streams';
 export interface DemoWiring {
   /** the goal-driven second visitor, scripted by the caller */
   wandererId?: number;
+  /** the stick figure, on its own shorter round */
+  sketcherId?: number;
   scene: GPScene;
   /** ids the caller needs to wire the RUNTIME sim drivers, which live
    *  outside GPScene (they are live wiring, not document state — see
@@ -137,6 +139,24 @@ function walkLoopPoints(): Vec3[] {
  * idle to show. Every line is spoken at the moment the goal is set, so the
  * log cannot drift from what is actually happening.
  */
+/**
+ * The stick figure's round: shorter than the Wanderer's, and deliberately
+ * overlapping it — two scripted characters that have to share a floor is a
+ * more honest test than two that never meet.
+ */
+export function sketcherScript(upAxisZ: boolean): Step[] {
+  const P = (x: number, y: number, up = 0): Vec3 => (upAxisZ ? [x, y, up] : [x, up, y]);
+  return [
+    { say: 'Standing where I can see the whole room.', goto: P(6.5, -5.0), style: 'walk' },
+    { say: 'This angle, I think.', face: P(0, 0) },
+    { say: 'Holding still while I get the proportions.', wait: 2.4 },
+    { say: 'Closer, for the columns.', goto: P(2.2, -1.6), style: 'walk' },
+    { say: 'Blocking it in.', perform: 'a person waving one arm slowly', hold: 3.0 },
+    { say: 'And round the other side.', goto: P(-2.0, -6.0), style: 'walk' },
+    { say: 'That will do for now.', face: P(0, 2) },
+  ];
+}
+
 export function wandererScript(upAxisZ: boolean): Step[] {
   const P = (x: number, y: number, up = 0): Vec3 => (upAxisZ ? [x, y, up] : [x, up, y]);
   return [
@@ -188,12 +208,15 @@ export function buildPlaygroundScene(upAxisZ: boolean): DemoWiring {
   const { scene } = wiring;
   const at = (x: number, y: number, up: number): Vec3 =>
     (upAxisZ ? [x, y, up] : [x, up, y]);
+  // the gallery already filed itself into categories; join the right one
+  const propsGroup = scene.meshes.find((m) => m.kind === 'EMPTY' && m.name === 'Props');
 
   const loose = (
     kind: 'SPHERE' | 'BOX' | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA',
     name: string, x: number, y: number, size: number, color: Vec3,
   ): void => {
     const m = createMeshObject(genId(), kind, at(x, y, size * 0.5 + 0.02));
+    if (propsGroup) m.parent = { kind: 'MESH', id: propsGroup.id };
     m.name = name;
     m.scale = [size, size, size];
     m.color = color;
@@ -478,6 +501,11 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   // Wanderer: no path at all. It is handed goals by a behaviour script and
   // has to steer, climb and avoid its own way there.
   const wanderer = makeVisitor('Wanderer', at(4.0, -8.0, 0), 'CLAY', [0.91, 0.70, 0.58]);
+  // A third register: drawn rather than modelled. Unlit and thin, it reads
+  // as a diagram standing in a room of solids — which is the point of having
+  // looks at all, and it survives every scene style (a line drawing of a
+  // line drawing is still a line drawing).
+  const sketcher = makeVisitor('Sketcher', at(7.0, -6.0, 0), 'MINIMAL', [0.16, 0.16, 0.2]);
 
   // ---- the security camera: a fixed, elevated corner camera looking
   // across the room — the "installed webcam" the sim streams are seen
@@ -516,15 +544,41 @@ export function buildDemoScene(upAxisZ: boolean): DemoWiring {
   scan.visible = false;
   scene.paintClouds.push(scan);
 
+  // ---- categories -------------------------------------------------------
+  // Empties at the ORIGIN with no rotation or scale, so parenting to one
+  // changes nothing about where anything sits — it is filing, not a
+  // transform. Sixty objects in a flat list is a scene you navigate by
+  // reading names; four collapsible groups is one you navigate by shape.
+  const group = (name: string) => {
+    const g = createMeshObject(genId(), 'EMPTY', at(0, 0, 0));
+    g.name = name;
+    return g;
+  };
+  const gRoom = group('Room');
+  const gProps = group('Props');
+  const gCast = group('Cast');
+  const gDrawing = group('Drawing');
+  const gSensors = group('Sensors');
+  const parentTo = (g: { id: number }) => ({ kind: 'MESH' as const, id: g.id });
+
+  for (const m of room) m.parent = parentTo(gRoom);
+  for (const m of props) m.parent = parentTo(gProps);
+  zoneObj.parent = parentTo(gSensors);
+  scan.parent = parentTo(gRoom);
+  pathObj.parent = parentTo(gDrawing);
+  walker.parent = parentTo(gCast);
+  wanderer.parent = parentTo(gCast);
+  sketcher.parent = parentTo(gCast);
+
   scene.objects.push(pathObj);
-  scene.meshes.push(...room, ...props, zoneObj);
-  scene.actors.push(walker, wanderer);
+  scene.meshes.push(gRoom, gProps, gCast, gDrawing, gSensors, ...room, ...props, zoneObj);
+  scene.actors.push(walker, wanderer, sketcher);
   scene.cameras.push(secCam);
   scene.activeCamera = 0; // keep the user's main camera active; security cam is a second view
   scene.frameEnd = Math.max(scene.frameEnd, 250);
 
   return {
-    scene, actorId: walker.id, wandererId: wanderer.id,
+    scene, actorId: walker.id, wandererId: wanderer.id, sketcherId: sketcher.id,
     poseStreamId: poseStream.id, detectStreamId: detectStream.id,
     camIndex: scene.cameras.length - 1,
   };
