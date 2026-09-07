@@ -73,7 +73,13 @@ const SPINE_SPECS: JointSpec[] = [
 /** bones as name pairs — resolved to ids once the joints exist */
 const SPINE_BONES: [string, string, number][] = [
   ['hips', 'spine', 0.070], ['spine', 'chest', 0.075],
-  ['chest', 'neck', 0.045], ['neck', 'head', 0.050],
+  // A NECK IS NOT A COLUMN. These were 0.045 and 0.050 against a head of
+  // radius 0.067, so the tube holding the head up was as wide as the head
+  // itself (and the collar nearly twice it) — which reads as a funnel with a
+  // ball on top, and turns every head turn into a cone sweeping about. Three
+  // of the four looks quietly divided it back down again; DEFAULT was the
+  // one that did not, which is why the mannequin wore the fault.
+  ['chest', 'neck', 0.028], ['neck', 'head', 0.030],
 ];
 function limbBones(side: string): [string, string, number][] {
   return [

@@ -61,9 +61,12 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     label: 'Mannequin',
     limb: 1, joint: 0.55, taper: 1, capped: false,
     roughness: 0.75, metalness: 0, flat: false, unlit: false,
-    // 1.15 holds the head at the size it read at before the skeleton's own
-    // head shrank — this look was never the one with the problem
-    emphasis: { head: 1.15 },
+    // The beads are drawn at 0.55 of the joint radius, so a head at 1.15
+    // came out SMALLER than the neck tube holding it up — 0.042 against
+    // 0.050. 1.85 lands the drawn head at 1/7.3 of height, which is the
+    // canonical figure, and back in proportion with the other looks
+    // (WOOD 0.86*1.05, CLAY 1.05*1.6).
+    emphasis: { head: 1.85 },
     limbEmphasis: {},
     headOvoid: 1,
     color: [0.72, 0.74, 0.80],
@@ -79,7 +82,9 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     emphasis: { head: 1.05, hips: 1.15, chest: 1.1, hand: 0.85, foot: 0.9 },
     // the neck is a slim PEG between the shoulder line and the head, which
     // is the join a lay figure shows off rather than hides
-    limbEmphasis: { neck: 0.55, head: 0.62 },
+    // was 0.55/0.62 against the old fat base — same drawn thickness, now
+    // expressed as "a little slimmer than standard" rather than "a third"
+    limbEmphasis: { neck: 0.85, head: 1.0 },
     headOvoid: 1.32,
     color: [0.78, 0.58, 0.34],
     hint: 'artist’s lay figure — turned limbs, proud ball joints, warm wood',
@@ -93,7 +98,9 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     // 1.75 keeps this figure EXACTLY the size it was before the skeleton's
     // head shrank; it was the one look that already read correctly
     emphasis: { head: 1.75, hand: 0.7, foot: 0.7 },
-    limbEmphasis: {},
+    // a stick figure's neck should match its other strokes, and the thinner
+    // base would otherwise make it the one line that vanishes
+    limbEmphasis: { neck: 1.6, head: 1.65 },
     headOvoid: 1,
     color: [0.93, 0.93, 0.96],
     hint: 'stylised stick figure — thin lines, one flat tone, no lighting',
@@ -109,7 +116,7 @@ export const ACTOR_LOOKS: Record<ActorLook, LookSpec> = {
     limb: 1.12, joint: 1.05, taper: 0.9, capped: true,
     roughness: 0.95, metalness: 0, flat: false, unlit: false,
     emphasis: { head: 1.6, hand: 1.55, foot: 1.35, hips: 1.15, chest: 1.1 },
-    limbEmphasis: { spine: 1.25, chest: 1.25, neck: 0.5, head: 0.5, hand: 1.2, foot: 1.2 },
+    limbEmphasis: { spine: 1.25, chest: 1.25, neck: 0.8, head: 0.85, hand: 1.2, foot: 1.2 },
     headOvoid: 1.1,
     color: [0.91, 0.70, 0.58],
     hint: 'stop-motion chunk — big head and hands, stocky torso, matte clay',

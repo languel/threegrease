@@ -109,6 +109,22 @@ export function deserializeScene(json: string): GPScene {
     a.layers ??= defaultLayers();
     a.steer ??= defaultSteer();
     a.physics.hinges ??= true;
+    // The neck bones shipped as wide as the head itself (0.045 and 0.050
+    // against a head radius of 0.067), which drew a funnel with a ball on
+    // top. Bone radii are display-only and baked into each actor when it is
+    // created, so a saved figure would keep the funnel forever. Rewrite the
+    // two — and ONLY when they still hold the old default for this actor's
+    // own height, so a deliberately fat neck survives.
+    const headJoint = a.joints.find((j) => j.name === 'head');
+    const h = headJoint ? headJoint.radius / 0.067 : 0;
+    if (h > 0) {
+      for (const [name, was, now] of [
+        ['chest→neck', 0.045, 0.028], ['neck→head', 0.050, 0.030],
+      ] as [string, number, number][]) {
+        const bone = a.bones.find((b) => b.name === name);
+        if (bone && Math.abs(bone.radius - was * h) < 1e-4 * h) bone.radius = now * h;
+      }
+    }
     // A limit with no pole predates hinges — and those limits also named
     // the wrong bones (they constrained the hip and the shoulder, never the
     // knee or the elbow), so they are rebuilt rather than patched.

@@ -403,6 +403,21 @@ the browser console or automated evals:
     To limit a knee you name the bone BELOW it: `(ankle, knee)`. Limits are
     rebuilt from joint names by `rebuildLimbLimits` rather than hand-listed,
     and serialize.ts rebuilds any actor whose limits predate poles.
+- **A neck is not a column, and a look's multipliers can hide a bad base.**
+  The neck bones shipped at 0.045 and 0.050 against a head of radius 0.067,
+  so the tube holding the head up was as WIDE as the head and the collar
+  nearly twice it — a funnel with a ball on top, and every head turn swept a
+  cone. It survived because three of the four looks divided it back down in
+  their own `limbEmphasis` (WOOD 0.55/0.62, CLAY 0.5/0.5, MINIMAL through a
+  0.3 global limb); DEFAULT was the only one that did not, so the mannequin
+  wore the fault alone. Fixed at the base (0.028/0.030) with the other looks
+  rebalanced to land within a few percent of where they were. The same
+  arithmetic explains why DEFAULT's head looked small: beads are drawn at
+  `joint * emphasis * spec.joint`, and 0.55 of the joint radius at 1.15
+  emphasis came out at 0.042 — SMALLER than the 0.050 tube beneath it.
+  Bone radii are display-only but are BAKED into an actor when it is created,
+  so serialize.ts rewrites the two, and only when they still hold the old
+  default for that actor's own height (a deliberately fat neck survives).
 - **A leaf bone needs its DIRECTION held, and `tone` fights it.** Nothing
   below a foot or a hand pulls it into shape, and tone pulls a joint toward
   its fixed rest POSITION — so swinging the ankle 0.4 m forward drags the
