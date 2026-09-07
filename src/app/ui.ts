@@ -1,7 +1,7 @@
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
-import type { MaterialBlend, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
+import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
@@ -63,6 +63,7 @@ import { autoRig } from '../actor/rig';
 import { MASK_LABELS, SOURCE_LABELS, nextLayerId } from '../actor/mixer';
 import { MOVE_ACTIONS, runMoveAction } from '../actor/commands';
 import { nextMacroId } from '../actor/macros';
+import { poseSegments } from '../actor/poses';
 import { engineOf, resetPhysics } from '../actor/physics';
 import { defaultBody, propRadius } from '../actor/props';
 import { ACTOR_LOOKS, LOOK_OPTIONS } from '../render/actorlooks';
@@ -76,6 +77,10 @@ export interface AppHandle {
   scaleSceneToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string };
   addActor(at?: [number, number, number]): void;
   resetActor(id: number): void;
+  setActorStance(id: number, kind: 'REST' | 'T' | 'A'): void;
+  savePoseSlot(id: number, poseId?: number): void;
+  applyPoseSlot(id: number, poseId: number): void;
+  deletePoseSlot(poseId: number): void;
   setStreamDriver(streamId: number, source: { kind: 'ACTOR'; actorId: number } | { kind: 'OBJECT'; ref: ObjRef }, cameraIndex: number): void;
   clearStreamDriver(streamId: number): void;
   streamDriver(streamId: number): { source: { kind: 'ACTOR'; actorId: number } | { kind: 'OBJECT'; ref: ObjRef }; cameraIndex: number } | null;
@@ -524,6 +529,29 @@ function panelCollapsed(): Record<string, boolean> {
  *  sitting in the body as a permanently-visible row. */
 interface PanelHint { __panelHint: string }
 function panelHint(text: string): PanelHint { return { __panelHint: text }; }
+
+/** One pose thumbnail, in normalised 0..1 coordinates. */
+function poseThumb(
+  lines: [number, number, number, number][], dots: [number, number][],
+): SVGSVGElement {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 1 1');
+  svg.setAttribute('class', 'pose-thumb');
+  for (const [x1, y1, x2, y2] of lines) {
+    const l = document.createElementNS(NS, 'line');
+    l.setAttribute('x1', String(x1)); l.setAttribute('y1', String(y1));
+    l.setAttribute('x2', String(x2)); l.setAttribute('y2', String(y2));
+    svg.append(l);
+  }
+  for (const [cx, cy] of dots) {
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', String(cx)); c.setAttribute('cy', String(cy));
+    c.setAttribute('r', '0.045');
+    svg.append(c);
+  }
+  return svg;
+}
 
 /** Hang an explanation off a control instead of printing it underneath.
  *  A sentence of prose in a panel is read once and then read again every
@@ -2131,8 +2159,17 @@ export class UI {
 
       el('div', { class: 'menu-header', text: 'Pose' }),
       fieldRow('', el('div', { class: 'row' },
+        btn('Stance', () => this.app.setActorStance(actor.id, 'REST'),
+          { title: 'the natural stance the skeleton is authored in' }),
+        btn('T-pose', () => this.app.setActorStance(actor.id, 'T'),
+          { title: 'arms straight out — the reference pose most rigs are built against' }),
+        btn('A-pose', () => this.app.setActorStance(actor.id, 'A'),
+          { title: 'arms at 45 degrees — kinder to the shoulder than a T' }),
+      ), { full: true }),
+      this.poseLibrary(actor),
+      fieldRow('', el('div', { class: 'row' },
         btn('Reset pose', () => this.app.resetActor(actor.id),
-          { title: 'Back to the T-pose, and clear the simulation velocity' }),
+          { title: 'Back to the rest stance, and clear the simulation velocity' }),
         btn(actor.joints.some((j) => j.pin) ? 'Unpin all' : 'Pin all', () => {
           ctx.pushUndo();
           const anyPinned = actor.joints.some((j) => j.pin);
@@ -3218,6 +3255,55 @@ export class UI {
       ),
     );
     return rows;
+  }
+
+  /**
+   * The pose library: little skeletons you can click.
+   *
+   * A thumbnail is drawn FROM THE POSE — projected front-on through the
+   * actor's own bones — rather than captured as an image. A picture would
+   * be a second copy of the truth that goes stale the moment the skeleton
+   * changes, and it would have to live in the saved file; a hundred bytes of
+   * joint positions draw themselves.
+   */
+  private poseLibrary(actor: TGActor): HTMLElement {
+    const { ctx } = this.app;
+    const upZ = ctx.settings.upAxis === 'Z';
+    const poses = ctx.scene.poses ?? [];
+    const slots: Node[] = [];
+
+    for (const pose of poses) {
+      const { lines, dots } = poseSegments(pose, actor, upZ);
+      const svg = poseThumb(lines, dots);
+      const cell = el('div', { class: 'pose-slot', title: `${pose.name} — click to apply, Shift-click to overwrite` }, svg,
+        el('span', { class: 'pose-slot-name', text: pose.name }));
+      cell.onclick = (e) => {
+        if ((e as MouseEvent).shiftKey) this.app.savePoseSlot(actor.id, pose.id);
+        else this.app.applyPoseSlot(actor.id, pose.id);
+      };
+      cell.oncontextmenu = (e) => {
+        e.preventDefault();
+        this.app.deletePoseSlot(pose.id);
+      };
+      slots.push(cell);
+    }
+
+    // Always one empty slot on the end: the gesture is "shift-click an empty
+    // slot to put this pose in it", so there has to be one to click.
+    const empty = el('div', {
+      class: 'pose-slot empty',
+      title: 'Shift-click to store the current pose here',
+    }, el('span', { class: 'pose-slot-plus', text: '+' }));
+    empty.onclick = (e) => {
+      if (!(e as MouseEvent).shiftKey) {
+        this.app.ctx.setStatus('Shift-click an empty slot to store the pose');
+        return;
+      }
+      this.app.savePoseSlot(actor.id);
+    };
+    slots.push(empty);
+
+    return fieldRow('', el('div', { class: 'pose-grid' }, ...slots), { full: true });
   }
 
   /** Blender-style brush Advanced panel; edits are baked into future strokes only. */

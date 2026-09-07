@@ -117,6 +117,10 @@ import { actorMixer } from '../actor/mixer';
 import { steerEngine } from '../actor/steering';
 import { behaviourEngine } from '../actor/behaviour';
 import { actorState } from '../actor/state';
+import {
+  aPosePositions, applyPose, capturePose, holdFrom, pushHeldPoses, restPositions,
+  tPosePositions,
+} from '../actor/poses';
 import { actorLog } from './actorlog';
 import { retargetGltfClip } from '../actor/gltfclip';
 import {
@@ -3023,9 +3027,72 @@ class App implements AppHandle {
     if (!actor) return;
     this.ctx.pushUndo();
     resetPose(actor);
+    delete actor.hold;
     actorSolver.reset(id);
     actorRig.reset(id);
     this.ctx.requestRender();
+    this.ui.refresh();
+  }
+
+  /**
+   * Stand an actor in one of the reference poses.
+   *
+   * The solver is reset with it: a pose is a statement about where the body
+   * IS, and leaving last frame's velocity in place makes it sag out of the
+   * pose over the following second — which reads as the pose not having
+   * been applied at all.
+   */
+  setActorStance(id: number, kind: 'REST' | 'T' | 'A'): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === id);
+    if (!actor) return;
+    this.ctx.pushUndo();
+    const upZ = this.ctx.settings.upAxis === 'Z';
+    const positions = kind === 'REST' ? restPositions(actor)
+      : kind === 'T' ? tPosePositions(actor, upZ) : aPosePositions(actor, upZ);
+    actor.pose = positions;
+    // REST is where tone already pulls, so it needs no holding — and not
+    // holding it is what makes "Stance" the way OUT of a held pose.
+    if (kind === 'REST') delete actor.hold;
+    else actor.hold = holdFrom(actor, positions);
+    actorSolver.reset(id);
+    actorRig.reset(id);
+    this.ctx.requestRender();
+    this.ui.refresh();
+  }
+
+  /** Store the actor's current pose in the library (overwriting a slot). */
+  savePoseSlot(id: number, poseId?: number): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === id);
+    if (!actor) return;
+    const scene = this.ctx.scene;
+    scene.poses ??= [];
+    this.ctx.pushUndo();
+    const at = poseId !== undefined ? scene.poses.findIndex((p) => p.id === poseId) : -1;
+    const nextId = scene.poses.reduce((n, p) => Math.max(n, p.id), 0) + 1;
+    const made = capturePose(actor, at >= 0 ? scene.poses[at].id : nextId,
+      at >= 0 ? scene.poses[at].name : `Pose ${scene.poses.length + 1}`);
+    if (at >= 0) scene.poses[at] = made; else scene.poses.push(made);
+    this.ui.refresh();
+  }
+
+  applyPoseSlot(id: number, poseId: number): void {
+    const actor = this.ctx.scene.actors.find((a) => a.id === id);
+    const pose = this.ctx.scene.poses?.find((p) => p.id === poseId);
+    if (!actor || !pose) return;
+    this.ctx.pushUndo();
+    applyPose(actor, pose);
+    actor.hold = { ...pose.joints };
+    actorSolver.reset(id);
+    actorRig.reset(id);
+    this.ctx.requestRender();
+    this.ui.refresh();
+  }
+
+  deletePoseSlot(poseId: number): void {
+    const scene = this.ctx.scene;
+    if (!scene.poses?.some((p) => p.id === poseId)) return;
+    this.ctx.pushUndo();
+    scene.poses = scene.poses.filter((p) => p.id !== poseId);
     this.ui.refresh();
   }
 
@@ -3877,6 +3944,8 @@ class App implements AppHandle {
     // frame's motion. Imperceptible while walking, and the same deliberate
     // one-frame lag simstream already documents.
     gaitEngine.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
+    // a pose you put an actor in is held until something clears it
+    pushHeldPoses(ctx.scene);
     // The solver moves JOINTS, and no stroke geometry depends on a joint —
     // a GP object bound to one rides its group transform, which this loop
     // re-applies every frame anyway. Marking the whole GP scene dirty here

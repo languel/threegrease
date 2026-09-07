@@ -686,3 +686,32 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
   font-weight: 600;
   margin-right: 6px;
 }
+
+/* ---- pose library ---- */
+.pose-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: 6px; width: 100%;
+}
+.pose-slot {
+  position: relative; cursor: pointer; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--panel2);
+  padding: 3px 3px 12px; min-height: 48px;
+}
+.pose-slot:hover { border-color: var(--accent); }
+.pose-slot.empty {
+  display: flex; align-items: center; justify-content: center;
+  border-style: dashed; color: var(--dim); padding: 3px;
+}
+.pose-slot-plus { font-size: 16px; line-height: 1; }
+.pose-slot-name {
+  position: absolute; left: 0; right: 0; bottom: 1px;
+  font-size: 8px; text-align: center; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pose-thumb { display: block; width: 100%; height: 40px; }
+/* the figure is drawn from joint positions, so it inherits the panel's
+   colours rather than carrying any of its own */
+.pose-thumb line {
+  stroke: var(--text); stroke-width: 0.035; stroke-linecap: round; opacity: 0.85;
+}
+.pose-thumb circle { fill: var(--accent); }

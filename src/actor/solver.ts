@@ -290,6 +290,10 @@ export class ActorSolver {
       // puts it BEHIND the ankle: the foot points backwards. Track the rest
       // DIRECTION instead, which is what "a foot points forward" means.
       if (actor.physics.hinges !== false) {
+        // Which bone leads INTO each joint, so a leaf can be held relative
+        // to its parent limb rather than to the actor.
+        const into = new Map<number, typeof actor.bones[number]>();
+        for (const b of actor.bones) if ((b.trackRest ?? 0) <= 0) into.set(b.b, b);
         for (const bone of actor.bones) {
           const k = bone.trackRest ?? 0;
           if (k <= 0) continue;
@@ -302,6 +306,29 @@ export class ActorSolver {
           const restLen = dir.length();
           if (restLen < 1e-9) continue;
           dir.divideScalar(restLen);
+          // ROTATE that rest direction by wherever the parent limb has got
+          // to. Held in the ACTOR's frame instead, a hand goes on pointing
+          // at the floor while the arm swings out to a T — the wrist visibly
+          // breaks — and a foot points along the world while the shin
+          // swings. What "a hand continues the arm" means is a direction
+          // relative to the FOREARM, and the minimal rotation from the
+          // parent's rest direction to its current one is exactly that.
+          const parent = into.get(bone.a);
+          const ipa = parent ? idx.get(parent.a) : undefined;
+          const ipb = parent ? idx.get(parent.b) : undefined;
+          if (parent && ipa !== undefined && ipb !== undefined) {
+            const pra = actor.joints[ipa].rest; const prb = actor.joints[ipb].rest;
+            const restParent = new THREE.Vector3(
+              prb[0] - pra[0], prb[1] - pra[1], prb[2] - pra[2]);
+            const curParent = new THREE.Vector3(
+              pose[ipb][0] - pose[ipa][0],
+              pose[ipb][1] - pose[ipa][1],
+              pose[ipb][2] - pose[ipa][2]);
+            if (restParent.lengthSq() > 1e-12 && curParent.lengthSq() > 1e-12) {
+              dir.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(
+                restParent.normalize(), curParent.normalize()));
+            }
+          }
           const pa = pose[ia]; const pb = pose[ib];
           const cur = Math.hypot(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]) || restLen;
           pb[0] += (pa[0] + dir.x * cur - pb[0]) * k;
@@ -350,6 +377,13 @@ export class ActorSolver {
       for (let i = 0; i < actor.joints.length; i++) {
         const j = actor.joints[i];
         if (j.pin || j.mass <= 0) continue;
+        // A joint being HELD in a pose is already being told where to be,
+        // and tone is only there for the joints nobody is asking about.
+        // Applied to a held one it drags it along the chord toward its rest
+        // position, which shortens the limb rather than lowering it — a
+        // held T-pose measured 7% short in every arm bone for exactly this
+        // reason, at any target weight, because the pull came after.
+        if (actor.hold?.[j.name]) continue;
         const p = pose[i]; const r = j.rest;
         p[0] += (r[0] - p[0]) * tone;
         p[1] += (r[1] - p[1]) * tone;

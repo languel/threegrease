@@ -1018,6 +1018,17 @@ export interface TGActorSteer {
 }
 
 export interface TGActor {
+  /**
+   * A pose the actor is being HELD in, by joint name (actor-local).
+   *
+   * Applying a pose cannot just write `pose`: `physics.tone` pulls every
+   * joint toward its REST position, so a T-pose written once sags back to
+   * the stance within half a second (measured: 90 degrees to 4 in half a
+   * second). A hold pushes solver targets every frame instead — the same
+   * door capture, the pose tool and MIDI go through — so it is weighed
+   * against everything else by the mixer rather than fighting it.
+   */
+  hold?: Record<string, Vec3>;
   id: number;
   name: string;
   joints: TGJoint[];
@@ -1195,6 +1206,19 @@ export interface TGWorld {
   lighting: boolean;
 }
 
+/**
+ * A saved pose: joint POSITIONS by name, divided by the actor's own scale.
+ *
+ * Scale-free so a pose taken from a tall figure lands on a short one, and
+ * keyed by NAME rather than index so it survives a skeleton that gains or
+ * loses joints. Scene data, so poses save, load and undo with the document.
+ */
+export interface TGPose {
+  id: number;
+  name: string;
+  joints: Record<string, Vec3>;
+}
+
 export interface GPScene {
   /**
    * Which physics backend runs the props.
@@ -1206,6 +1230,8 @@ export interface GPScene {
    * because a scene staged in one does not behave the same in the other.
    */
   physicsEngine?: 'SIMPLE' | 'RAPIER';
+  /** the pose library — shared by every actor in the scene */
+  poses?: TGPose[];
   objects: GPObject[];
   activeObject: number;
   frame: number;

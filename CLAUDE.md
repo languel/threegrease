@@ -418,13 +418,31 @@ the browser console or automated evals:
   Bone radii are display-only but are BAKED into an actor when it is created,
   so serialize.ts rewrites the two, and only when they still hold the old
   default for that actor's own height (a deliberately fat neck survives).
+- **A pose has to be HELD, not written.** `physics.tone` pulls every joint
+  toward its REST position, so writing a T-pose and walking away gives you a
+  stance again within half a second (measured: 90 degrees to 4). `TGActor.hold`
+  is a pose by joint name that `pushHeldPoses` feeds to the solver as TARGETS
+  every frame — the same door capture, the pose tool and MIDI use — so a held
+  pose is weighed against the gait rather than fighting it, and a mixer mask
+  can hold the arms while the legs walk. Two traps: `applyTargets` CLAMPS the
+  weight to 1 and treats 1 as a hard pin, so a "stronger" weight above 1 is
+  arithmetic that never happens; and tone must be SKIPPED for held joints,
+  because pulling a held joint along the chord toward its rest position
+  shortens the limb rather than lowering it — every arm bone measured 7%
+  short at any weight until tone stood down. With both right, T lands at 90
+  and A at 45 with bone lengths within 0.1%.
 - **A leaf bone needs its DIRECTION held, and `tone` fights it.** Nothing
   below a foot or a hand pulls it into shape, and tone pulls a joint toward
   its fixed rest POSITION — so swinging the ankle 0.4 m forward drags the
   foot back toward where it stands at rest, which puts it BEHIND the ankle.
   A foot pointing backwards on a third of the frames is the visible result.
-  `TGBone.trackRest` (0..1) holds the bone's rest direction in the actor's
-  own frame instead, which is what "a foot points forward" actually means.
+  `TGBone.trackRest` (0..1) holds the bone's rest direction, ROTATED by
+  wherever the parent limb has got to — the minimal rotation from the parent
+  bone's rest direction to its current one. Held in the actor's own frame
+  instead (as it was first written), a hand goes on pointing at the floor
+  while the arm swings out to a T, so the wrist visibly breaks, and the same
+  pull dragged a held pose 15% short of the angle asked for. "A hand
+  continues the arm" is a direction relative to the FOREARM.
   `physics.hinges = false` turns off both this and the poles, restoring the
   free-bending version deliberately — it looks good on anything that isn't
   a person.
