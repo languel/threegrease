@@ -76,6 +76,8 @@ export class Navigation {
   private pitch = 0;
   private flyStart = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
   private flyStopping = false; // deliberate exit in progress (Enter/click)
+  /** whether this flight actually holds the pointer lock — see startFly */
+  private lockHeld = false;
   onFlyChange: ((flying: boolean) => void) | null = null;
   /** One-line status messages (fly speed, a refused pointer lock). */
   onNotice: ((text: string) => void) | null = null;
@@ -101,11 +103,13 @@ export class Navigation {
     this.ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -500, 500);
 
     document.addEventListener('pointerlockchange', () => {
-      // Esc is swallowed by pointer lock: losing the lock without a
-      // deliberate stopFly() means the user cancelled -> teleport back
-      if (document.pointerLockElement !== this.canvas && this.flying && !this.flyStopping) {
-        this.stopFly(false);
-      }
+      if (document.pointerLockElement === this.canvas) { this.lockHeld = true; return; }
+      // Esc is swallowed by pointer lock: losing a lock we actually HELD,
+      // without a deliberate stopFly(), means the user cancelled -> teleport
+      // back. A flight that never got a lock has nothing to lose here, and
+      // must not be cancelled by someone else's lock ending.
+      if (this.flying && this.lockHeld && !this.flyStopping) this.stopFly(false);
+      this.lockHeld = false;
     });
     // A REFUSED lock fires this and NOT pointerlockchange, so without it
     // nothing ever learns the request failed — see `startFly`.
@@ -117,10 +121,7 @@ export class Navigation {
     // or — worse, because it looks like nothing rather than like a bug —
     // a stuck W silently cancels every S you press and movement reads as
     // dead. The key set is not state worth preserving across a blur.
-    window.addEventListener('blur', () => {
-      this.flyKeys.clear();
-      if (this.flying && document.pointerLockElement !== this.canvas) this.stopFly(true);
-    });
+    window.addEventListener('blur', () => { this.flyKeys.clear(); });
     document.addEventListener('mousemove', (e) => {
       if (!this.flying) return;
       this.yaw -= e.movementX * 0.0022;
@@ -295,8 +296,8 @@ export class Navigation {
    * the session, since nothing else ever writes it. Stop, and say so.
    */
   private lockRefused(): void {
-    this.stopFly(true);   // nothing has moved yet, so accept == cancel
-    this.onNotice?.('Fly mode needs pointer lock — click the viewport and try again');
+    this.lockHeld = false;
+    this.onNotice?.('Flying without pointer lock — the cursor stays visible · Enter accepts, Esc cancels');
   }
 
   startFly(): void {
@@ -315,9 +316,14 @@ export class Navigation {
     this.controls.enabled = false;
     // requestPointerLock CAN FAIL, and the failure is silent: Chrome refuses
     // when the document is not focused and enforces a cooldown after an
-    // Esc-driven exit ("requested too soon after exiting"). It returns a
-    // promise in current browsers and undefined in older ones, so both paths
-    // are handled — and `pointerlockerror` covers the rest.
+    // Esc-driven exit ("requested too soon after exiting"), and an embedded
+    // or previewing browser may not offer it at all. That is worth KNOWING
+    // about — it is why the cursor can wander off mid-flight — but it is not
+    // worth refusing to fly over: mouse-look reads `movementX/Y`, which a
+    // free cursor still reports, so the mode degrades rather than breaking.
+    // It returns a promise in current browsers and undefined in older ones,
+    // so both paths are handled, and `pointerlockerror` covers the rest.
+    this.lockHeld = false;
     const req = this.canvas.requestPointerLock() as unknown as Promise<void> | undefined;
     req?.catch?.(() => { if (this.flying) this.lockRefused(); });
     this.onFlyChange?.(true);
