@@ -193,15 +193,18 @@ void main() {
  *    gizmo's drag plane — whose materials are simply `visible: false`.
  *
  * Object visibility is checked by the renderer BEFORE the override is
- * consulted, so `visible` is the one lever that still works here. Outline
- * shells go too, on the principle that an overlay on the drawing is not part
- * of the drawn world.
+ * consulted, so `visible` is the one lever that still works here. EDITOR
+ * FURNITURE goes too, marked `userData.overlay`: the transform gizmo, the
+ * plane helper, the camera frusta. None of them is part of the world being
+ * drawn, and the gizmo in particular carries a 90,000-unit invisible drag
+ * plane whose only possible contribution to a line drawing is a wrong one.
+ * Outline shells go on the same principle.
  */
 function hideNonDrawing(root: THREE.Object3D): THREE.Object3D[] {
   const hidden: THREE.Object3D[] = [];
   root.traverse((o) => {
     if (!o.visible) return;
-    if (o.userData.hoverShell) { o.visible = false; hidden.push(o); return; }
+    if (o.userData.hoverShell || o.userData.overlay) { o.visible = false; hidden.push(o); return; }
     const mat = (o as THREE.Mesh).material;
     if (!mat) return;
     const list = Array.isArray(mat) ? mat : [mat];
@@ -317,6 +320,11 @@ export class ScenePost {
 
   /** Where the frame should be drawn when post is on. */
   get target(): THREE.WebGLRenderTarget { return this.rt; }
+
+  /** The edge prepass buffer — normals in rgb, view depth in alpha. Exposed
+   *  for `App.whatIsHere`, which is how a viewport artefact gets diagnosed
+   *  rather than guessed at. */
+  get normalTarget(): THREE.WebGLRenderTarget { return this.rtNormal; }
 
   private draw(
     renderer: THREE.WebGLRenderer, mat: THREE.ShaderMaterial,

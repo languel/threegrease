@@ -158,6 +158,7 @@ import {
   allRefs, applyObjectTransform, getParent, gpIndexOf, listSelected, parentWorldMatrixOf, selectionPivot,
   setObjectSelected, setObjectTransform, setParentKeepWorld, worldMatrixOf,
   type ObjRef, type ObjTransform,
+  refOfObject3D, objectName,
 } from '../tools/objects';
 import { UI, type AppHandle } from './ui';
 import type { Tool } from '../tools/toolsys';
@@ -404,13 +405,16 @@ class App implements AppHandle {
     this.scene3.add(this.grid);
     this.applyThemeColors();
     this.camHelper = new THREE.Group();
+    markOverlay(this.camHelper);
     this.scene3.add(this.camHelper);
     this.scene3.add(this.gp.root);
     this.cursorMarker = this.makeCursorMarker();
     this.scene3.add(this.cursorMarker);
     this.planeHelper = this.makePlaneHelper();
+    markOverlay(this.planeHelper);
     this.scene3.add(this.planeHelper);
     this.depthHelper = this.makeDepthHelper();
+    markOverlay(this.depthHelper);
     this.scene3.add(this.depthHelper);
     this.scene3.add(this.selGlyphs);
     // a ground plane for SURFACE placement demos
@@ -448,7 +452,12 @@ class App implements AppHandle {
     this.scene3.add(this.widgetProxy);
     this.widget = new TransformControls(this.camera, glCanvas);
     this.widget.setSize(0.8);
-    this.scene3.add(this.widget.getHelper());
+    const widgetHelper = this.widget.getHelper();
+    // editor furniture, not the world: the scene look's edge prepass must
+    // not ink it, and the gizmo hides a 90,000-unit invisible drag plane
+    // whose only possible contribution to a line drawing is a wrong one
+    markOverlay(widgetHelper);
+    this.scene3.add(widgetHelper);
     this.widget.addEventListener('dragging-changed', (e) => {
       this.controls.enabled = !(e as unknown as { value: boolean }).value;
       if ((e as unknown as { value: boolean }).value) this.beginWidgetDrag();
@@ -1529,6 +1538,7 @@ class App implements AppHandle {
     pts.push(new THREE.Vector3(w * 0.5, h, -d), new THREE.Vector3(0, h + 0.14, -d));
     pts.push(new THREE.Vector3(0, h + 0.14, -d), new THREE.Vector3(-w * 0.5, h, -d));
     g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    markOverlay(g);
     return g;
   }
 
@@ -4160,6 +4170,94 @@ class App implements AppHandle {
     g.globalAlpha = 1;
   }
 
+  /**
+   * "What is at this pixel, and would the ordinary render have drawn it?"
+   *
+   * A viewport artefact is nearly always one of two things: geometry you did
+   * not know was there, or something drawn into the EDGE PREPASS that the
+   * colour pass never draws — `scene.overrideMaterial` replaces a material
+   * outright, so any object whose appearance depends on its own material
+   * flags or its own vertex shader comes back to life for that one pass (see
+   * `hideNonDrawing`). Both look identical on screen and neither can be
+   * reasoned about from a screenshot, so this reports the facts: the depth
+   * and normal the edge pass believes, and every object along the ray with
+   * the material flags that decide whether it is really visible.
+   *
+   * Call it from the console with the artefact under the pointer:
+   * `__tg.whatIsHere()`. Coordinates are optional (client px).
+   */
+  whatIsHere(clientX?: number, clientY?: number): unknown {
+    const rect = this.ctx.canvas.getBoundingClientRect();
+    const last = (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer;
+    const x = clientX !== undefined ? clientX - rect.left : last?.x ?? rect.width / 2;
+    const y = clientY !== undefined ? clientY - rect.top : last?.y ?? rect.height / 2;
+    const ndc = new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
+
+    // what the edge prepass sees here: rgb = view normal, a = view depth
+    let prepass: { depth: number; normal: number[] } | null = null;
+    try {
+      const rt = this.post.normalTarget;
+      const px = Math.round(((ndc.x + 1) / 2) * rt.width);
+      const py = Math.round(((ndc.y + 1) / 2) * rt.height);
+      const buf = new Float32Array(4);
+      this.glRenderer.readRenderTargetPixels(rt, px, py, 1, 1, buf);
+      prepass = {
+        depth: +buf[3].toFixed(4),
+        normal: [buf[0] * 2 - 1, buf[1] * 2 - 1, buf[2] * 2 - 1].map((v) => +v.toFixed(3)),
+      };
+    } catch { /* no prepass this frame (edges off) */ }
+
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, this.ctx.camera);
+    const view = this.ctx.camera.getWorldDirection(new THREE.Vector3());
+    const along = ray.ray.direction.dot(view);
+    const hits = ray.intersectObjects(this.scene3.children, true).slice(0, 10).map((h) => {
+      const raw = (h.object as THREE.Mesh).material;
+      const mats = Array.isArray(raw) ? raw : [raw];
+      const m = mats[0] as THREE.Material | undefined;
+      const ref = refOfObject3D(h.object);
+      const drawn = !!m && m.visible !== false && m.colorWrite !== false
+        && !(m.depthWrite === false && m.transparent);
+      // exactly what `hideNonDrawing` stands down for the edge prepass, so
+      // the report only cries phantom about something that really is one
+      let overlay = false;
+      for (let n: THREE.Object3D | null = h.object; n; n = n.parent) {
+        if (n.userData.overlay || n.userData.hoverShell) { overlay = true; break; }
+      }
+      return {
+        object: ref ? `${ref.kind} ${objectName(this.ctx.scene, ref)}` : (h.object.name || h.object.type),
+        type: h.object.type,
+        viewDepth: +(h.distance * along).toFixed(4),
+        material: m?.type,
+        // the flags that decide whether the colour pass draws it at all —
+        // the prepass ignores every one of them
+        visible: m?.visible, colorWrite: m?.colorWrite, transparent: m?.transparent,
+        depthWrite: m?.depthWrite, opacity: m?.opacity,
+        inColourPass: drawn,
+        inEdgePass: !(overlay || !drawn),
+        // THE line worth reading. `prepass.depth` is what the edge pass
+        // actually believes is nearest at this pixel, so the object sitting
+        // at that exact depth is the one drawing the lines here — and if the
+        // colour pass would not draw that object, it is the phantom. No
+        // material flag can decide this on its own: a mesh whose shape comes
+        // out of its own vertex shader, or one masked by a stencil, passes
+        // every flag and still draws something else entirely under an
+        // override material.
+        isEdgeSurface: prepass !== null && Math.abs(h.distance * along - prepass.depth) < 0.02,
+      };
+    });
+    const phantoms = hits.filter((h) => h.isEdgeSurface && !h.inColourPass);
+    return {
+      pixel: { x: Math.round(x), y: Math.round(y) },
+      prepass,
+      // an empty list with a prepass depth that matches nothing in `hits` is
+      // itself the answer: whatever is drawing there is not raycastable
+      // (points, lines, or geometry built in a shader)
+      phantoms,
+      hits,
+    };
+  }
+
   private drawHud(): void {
     const g = this.hud.getContext('2d')!;
     g.clearRect(0, 0, this.hud.width, this.hud.height);
@@ -4304,6 +4402,13 @@ class App implements AppHandle {
       ? 'LMB/Enter confirm · RMB/Esc cancel · X/Y/Z axis (Shift+axis = plane, again clears) · G/R/S switch · RR trackball · type a number for exact · Shift precision · Ctrl inverts snap'
       : `${s.mode} — ${s.activeTool} · frame ${this.ctx.scene.frame} · ${hints[s.mode]}`;
   }
+}
+
+/** Mark a subtree as EDITOR FURNITURE — gizmos, helpers, frusta. The scene
+ *  look's edge prepass skips these (see `hideNonDrawing`), because a line
+ *  drawing of the scene should not contain a drawing of the tools. */
+function markOverlay(root: THREE.Object3D): void {
+  root.traverse((o) => { o.userData.overlay = true; });
 }
 
 new App();

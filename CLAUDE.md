@@ -344,6 +344,22 @@ the browser console or automated evals:
     the only lever that still works there. Measured on the demo scene: the
     prepass read a flat 14.1 m across the middle of the floor and jittered
     frame to frame, against a smooth 21.2 -> 23.4 with the cull in place.
+    EDITOR FURNITURE is excluded from the pass by `userData.overlay`
+    (`markOverlay` in main.ts: the transform gizmo, the plane and depth
+    helpers, the camera frusta) — a line drawing of the scene should not
+    contain a drawing of the tools, and the gizmo alone carries a
+    90,000-unit invisible drag plane.
+  - **`__tg.whatIsHere()` is how a viewport artefact gets diagnosed** rather
+    than guessed at. With the artefact under the pointer it reports the edge
+    prepass's own depth and normal at that pixel, then every object along the
+    ray with the material flags that decide visibility, and marks the one
+    sitting at exactly the prepass depth (`isEdgeSurface`). The object that
+    IS the edge surface but is not `inColourPass` is the phantom, named. No
+    flag can decide this alone — a mesh whose shape comes out of its own
+    vertex shader, or one masked by a stencil, passes every check and still
+    draws something else entirely under an override material. A prepass depth
+    that matches NO hit is itself the answer: whatever draws there is not
+    raycastable (points, lines, or shader-built geometry).
   - DEPTH PRECISION is the trap. The prepass stores view depth in the alpha
     channel, and a HALF float carries about three decimal digits — across a
     20 m room that quantises depth to centimetres, and the edge pass reads
