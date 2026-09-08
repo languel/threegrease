@@ -350,6 +350,7 @@ class App implements AppHandle {
     // including the Esc path, which pointer lock swallows and nav detects
     // through pointerlockchange rather than a keydown.
     this.nav.onFlyChange = (flying) => { if (!flying) this.endPossess(); };
+    this.nav.onNotice = (text) => this.setStatusHint(text, 2500);
 
     const settings = defaultSettings();
     loadPrefs(settings);

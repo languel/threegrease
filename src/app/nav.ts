@@ -44,6 +44,13 @@ interface GizmoBall { x: number; y: number; z: number; view: ViewName; label: st
  * toggle, manual orbit/pan/dolly (drives Blender-style Alt+LMB emulation and
  * numpad 2/4/6/8), flythrough mode, and the corner axis gizmo.
  */
+/** Fly speed in metres per second, and the floor the wheel ratchet clamps
+ *  to. The floor is 3% of the default, which is slow enough to read as
+ *  "movement is broken" — so `onNotice` says the number out loud whenever
+ *  the wheel changes it. */
+const DEFAULT_FLY_SPEED = 3;
+const FLY_SPEED_MIN = 0.1;
+
 export class Navigation {
   readonly persp: THREE.PerspectiveCamera;
   readonly ortho: THREE.OrthographicCamera;
@@ -64,12 +71,14 @@ export class Navigation {
   // fly mode
   flying = false;
   private flyKeys = new Set<string>();
-  private flySpeed = 3;
+  private flySpeed = DEFAULT_FLY_SPEED;
   private yaw = 0;
   private pitch = 0;
   private flyStart = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
   private flyStopping = false; // deliberate exit in progress (Enter/click)
   onFlyChange: ((flying: boolean) => void) | null = null;
+  /** One-line status messages (fly speed, a refused pointer lock). */
+  onNotice: ((text: string) => void) | null = null;
   /**
    * Possession hook. Fly mode already owns the hard parts of a first-person
    * rig — pointer lock, mouse-look in the up-frame, WASD key state, and the
@@ -98,6 +107,20 @@ export class Navigation {
         this.stopFly(false);
       }
     });
+    // A REFUSED lock fires this and NOT pointerlockchange, so without it
+    // nothing ever learns the request failed — see `startFly`.
+    document.addEventListener('pointerlockerror', () => {
+      if (this.flying) this.lockRefused();
+    });
+    // A window that is not focused never delivers KEYUP, so a key held as
+    // the mouse leaves stays held forever: the camera flies off on its own,
+    // or — worse, because it looks like nothing rather than like a bug —
+    // a stuck W silently cancels every S you press and movement reads as
+    // dead. The key set is not state worth preserving across a blur.
+    window.addEventListener('blur', () => {
+      this.flyKeys.clear();
+      if (this.flying && document.pointerLockElement !== this.canvas) this.stopFly(true);
+    });
     document.addEventListener('mousemove', (e) => {
       if (!this.flying) return;
       this.yaw -= e.movementX * 0.0022;
@@ -107,7 +130,14 @@ export class Navigation {
     canvas.addEventListener('wheel', (e) => {
       if (this.flying) {
         this.flySpeed *= e.deltaY > 0 ? 0.85 : 1.18;
-        this.flySpeed = Math.max(0.1, Math.min(50, this.flySpeed));
+        this.flySpeed = Math.max(FLY_SPEED_MIN, Math.min(50, this.flySpeed));
+        // SAY IT. This is a persistent scalar with no other display, and one
+        // trackpad flick moves it 25 ticks — from 3 m/s to the floor, 3% of
+        // normal, where it stays for the rest of the session. An invisible
+        // number that a stray gesture can ratchet is a number that will one
+        // day read as "the app broke".
+        this.onNotice?.(`Fly speed ${this.flySpeed.toFixed(2)} m/s`
+          + (this.flySpeed <= FLY_SPEED_MIN ? ' (slowest — scroll up to speed up)' : ''));
         e.preventDefault();
       }
     }, { passive: false });
@@ -254,6 +284,21 @@ export class Navigation {
 
   // -------------------------------------------------------------- fly mode
 
+  /**
+   * The lock was asked for and refused.
+   *
+   * Fly mode without pointer lock is the worst of both worlds and was the
+   * cause of a real bug: the app believes it is flying, so `mousemove`
+   * spins the view from a mouse that is free to wander off the window, and
+   * every scroll is eaten by the fly-speed ratchet instead of zooming —
+   * which drags `flySpeed` to its floor and leaves it there for the rest of
+   * the session, since nothing else ever writes it. Stop, and say so.
+   */
+  private lockRefused(): void {
+    this.stopFly(true);   // nothing has moved yet, so accept == cancel
+    this.onNotice?.('Fly mode needs pointer lock — click the viewport and try again');
+  }
+
   startFly(): void {
     if (this.flying) return;
     if (this.isOrtho) this.toggleOrtho();
@@ -268,7 +313,13 @@ export class Navigation {
     this.pitch = euler.x;
     this.flyKeys.clear();
     this.controls.enabled = false;
-    this.canvas.requestPointerLock();
+    // requestPointerLock CAN FAIL, and the failure is silent: Chrome refuses
+    // when the document is not focused and enforces a cooldown after an
+    // Esc-driven exit ("requested too soon after exiting"). It returns a
+    // promise in current browsers and undefined in older ones, so both paths
+    // are handled — and `pointerlockerror` covers the rest.
+    const req = this.canvas.requestPointerLock() as unknown as Promise<void> | undefined;
+    req?.catch?.(() => { if (this.flying) this.lockRefused(); });
     this.onFlyChange?.(true);
   }
 
