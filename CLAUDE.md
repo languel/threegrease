@@ -188,25 +188,37 @@ the browser console or automated evals:
   **`requestPointerLock()` CAN FAIL, and it fails SILENTLY.** Chrome refuses
   it when the document is not focused and enforces a cooldown after an
   Esc-driven exit ("requested too soon after exiting"); a refusal fires
-  `pointerlockerror` and NOT `pointerlockchange`, so the handler that ends
-  fly mode never runs. What you get is fly mode WITHOUT the lock, which is
-  the worst of both worlds and reads as a completely different bug: the
-  mouse is free to wander off the window (the giveaway — a locked pointer
-  cannot), `mousemove` still spins the view from it, and every scroll is
-  eaten by the fly-speed ratchet instead of zooming. `flySpeed` is a
+  `pointerlockerror` and NOT `pointerlockchange`, so nothing downstream ever
+  learns. What you get is fly mode WITHOUT the lock, which reads as a
+  completely different bug: the mouse is free to wander off the window (the
+  giveaway — a locked pointer cannot), and every scroll is eaten by the
+  fly-speed ratchet instead of zooming. `flySpeed` is a
   PERSISTENT scalar with no other display and nothing else that writes it,
   so one trackpad flick (25 ticks, x0.85 each) takes it from 3 m/s to its
   0.1 floor — 3% of normal — and leaves it there for the rest of the
   session. The symptom is "WASD suddenly barely moves and only a reload
-  fixes it". So: the lock request is checked (promise rejection AND
-  `pointerlockerror`) and a refusal stops fly mode, and the wheel SAYS the
-  speed through `Navigation.onNotice` — an invisible number a stray gesture
-  can ratchet is a number that will read as a broken app.
+  fixes it". So the lock request is checked (promise rejection AND
+  `pointerlockerror`), and the wheel SAYS the speed through
+  `Navigation.onNotice` — an invisible number a stray gesture can ratchet is
+  a number that will read as a broken app.
+  **A refusal must NOT refuse to fly.** Making the lock a precondition is
+  the obvious next move and it is wrong: mouse-look reads `movementX/Y`,
+  which a free cursor still reports, so fly mode WORKS without a lock and
+  always did — an embedded or previewing browser may never grant one, and
+  blocking the mode there trades a subtle bug for no flying at all. A
+  refused lock just says so ("the cursor stays visible") and flies.
+  `lockHeld` is what keeps the Esc semantics honest across that: losing a
+  lock we ACTUALLY HELD is the user cancelling and teleports back, while a
+  flight that never had one must not be cancelled by someone else's lock
+  ending. Verified with no lock at all: W moves at the full 3 m/s, release
+  stops dead, Enter exits, and a held lock lost mid-flight teleports back to
+  0.000 m from the start.
   **A blurred window never delivers KEYUP**, so a key held while the mouse
   leaves stays held forever. A stuck `w` is not "the camera runs away" — it
   silently cancels every `s` you press and movement reads as DEAD, which is
-  the same symptom wearing a different hat. `blur` clears `flyKeys` and ends
-  an unlocked flight.
+  the same symptom wearing a different hat. `blur` clears `flyKeys` — and
+  only that: ending the flight there races the lock's own async grant and
+  kills the mode on the way in.
 
 - Agent tools (`src/agent/tools.ts`) are the SINGLE registry behind the
   in-app chat, MCP, ACP and WebMCP — adding one there exposes it to Claude
