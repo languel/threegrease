@@ -147,6 +147,10 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Capture-stream landmarks probe every zone automatically
 - [x] Splat + mesh scan import (Kiri and similar work today)
 - [x] Measure tool, display units, scale-the-scene-from-a-measurement
+- [x] Measurements as OBJECTS: outliner row, transform, parent, colour,
+      closed rings with area, and per-point BINDING (a point snapped to a
+      vertex/surface/origin stays on it, an actor's point rides its joint)
+- [ ] Measurements: curved legs (arc/spline) and surface-following paths
 - [x] Shared snapping module so every tool gets the one magnet
 - [x] Semantic detection: open-vocabulary (text-query) streams feeding the
       existing zone/probe machinery — model loading unverified, see docs

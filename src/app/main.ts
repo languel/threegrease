@@ -137,7 +137,7 @@ import { walkVolume } from '../actor/locomotion';
 import { nextLayerId } from '../actor/mixer';
 import { gaitEngine } from '../actor/gait';
 import { buildDemoScene, buildPlaygroundScene, sketcherScript, wandererScript } from './demoscene';
-import { MeasureTool, measureLength, toWorldLength } from '../tools/measure';
+import { MeasureTool, drawMeasures, measureLength, toWorldLength, worldPointsOf } from '../tools/measure';
 import { DirectTool } from '../tools/direct';
 import { createHumanoid, resetPose } from '../actor/skeleton';
 import { autoRig } from '../actor/rig';
@@ -2188,6 +2188,12 @@ class App implements AppHandle {
       const b = new THREE.Box3().setFromObject(root);
       if (!b.isEmpty()) box.union(b);
     }
+    // a measurement has no mesh at all — it is drawn on the HUD — so its
+    // extent is its own points
+    for (const m of this.ctx.scene.measures) {
+      if (!m.select) continue;
+      for (const p of worldPointsOf(this.ctx.scene, m)) box.expandByPoint(p);
+    }
     // actors have no entry in objectRoot — they are their own manager
     for (const a of this.ctx.scene.actors) {
       if (!a.select) continue;
@@ -2974,7 +2980,7 @@ class App implements AppHandle {
     const scene = this.ctx.scene;
     const m = scene.measures.find((x) => x.id === measureId);
     if (!m) return { ok: false, error: 'measurement not found' };
-    const current = measureLength(m);
+    const current = measureLength(scene, m);
     if (current < 1e-9) return { ok: false, error: 'measurement has no length' };
     if (!(realLength > 0)) return { ok: false, error: 'real length must be greater than zero' };
     const k = realLength / current;
@@ -2992,11 +2998,11 @@ class App implements AppHandle {
       });
     }
     // things that carry a world-space length of their own and are not
-    // object transforms
+    // object transforms. Measurements used to be here; they are objects now,
+    // so the loop above already scaled them — and a BOUND point needs no
+    // scaling at all, because whatever it is stuck to has just been scaled
+    // underneath it.
     for (const trig of scene.score.triggers) trig.radius *= k;
-    for (const meas of scene.measures) {
-      meas.points = meas.points.map((p) => [p[0] * k, p[1] * k, p[2] * k] as [number, number, number]);
-    }
     for (const cam of scene.cameras) {
       cam.translation = [cam.translation[0] * k, cam.translation[1] * k, cam.translation[2] * k];
     }
@@ -4160,6 +4166,11 @@ class App implements AppHandle {
     g.save();
     g.scale(devicePixelRatio, devicePixelRatio);
     this.drawTargetOverlay(g, this.hud.width / devicePixelRatio, this.hud.height / devicePixelRatio);
+    // Measurements are drawn in EVERY mode, not only while the measure tool
+    // is active: a dimension you can only see inside one tool is a mode, not
+    // an annotation of the scene. The tool adds the rubber-band leg on top,
+    // so it draws them itself and this stands down while it is running.
+    if (this.tools.active?.id !== 'measure') drawMeasures(this.ctx, g);
     this.tools.active?.drawHud?.(this.ctx, g);
     if (this.objModal.active) {
       const w = this.hud.width / devicePixelRatio;

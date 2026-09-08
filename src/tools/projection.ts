@@ -484,6 +484,15 @@ export function drawingPlane(ctx: AppCtx): THREE.Plane {
 /** Screen px -> nearest point on any mesh/splat/canvas surface, regardless
  *  of the current draw-placement mode. Used by 3D-cursor SURFACE snap. */
 export function raycastSurfaces(ctx: AppCtx, x: number, y: number): THREE.Vector3 | null {
+  return raycastSurfaceHit(ctx, x, y)?.point ?? null;
+}
+
+/** The same cast, keeping WHICH object was hit — a measurement point that
+ *  wants to stay on the wall has to know which wall it landed on, and the
+ *  point alone cannot say. */
+export function raycastSurfaceHit(
+  ctx: AppCtx, x: number, y: number,
+): { point: THREE.Vector3; object: THREE.Object3D } | null {
   if (!ctx.surfaces.length) return null;
   const rect = ctx.canvas.getBoundingClientRect();
   const ndc = new THREE.Vector2(
@@ -492,13 +501,13 @@ export function raycastSurfaces(ctx: AppCtx, x: number, y: number): THREE.Vector
   );
   raycaster.setFromCamera(ndc, ctx.camera);
   const hits = raycaster.intersectObjects(ctx.surfaces, true);
-  return hits.length ? hits[0].point.clone() : null;
+  return hits.length ? { point: hits[0].point.clone(), object: hits[0].object } : null;
 }
 
 /** Screen px -> the mesh TRIANGLE under the pointer (world-space), for the
  *  Face Center / Face Nearest snap targets. Falls back to null when the hit
  *  has no face (splats, points). */
-export function raycastFaceTriangle(ctx: AppCtx, x: number, y: number): { point: THREE.Vector3; tri: THREE.Triangle } | null {
+export function raycastFaceTriangle(ctx: AppCtx, x: number, y: number): { point: THREE.Vector3; tri: THREE.Triangle; object: THREE.Object3D } | null {
   if (!ctx.surfaces.length) return null;
   const rect = ctx.canvas.getBoundingClientRect();
   const ndc = new THREE.Vector2(
@@ -514,7 +523,7 @@ export function raycastFaceTriangle(ctx: AppCtx, x: number, y: number): { point:
     const va = new THREE.Vector3().fromBufferAttribute(pos, h.face.a).applyMatrix4(mesh.matrixWorld);
     const vb = new THREE.Vector3().fromBufferAttribute(pos, h.face.b).applyMatrix4(mesh.matrixWorld);
     const vc = new THREE.Vector3().fromBufferAttribute(pos, h.face.c).applyMatrix4(mesh.matrixWorld);
-    return { point: h.point.clone(), tri: new THREE.Triangle(va, vb, vc) };
+    return { point: h.point.clone(), tri: new THREE.Triangle(va, vb, vc), object: mesh };
   }
   return null;
 }

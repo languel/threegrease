@@ -7,7 +7,8 @@ import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
 import { PROVIDER_LIST, getProvider } from '../agent/providers';
 import { webMcp } from '../agent/webmcp';
-import { formatLength, measureLength, toWorldLength } from '../tools/measure';
+import { MEASURE_COLOR, formatArea, formatLength, measureArea, measureLength, toWorldLength, worldPointsOf } from '../tools/measure';
+import { localPoint } from '../core/measures';
 import { DETECT_MODELS, semanticDetector } from '../mm/detect';
 import type { DetectConfig, DetectHit, MMStream } from '../core/types';
 import type { BakeSource } from '../render/bake';
@@ -2206,6 +2207,83 @@ export class UI {
 
   /** Measurements + display units. Lives in the Scene tab because it is a
    *  property of the whole document, not of a selection. */
+  /**
+   * The editor for ONE measurement: its look, and what each of its points is
+   * stuck to.
+   *
+   * The per-point list is the whole reason a measurement is an object rather
+   * than a HUD doodle. A point that is BOUND rides the thing it was snapped
+   * to; a free one does not, and the difference decides whether a set of
+   * dimensions survives the next time the blockout moves. So it is stated
+   * per point, in words, with the target named — and undoing a binding is
+   * one click, because a point pinned to the wrong wall is worse than a
+   * point pinned to nothing.
+   */
+  private measureObjectRows(id: number): Node[] {
+    const { ctx } = this.app;
+    const scene = ctx.scene;
+    const m = scene.measures.find((x) => x.id === id);
+    if (!m) return [];
+    const unit = ctx.settings.lengthUnit;
+    const pts = worldPointsOf(scene, m);
+    const area = measureArea(scene, m);
+
+    const rows: Node[] = [
+      el('div', { class: 'menu-sep' }),
+      el('div', { class: 'menu-header', text: 'Measurement' }),
+      el('div', {
+        class: 'row',
+        text: `${formatLength(measureLength(scene, m), unit)}${area > 0 ? ` · ${formatArea(area, unit)}` : ''} · ${m.points.length} points`,
+      }),
+      checkbox('Closed', !!m.closed, (v) => {
+        ctx.pushUndo(); m.closed = v; this.refresh();
+      }, 'join the last point back to the first: a perimeter and an enclosed AREA instead of a running length'),
+      checkbox('Corner angles', m.angles !== false, (v) => { m.angles = v; }),
+      checkbox('Freeze', !!m.locked, (v) => { m.locked = v; this.refresh(); },
+        'stop it being dragged, so the reference the scene was scaled from cannot move by accident'),
+      fieldRow('Ink', colorField('', [...(m.color ?? MEASURE_COLOR), 1], (rgb) => { m.color = rgb; })),
+      el('div', {
+        class: 'menu-header', text: 'Points',
+        title: 'Place them with the Measure tool — the magnet decides what a point attaches to. '
+          + 'Shift-click extends the selected measurement, C closes it, Backspace deletes the point under the pointer.',
+      }),
+    ];
+
+    for (let i = 0; i < m.points.length; i++) {
+      const p = m.points[i];
+      const b = p.bind;
+      const where = b
+        ? `${b.kind.toLowerCase().replace('_', ' ')} on ${objectName(scene, b.target as ObjRef)}${b.joint ? ` · ${b.joint}` : ''}`
+        : 'free';
+      rows.push(el('div', { class: 'row' },
+        el('span', { text: `${i + 1}`, class: 'dim' }),
+        el('span', {
+          class: 'grow', text: where,
+          title: b
+            ? 'this point is stuck to that object and moves with it'
+            : 'this point stays where it is, whatever the scene does',
+        }),
+        el('span', {
+          class: 'dim',
+          text: i > 0 && pts[i] && pts[i - 1] ? formatLength(pts[i].distanceTo(pts[i - 1]), unit) : '',
+          title: 'length of the leg reaching this point',
+        }),
+        ...(b ? [btn(icon('xMark'), () => {
+          // unbinding keeps the point WHERE IT IS: the position it is
+          // showing at is the one you were looking at, and a point that
+          // jumped back to its stored free position on release would look
+          // like the release moved it
+          ctx.pushUndo();
+          const world = pts[i];
+          p.bind = null;
+          p.pos = localPoint(m, world);
+          this.refresh();
+        }, { cls: 'icon-btn', title: 'Detach — leave it where it is, but stop it following' })] : []),
+      ));
+    }
+    return rows;
+  }
+
   private measurePanel(): HTMLElement {
     const { ctx } = this.app;
     const scene = ctx.scene;
@@ -2223,7 +2301,9 @@ export class UI {
     }
 
     for (const m of scene.measures) {
-      const len = measureLength(m);
+      const len = measureLength(scene, m);
+      const area = measureArea(scene, m);
+      const bound = m.points.filter((p) => p.bind).length;
       const nameInput = el('input', { type: 'text', class: 'grow', value: m.name }) as HTMLInputElement;
       nameInput.onchange = () => { m.name = nameInput.value; };
       nameInput.onkeydown = (e) => e.stopPropagation();
@@ -2260,8 +2340,13 @@ export class UI {
           }, { cls: 'icon-btn', title: 'Delete' }),
         ),
         el('div', { class: 'measure-len' },
-          el('span', { class: 'measure-val', text: formatLength(len, unit) }),
-          el('span', { text: `${m.points.length} pts` }),
+          el('span', { class: 'measure-val', text: area > 0 ? formatArea(area, unit) : formatLength(len, unit) }),
+          el('span', {
+            text: `${m.points.length} pts${bound ? ` · ${bound} bound` : ''}`,
+            title: bound
+              ? `${bound} of ${m.points.length} points are stuck to geometry and follow it`
+              : 'no point is attached to anything — this ruler stays put when the scene moves',
+          }),
           el('span', { class: 'grow' }),
           el('span', { class: 'measure-set', text: 'is really', title: 'Rescale the scene so this measurement equals the length you type' }),
           real,
@@ -2698,6 +2783,27 @@ export class UI {
         ),
       ],
       rename: (v) => { a.name = v; },
+    });
+    for (const m of scene.measures) nodes.push({
+      ref: { kind: 'MEASURE', id: m.id }, icon: icon('ruler'), name: m.name,
+      selected: !!m.select, parent: m.parent,
+      onSelect: (e) => {
+        this.app.setLastPicked({ kind: 'MEASURE', id: m.id });
+        toggleSel((v) => { m.select = v; }, !!m.select, !!(e?.metaKey || e?.ctrlKey));
+      },
+      extras: [
+        el('span', {
+          text: formatLength(measureLength(scene, m), ctx.settings.lengthUnit),
+          title: 'total length',
+        }),
+        colorField('', [...(m.color ?? MEASURE_COLOR), 1], (rgb) => { m.color = rgb; }),
+        ...viewLockBtns(
+          { kind: 'MEASURE', id: m.id },
+          !m.visible, (v) => { m.visible = !v; },
+          !!m.lock, (v) => { m.lock = v; },
+        ),
+      ],
+      rename: (v) => { m.name = v; },
     });
     for (const l of scene.lights) nodes.push({
       ref: { kind: 'LIGHT', id: l.id }, icon: icon('boltCircle'), name: l.name,
@@ -3140,6 +3246,8 @@ export class UI {
           ? [] // MODEL owns its imported materials; EMPTY has no surface
           : this.materialEditor(ref)),
       );
+    } else if (ref.kind === 'MEASURE') {
+      rows.push(...this.measureObjectRows(ref.id));
     } else if (ref.kind === 'POLY') {
       const p = ctx.scene.polyMeshes.find((x) => x.id === ref.id)!;
       rows.push(

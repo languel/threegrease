@@ -15,9 +15,9 @@ import type { AppCtx } from './context';
 import { snapIncrement } from './context';
 import {
   drawingPlane, nearestStrokePointAll, nearestStrokeSegmentAll, perpendicularFoot,
-  raycastFaceTriangle, raycastSurfaces, screenToWorld,
+  raycastFaceTriangle, raycastSurfaceHit, screenToWorld,
 } from './projection';
-import { allRefs, worldMatrixOf } from './objects';
+import { allRefs, refOfObject3D, worldMatrixOf, type ObjRef } from './objects';
 
 /** What the returned point actually landed on — for HUD feedback, so the
  *  user can tell a real vertex hit from a fallback onto the drawing plane. */
@@ -28,6 +28,17 @@ export type SnapKind =
 export interface SnapHit {
   point: THREE.Vector3;
   kind: SnapKind;
+  /**
+   * WHAT the magnet caught, when it can say.
+   *
+   * A snap is normally a one-shot — the caller wants a world position and
+   * nothing else. A measurement point wants to STAY on the thing, so it
+   * needs the thing's identity as well; anything that resolves through a
+   * raycast or an object origin can supply it, and the modes that work off
+   * a plane or a lattice honestly cannot. Callers that don't care ignore
+   * the field, which is why it is optional rather than a second function.
+   */
+  ref?: ObjRef | null;
 }
 
 /** Screen-space search radius for the point/segment magnets, px. */
@@ -86,19 +97,22 @@ export function snapWorldPoint(
         const p = new THREE.Vector3();
         if (snap.mode === 'FACE_CENTER' || !reference) hit.tri.getMidpoint(p);
         else hit.tri.closestPointToPoint(reference, p);
-        return { point: p, kind: snap.mode === 'FACE_CENTER' ? 'FACE_CENTER' : 'FACE_NEAREST' };
+        return {
+          point: p, ref: refOfObject3D(hit.object),
+          kind: snap.mode === 'FACE_CENTER' ? 'FACE_CENTER' : 'FACE_NEAREST',
+        };
       }
     }
 
     if (snap.mode === 'SURFACE' || snap.mode === 'CANVAS') {
-      const hit = raycastSurfaces(ctx, clientX, clientY);
-      if (hit) return { point: hit.clone(), kind: 'SURFACE' };
+      const hit = raycastSurfaceHit(ctx, clientX, clientY);
+      if (hit) return { point: hit.point.clone(), kind: 'SURFACE', ref: refOfObject3D(hit.object) };
       // nothing under the pointer: fall through to plane placement
     }
 
     if (snap.mode === 'OBJECT') {
       const origin = nearestObjectOrigin(ctx, x, y, rect.width, rect.height);
-      if (origin) return { point: origin, kind: 'OBJECT' };
+      if (origin) return { point: origin.point, kind: 'OBJECT', ref: origin.ref };
     }
   }
 
@@ -115,15 +129,18 @@ export function snapWorldPoint(
  *  every zoom level rather than getting harder as you zoom out. */
 function nearestObjectOrigin(
   ctx: AppCtx, x: number, y: number, w: number, h: number,
-): THREE.Vector3 | null {
-  let best: THREE.Vector3 | null = null;
+): { point: THREE.Vector3; ref: ObjRef } | null {
+  let best: { point: THREE.Vector3; ref: ObjRef } | null = null;
   let bestD = OBJECT_PX;
   for (const ref of allRefs(ctx.scene)) {
+    // a ruler must not snap to its own origin, and neither should anything
+    // else that is only ever an annotation of the scene
+    if (ref.kind === 'MEASURE') continue;
     const pos = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(ctx.scene, ref));
     const ndc = pos.clone().project(ctx.camera);
     if (ndc.z > 1) continue;             // behind the camera
     const d = Math.hypot((ndc.x * 0.5 + 0.5) * w - x, (-ndc.y * 0.5 + 0.5) * h - y);
-    if (d < bestD) { bestD = d; best = pos; }
+    if (d < bestD) { bestD = d; best = { point: pos, ref }; }
   }
   return best;
 }

@@ -167,7 +167,7 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
-export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR'; id: number }
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE'; id: number }
 
 // ---- object constraints (Blender-style stack, evaluated every frame) ----
 
@@ -1106,17 +1106,64 @@ export interface TGActor {
  * built over days — "that doorway is 900" has to survive a save, and the
  * measurement that established the scene's scale has to stay auditable.
  */
+/**
+ * What a measurement point is stuck to.
+ *
+ * A snap is a one-off: it puts the point where the vertex WAS. A bind is the
+ * same gesture kept — the point is stored in the target's own local space and
+ * resolved every frame, so moving the wall moves the dimension on it. That is
+ * the whole difference between a ruler drawn over a scene and a ruler that
+ * belongs to it.
+ */
+export interface TGMeasureBind {
+  target: ParentRef;
+  /** which magnet caught it, for the label ('vertex', 'surface', ...) */
+  kind: string;
+  /** the point in the TARGET's local space */
+  local: Vec3;
+  /** an ACTOR deforms, so a point on one rides a JOINT rather than the
+   *  object transform — `local` is then the offset from that joint */
+  joint?: string | null;
+}
+
+/** One point of a measurement: where it sits, and what it is stuck to. */
+export interface TGMeasurePoint {
+  /** position in the MEASURE's own local space — used whenever `bind` is
+   *  absent or its target has gone away */
+  pos: Vec3;
+  bind?: TGMeasureBind | null;
+}
+
+/**
+ * A measurement: an object made of straight legs, drawn over the scene.
+ *
+ * It is a pen with a readout — the same placement magnets put its points
+ * down, and it lives in the outliner with a transform, a parent and the
+ * usual visibility and lock, so a set of dimensions can be filed, hidden and
+ * moved as one. `points` are in the measure's OWN space; a bound point
+ * ignores that transform, because its target owns it instead.
+ */
 export interface TGMeasure {
   id: number;
   name: string;
-  /** world-space points, in order */
-  points: Vec3[];
+  points: TGMeasurePoint[];
   visible: boolean;
   select?: boolean;
   lock?: boolean;
   /** freeze it once it has served its purpose, so a stray drag can't move
    *  the reference the whole scene was scaled from */
   locked?: boolean;
+  translation: Vec3;
+  rotation: Vec3;
+  scale: Vec3;
+  parent?: ParentRef | null;
+  /** close the path back to its first point: perimeter and AREA instead of
+   *  a running length */
+  closed?: boolean;
+  /** ink colour; the default reads on both a dark viewport and white paper */
+  color?: Vec3;
+  /** show the interior angle at each corner */
+  angles?: boolean;
 }
 
 /** One open-vocabulary detection: what matched, how strongly, and where.

@@ -105,6 +105,20 @@ export function deserializeScene(json: string): GPScene {
   for (const m of scene.measures) {
     m.visible ??= true;
     m.points ??= [];
+    // Measurements used to be bare world-space points with no object of
+    // their own. They are objects now — a transform, a parent, a row in the
+    // outliner — and a point can be BOUND to what it was snapped to. An old
+    // save migrates onto an IDENTITY transform, which makes its stored world
+    // points correct as local ones, and onto free (unbound) points, which is
+    // exactly what they were.
+    m.points = (m.points as unknown[]).map((p) => (
+      Array.isArray(p) ? { pos: [p[0], p[1], p[2]] as Vec3, bind: null } : p
+    )) as typeof m.points;
+    m.translation ??= [0, 0, 0];
+    m.rotation ??= [0, 0, 0];
+    m.scale ??= [1, 1, 1];
+    m.parent ??= null;
+    m.select ??= false;
   }
   for (const a of scene.actors) {
     a.select ??= false;

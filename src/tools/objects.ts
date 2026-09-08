@@ -3,13 +3,16 @@
 // ObjRef.id is STABLE for every kind (GPObject.id, not its array index).
 import * as THREE from 'three';
 import type { AppCtx } from './context';
-import type { GPScene, ParentRef, Vec3 } from '../core/types';
+import type { GPScene, ParentRef, TGMeasure, Vec3 } from '../core/types';
+import {
+  measureLocalMatrix, measureWorldPoints, type MeasureResolvers,
+} from '../core/measures';
 import { frameAt } from '../core/gpdata';
 import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso, pointInPolygon } from './draw';
 
-export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR';
+export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE';
 export interface ObjRef { kind: ObjKind; id: number }
 
 export function gpIndexOf(scene: GPScene, id: number): number {
@@ -28,6 +31,7 @@ export function listSelected(scene: GPScene): ObjRef[] {
   for (const pc of scene.paintClouds) if (pc.select) out.push({ kind: 'PCLOUD', id: pc.id });
   for (const l of scene.lights) if (l.select) out.push({ kind: 'LIGHT', id: l.id });
   for (const a of scene.actors) if (a.select) out.push({ kind: 'ACTOR', id: a.id });
+  for (const m of scene.measures) if (m.select) out.push({ kind: 'MEASURE', id: m.id });
   return out;
 }
 
@@ -55,6 +59,7 @@ function entityOf(scene: GPScene, ref: ObjRef):
   if (ref.kind === 'PCLOUD') return scene.paintClouds.find((pc) => pc.id === ref.id);
   if (ref.kind === 'LIGHT') return scene.lights.find((l) => l.id === ref.id);
   if (ref.kind === 'ACTOR') return scene.actors.find((a) => a.id === ref.id);
+  if (ref.kind === 'MEASURE') return scene.measures.find((m) => m.id === ref.id);
   return scene.meshes.find((m) => m.id === ref.id);
 }
 
@@ -121,6 +126,83 @@ export function descendantRefs(scene: GPScene, ref: ObjRef, depth = 0): ObjRef[]
   return out;
 }
 
+/**
+ * Which scene object a rendered Object3D belongs to.
+ *
+ * The renderers stamp an id on every node they build, and picking has always
+ * walked up looking for one; binding a measurement point to what it landed on
+ * needs the same walk, so it is a function rather than a second copy that can
+ * drift from the first.
+ */
+/**
+ * The one place that knows how to turn a measurement into world points.
+ *
+ * `core/measures.ts` is pure data and cannot reach the object graph, so the
+ * two lookups it needs are handed to it: a target's world matrix, and — for
+ * an ACTOR, which deforms and therefore cannot be described by a matrix
+ * alone — where a named joint currently is.
+ */
+export function measureResolvers(scene: GPScene): MeasureResolvers {
+  return {
+    measureMatrix: (m) => measureWorldMatrix(scene, m),
+    matrixOf: (target) => {
+      const ref = target as ObjRef;
+      return worldMatrixOf(scene, ref);
+    },
+    jointOf: (actorId, joint) => {
+      const a = scene.actors.find((x) => x.id === actorId);
+      if (!a) return null;
+      const i = a.joints.findIndex((j) => j.name === joint);
+      const p = i >= 0 ? a.pose[i] : null;
+      if (!p) return null;
+      return new THREE.Vector3(...p).applyMatrix4(
+        worldMatrixOf(scene, { kind: 'ACTOR', id: actorId }),
+      );
+    },
+  };
+}
+
+/**
+ * A measurement's own space, through its parent chain.
+ *
+ * A DRAFT is not in the scene yet, and `worldMatrixOf` would answer for
+ * whichever committed measurement happens to share its provisional id — so
+ * anything not actually in the list resolves against its local transform
+ * alone, which for a draft is the identity it was born with.
+ */
+export function measureWorldMatrix(scene: GPScene, m: TGMeasure): THREE.Matrix4 {
+  return scene.measures.includes(m)
+    ? worldMatrixOf(scene, { kind: 'MEASURE', id: m.id })
+    : measureLocalMatrix(m);
+}
+
+/** World points of one measurement — the call everything else makes. */
+export function worldPointsOf(scene: GPScene, m: TGMeasure): THREE.Vector3[] {
+  return measureWorldPoints(m, measureResolvers(scene));
+}
+
+/** A measurement's points in screen space — shared by click-picking and
+ *  circle/box select so the three cannot disagree about where a ruler is. */
+function measureScreenPoints(ctx: AppCtx, m: TGMeasure): THREE.Vector2[] {
+  const world = worldPointsOf(ctx.scene, m);
+  return world.map((p) => objectToScreen(ctx, [p.x, p.y, p.z]));
+}
+
+export function refOfObject3D(object: THREE.Object3D | null): ObjRef | null {
+  let cur: THREE.Object3D | null = object;
+  while (cur) {
+    const u = cur.userData as Record<string, number | undefined>;
+    if (u.canvasId !== undefined) return { kind: 'CANVAS', id: u.canvasId };
+    if (u.meshId !== undefined) return { kind: 'MESH', id: u.meshId };
+    if (u.polyId !== undefined) return { kind: 'POLY', id: u.polyId };
+    if (u.pcloudId !== undefined) return { kind: 'PCLOUD', id: u.pcloudId };
+    if (u.splatId !== undefined) return { kind: 'SPLAT', id: u.splatId };
+    if (u.actorId !== undefined) return { kind: 'ACTOR', id: u.actorId };
+    cur = cur.parent;
+  }
+  return null;
+}
+
 export function objectName(scene: GPScene, ref: ObjRef): string {
   return entityOf(scene, ref)?.name ?? `${ref.kind} ${ref.id}`;
 }
@@ -164,6 +246,10 @@ export function getObjectTransform(scene: GPScene, ref: ObjRef): ObjTransform | 
   if (ref.kind === 'ACTOR') {
     const a = scene.actors.find((x) => x.id === ref.id);
     return a ? { translation: [...a.translation], rotation: [...a.rotation], scale: [...a.scale] } : null;
+  }
+  if (ref.kind === 'MEASURE') {
+    const mm = scene.measures.find((x) => x.id === ref.id);
+    return mm ? { translation: [...mm.translation], rotation: [...mm.rotation], scale: [...mm.scale] } : null;
   }
   const m = scene.meshes.find((x) => x.id === ref.id);
   return m ? { translation: [...m.translation], rotation: [...m.rotation], scale: [...m.scale] } : null;
@@ -210,6 +296,12 @@ export function setObjectTransform(scene: GPScene, ref: ObjRef, t: ObjTransform)
     // ragdoll with it and the solver never sees the move at all.
     const a = scene.actors.find((x) => x.id === ref.id);
     if (a) { a.translation = [...t.translation]; a.rotation = [...t.rotation]; a.scale = [...t.scale]; }
+  } else if (ref.kind === 'MEASURE') {
+    // A measurement's points are in its OWN space, so the widget moves the
+    // whole ruler; its BOUND points ignore this entirely, because whatever
+    // they are stuck to owns them instead.
+    const mm = scene.measures.find((x) => x.id === ref.id);
+    if (mm) { mm.translation = [...t.translation]; mm.rotation = [...t.rotation]; mm.scale = [...t.scale]; }
   } else {
     const m = scene.meshes.find((x) => x.id === ref.id);
     if (m) { m.translation = [...t.translation]; m.rotation = [...t.rotation]; m.scale = [...t.scale]; }
@@ -248,6 +340,8 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     scene.lights = scene.lights.filter((l) => l.id !== ref.id);
   } else if (ref.kind === 'ACTOR') {
     scene.actors = scene.actors.filter((a) => a.id !== ref.id);
+  } else if (ref.kind === 'MEASURE') {
+    scene.measures = scene.measures.filter((m) => m.id !== ref.id);
   } else {
     scene.meshes = scene.meshes.filter((m) => m.id !== ref.id);
   }
@@ -265,6 +359,7 @@ export function allRefs(scene: GPScene): ObjRef[] {
     ...scene.paintClouds.map((pc) => ({ kind: 'PCLOUD' as const, id: pc.id })),
     ...scene.lights.map((l) => ({ kind: 'LIGHT' as const, id: l.id })),
     ...scene.actors.map((a) => ({ kind: 'ACTOR' as const, id: a.id })),
+    ...scene.measures.map((m) => ({ kind: 'MEASURE' as const, id: m.id })),
   ];
 }
 
@@ -551,6 +646,13 @@ export class ObjectSelectTool implements Tool {
       }
       return false;
     }
+    if (ref.kind === 'MEASURE') {
+      // a ruler is its POINTS, not its origin — an origin test would ask you
+      // to click a spot with nothing drawn at it
+      const m = ctx.scene.measures.find((x) => x.id === ref.id);
+      if (!m || !m.visible) return false;
+      return measureScreenPoints(ctx, m).some(test);
+    }
     const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, ref));
     return !!p && test(p);
   }
@@ -615,6 +717,12 @@ export class ObjectSelectTool implements Tool {
       }
     }
     if (best) return best.ref;
+    for (const m of ctx.scene.measures) {
+      if (!m.visible) continue;
+      for (const p of measureScreenPoints(ctx, m)) {
+        if (Math.hypot(p.x - e.x, p.y - e.y) < 14) return { kind: 'MEASURE', id: m.id };
+      }
+    }
     for (const s of ctx.scene.splats) {
       const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'SPLAT', id: s.id }));
       if (p && Math.hypot(p.x - e.x, p.y - e.y) < 40) return { kind: 'SPLAT', id: s.id };

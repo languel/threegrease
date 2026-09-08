@@ -877,6 +877,57 @@ the browser console or automated evals:
   a fixed-size buffer and reports the real extent in `drawRange`, so a blob
   body must be trimmed to that or the file carries tens of thousands of
   degenerate triangles at the origin.
+- **A MEASUREMENT is an object, and its points can be BOUND**
+  (`scene.measures`, `core/measures.ts` for the data, `tools/measure.ts` for
+  the tool). It is a pen with a readout: the same magnet
+  (`snapWorldPoint`) places every point, and it carries a transform, a
+  parent, a name, a colour and the usual visible/lock, so `ObjKind` gains
+  `'MEASURE'` and the outliner, selection, grouping, deletion and
+  frame-selection all come for free.
+  - THE BIND IS THE POINT. A snap is a one-off — it puts the point where the
+    corner WAS. A bind is the same gesture KEPT: `TGMeasureBind` stores the
+    point in the TARGET's own local space and resolves it every frame, so
+    moving, rotating or rescaling the wall carries the dimension on it.
+    Measured: a bound leg on a plinth translated with it exactly, kept its
+    length through a 90-degree rotation, and read 1.6 m instead of 0.8 after
+    the plinth was scaled x2 — which is right, because it is measuring the
+    plinth. A free ruler in the same scene did not move at all. Without this
+    a set of dimensions is only true of the blockout you had at the moment
+    you drew them, and the blockout is the thing that keeps moving.
+  - AN ACTOR NEEDS A JOINT, not a matrix. A body deforms, so a point bound to
+    one stores the nearest joint's name plus an offset in the actor's frame;
+    an object matrix would leave a dimension on a shoulder floating where the
+    shoulder used to be. Verified on a walking character: the reading tracked
+    the stride while the points travelled 1.3 m across the room.
+  - `SnapHit.ref` is how the identity gets out of the magnet, and it is
+    OPTIONAL on purpose: raycasts and object origins can say what they hit,
+    while the plane and lattice modes honestly cannot, and a point placed
+    that way is free. `refOfObject3D` is the one Object3D -> ObjRef walk,
+    shared with picking so the two cannot disagree.
+  - A BOUND POINT IGNORES THE MEASURE'S OWN TRANSFORM — the target owns it —
+    which is the same rule a constrained object already follows. Free points
+    are stored in the measure's space, and `recentre` puts a new ruler's
+    origin on its own centroid so the transform widget appears where the
+    thing you selected actually is rather than at the world origin.
+  - IT HAS NO MESH. Measurements are drawn on the HUD canvas, above the GL
+    canvas, so they read over the scene AND over whatever the scene look did
+    to it — an annotation a bloom pass can smear is not an annotation. That
+    also means `App.drawHud` draws them in EVERY mode and the tool draws them
+    itself while it is active (adding the rubber-band leg); a dimension
+    visible only inside one tool is a mode, not an annotation. A bound point
+    is drawn FILLED and a free one hollow, because which is which decides
+    whether the dimension survives the next edit.
+  - `closed` turns a path into a ring: perimeter plus AREA, by NEWELL's
+    method — the cross-product sum is twice the area vector, so it is right
+    at any orientation and sane for the slightly non-planar ring that tracing
+    a real corner always gives. Projecting onto a coordinate plane instead
+    reports a wall's area as zero the moment it stands up (verified: a 2x3
+    ring reads 6 m2 flat on the floor and 6 m2 stood on end).
+  - `scaleSceneToMeasure` no longer special-cases them: a measurement is a
+    root object, so the same loop scales it, and a bound point needs no
+    scaling at all because whatever it is stuck to was just scaled underneath
+    it. Curved legs and surface-following paths are not built; the data shape
+    (a list of points with binds) admits them.
 - **An actor can be a DRAW TARGET** (`TGActor.drawTarget`, the pencil icon on
   its outliner row). `ActorManager.drawTargets` joins the mesh, splat and poly
   lists in `ctx.surfaces`, so Placement: Surface lands strokes on the body
