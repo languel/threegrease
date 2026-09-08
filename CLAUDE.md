@@ -344,9 +344,22 @@ the browser console or automated evals:
     the only lever that still works there. Measured on the demo scene: the
     prepass read a flat 14.1 m across the middle of the floor and jittered
     frame to frame, against a smooth 21.2 -> 23.4 with the cull in place.
+    POINT SPRITES are the sneaky member of that family and were the last
+    mysterious square: a point's size comes from `gl_PointSize`, written by
+    the material's OWN vertex shader, and an override material writes none —
+    an unwritten `gl_PointSize` is undefined and on this driver comes out
+    enormous, so ONE point becomes a hard-edged screen-aligned square that
+    flattens depth and normals under it and takes the ink with it. The
+    SELECTION ORIGIN DOT is a single-vertex `THREE.Points`, so selecting
+    anything hung a phantom square on its pivot that tracked the camera and
+    vanished when the pivot left the frame. Measured: hiding that one dot
+    moved the frame from 20,818 inked pixels to 23,216; with the fix the
+    count is identical (18,557) whether nothing, a sensor or a mesh is
+    selected. `Points` and `Sprite` are skipped outright now — a sprite has
+    no silhouette and no normal to contribute to a line drawing anyway.
     EDITOR FURNITURE is excluded from the pass by `userData.overlay`
     (`markOverlay` in main.ts: the transform gizmo, the plane and depth
-    helpers, the camera frusta) — a line drawing of the scene should not
+    helpers, the camera frusta, the selection glyphs, the 3D cursor) — a line drawing of the scene should not
     contain a drawing of the tools, and the gizmo alone carries a
     90,000-unit invisible drag plane.
   - **`__tg.whatIsHere()` is how a viewport artefact gets diagnosed** rather

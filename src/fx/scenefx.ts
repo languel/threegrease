@@ -189,6 +189,18 @@ void main() {
  *    pass on their own merits too: `depthWrite: false` means they do not
  *    occlude anything in the real render either, and a stroke is already a
  *    line.
+ *  - POINT SPRITES, which are the sneaky one. A point's size comes from
+ *    `gl_PointSize`, written by the material's OWN vertex shader — and the
+ *    override material, having no reason to think about points, writes none.
+ *    An unwritten `gl_PointSize` is undefined, and on this driver it comes
+ *    out enormous: one point becomes a screen-aligned SQUARE, hard-edged,
+ *    flattening depth and normals across everything under it so the ink
+ *    inside it disappears. The selection ORIGIN DOT is a single-vertex
+ *    `THREE.Points`, so selecting anything put a phantom square at its pivot
+ *    that moved with the camera and vanished when the pivot left the frame.
+ *    Measured: hiding that one dot took the frame from 20,818 inked pixels
+ *    to 23,216. No point cloud belongs in this pass anyway — a sprite has no
+ *    silhouette and no normal to contribute.
  *  - The invisible helpers — the pick proxies on empties and lights, and the
  *    gizmo's drag plane — whose materials are simply `visible: false`.
  *
@@ -205,6 +217,9 @@ function hideNonDrawing(root: THREE.Object3D): THREE.Object3D[] {
   root.traverse((o) => {
     if (!o.visible) return;
     if (o.userData.hoverShell || o.userData.overlay) { o.visible = false; hidden.push(o); return; }
+    if ((o as THREE.Points).isPoints || (o as THREE.Sprite).isSprite) {
+      o.visible = false; hidden.push(o); return;
+    }
     const mat = (o as THREE.Mesh).material;
     if (!mat) return;
     const list = Array.isArray(mat) ? mat : [mat];

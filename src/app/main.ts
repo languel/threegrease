@@ -409,6 +409,7 @@ class App implements AppHandle {
     this.scene3.add(this.camHelper);
     this.scene3.add(this.gp.root);
     this.cursorMarker = this.makeCursorMarker();
+    markOverlay(this.cursorMarker);
     this.scene3.add(this.cursorMarker);
     this.planeHelper = this.makePlaneHelper();
     markOverlay(this.planeHelper);
@@ -416,6 +417,9 @@ class App implements AppHandle {
     this.depthHelper = this.makeDepthHelper();
     markOverlay(this.depthHelper);
     this.scene3.add(this.depthHelper);
+    // selection outlines and origin dots are editor furniture: the scene
+    // look must not ink them, and the dot in particular is a point sprite
+    markOverlay(this.selGlyphs);
     this.scene3.add(this.selGlyphs);
     // a ground plane for SURFACE placement demos
     this.scene3.add(this.canvasGroup);
