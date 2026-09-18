@@ -154,6 +154,8 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Shape tools snap at their ends (Snap: Ends / Every point)
 - [x] Drop files onto the viewport to place them (splats, models, images, GP json)
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
+- [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
+- [x] Restyle selected strokes (Stroke Style panel)
 - [ ] Pack a scene with its stored files for moving between machines
 - [ ] Measurements: curved legs (arc/spline) and surface-following paths
 - [x] Shared snapping module so every tool gets the one magnet

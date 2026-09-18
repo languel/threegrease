@@ -2,7 +2,7 @@ import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type Paint
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
 import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
-import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, frameAt, genId } from '../core/gpdata';
+import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, forEachSelectedStroke, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
 import { PROVIDER_LIST, getProvider } from '../agent/providers';
@@ -1107,53 +1107,106 @@ export class UI {
   // ------------------------------------------------------------- topbar
 
   /**
-   * Where a placed point lands: Placement, Plane, Guide and their options.
+   * WHERE THINGS LAND — Placement, Plane and Guide — as one global cluster in
+   * the middle of the top bar, the way Blender parks its transform pivot and
+   * snapping between the tool's own settings (left) and the view (right).
    *
-   * One group, shown wherever points are PLACED — the drawing tools, and
-   * the Measure tool in Object and Edit mode, which resolves its points
-   * through exactly the same chain (`snapWorldPoint` -> `screenToWorld`), so
-   * a dimension can be snapped to a surface or lifted off a floor plan the
-   * same way a stroke can. It used to exist only in Draw mode, so the
-   * settings that decided where a measurement landed were invisible while
-   * measuring.
+   * These decide where every placed or MOVED point resolves: a stroke, a
+   * shape, a measurement, and a point dragged with G in Edit mode, which
+   * unprojects both pointer positions through exactly the same chain
+   * (`screenToWorld`). They used to live inside Draw mode's tool settings,
+   * so in Edit mode the settings moving your points were invisible, and the
+   * Measure tool had to borrow them one mode at a time.
+   *
+   * The per-placement refinements (Lock, Smooth, Offset, Target, shape
+   * snapping) live in a popover behind the ⋯ button, which lights up when
+   * any of them is set away from its default — hidden settings that are
+   * quietly ON are the worst kind.
    */
-  private placementControls(): Node[] {
+  private placementCluster(): Node[] {
     const s = this.app.ctx.settings;
+    const opts = this.placementOptions();
+    const tuned = s.placementLock || s.placementSmooth || s.surfaceOffset !== 0
+      || s.strokeTarget !== 'ALL' || s.shapeSnap !== 'ENDS';
+    const nodes: Node[] = [
+      tip(selectField('Place', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['SURFACE_PERP', 'Surface ⊥'], ['STROKE', 'Stroke'], ['STROKE_PERP', 'Stroke ⊥'], ['SPLAT', 'Splat (nearest)'], ['NEAREST', 'Nearest Object']] as [PlacementMode, string][],
+        (v) => { s.placement = v; this.refresh(); }),
+        'Placement — what a new point lands on: the drawing plane through the origin or the 3D cursor, '
+          + 'a surface, a stroke, a splat, or whatever object is nearest'),
+    ];
+    if (opts.length) {
+      const wrap = el('div', { class: 'tb-pop-wrap' });
+      wrap.append(btn(icon('adjustments', 14), () => {
+        this.topbarPopover = this.topbarPopover === 'placement' ? null : 'placement';
+        this.buildTopbar();
+      }, {
+        cls: `icon-btn${tuned ? ' tuned' : ''}${this.topbarPopover === 'placement' ? ' active' : ''}`,
+        title: tuned ? 'Placement options (some are set)' : 'Placement options',
+      }));
+      if (this.topbarPopover === 'placement') wrap.append(el('div', { class: 'tb-pop' }, ...opts));
+      nodes.push(wrap);
+    }
+    nodes.push(
+      tip(selectField('Plane', s.plane, (s.upAxis === 'Z'
+        ? [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['UPRIGHT', 'Up from Ground'], ['FRONT', 'Front (X·Z)'], ['SIDE', 'Side (Y·Z)'], ['TOP', 'Top (X·Y)'], ['CURSOR', 'Cursor']]
+        : [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['UPRIGHT', 'Up from Ground'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)'], ['CURSOR', 'Cursor']]) as [PlaneMode, string][],
+      (v) => { s.plane = v; }),
+      'Plane — the surface a point lands on when nothing is snapped. Up from Ground: a stroke starts on '
+        + 'the floor (or on whatever the Placement snaps it to) and grows straight up on a vertical plane '
+        + 'facing you. Draw the plan with Top, then lift it with this.'),
+      tip(selectField('Guide', s.guide.type, [['NONE', 'No Guide'], ['CIRCULAR', 'Circular'], ['RADIAL', 'Radial'], ['PARALLEL', 'Parallel'], ['GRID', 'Grid'], ['ISO', 'Isometric']] as [GuideType, string][],
+        (v) => { s.guide.type = v; }),
+      'Guide — constrain the pointer on screen: parallel lines, circles or rays about the 3D cursor, a grid'),
+    );
+    return nodes;
+  }
+
+  /** The refinements of the current placement, for the ⋯ popover. Empty
+   *  when the placement has none, in which case the button is not shown. */
+  private placementOptions(): Node[] {
+    const s = this.app.ctx.settings;
+    const seeking = s.placement === 'SURFACE' || s.placement === 'STROKE'
+      || s.placement === 'SPLAT' || s.placement === 'NEAREST';
     return [
-          selectField('Placement', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['SURFACE_PERP', 'Surface ⊥'], ['STROKE', 'Stroke'], ['STROKE_PERP', 'Stroke ⊥'], ['SPLAT', 'Splat (nearest)'], ['NEAREST', 'Nearest Object']] as [PlacementMode, string][], (v) => { s.placement = v; this.refresh(); }),
-          ...(s.placement === 'SURFACE' ? [
-            numField('Offset', s.surfaceOffset, (v) => { s.surfaceOffset = v; }, 0.01),
-          ] : []),
-          ...(s.placement === 'STROKE' || s.placement === 'SPLAT' || s.placement === 'NEAREST' ? [
-            checkbox('Lock', s.placementLock, (v) => { s.placementLock = v; },
-              'freeze the depth this stroke started at instead of re-snapping to whatever is nearest as you draw'),
-            checkbox('Smooth', s.placementSmooth, (v) => { s.placementSmooth = v; },
-              'ease toward a new target depth instead of jumping straight to it (ignored when Lock is on)'),
-          ] : []),
-          tip(selectField('Plane', s.plane, (s.upAxis === 'Z'
-            ? [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['UPRIGHT', 'Up from Ground'], ['FRONT', 'Front (X·Z)'], ['SIDE', 'Side (Y·Z)'], ['TOP', 'Top (X·Y)'], ['CURSOR', 'Cursor']]
-            : [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['UPRIGHT', 'Up from Ground'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)'], ['CURSOR', 'Cursor']]) as [PlaneMode, string][],
-          (v) => { s.plane = v; }),
-          'Up from Ground: a stroke starts on the floor — or on whatever the Placement snaps it to, '
-            + 'a line of an existing floor plan with Placement: Nearest — and grows straight up on a vertical plane '
-            + 'facing you. Draw the plan with Top, then lift it with this.'),
-          ...(['line', 'polyline', 'arc', 'curve', 'box', 'circle'].includes(s.activeTool)
-            && (s.placement === 'SURFACE' || s.placement === 'STROKE'
-              || s.placement === 'SPLAT' || s.placement === 'NEAREST') ? [
-            tip(selectField('Snap', s.shapeSnap, [['ENDS', 'Ends'], ['EVERY', 'Every point']],
-              (v) => { s.shapeSnap = v as 'ENDS' | 'EVERY'; this.app.savePrefs(); }),
-            'Ends: only the points you place snap — a line\u2019s two ends, a box\u2019s corners — and the '
-              + 'shape between them is built straight in 3D. Every point: each sample snaps on its own, '
-              + 'so the shape drapes over whatever it crosses on screen.'),
-          ] : []),
-          ...(s.placement === 'STROKE' ? [
-            selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][], (v) => { s.strokeTarget = v; }),
-          ] : []),
-          selectField('Guide', s.guide.type, [['NONE', 'No Guide'], ['CIRCULAR', 'Circular'], ['RADIAL', 'Radial'], ['PARALLEL', 'Parallel'], ['GRID', 'Grid'], ['ISO', 'Isometric']] as [GuideType, string][], (v) => { s.guide.type = v; }),
+      ...(s.placement === 'SURFACE' ? [
+        numField('Offset', s.surfaceOffset, (v) => { s.surfaceOffset = v; }, 0.01),
+      ] : []),
+      ...(s.placement === 'STROKE' || s.placement === 'SPLAT' || s.placement === 'NEAREST' ? [
+        checkbox('Lock', s.placementLock, (v) => { s.placementLock = v; this.buildTopbar(); },
+          'freeze the depth this stroke started at instead of re-snapping to whatever is nearest as you draw'),
+        checkbox('Smooth', s.placementSmooth, (v) => { s.placementSmooth = v; this.buildTopbar(); },
+          'ease toward a new target depth instead of jumping straight to it (ignored when Lock is on)'),
+      ] : []),
+      ...(s.placement === 'STROKE' ? [
+        tip(selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][],
+          (v) => { s.strokeTarget = v; this.buildTopbar(); }),
+        'which part of a nearby stroke a new point may land on — and what the ends of a new stroke snap onto'),
+      ] : []),
+      ...(seeking ? [
+        tip(selectField('Shapes', s.shapeSnap, [['ENDS', 'Snap ends'], ['EVERY', 'Snap every point']],
+          (v) => { s.shapeSnap = v as 'ENDS' | 'EVERY'; this.app.savePrefs(); this.buildTopbar(); }),
+        'Line, box, arc and the other shapes. Snap ends: only the points you place snap and the shape '
+          + 'between them is built straight in 3D. Every point: each sample snaps on its own, so the '
+          + 'shape drapes over whatever it crosses on screen.'),
+      ] : []),
     ];
   }
 
+  /** which top-bar popover is open, if any (runtime UI state) */
+  private topbarPopover: 'placement' | null = null;
+  private popoverCloserBound = false;
+
   private buildTopbar(): void {
+    if (!this.popoverCloserBound) {
+      // a click anywhere outside an open popover closes it, as menus do
+      this.popoverCloserBound = true;
+      document.addEventListener('pointerdown', (e) => {
+        if (this.topbarPopover && !(e.target as HTMLElement)?.closest?.('.tb-pop-wrap')) {
+          this.topbarPopover = null;
+          this.buildTopbar();
+        }
+      }, true);
+    }
     const { ctx } = this.app;
     const s = ctx.settings;
     const bar = $('topbar');
@@ -1180,7 +1233,6 @@ export class UI {
           btn(icon('arrowsRightLeft'), () => this.app.setWidgetMode('scale'), { active: this.app.widgetMode === 'scale', title: 'Widget: scale (S)' }),
         );
       }
-      if (s.activeTool === 'measure') bar.append(el('div', { class: 'sep' }), ...this.placementControls());
     } else if (s.mode === 'DRAW' && s.activeTool === 'vertexpaint') {
       // spray color directly onto GP point vertex colors — same controls
       // as the old standalone VERTEX mode, just reachable without leaving
@@ -1221,7 +1273,6 @@ export class UI {
         ...(s.activeTool === 'splatpaint' || s.activeTool === 'texpaint' ? [
           colorField('Color', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }),
         ] : []),
-        ...this.placementControls(),
       );
       if (s.activeTool === 'erase') {
         bar.append(
@@ -1229,8 +1280,6 @@ export class UI {
           slider('Size', s.eraser.radius, 4, 120, 1, (v) => { s.eraser.radius = v; }, { def: 24 }),
         );
       }
-    } else if (s.mode === 'EDIT' && s.activeTool === 'measure') {
-      bar.append(...this.placementControls());
     } else if (s.mode === 'EDIT') {
       bar.append(
         selectField('Select', s.selectMode, [['POINT', 'Point'], ['STROKE', 'Stroke']], (v) => { s.selectMode = v; ctx.requestRender(); }),
@@ -1262,12 +1311,22 @@ export class UI {
       );
     }
 
-    bar.append(el('div', { class: 'sep' }));
+    // CENTRE: where things land. Tool settings stay on the left and the view
+    // on the right, the way Blender's 3D-view header is laid out; the two
+    // `.grow` spacers keep this group in the middle whatever the tool shows.
+    // Placement / Plane / Guide appear in every mode that places or moves
+    // points; sculpt and paint modes only restyle what is there.
+    bar.append(el('div', { class: 'grow' }));
+    const centre = el('div', { class: 'tb-centre' });
+    if (s.mode === 'OBJECT' || s.mode === 'DRAW' || s.mode === 'EDIT') {
+      centre.append(...this.placementCluster(), el('div', { class: 'sep' }));
+    }
+    bar.append(centre);
     // Global Snap cluster (Blender parity): ONE magnet setting drives
     // G/R/S point drags (EDIT), the translate widget (OBJECT), and the 3D
     // cursor (Shift+RMB drag). Magnet off = cursor moves freely on the
     // drawing plane.
-    bar.append(
+    centre.append(
       iconCheckbox(icon('magnet'), 'Magnet snapping', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
       selectField('', s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode, [
         ['INCREMENT', 'Increment'], ['GRID', 'Grid'], ['POINT', 'Vertex'],
@@ -1291,7 +1350,7 @@ export class UI {
       ['MATERIAL', 'shadeMaterial', 'Material preview — world background + IBL, no scene lights'],
       ['RENDERED', 'shadeRendered', 'Rendered — world plus the scene\u2019s own lights and shadows'],
     ];
-    bar.append(el('div', { class: 'grow' }), el('div', { class: 'sep' }));
+    bar.append(el('div', { class: 'grow' }));
     for (const [mode, iconName, title] of shadings) {
       bar.append(btn(icon(iconName), () => this.app.setShading(mode),
         { active: s.shading === mode, title }));
@@ -1729,14 +1788,14 @@ export class UI {
         id: 'brush', icon: 'brush', title: 'Brush & GP materials',
         build: () => [
           this.brushPanel(), this.stencilPanel(), this.materialsPanel(),
-          ...(ctx.settings.mode === 'EDIT' ? [this.strokePanel(), this.editOpsPanel()] : []),
+          ...(ctx.settings.mode === 'EDIT' ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
         ],
       },
       {
         id: 'data', icon: 'folder', title: 'Data — layers · strokes · onion skin',
         build: () => [
           this.layersPanel(),
-          ...(ctx.settings.mode === 'EDIT' ? [this.strokePanel(), this.editOpsPanel()] : []),
+          ...(ctx.settings.mode === 'EDIT' ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
           this.onionPanel(),
         ],
       },
@@ -4056,6 +4115,96 @@ export class UI {
       ),
       ...items,
     );
+  }
+
+  /**
+   * Restyle the SELECTED strokes after the fact.
+   *
+   * Every stroke carries its own brush record — width, hardness and the full
+   * style (stamp, spacing, jitter, grain, taper) — baked in when it was
+   * drawn, so a line and an airbrush mark can sit in one layer. What was
+   * missing was a way back in: change your mind about a stroke and the only
+   * option was to redraw it. This edits the record on every selected stroke
+   * at once. The fields show the FIRST selected stroke's values; a change is
+   * written to all of them.
+   */
+  private undoAt = 0;
+  private strokeStylePanel(): HTMLElement {
+    const { ctx } = this.app;
+    const ob = activeObject(ctx.scene);
+    const strokes: import('../core/types').GPStroke[] = [];
+    forEachSelectedStroke(ob, ctx.scene.frame, (st) => strokes.push(st));
+    if (!strokes.length) {
+      return panel('Stroke Style', el('div', { class: 'row', text: 'select strokes to restyle them' }));
+    }
+    const first = strokes[0];
+    // one undo step per burst of edits, not one per pixel of a scrub
+    const apply = (fn: (st: import('../core/types').GPStroke) => void, rebuild = false) => {
+      const now = performance.now();
+      if (now - this.undoAt > 800) ctx.pushUndo();
+      this.undoAt = now;
+      for (const st of strokes) fn(st);
+      ctx.requestRender();
+      if (rebuild) this.refresh();
+    };
+    const n = strokes.length;
+    const scene = first.style.unit === 'SCENE';
+    const st = first.style;
+    const rows: Node[] = [
+      el('div', { class: 'row', text: `${n} stroke${n > 1 ? 's' : ''} — edits apply to all of them` }),
+      tip(selectField('Brush', '', [['', 'Apply preset…'], ...BRUSH_PRESETS.map((p) => [p.name, p.name] as [string, string])],
+        (name) => {
+          const p = BRUSH_PRESETS.find((x) => x.name === name);
+          if (!p) return;
+          apply((s) => {
+            s.style = { ...p.style };
+            s.hardness = p.hardness;
+            s.lineWidth = p.style.unit === 'SCENE' ? p.size / 100 : p.size;
+          }, true);
+        }), 'Give the selection a brush preset\u2019s look — its style, hardness and width. '
+          + 'Pressure recorded in each point is kept.'),
+      fieldRow('', btn('Match current brush', () => apply((s) => {
+        const b = ctx.settings.brush;
+        s.style = { ...b.style };
+        s.hardness = b.hardness;
+        s.lineWidth = b.style.unit === 'SCENE' ? b.size / 100 : b.size;
+      }, true), { title: 'Copy the brush you are drawing with onto the selected strokes' }), { full: true }),
+      selectField('Material', String(first.materialIndex),
+        ob.materials.map((m, i) => [String(i), m.name] as [string, string]),
+        (v) => apply((s) => { s.materialIndex = Number(v); }, true)),
+      el('div', { class: 'menu-header', text: 'Shape' }),
+      tip(selectField('Unit', st.unit, [['VIEW', 'Screen px'], ['SCENE', 'World']],
+        (v) => apply((s) => {
+          // keep the apparent width when switching: px <-> world on the
+          // brush's own convention (size 30 px == 0.3 m)
+          if (s.style.unit !== v) s.lineWidth = v === 'SCENE' ? s.lineWidth / 100 : s.lineWidth * 100;
+          s.style.unit = v as 'VIEW' | 'SCENE';
+        }, true)),
+        'Screen px: the same thickness at any distance. World: a real thickness that shrinks with distance.'),
+      scene
+        ? slider('Width', first.lineWidth, 0.001, 1, 0.001, (v) => apply((s) => { s.lineWidth = v; }), { title: 'metres' })
+        : slider('Width', first.lineWidth, 0.5, 80, 0.5, (v) => apply((s) => { s.lineWidth = v; }), { title: 'screen px' }),
+      slider('Hardness', first.hardness, 0.05, 1, 0.01, (v) => apply((s) => { s.hardness = v; })),
+      slider('Taper in', st.taperIn ?? 0, 0, 1, 0.01, (v) => apply((s) => { s.style.taperIn = v; })),
+      slider('Taper out', st.taperOut ?? 0, 0, 1, 0.01, (v) => apply((s) => { s.style.taperOut = v; })),
+      el('div', { class: 'menu-header', text: 'Texture' }),
+      checkbox('Stamp', st.stamp, (v) => apply((s) => { s.style.stamp = v; }, true),
+        'draw the stroke as a row of brush dabs (airbrush, charcoal) instead of one solid ribbon'),
+    ];
+    if (st.stamp) {
+      rows.push(
+        slider('Spacing', st.spacing, 0.03, 1, 0.01, (v) => apply((s) => { s.style.spacing = v; })),
+        slider('Aspect', st.aspect, 0.1, 1, 0.01, (v) => apply((s) => { s.style.aspect = v; })),
+        slider('Angle', st.angle, -Math.PI, Math.PI, 0.05, (v) => apply((s) => { s.style.angle = v; })),
+      );
+    }
+    rows.push(
+      slider('Jitter', st.jitter, 0, 1, 0.01, (v) => apply((s) => { s.style.jitter = v; })),
+      slider('Grain', st.grain, 0, 1, 0.01, (v) => apply((s) => { s.style.grain = v; })),
+      slider('Grain scale', st.grainScale, 1, 40, 0.5, (v) => apply((s) => { s.style.grainScale = v; })),
+    );
+    return panel('Stroke Style', ...rows,
+      panelHint('Change the brush of strokes you have already drawn. Select them in Edit mode.'));
   }
 
   /** Per-stroke identity + event assignment (visible with exactly one stroke selected). */

@@ -46,6 +46,20 @@ function uprightNormal(ctx: AppCtx): THREE.Vector3 {
   return n.normalize();
 }
 
+/**
+ * Move the in-progress stroke's sticky standing plane (View at Origin, Up
+ * from Ground) so it passes through `point`.
+ *
+ * The plane is captured from wherever the first point RESOLVED. When a tool
+ * then moves that first point — the pencil anchoring its start ON a nearby
+ * stroke rather than merely at its depth — the plane has to follow, or every
+ * later point lies on a plane that no longer contains the stroke's own start
+ * and the mark kinks away from where it began.
+ */
+export function reseatStickyPlane(point: THREE.Vector3): void {
+  if (viewOriginPlane) viewOriginPlane.setFromNormalAndCoplanarPoint(viewOriginPlane.normal, point);
+}
+
 /** Plane.VIEW_ORIGIN's sticky standing plane: view-aligned, through
  *  wherever THIS stroke's first point actually landed (whatever the
  *  active Placement resolved it to), instead of a fixed cursor/object

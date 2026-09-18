@@ -6,7 +6,10 @@ import {
 } from '../core/gpdata';
 import { simplifyStroke, smoothAttr, smoothPoints, clamp, falloff } from '../core/mathutil';
 import type { AppCtx } from './context';
-import { applyGuide, eventToCanvas, objectToScreen, screenToWorld, setStrokeExclusion, worldToObject } from './projection';
+import {
+  applyGuide, eventToCanvas, objectToScreen, reseatStickyPlane, screenToWorld, setStrokeExclusion,
+  strokeAnchorPoint, worldToObject,
+} from './projection';
 import { listSelected, worldMatrixOf } from './objects';
 import { PAINT_STRIDE } from '../render/paintclouds';
 import type { Tool, ToolEvent } from './toolsys';
@@ -25,6 +28,10 @@ function drawTarget(ctx: AppCtx) {
 }
 
 // ---------------------------------------------------------------- Draw tool
+
+/** Reach, in CSS px, of the pencil's end snap under Placement: Stroke —
+ *  the same as the shape tools' (`primitives.ts`). */
+const ANCHOR_PX = 28;
 
 export class DrawTool implements Tool {
   id = 'draw';
@@ -45,6 +52,26 @@ export class DrawTool implements Tool {
    *  leaving the pencil tool (matches Blender's "hold Shift to smooth"
    *  convention available on most brushes). */
   private smoothing = false;
+  /** where the stroke's first point was pinned ON a neighbouring stroke —
+   *  re-applied after smoothing and simplifying, which would drift it off */
+  private anchorStart: Vec3 | null = null;
+
+  /**
+   * Under Placement: Stroke, the pencil's first and last points land ON the
+   * stroke they are released near, not merely at its depth.
+   *
+   * Stroke placement borrows a nearby stroke's DEPTH for each sample along
+   * the pointer's own ray — right for the body of a freehand mark, wrong for
+   * its ends: start or stop a few pixels short of a line and the new stroke
+   * ends in mid-air beside it, a visible gap that reads as the snap missing.
+   * The shape tools learned this first (`strokeAnchorPoint`, the same 28 px
+   * reach and the same front-most tie-break); the pencil now does too. Hold
+   * Cmd/Ctrl at the start or the end to leave that end where it is.
+   */
+  private anchor(ctx: AppCtx, e: ToolEvent): THREE.Vector3 | null {
+    if (ctx.settings.placement !== 'STROKE' || e.ctrl) return null;
+    return strokeAnchorPoint(ctx, e.x, e.y, ANCHOR_PX, ctx.settings.strokeTarget);
+  }
 
   onDown(ctx: AppCtx, e: ToolEvent): void {
     if (e.shift) {
@@ -74,6 +101,13 @@ export class DrawTool implements Tool {
     const c = objectToScreen(ctx, [ctx.scene.cursor[0], ctx.scene.cursor[1], ctx.scene.cursor[2]]);
     this.guideCenter.copy(c);
     this.addPoint(ctx, e);
+    this.anchorStart = null;
+    const a = this.anchor(ctx, e);
+    if (a && s.points.length) {
+      this.anchorStart = worldToObject(ctx, a);
+      s.points[0].co = [...this.anchorStart] as Vec3;
+      reseatStickyPlane(a);
+    }
   }
 
   onMove(ctx: AppCtx, e: ToolEvent): void {
@@ -83,10 +117,13 @@ export class DrawTool implements Tool {
     ctx.requestRender(this.layerId ?? undefined); // hot path: this layer only
   }
 
-  onUp(ctx: AppCtx): void {
+  onUp(ctx: AppCtx, e?: ToolEvent): void {
     if (this.smoothing) { this.smoothing = false; ctx.refreshUI(); return; }
     if (!this.stroke) return;
     const b = ctx.settings.brush;
+    // decided BEFORE the in-progress stroke stops being excluded from the
+    // search, or the end would snap onto the stroke being finished
+    const endAnchor = e ? this.anchor(ctx, e) : null;
     if (this.stroke.points.length < 2) {
       // keep single dots — Blender does
     } else {
@@ -97,6 +134,12 @@ export class DrawTool implements Tool {
       smoothAttr(this.stroke.points, 'pressure', b.postSmooth * 0.5);
       if (b.simplify > 0) simplifyStroke(this.stroke, b.simplify);
     }
+    // pin the ends AFTER smoothing and simplifying, which would pull them
+    // back off the strokes they were meant to touch
+    const pts = this.stroke.points;
+    if (this.anchorStart && pts.length) pts[0].co = [...this.anchorStart] as Vec3;
+    if (endAnchor && pts.length > 1) pts[pts.length - 1].co = worldToObject(ctx, endAnchor);
+    this.anchorStart = null;
     this.stroke = null;
     setStrokeExclusion(null);
     // onUp mutates the finished stroke (smooth/simplify), so the frozen

@@ -94,6 +94,18 @@ Key invariants:
   selection key actually changed AND the row is off screen; anything more
   eager is the original bug (the list moving out from under someone reading
   it) wearing a different hat. Frame-selection asks for it explicitly.
+- **The top bar is laid out like Blender's 3D-view header**: the TOOL's
+  settings on the left (brush, size, select mode…), WHERE THINGS LAND in the
+  centre (`UI.placementCluster`: Placement, Plane, Guide, then the magnet),
+  the VIEW on the right (shading); two `.grow` spacers keep the centre
+  centred. Placement/Plane/Guide are global in Object, Draw and Edit mode
+  because they decide where every placed OR MOVED point resolves — Edit
+  mode's G unprojects both pointer positions through `screenToWorld` — and
+  they used to be hidden in Edit mode while moving its points. The
+  per-placement refinements (Lock, Smooth, Offset, Target, shape snapping)
+  sit in a popover behind the ⋯ button, which turns orange when any of them
+  is away from its default: a hidden setting that is quietly ON is the worst
+  kind.
 - **A checkbox's NAME goes in the label column and the box in the value
   column**, like every other row. It used to carry its own text, which put it
   the other way round — box first, name second, both adrift in the value
@@ -263,7 +275,21 @@ the browser console or automated evals:
   precise aim still reaches a far stroke. Cmd/Ctrl held as a point is
   placed opts that point out; the choice is frozen per anchor, and the
   release REBUILDS the shape so the modifier at release is the one that
-  counts. Ortho trap in the depth helper: an ortho ray starts
+  counts. The PENCIL does the same for its first and last points
+  (`DrawTool.anchor`): its body keeps Stroke placement's per-sample depth,
+  but its ends land ON the strokes they start and stop near — pinned again
+  AFTER smoothing and simplifying, which would pull them back off, and with
+  the sticky plane re-seated through an anchored start
+  (`reseatStickyPlane`) so the rest of the mark does not kink away from it.
+  Verified: released 12 and 15 px short, both ends landed exactly on the
+  lines; Cmd at release left the end where it was.
+  **Strokes can be restyled after drawing** (Stroke Style panel, Edit mode):
+  every stroke already carries its own brush record — `lineWidth`,
+  `hardness`, `style` — so this edits that record on all selected strokes
+  at once: a preset, "Match current brush", or single fields. Switching unit
+  keeps the apparent width on the brush convention (30 px == 0.3 m). Edits
+  within 800 ms share one undo step, so a scrub is one undo, not hundreds.
+  Ortho trap in the depth helper: an ortho ray starts
   on the NEAR PLANE, not at the camera, so depth must be measured from the
   same point on both sides or every point lands short by the near distance.
 - Agent tools (`src/agent/tools.ts`) are the SINGLE registry behind the

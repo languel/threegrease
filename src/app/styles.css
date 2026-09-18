@@ -768,3 +768,18 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
   font-size: 11px; text-align: center;
 }
 .lib-drop.over { border-color: var(--accent); color: var(--text); }
+
+/* Top bar centre: where things land (Placement / Plane / Guide / magnet),
+   between the tool's settings and the view, as in Blender's header. */
+.tb-centre { display: flex; align-items: center; gap: 6px; flex: none; }
+.tb-pop-wrap { position: relative; display: flex; }
+.tb-pop {
+  position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  z-index: 60; min-width: 230px; padding: 8px 10px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center;
+}
+.tb-pop > .field-row { display: contents; }
+/* an options button whose hidden settings are not at their defaults */
+.icon-btn.tuned { color: var(--accent2); }
