@@ -129,6 +129,8 @@ export class MeasureTool implements Tool {
   private previewRef: ObjRef | null = null;
   /** dragging an existing point: [measureId, pointIndex] */
   private drag: { id: number; index: number } | null = null;
+  /** Cmd/Ctrl is down: the draft will close when it finishes */
+  private closeHeld = false;
   /** point under the pointer, for the delete key and the hover ring */
   private hover: { id: number; index: number } | null = null;
 
@@ -223,6 +225,7 @@ export class MeasureTool implements Tool {
     const dragged = this.drag
       ? worldPointsOf(ctx.scene, ctx.scene.measures.find((m) => m.id === this.drag!.id)!)[this.drag.index]
       : undefined;
+    this.closeHeld = e.ctrl;
     const g = this.drag ? { clientX: e.clientX, clientY: e.clientY } : this.guided(ctx, e);
     const snapped = snapWorldPoint(ctx, g.clientX, g.clientY, dragged);
     if (!snapped) return;
@@ -239,14 +242,23 @@ export class MeasureTool implements Tool {
     }
   }
 
-  onUp(ctx: AppCtx, _e: ToolEvent): void {
+  onUp(ctx: AppCtx, e: ToolEvent): void {
     if (this.drag) ctx.refreshUI();
     this.drag = null;
+    // Cmd/Ctrl held on RELEASE finishes the ruler: the point just placed is
+    // the last one, and the ring closes back to the first — a room's outline
+    // in one gesture, instead of place, Enter, select, C.
+    this.closeHeld = e.ctrl;
+    if (e.ctrl && this.draft.length >= 2) this.commit(ctx, true);
   }
 
-  onKey(ctx: AppCtx, key: string): boolean {
+  onKey(ctx: AppCtx, key: string, e?: KeyboardEvent): boolean {
+    // the modifier alone changes what the draft WILL be, so the preview
+    // shows the closing leg the moment Cmd goes down
+    if (key === 'Meta' || key === 'Control') { this.closeHeld = true; return false; }
     if (key === 'Escape') { this.cancel(ctx); return true; }
-    if (key === 'Enter') { this.commit(ctx); return true; }
+    // Cmd/Ctrl+Enter finishes it CLOSED, the same as a Cmd release
+    if (key === 'Enter') { this.commit(ctx, !!(e?.metaKey || e?.ctrlKey)); return true; }
     // Backspace drops the last point rather than the whole ruler — a
     // three-point measurement is a lot of aiming to throw away over one miss
     if (key === 'Backspace' && this.draft.length) {
@@ -288,11 +300,15 @@ export class MeasureTool implements Tool {
   }
 
   /** Commit the draft. A single point is not a measurement, so it is
-   *  discarded rather than saved as a degenerate one. */
-  private commit(ctx: AppCtx): void {
+   *  discarded rather than saved as a degenerate one. `close` rings it back
+   *  to the first point — only meaningful from three points up, since two
+   *  points enclose nothing. */
+  private commit(ctx: AppCtx, close = false): void {
+    this.closeHeld = false;
     if (this.draft.length >= 2) {
       ctx.pushUndo();
       const m = createMeasure(ctx.scene.measures, this.draft);
+      if (close && this.draft.length >= 3) m.closed = true;
       recentre(m);
       for (const other of ctx.scene.measures) other.select = false;
       m.select = true;
@@ -312,9 +328,9 @@ export class MeasureTool implements Tool {
    *  routine can be used with no tool active at all (see drawMeasures). */
   liveDraft(): {
     draft: TGMeasurePoint[]; preview: THREE.Vector3 | null;
-    kind: SnapKind; hover: { id: number; index: number } | null;
+    kind: SnapKind; hover: { id: number; index: number } | null; close: boolean;
   } {
-    return { draft: this.draft, preview: this.preview, kind: this.previewKind, hover: this.hover };
+    return { draft: this.draft, preview: this.preview, kind: this.previewKind, hover: this.hover, close: this.closeHeld };
   }
 }
 
@@ -345,7 +361,9 @@ export function drawMeasures(
   }
 
   if (live?.draft.length) {
-    const host: TGMeasure = { ...DRAFT_HOST, points: live.draft };
+    // with Cmd held the draft is drawn CLOSED — the leg back to the first
+    // point is shown before you commit to it
+    const host: TGMeasure = { ...DRAFT_HOST, points: live.draft, closed: live.close };
     const pts = measureWorldPoints(host, measureResolvers(ctx.scene));
     if (live.preview) pts.push(live.preview);
     drawRuler(ctx, hud, pts, host, unit, '#ffc84d', true, false, -1);

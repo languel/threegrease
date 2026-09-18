@@ -1073,7 +1073,10 @@ the browser console or automated evals:
     opens a sticky placement SESSION (`setStrokeExclusion(-1)`) — the planes
     captured from a first point (Up from Ground, View at Origin, the two ⊥
     placements) only engage while one is open, so without it every point of
-    a ruler fell back to the floor. Verified: Up from Ground takes a ruler
+    a ruler fell back to the floor. Cmd/Ctrl held on the RELEASE of a click
+    (or Cmd+Enter) finishes the ruler CLOSED — a room's outline and its area
+    in one gesture; the draft is drawn closed the moment Cmd is down, and two
+    points finish as a plain ruler since they enclose nothing. Verified: Up from Ground takes a ruler
     from (1,1,0) straight up to 2.34 m; a Parallel guide flattens an
     off-axis click onto the horizontal.
   - `scaleSceneToMeasure` no longer special-cases them: a measurement is a
