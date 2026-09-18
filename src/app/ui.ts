@@ -1,4 +1,4 @@
-import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget } from '../tools/context';
+import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget, type NearestTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
 import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
@@ -1198,7 +1198,8 @@ export class UI {
   private placementCluster(): Node[] {
     const s = this.app.ctx.settings;
     const tuned = s.placementLock || s.placementSmooth || s.surfaceOffset !== 0
-      || s.strokeTarget !== 'ALL' || s.shapeSnap !== 'ENDS';
+      || s.strokeTarget !== 'ALL' || s.shapeSnap !== 'ENDS'
+      || (s.placement === 'NEAREST' && s.nearestTarget !== 'ELEMENT');
     const zUp = s.upAxis === 'Z';
     return [
       this.iconMenu('place', 'Placement', s.placement, [
@@ -1209,9 +1210,10 @@ export class UI {
         ['STROKE', 'placeStroke', 'Stroke', 'at the depth of the nearest stroke; a stroke’s ends land on it'],
         ['STROKE_PERP', 'placeStrokePerp', 'Stroke ⊥', 'start on a stroke, then grow across it'],
         ['SPLAT', 'placeSplat', 'Splat (nearest)', 'at the depth of the nearest splat'],
-        ['NEAREST', 'placeNearest', 'Nearest Object', 'onto whatever geometry is nearest the pointer'],
+        ['NEAREST', 'placeNearest', 'Nearest', 'onto the nearest vertex, edge or face — choose which below'],
       ] as [PlacementMode, IconName, string, string][], (v) => { s.placement = v; }, this.placementOptions(), tuned),
       this.iconMenu('plane', 'Plane', s.plane, [
+        ['NONE', 'planeNone', 'None', 'no plane of its own: the Placement, the magnet and the guide decide (a point nothing catches faces the camera), and the grid snaps in 3D'],
         ['VIEW', 'planeView', 'View', 'facing the camera'],
         ['VIEW_ORIGIN', 'planeViewOrigin', 'View at Origin', 'facing the camera, through wherever a stroke starts'],
         ['UPRIGHT', 'planeUpright', 'Up from Ground', 'start on the floor, then grow straight up — draw the plan with Top, lift it with this'],
@@ -1246,6 +1248,13 @@ export class UI {
           'freeze the depth this stroke started at instead of re-snapping to whatever is nearest as you draw'),
         checkbox('Smooth', s.placementSmooth, (v) => { s.placementSmooth = v; this.buildTopbar(); },
           'ease toward a new target depth instead of jumping straight to it (ignored when Lock is on)'),
+      ] : []),
+      ...(s.placement === 'NEAREST' ? [
+        tip(selectField('Target', s.nearestTarget, [['ELEMENT', 'Nearest Element'], ['VERTEX', 'Vertex'], ['EDGE', 'Edge'], ['FACE', 'Face']] as [NearestTarget, string][],
+          (v) => { s.nearestTarget = v; this.buildTopbar(); }),
+        'Element: whatever is nearest, in priority order (mesh vertex, edge, face, surface, stroke, splat). '
+          + 'Vertex: a stroke point, a mesh or poly vertex, a splat centre. Edge: anywhere along a stroke or a mesh edge. '
+          + 'Face: a mesh surface.'),
       ] : []),
       ...(s.placement === 'STROKE' ? [
         tip(selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][],

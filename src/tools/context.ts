@@ -14,11 +14,15 @@ export type PlacementMode =
   | 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'SURFACE_PERP' | 'STROKE'
   | 'STROKE_PERP' | 'SPLAT' | 'NEAREST';
 export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
+/** which kind of element Placement: Nearest lands on */
+export type NearestTarget = 'ELEMENT' | 'VERTEX' | 'EDGE' | 'FACE';
 /** UPRIGHT: start on the GROUND, then grow straight up — the first point
  *  lands on the floor (or on whatever the Placement snaps it to), and the
  *  rest of the stroke lives on the VERTICAL plane through it that faces the
  *  camera as much as a vertical plane can. Floor plan first, then walls. */
-export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR' | 'VIEW_ORIGIN' | 'UPRIGHT';
+/** NONE: no plane of its own — the Placement, the magnet and the guide
+ *  decide; a point none of them catches falls back to facing the camera. */
+export type PlaneMode = 'NONE' | 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR' | 'VIEW_ORIGIN' | 'UPRIGHT';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
 export type EraserMode = 'POINT' | 'STROKE' | 'SOFT';
 export type SculptBrush =
@@ -77,6 +81,7 @@ export interface Settings {
   fill: { simplify: number; scale: number };
   placement: PlacementMode;
   strokeTarget: StrokeTarget;  // which points of existing strokes anchor depth
+  nearestTarget: NearestTarget;
   surfaceOffset: number;       // world units above the surface hit (along normal)
   plane: PlaneMode;
   /** STROKE/SPLAT/NEAREST placement continuously re-resolve their target as
@@ -299,6 +304,7 @@ export function defaultSettings(): Settings {
     fill: { simplify: 1.5, scale: 1 },
     placement: 'ORIGIN',
     strokeTarget: 'ALL',
+    nearestTarget: 'ELEMENT',
     surfaceOffset: 0,
     plane: 'VIEW',
     placementLock: false,

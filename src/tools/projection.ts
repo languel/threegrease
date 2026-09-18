@@ -58,6 +58,16 @@ function uprightNormal(ctx: AppCtx): THREE.Vector3 {
  */
 export function reseatStickyPlane(point: THREE.Vector3): void {
   if (viewOriginPlane) viewOriginPlane.setFromNormalAndCoplanarPoint(viewOriginPlane.normal, point);
+  if (viewOriginPlane || perpPlane) stickySeed = point.clone();
+}
+
+/** Where the current sticky plane was captured (the stroke's first point).
+ *  The grid magnet anchors its lattice there on a tilted plane, so a line
+ *  lifted from a snapped floor point stays exactly above it rather than
+ *  drifting onto a lattice counted from the world origin. */
+let stickySeed: THREE.Vector3 | null = null;
+export function currentStickySeed(): THREE.Vector3 | null {
+  return currentStickyPlane() ? stickySeed : null;
 }
 
 /** Plane.VIEW_ORIGIN's sticky standing plane: view-aligned, through
@@ -79,6 +89,7 @@ export function setStrokeExclusion(id: number | null): void {
   drawingSurface = null;  // ...and its surface
   perpPlane = null;       // ...and its Surface-⊥ / Stroke-⊥ standing plane
   viewOriginPlane = null; // ...and its View-at-Origin standing plane
+  stickySeed = null;
   lockedDepth = null;     // ...and its placementLock freeze
   smoothedDepth = null;   // ...and its placementSmooth chase
 }
@@ -688,6 +699,7 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
           ? uprightNormal(ctx)
           : ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
         viewOriginPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, first);
+        stickySeed = first.clone();
       }
       return first;
     }
@@ -753,7 +765,7 @@ function resolvePlacement(ctx: AppCtx, x: number, y: number, rect: DOMRect): THR
           ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
           : raycaster.ray.direction.clone().negate();
         const plane = perpendicularPlaneAt(ctx, h.point, n);
-        if (excludedStrokeId !== null) perpPlane = plane; // stick for this stroke
+        if (excludedStrokeId !== null) { perpPlane = plane; stickySeed = h.point.clone(); } // stick for this stroke
         return h.point.clone();
       }
     }
@@ -781,7 +793,7 @@ function resolvePlacement(ctx: AppCtx, x: number, y: number, rect: DOMRect): THR
         if (side.lengthSq() < 1e-9) side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0));
         if (side.lengthSq() < 1e-9) side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(1, 0, 0));
         const plane = perpendicularPlaneAt(ctx, point, side.normalize());
-        if (excludedStrokeId !== null) perpPlane = plane; // stick for this stroke
+        if (excludedStrokeId !== null) { perpPlane = plane; stickySeed = point.clone(); } // stick for this stroke
       }
       return point.clone();
     }
@@ -815,7 +827,7 @@ function resolvePlacement(ctx: AppCtx, x: number, y: number, rect: DOMRect): THR
   }
   if (ctx.settings.placement === 'NEAREST') {
     const px = x - rect.left, py = y - rect.top;
-    const hit = pickConstruction(ctx, px, py, {});
+    const hit = pickConstruction(ctx, px, py, { only: ctx.settings.nearestTarget });
     const real = hit.source.kind !== 'PLANE' && hit.source.kind !== 'FREE';
     if (real) {
       const w = new THREE.Vector3(...hit.world);

@@ -105,6 +105,7 @@ const PATHS: Record<string, string> = {
   placeStrokePerp: 'M3 19c5-5 12-5 18-2M12 16.5V4M9.5 6.5 12 4l2.5 2.5',
   placeSplat: 'M5.2 9a2.8 2.8 0 1 0 5.6 0a2.8 2.8 0 1 0 -5.6 0M13.5 7.5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M11.2 15a3.3 3.3 0 1 0 6.6 0a3.3 3.3 0 1 0 -6.6 0M4.9 16.5a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0 -3.2 0',
   placeNearest: 'M14 5h7v7h-7ZM4.5 18.5 13 12M2.5 19a1.5 1.5 0 1 0 3.0 0a1.5 1.5 0 1 0 -3.0 0',
+  planeNone: 'M6.5 12a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0 -11 0M5 19 19 5',
   planeView: 'M3 6h18v12H3ZM9.7 12a2.3 2.3 0 1 0 4.6 0a2.3 2.3 0 1 0 -4.6 0',
   planeViewOrigin: 'M3 6h18v12H3ZM12 9v6M9 12h6',
   planeUpright: 'M2 21l4.5-4h15.5l-4.5 4ZM8.5 19V5h8v14',

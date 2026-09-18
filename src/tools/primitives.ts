@@ -5,7 +5,11 @@ import {
 } from '../core/gpdata';
 import type { AppCtx } from './context';
 import { brushWidth } from './draw';
-import { screenToWorld, setStrokeExclusion, strokeAnchorPoint, worldToObject } from './projection';
+import {
+  currentStickyPlane, drawingPlane, reseatStickyPlane, screenToWorld, setStrokeExclusion,
+  strokeAnchorPoint, worldToObject,
+} from './projection';
+import { magnetPoint } from './snapping';
 import type { Tool, ToolEvent } from './toolsys';
 
 type PrimKind = 'line' | 'polyline' | 'arc' | 'curve' | 'box' | 'circle';
@@ -28,6 +32,10 @@ export class PrimitiveTool implements Tool {
   private freeHeld = false;
   /** that choice, frozen per placed anchor at the moment it was placed */
   private anchorFree: boolean[] = [];
+  /** the first point, resolved ONCE. Re-resolving it on every rebuild went
+   *  through the sticky plane that point itself had just captured, so under
+   *  Up from Ground a snapped floor corner crept 4 cm up the wall. */
+  private firstWorld: THREE.Vector3 | null = null;
 
   constructor(kind: PrimKind) {
     this.kind = kind;
@@ -51,6 +59,7 @@ export class PrimitiveTool implements Tool {
       setStrokeExclusion(this.stroke.id);
       this.anchors = [new THREE.Vector2(e.x, e.y)];
       this.anchorFree = [e.ctrl];
+      this.firstWorld = null;
       this.phase = this.kind === 'polyline' ? 'poly' : 'drag';
       this.rebuild(ctx);
     } else if (this.phase === 'poly') {
@@ -115,6 +124,7 @@ export class PrimitiveTool implements Tool {
     this.stroke = null;
     this.anchors = [];
     this.anchorFree = [];
+    this.firstWorld = null;
     this.phase = 'idle';
     setStrokeExclusion(null);
     ctx.requestRender();
@@ -156,12 +166,22 @@ export class PrimitiveTool implements Tool {
     // first), and only outside it does the ordinary placement take over.
     // Holding Cmd/Ctrl as a point is placed opts THAT point out, for the
     // times you want an end to stop exactly where you let go.
-    const at = (p: THREE.Vector2, free = false) => {
-      if (s.placement === 'STROKE' && !free) {
-        const hit = strokeAnchorPoint(ctx, p.x, p.y, ANCHOR_SNAP_PX, s.strokeTarget);
-        if (hit) return hit;
+    // The MAGNET then gets the last word on a placed point (the same Cmd
+    // opts out of both): a lattice snap rounds what the placement resolved,
+    // a vertex/edge/face snap replaces it. The first point re-seats a sticky
+    // plane through where it actually landed, or Up from Ground would stand
+    // its wall on the unsnapped spot beside it.
+    const at = (p: THREE.Vector2, free = false, first = false) => {
+      if (first && this.firstWorld) return this.firstWorld.clone();
+      let w: THREE.Vector3 | null = null;
+      if (s.placement === 'STROKE' && !free) w = strokeAnchorPoint(ctx, p.x, p.y, ANCHOR_SNAP_PX, s.strokeTarget);
+      if (!w) w = screenToWorld(ctx, p.x + rect.left, p.y + rect.top);
+      if (!free) {
+        const m = magnetPoint(ctx, p.x + rect.left, p.y + rect.top, w, first);
+        if (m) { w = m; if (first) reseatStickyPlane(m); }
       }
-      return screenToWorld(ctx, p.x + rect.left, p.y + rect.top);
+      if (first && w) this.firstWorld = w.clone();
+      return w;
     };
     const free0 = this.anchorFree[0] ?? false;
     const freeNow = this.freeHeld;
@@ -190,16 +210,29 @@ export class PrimitiveTool implements Tool {
     const cur = this.current;
     switch (this.kind) {
       case 'line': {
-        const A = at(a, free0); const B = at(this.constrain(a, cur), freeNow);
+        const A = at(a, free0, true); const B = at(this.constrain(a, cur), freeNow);
         return straight([A, B], 8, false);
       }
       case 'polyline':
         return straight([
-          ...this.anchors.map((q, i) => at(q, this.anchorFree[i] ?? false)), at(cur, freeNow),
+          ...this.anchors.map((q, i) => at(q, this.anchorFree[i] ?? false, i === 0)), at(cur, freeNow),
         ], 4, false);
       case 'box': {
         const c = this.constrain(a, cur);
-        const A = at(a, free0); const C = at(c, freeNow);
+        const A = at(a, free0, true); const C = at(c, freeNow);
+        if (A && C && !seeking) {
+          // On a plane, the box is a RECTANGLE IN THAT PLANE, not the screen
+          // rectangle projected onto it: under perspective a screen box cast
+          // onto a wall or the floor is a trapezoid, and on Up from Ground's
+          // wall it came out a parallelogram. Its edges run along the plane's
+          // own axes (up-in-plane and across; X and Y on the floor) — on a
+          // view-facing plane those are the screen's axes, as before.
+          const { u, v } = planeAxes(ctx, currentStickyPlane() ?? drawingPlane(ctx));
+          const d = C.clone().sub(A);
+          const B = A.clone().addScaledVector(u, d.dot(u));
+          const D = A.clone().addScaledVector(v, d.dot(v));
+          return straight([A, B, C, D], 6, true);
+        }
         // the two corners you did not place sit between the two you did
         const d = A && C ? (viewDepth(ctx, A) + viewDepth(ctx, C)) / 2 : 0;
         const B = A && C ? between(new THREE.Vector2(c.x, a.y), d) : null;
@@ -209,7 +242,7 @@ export class PrimitiveTool implements Tool {
       case 'arc':
       case 'curve': {
         const pts = this.shape2D();
-        const A = at(pts[0], free0);
+        const A = at(pts[0], free0, true);
         const B = at(pts[pts.length - 1], this.phase === 'adjust' ? (this.anchorFree[1] ?? false) : freeNow);
         if (!A || !B) return [];
         const dA = viewDepth(ctx, A), dB = viewDepth(ctx, B);
@@ -219,7 +252,7 @@ export class PrimitiveTool implements Tool {
       case 'circle': {
         // a circle has no placed point ON it, so it lies flat at the depth
         // of the corner you started the drag from
-        const A = at(a, free0);
+        const A = at(a, free0, true);
         if (!A) return [];
         const d = viewDepth(ctx, A);
         return this.shape2D().map((p) => between(p, d));
@@ -291,6 +324,21 @@ export class PrimitiveTool implements Tool {
 }
 
 const ray = new THREE.Raycaster();
+
+/** A plane's own axes: `v` is the up axis laid into the plane (so on a wall
+ *  it is straight up), `u` runs across it; on a floor, where up has no
+ *  projection, they are world X and the in-plane axis square to it. */
+function planeAxes(ctx: AppCtx, plane: THREE.Plane): { u: THREE.Vector3; v: THREE.Vector3 } {
+  const n = plane.normal;
+  const up = ctx.settings.upAxis === 'Z' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  let v = up.clone().addScaledVector(n, -up.dot(n));
+  if (v.lengthSq() < 1e-6) {
+    const u = new THREE.Vector3(1, 0, 0).addScaledVector(n, -n.x).normalize();
+    return { u, v: new THREE.Vector3().crossVectors(n, u).normalize() };
+  }
+  v.normalize();
+  return { u: new THREE.Vector3().crossVectors(v, n).normalize(), v };
+}
 
 /** How close, in screen px, a placed shape point must be to a stroke to land
  *  ON it under Placement: Stroke. Generous enough to forgive a release that

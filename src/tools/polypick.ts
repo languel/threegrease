@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import type { AppCtx } from './context';
 import type { PathRef, TGVertexBinding, Vec3 } from '../core/types';
 import { frameAt } from '../core/gpdata';
-import { drawingPlane } from './projection';
+import { drawingPlane, nearestStrokePointAll, nearestStrokeSegmentAll, raycastFaceTriangle } from './projection';
 import { snapIncrement } from './context';
 import { worldMatrixOf } from './objects';
 import { pickPaintCloudPoint, pickSplatPoint } from './splatpick';
@@ -23,6 +23,9 @@ export type ConstructionSource =
   | { kind: 'SPLAT'; objectId: number; pointIndex?: number }
   | { kind: 'PCLOUD'; cloudId: number; pointIndex?: number }
   | { kind: 'PLANE' }
+  /** a vertex/edge/face of something with no finer identity to report
+   *  (a stroke point, a triangle corner) — Placement: Nearest's filters */
+  | { kind: 'ELEMENT' }
   | { kind: 'FREE' };
 
 export interface ConstructionHit {
@@ -45,6 +48,9 @@ export interface ConstructionOpts {
   edgePx?: number;
   strokePx?: number;
   splatPx?: number;
+  /** only this kind of element (Placement: Nearest's target); ELEMENT or
+   *  absent = the full priority chain */
+  only?: 'ELEMENT' | 'VERTEX' | 'EDGE' | 'FACE';
 }
 
 /** Vertex binding matching a construction source (provenance only). */
@@ -196,6 +202,80 @@ export function pickStrokePoint(
   return best;
 }
 
+// ---- one kind of element ----------------------------------------------------
+
+/** Screen radius for Placement: Nearest's element filters — wider than the
+ *  full chain's, since asking for "a vertex" means you want one found. */
+const ELEMENT_PX = 24;
+
+/**
+ * The nearest element of ONE kind, across everything that has that kind:
+ * a VERTEX is a poly vertex, a stroke point, a splat centre, or the corner of
+ * the mesh triangle under the pointer; an EDGE is a poly edge, anywhere along
+ * a stroke, or the nearest side of that triangle; a FACE is a poly face or a
+ * mesh surface. Candidates compete on screen distance. The triangle is the
+ * renderer's, so a box's face diagonal counts as an edge — a mesh has no
+ * other record of which of its edges are "real".
+ */
+function pickElement(
+  ctx: AppCtx, x: number, y: number, only: 'VERTEX' | 'EDGE' | 'FACE', rect: DOMRect, opts: ConstructionOpts,
+): ConstructionHit | null {
+  const cands: { world: THREE.Vector3; d: number; source: ConstructionSource }[] = [];
+  const dist = (w: THREE.Vector3) => {
+    const s = screenOf(ctx, w, rect);
+    return s ? Math.hypot(s.x - x, s.y - y) : Infinity;
+  };
+  const tri = only === 'FACE' ? null : raycastFaceTriangle(ctx, x + rect.left, y + rect.top);
+  if (only === 'VERTEX') {
+    const v = pickPolyVertex(ctx, x, y, ELEMENT_PX, opts.editMeshId, opts.excludeVertexIds);
+    if (v) cands.push({ world: v.world, d: v.d, source: { kind: 'POLY_VERTEX', meshId: v.meshId, vertexId: v.vertexId } });
+    const sp = nearestStrokePointAll(ctx, x, y, ELEMENT_PX);
+    if (sp) cands.push({ world: sp, d: dist(sp), source: { kind: 'ELEMENT' } });
+    const pc = pickPaintCloudPoint(ctx, x, y, ELEMENT_PX);
+    if (pc) cands.push({ world: new THREE.Vector3(...pc.world), d: pc.d, source: { kind: 'PCLOUD', cloudId: pc.cloudId, pointIndex: pc.pointIndex } });
+    const sk = pickSplatPoint(ctx, x, y, ELEMENT_PX);
+    if (sk) cands.push({ world: new THREE.Vector3(...sk.world), d: sk.d, source: { kind: 'SPLAT', objectId: sk.objectId, pointIndex: sk.pointIndex } });
+    if (tri) {
+      // the corner of the face you are on — offered however far it is,
+      // since being ON the face is what makes it the nearest vertex
+      const corners = [tri.tri.a, tri.tri.b, tri.tri.c];
+      const best = corners.reduce((m, c) => (dist(c) < dist(m) ? c : m));
+      cands.push({ world: best.clone(), d: Math.max(dist(best), ELEMENT_PX - 0.01), source: { kind: 'ELEMENT' } });
+    }
+  } else if (only === 'EDGE') {
+    const e = pickPolyEdge(ctx, x, y, ELEMENT_PX, opts.editMeshId);
+    if (e) cands.push({ world: e.world, d: e.d, source: { kind: 'POLY_EDGE', meshId: e.meshId, edgeId: e.edgeId, t: e.t } });
+    const seg = nearestStrokeSegmentAll(ctx, x, y, ELEMENT_PX);
+    if (seg) {
+      const w = seg.a.clone().lerp(seg.b, seg.t);
+      cands.push({ world: w, d: dist(w), source: { kind: 'ELEMENT' } });
+    }
+    if (tri) {
+      const sides = [[tri.tri.a, tri.tri.b], [tri.tri.b, tri.tri.c], [tri.tri.c, tri.tri.a]];
+      let best: THREE.Vector3 | null = null;
+      for (const [a, b] of sides) {
+        const p = new THREE.Line3(a, b).closestPointToPoint(tri.point, true, new THREE.Vector3());
+        if (!best || p.distanceTo(tri.point) < best.distanceTo(tri.point)) best = p;
+      }
+      if (best) cands.push({ world: best, d: Math.max(dist(best), ELEMENT_PX - 0.01), source: { kind: 'ELEMENT' } });
+    }
+  } else {
+    const f = pickPolyFace(ctx, x, y);
+    if (f) {
+      return {
+        world: [f.world.x, f.world.y, f.world.z],
+        normal: f.normal ? [f.normal.x, f.normal.y, f.normal.z] : undefined,
+        source: { kind: 'POLY_FACE', meshId: f.meshId, faceId: f.faceId },
+      };
+    }
+    const hit = raycastFaceTriangle(ctx, x + rect.left, y + rect.top);
+    if (hit) return { world: [hit.point.x, hit.point.y, hit.point.z], source: { kind: 'ELEMENT' } };
+  }
+  if (!cands.length) return null;
+  const win = cands.reduce((m, c) => (c.d < m.d ? c : m));
+  return { world: [win.world.x, win.world.y, win.world.z], source: win.source, distancePx: win.d };
+}
+
 // ---- unified query ---------------------------------------------------------
 
 export function pickConstruction(ctx: AppCtx, x: number, y: number, opts: ConstructionOpts = {}): ConstructionHit {
@@ -205,7 +285,11 @@ export function pickConstruction(ctx: AppCtx, x: number, y: number, opts: Constr
   const splatPx = opts.splatPx ?? 14;
   const rect = ctx.canvas.getBoundingClientRect();
 
-  if (!opts.noSnap) {
+  if (!opts.noSnap && opts.only && opts.only !== 'ELEMENT') {
+    const hit = pickElement(ctx, x, y, opts.only, rect, opts);
+    if (hit) return hit;
+  }
+  if (!opts.noSnap && (!opts.only || opts.only === 'ELEMENT')) {
     const v = pickPolyVertex(ctx, x, y, vertexPx, opts.editMeshId, opts.excludeVertexIds);
     if (v) {
       return {

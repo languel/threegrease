@@ -4840,6 +4840,21 @@ class App implements AppHandle {
     try { this.withPane(pane, fn); } finally { g.restore(); }
   }
 
+  /** Draw world-anchored HUD once per view: each quad pane through its own
+   *  camera, clipped to it; the single view otherwise. */
+  private eachPaneHud(g: CanvasRenderingContext2D, fn: () => void): void {
+    if (!this.quadView || !this.paneRects) { fn(); return; }
+    for (const id of ['persp', 'front', 'side', 'top'] as PaneId[]) {
+      const r = this.paneRects[id];
+      g.save();
+      g.beginPath();
+      g.rect(r.x, r.y, r.w, r.h);
+      g.clip();
+      g.translate(r.x, r.y);
+      try { this.withPane(id, fn); } finally { g.restore(); }
+    }
+  }
+
   private drawHud(): void {
     const g = this.hud.getContext('2d')!;
     g.clearRect(0, 0, this.hud.width, this.hud.height);
@@ -4850,8 +4865,12 @@ class App implements AppHandle {
     // is active: a dimension you can only see inside one tool is a mode, not
     // an annotation of the scene. The tool adds the rubber-band leg on top,
     // so it draws them itself and this stands down while it is running.
-    if (this.tools.active?.id !== 'measure') drawMeasures(this.ctx, g);
-    this.paneHud(g, () => this.tools.active?.drawHud?.(this.ctx, g));
+    // In quad view they are drawn in EVERY pane through that pane's camera,
+    // like any object in the scene; the tool's draft is world points too, so
+    // it goes with them rather than through the pointer's pane alone.
+    const measureTool = this.tools.active?.id === 'measure' ? this.tools.active as MeasureTool : undefined;
+    this.eachPaneHud(g, () => drawMeasures(this.ctx, g, measureTool));
+    if (!measureTool) this.paneHud(g, () => this.tools.active?.drawHud?.(this.ctx, g));
     if (this.objModal.active) {
       const w = this.hud.width / devicePixelRatio;
       const kind = this.objModal.trackball ? 'Rotate (trackball)'

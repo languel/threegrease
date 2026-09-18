@@ -360,6 +360,43 @@ the browser console or automated evals:
   HUD — goes through `withPane(this.pointerPane)` (`paneHud` for the 2D
   part: translated and clipped to the pane), or it lands where the pointer
   would be in the full-size view.
+  Measurements are drawn in EVERY pane (`eachPaneHud`) — they are scene
+  objects that happen to be drawn on the HUD, so a quad view must show them
+  through all four cameras, draft included.
+- **The magnet applies to DRAWING** (`magnetPoint` in `tools/snapping.ts`).
+  It used to reach only the 3D cursor, the transform tools and the ruler, so
+  a line drawn with Grid snap on landed wherever the pointer was. Now every
+  PLACED point of a shape (line/polyline ends, box corners, arc/curve ends)
+  and the pen's first and last points go through it after the Placement has
+  resolved them; Cmd opts a point out of both. A lattice snap ROUNDS the
+  resolved point rather than re-resolving it, so it composes with any
+  Placement; a vertex/edge/face snap replaces it. Freehand samples between
+  the ends are not snapped (a staircase is not a stroke).
+  THE LATTICE LIVES IN THE PLANE the point is going on (`snapToLattice`): it
+  used to raycast the floor whatever the Plane said, so a Top plane through
+  an object 1 m up snapped down to z = 0. An axis-aligned plane rounds its
+  two in-plane world coordinates; a tilted one (Up from Ground's wall) rounds
+  in its own up/across basis counted from the sticky SEED, so a lift stays
+  exactly above its snapped floor point. A stroke's FIRST point snaps on the
+  RESTING plane (the floor), because its own resolution has already captured
+  the wall. And a shape's first point is resolved ONCE per shape
+  (`PrimitiveTool.firstWorld`): re-resolving it each rebuild went through the
+  wall it had itself just raised and crept 4 cm up it.
+  Plane: NONE has no plane of its own — Placement, magnet and guide decide,
+  an uncaught point faces the camera (as View does), and the grid rounds all
+  three coordinates.
+- **A box on a PLANE is a rectangle IN that plane**, edges along the plane's
+  own axes (up-in-plane and across; X and Y on the floor), not the screen
+  rectangle cast onto it — under perspective that is a trapezoid, and on Up
+  from Ground's wall it came out a parallelogram. Verified: corners square to
+  0.00000, bottom edge on the floor. Target-seeking placements keep the old
+  screen-built box.
+- **Placement: Nearest has a Target** (`settings.nearestTarget`,
+  `pickElement` in `polypick.ts`): Element (the old priority chain), Vertex
+  (poly vertex, stroke point, splat centre, or the corner of the mesh
+  triangle under the pointer), Edge (poly edge, anywhere along a stroke, the
+  nearest side of that triangle), Face (poly face, mesh surface). Mesh
+  "edges" are the renderer's triangles, so a box face's diagonal counts.
 - **A new pencil continues the last one** (`App.newPencil`): its material
   slots and active slot are copied from the GP object last active
   (`lastPencil`, held by reference so a deleted object still answers), not

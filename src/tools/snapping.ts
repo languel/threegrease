@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import type { AppCtx } from './context';
 import { snapIncrement } from './context';
 import {
-  drawingPlane, nearestStrokePointAll, nearestStrokeSegmentAll, perpendicularFoot,
+  currentStickyPlane, currentStickySeed, drawingPlane, nearestStrokePointAll, nearestStrokeSegmentAll, perpendicularFoot,
   raycastFaceTriangle, raycastSurfaceHit, screenToWorld,
 } from './projection';
 import { allRefs, refOfObject3D, worldMatrixOf, type ObjRef } from './objects';
@@ -120,7 +120,7 @@ export function snapWorldPoint(
   if (!world) return null;
 
   if (snap.enabled && (snap.mode === 'INCREMENT' || snap.mode === 'GRID')) {
-    return { point: snapToLattice(ctx, world, clientX, clientY, rect), kind: 'GRID' };
+    return { point: snapToLattice(ctx, world), kind: 'GRID' };
   }
   return { point: world, kind: 'FREE' };
 }
@@ -146,44 +146,62 @@ function nearestObjectOrigin(
 }
 
 /**
- * Round onto the increment lattice.
+ * Round onto the increment lattice — IN THE PLANE THE POINT IS BEING PUT ON.
  *
- * Blender semantics: "grid" means the VISIBLE FLOOR grid, not a lattice on
- * whatever drawing plane happens to be active — so this raycasts the ground
- * and rounds the two in-plane coordinates. When the view is grazing enough
- * that the floor is edge-on (front/side ortho), that raycast is useless and
- * it falls back to the drawing plane's own lattice.
+ * This used to raycast the floor and round there whatever the Plane said, so
+ * a Top plane through an object standing 1 m up snapped every point down to
+ * z = 0, and anything drawn on a wall snapped onto the floor under it. Now
+ * the lattice lives in the active plane (the sticky one mid-stroke — Up from
+ * Ground's wall, a ⊥ placement's standing plane — else the Plane setting's
+ * own): an axis-aligned plane rounds its two in-plane world coordinates and
+ * keeps the point's own coordinate across it, so the grid you see is the
+ * grid you get; a tilted plane gets a lattice in its own basis (up-in-plane
+ * and across), moving the point only WITHIN the plane. Plane: None has no
+ * plane to respect and rounds all three coordinates.
  */
-function snapToLattice(
-  ctx: AppCtx, world: THREE.Vector3, clientX: number, clientY: number, rect: DOMRect,
-): THREE.Vector3 {
+export function snapToLattice(ctx: AppCtx, world: THREE.Vector3, resting = false): THREE.Vector3 {
   const g = snapIncrement(ctx.settings);
-  const zUp = ctx.settings.upAxis === 'Z';
-  const groundNormal = zUp ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
-
-  const ndc = new THREE.Vector2(
-    ((clientX - rect.left) / rect.width) * 2 - 1,
-    -((clientY - rect.top) / rect.height) * 2 + 1,
-  );
-  const ray = new THREE.Raycaster();
-  ray.setFromCamera(ndc, ctx.camera);
-  const hit = new THREE.Vector3();
-  if (Math.abs(ray.ray.direction.dot(groundNormal)) > 0.05
-    && ray.ray.intersectPlane(new THREE.Plane(groundNormal, 0), hit)) {
-    return zUp
-      ? new THREE.Vector3(Math.round(hit.x / g) * g, Math.round(hit.y / g) * g, 0)
-      : new THREE.Vector3(Math.round(hit.x / g) * g, 0, Math.round(hit.z / g) * g);
+  const r = (v: number) => Math.round(v / g) * g;
+  if (ctx.settings.plane === 'NONE') return new THREE.Vector3(r(world.x), r(world.y), r(world.z));
+  // a stroke's FIRST point snaps on the resting plane (Up from Ground's
+  // floor), even though its own resolution has already captured the wall
+  const sticky = resting ? null : currentStickyPlane();
+  const plane = sticky ?? drawingPlane(ctx);
+  const n = plane.normal;
+  const ax = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
+  const k = ax.indexOf(Math.max(...ax));
+  if (ax[k] > 0.9999) {
+    const out = world.clone();
+    for (let i = 0; i < 3; i++) if (i !== k) out.setComponent(i, r(out.getComponent(i)));
+    return out;
   }
+  const upV = ctx.settings.upAxis === 'Z' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  let v = upV.clone().addScaledVector(n, -upV.dot(n));
+  if (v.lengthSq() < 1e-6) v = new THREE.Vector3(1, 0, 0).addScaledVector(n, -n.x);
+  v.normalize();
+  const u = new THREE.Vector3().crossVectors(v, n).normalize();
+  const d = world.clone().sub((sticky && currentStickySeed()) || plane.coplanarPoint(new THREE.Vector3()));
+  const du = d.dot(u), dv = d.dot(v);
+  return world.clone().addScaledVector(u, r(du) - du).addScaledVector(v, r(dv) - dv);
+}
 
-  const plane = drawingPlane(ctx);
-  const anchor = plane.normal.clone().multiplyScalar(-plane.constant);
-  const tmp = Math.abs(plane.normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-  const u = new THREE.Vector3().crossVectors(tmp, plane.normal).normalize();
-  const v = new THREE.Vector3().crossVectors(plane.normal, u);
-  const d = world.clone().sub(anchor);
-  return anchor.clone()
-    .addScaledVector(u, Math.round(d.dot(u) / g) * g)
-    .addScaledVector(v, Math.round(d.dot(v) / g) * g);
+/**
+ * The magnet for a PLACED point of a stroke or shape: what the snap target
+ * catches, or null when the magnet is off or caught nothing (so the caller's
+ * own placement stands). A lattice snap rounds the point the caller's
+ * placement already resolved, rather than re-resolving it, so it composes
+ * with every Placement instead of overriding it.
+ */
+export function magnetPoint(
+  ctx: AppCtx, clientX: number, clientY: number, resolved: THREE.Vector3 | null,
+  /** the stroke's first point: lattice on the resting plane, not the sticky one */
+  first = false,
+): THREE.Vector3 | null {
+  const snap = ctx.settings.snap;
+  if (!snap.enabled) return null;
+  if (snap.mode === 'INCREMENT' || snap.mode === 'GRID') return resolved ? snapToLattice(ctx, resolved, first) : null;
+  const hit = snapWorldPoint(ctx, clientX, clientY, resolved ?? undefined);
+  return hit && hit.kind !== 'FREE' ? hit.point : null;
 }
 
 /** Short label for the HUD, so a snapped point says what it caught. */

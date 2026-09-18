@@ -10,6 +10,7 @@ import {
   applyGuide, eventToCanvas, objectToScreen, reseatStickyPlane, screenToWorld, setStrokeExclusion,
   strokeAnchorPoint, worldToObject,
 } from './projection';
+import { magnetPoint } from './snapping';
 import { listSelected, worldMatrixOf } from './objects';
 import { PAINT_STRIDE } from '../render/paintclouds';
 import type { Tool, ToolEvent } from './toolsys';
@@ -68,9 +69,16 @@ export class DrawTool implements Tool {
    * reach and the same front-most tie-break); the pencil now does too. Hold
    * Cmd/Ctrl at the start or the end to leave that end where it is.
    */
-  private anchor(ctx: AppCtx, e: ToolEvent): THREE.Vector3 | null {
-    if (ctx.settings.placement !== 'STROKE' || e.ctrl) return null;
-    return strokeAnchorPoint(ctx, e.x, e.y, ANCHOR_PX, ctx.settings.strokeTarget);
+  private anchor(ctx: AppCtx, e: ToolEvent, first = false): THREE.Vector3 | null {
+    if (e.ctrl) return null;
+    const w = ctx.settings.placement === 'STROKE'
+      ? strokeAnchorPoint(ctx, e.x, e.y, ANCHOR_PX, ctx.settings.strokeTarget) : null;
+    if (!ctx.settings.snap.enabled) return w;
+    // the magnet has the last word on the ENDS (snapping every sample of a
+    // freehand mark would turn it into a staircase)
+    const rect = ctx.canvas.getBoundingClientRect();
+    const cx = e.x + rect.left, cy = e.y + rect.top;
+    return magnetPoint(ctx, cx, cy, w ?? screenToWorld(ctx, cx, cy), first) ?? w;
   }
 
   onDown(ctx: AppCtx, e: ToolEvent): void {
@@ -102,7 +110,7 @@ export class DrawTool implements Tool {
     this.guideCenter.copy(c);
     this.addPoint(ctx, e);
     this.anchorStart = null;
-    const a = this.anchor(ctx, e);
+    const a = this.anchor(ctx, e, true);
     if (a && s.points.length) {
       this.anchorStart = worldToObject(ctx, a);
       s.points[0].co = [...this.anchorStart] as Vec3;
