@@ -113,6 +113,14 @@ button:hover { background: #35353c; }
    keyboard focus; pointer focus shows nothing. */
 select:focus { outline: none; }
 select:focus-visible { border-color: var(--accent); }
+/* Text fields get the same treatment. A text field IS focus-visible however
+   it was clicked (you need to know where the typing goes), so it keeps an
+   indicator — just the app's accent border instead of the browser's doubled
+   orange-and-white ring, which the command palette and every name field
+   still wore. */
+input:focus, textarea:focus { outline: none; }
+input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus,
+textarea:focus { border-color: var(--accent); }
 button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .tool-sep { height: 1px; background: var(--border); margin: 4px 3px; flex: none; }
 button.tool {
