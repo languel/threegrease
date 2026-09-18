@@ -502,6 +502,61 @@ function selectField<T extends string>(
   return label ? fieldRow(label, sel) : sel;
 }
 
+/** A UI-only preference (a folded strip, say) that should outlive a page
+ *  reload but is nobody's scene data. Storage can throw in a private window
+ *  or a sandboxed preview, and a folding strip is not worth a crash. */
+function readUiFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(`threegrease.ui.${key}`);
+    return v === null ? fallback : v === '1';
+  } catch { return fallback; }
+}
+function writeUiFlag(key: string, v: boolean): void {
+  try { localStorage.setItem(`threegrease.ui.${key}`, v ? '1' : '0'); } catch { /* ignore */ }
+}
+
+/**
+ * A GP material as a picture of itself: the fill as a rounded tile, the
+ * stroke as a line across it, in their own colours and alphas, dotted or
+ * squared as the line mode says. A hidden fill or stroke is simply absent,
+ * so a stroke-only material reads as a line on the dark ground and a
+ * fill-only one as a solid tile — which is the difference that matters when
+ * choosing between them.
+ */
+function materialThumb(m: GPMaterial): SVGSVGElement {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 30 30');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  const css = (c: number[]) => `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${c[3] ?? 1})`;
+  if (m.showFill) {
+    const r = document.createElementNS(NS, 'rect');
+    r.setAttribute('x', '4'); r.setAttribute('y', '4');
+    r.setAttribute('width', '22'); r.setAttribute('height', '22');
+    r.setAttribute('rx', '4');
+    r.setAttribute('fill', css(m.fillColor));
+    svg.append(r);
+  }
+  if (m.showStroke) {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', 'M5 22 C 11 6, 19 26, 25 9');
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', css(m.strokeColor));
+    p.setAttribute('stroke-width', '3.4');
+    if (m.lineMode === 'DOTS') {
+      p.setAttribute('stroke-dasharray', '0.1 5');
+      p.setAttribute('stroke-linecap', 'round');
+    } else if (m.lineMode === 'SQUARES') {
+      p.setAttribute('stroke-dasharray', '3 3');
+    } else {
+      p.setAttribute('stroke-linecap', 'round');
+    }
+    svg.append(p);
+  }
+  return svg;
+}
+
 function rgbToHex(c: number[]): string {
   const h = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
   return `#${h(c[0])}${h(c[1])}${h(c[2])}`;
@@ -3849,20 +3904,62 @@ export class UI {
     return rows;
   }
 
+  /**
+   * GP materials: the SLOTS as a strip of thumbnails, the ACTIVE one's
+   * properties below.
+   *
+   * The slots used to be a full-width list, one row each, so five of them
+   * stood between you and the settings you came for — a palette is picked
+   * by eye, not by reading names. Each slot is now a thumbnail drawn from its
+   * own settings (the fill as a tile, the stroke as a line across it, dotted
+   * or squared as its line mode is), the name lives in the tooltip and in an
+   * editable field for the active one, and the strip folds away entirely.
+   */
   private materialsPanel(): HTMLElement {
     const { ctx } = this.app;
     const ob = activeObject(ctx.scene);
-    const items: Node[] = [];
-    ob.materials.forEach((m, i) => {
-      const item = el('div', { class: `list-item ${i === ob.activeMaterial ? 'active' : ''}` });
-      item.onclick = () => { ob.activeMaterial = i; this.refresh(); };
-      const sw = el('div', { class: 'swatch' });
-      sw.style.background = rgbToHex(m.showFill ? m.fillColor : m.strokeColor);
-      item.append(sw, el('span', { class: 'grow', text: m.name }));
-      items.push(item);
+    const open = readUiFlag('matSlotsOpen', true);
+
+    const tiles: Node[] = ob.materials.map((mat, i) => {
+      const t = btn('', () => { ob.activeMaterial = i; this.refresh(); }, {
+        cls: `mat-tile${i === ob.activeMaterial ? ' active' : ''}`, title: mat.name,
+      });
+      t.append(materialThumb(mat));
+      return t;
     });
+    tiles.push(
+      btn('＋', () => {
+        ctx.pushUndo();
+        ob.materials.push(createMaterial(`Material ${ob.materials.length + 1}`, [0, 0, 0, 1]));
+        ob.activeMaterial = ob.materials.length - 1;
+        this.refresh();
+      }, { cls: 'mat-tile mat-add', title: 'New material' }),
+      btn('－', () => {
+        if (ob.materials.length <= 1) return;
+        ctx.pushUndo();
+        ob.materials.splice(ob.activeMaterial, 1);
+        ob.activeMaterial = Math.max(0, ob.activeMaterial - 1);
+        ctx.requestRender(); this.refresh();
+      }, { cls: 'mat-tile mat-add', title: 'Remove the active material' }),
+    );
 
     const m = ob.materials[ob.activeMaterial];
+    const head = el('div', { class: 'mat-head' });
+    const caret = btn(open ? '▾' : '▸', () => { writeUiFlag('matSlotsOpen', !open); this.refresh(); }, {
+      cls: 'icon-btn', title: open ? 'Hide the material slots' : `Show all ${ob.materials.length} material slots`,
+    });
+    head.append(caret);
+    if (m) {
+      const thumb = el('div', { class: 'mat-tile active mat-current' });
+      thumb.append(materialThumb(m));
+      const name = el('input', { type: 'text', class: 'grow', value: m.name }) as HTMLInputElement;
+      name.onchange = () => { ctx.pushUndo(); m.name = name.value.trim() || m.name; this.refresh(); };
+      name.onkeydown = (e) => e.stopPropagation();
+      head.append(thumb, name);
+    }
+    head.append(el('span', { class: 'dim', text: `${ob.activeMaterial + 1}/${ob.materials.length}` }));
+    const strip = el('div', { class: 'mat-slots' }, ...tiles);
+    strip.hidden = !open;
     const props: Node[] = [];
     if (m) {
       // Blender's GP material layout: each of Stroke and Fill is a titled
@@ -3902,24 +3999,7 @@ export class UI {
       }
     }
 
-    return panel('Materials',
-      el('div', { class: 'row' },
-        btn('＋', () => {
-          ctx.pushUndo();
-          ob.materials.push(createMaterial(`Material ${ob.materials.length + 1}`, [0, 0, 0, 1]));
-          ob.activeMaterial = ob.materials.length - 1;
-          this.refresh();
-        }),
-        btn('－', () => {
-          if (ob.materials.length <= 1) return;
-          ctx.pushUndo();
-          ob.materials.splice(ob.activeMaterial, 1);
-          ob.activeMaterial = Math.max(0, ob.activeMaterial - 1);
-          ctx.requestRender(); this.refresh();
-        }),
-      ),
-      ...items, ...props,
-    );
+    return panel('Materials', head, strip, ...props);
   }
 
   private canvasesPanel(): HTMLElement {

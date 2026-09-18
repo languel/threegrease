@@ -722,3 +722,20 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
   stroke: var(--text); stroke-width: 0.035; stroke-linecap: round; opacity: 0.85;
 }
 .pose-thumb circle { fill: var(--accent); }
+
+/* Materials: slots as a strip of thumbnails, the active one's settings
+   below. A palette is chosen by eye, so each slot is a picture of itself
+   rather than a full-width row of text. */
+.mat-head { display: flex; align-items: center; gap: 6px; padding: 2px 0 6px; }
+.mat-head input { flex: 1 1 auto; min-width: 0; width: auto; }
+.mat-slots { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 0 8px; }
+.mat-slots[hidden] { display: none; }
+.mat-tile {
+  width: 30px; height: 30px; padding: 0; border-radius: 6px; flex: none;
+  border: 1px solid var(--border); background: var(--bg); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.mat-tile:hover { border-color: var(--dim); }
+.mat-tile.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.mat-tile.mat-add { color: var(--dim); font-size: 14px; }
+.mat-current { cursor: default; }
