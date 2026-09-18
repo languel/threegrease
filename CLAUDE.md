@@ -1064,6 +1064,18 @@ the browser console or automated evals:
     a real corner always gives. Projecting onto a coordinate plane instead
     reports a wall's area as zero the moment it stands up (verified: a 2x3
     ring reads 6 m2 flat on the floor and 6 m2 stood on end).
+  - Measure is a tool in OBJECT and EDIT mode, and `UI.placementControls`
+    (Placement, Plane, Guide and their options) shows for it in both — the
+    same group Draw mode shows, because a ruler resolves its points through
+    exactly the same chain as a stroke. Two things a ruler needed to behave
+    like one: the GUIDE is applied to the pointer before the magnet (measured
+    from the previous point, as a stroke's is from its start), and each draft
+    opens a sticky placement SESSION (`setStrokeExclusion(-1)`) — the planes
+    captured from a first point (Up from Ground, View at Origin, the two ⊥
+    placements) only engage while one is open, so without it every point of
+    a ruler fell back to the floor. Verified: Up from Ground takes a ruler
+    from (1,1,0) straight up to 2.34 m; a Parallel guide flattens an
+    off-axis click onto the horizontal.
   - `scaleSceneToMeasure` no longer special-cases them: a measurement is a
     root object, so the same loop scales it, and a bound point needs no
     scaling at all because whatever it is stuck to was just scaled underneath

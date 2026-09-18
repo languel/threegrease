@@ -26,7 +26,7 @@ import {
   createMeasure, formatArea, formatLength, measureLocalMatrix, measureWorldPoints,
   pathLength, polygonArea, toWorldLength, type MeasureResolvers,
 } from '../core/measures';
-import { objectToScreen } from './projection';
+import { applyGuide, objectToScreen, setStrokeExclusion } from './projection';
 import {
   isObjectSelected, measureResolvers, measureWorldMatrix, worldMatrixOf, worldPointsOf,
   type ObjRef,
@@ -42,6 +42,9 @@ const HANDLE_PX = 12;
 /** The space a DRAFT's points live in: identity, because a draft has no
  *  object yet. One shared instance rather than a fresh measure per click,
  *  which would burn an id every time the pointer went down. */
+/** The "stroke" id a ruler draft holds its sticky placement session under. */
+const DRAFT_SESSION = -1;
+
 const DRAFT_HOST: TGMeasure = {
   id: -1, name: '', points: [], visible: true,
   translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], parent: null,
@@ -145,6 +148,28 @@ export class MeasureTool implements Tool {
     return best;
   }
 
+  /**
+   * The pointer after the drawing GUIDE has had its say — parallel,
+   * circular, radial, grid, isometric — measured from the previous point of
+   * the ruler being drafted, exactly as a stroke's guide is measured from
+   * where the stroke began. Returned as client coordinates, which is what
+   * the magnet takes.
+   */
+  private guided(ctx: AppCtx, e: ToolEvent): { clientX: number; clientY: number } {
+    if (ctx.settings.guide.type === 'NONE') return { clientX: e.clientX, clientY: e.clientY };
+    const rect = ctx.canvas.getBoundingClientRect();
+    const toScreen = (p: THREE.Vector3) => objectToScreen(ctx, [p.x, p.y, p.z]);
+    let start: THREE.Vector2 | null = null;
+    if (this.draft.length) {
+      const pts = measureWorldPoints({ ...DRAFT_HOST, points: this.draft }, measureResolvers(ctx.scene));
+      start = toScreen(pts[pts.length - 1]);
+    }
+    const c = ctx.scene.cursor;
+    const center = objectToScreen(ctx, [c[0], c[1], c[2]]);
+    const g = applyGuide(ctx, new THREE.Vector2(e.x, e.y), start, center);
+    return { clientX: g.x + rect.left, clientY: g.y + rect.top };
+  }
+
   onDown(ctx: AppCtx, e: ToolEvent): void {
     // grab an existing point first — adjusting a ruler you already placed is
     // far more common than starting another one on top of it
@@ -154,7 +179,8 @@ export class MeasureTool implements Tool {
       this.drag = hit;
       return;
     }
-    const snapped = snapWorldPoint(ctx, e.clientX, e.clientY);
+    const g = this.guided(ctx, e);
+    const snapped = snapWorldPoint(ctx, g.clientX, g.clientY);
     if (!snapped) return;
     // Shift with a measurement selected CONTINUES it rather than starting
     // another: a dimension chain is one object, and having to re-place the
@@ -171,6 +197,17 @@ export class MeasureTool implements Tool {
     }
     const host = this.draftHost(ctx);
     this.draft.push(pointFromSnap(ctx.scene, host, snapped, ctx.settings.snap.enabled));
+    if (this.draft.length === 1) {
+      // A ruler gets the same sticky session a stroke does. The planes that
+      // are captured from a FIRST point — Up from Ground, View at Origin, the
+      // two perpendicular placements — only engage while one is open, so
+      // without it every point of a ruler landed back on the floor instead
+      // of rising from where it began. -1 names no real stroke, so nothing
+      // is excluded from snapping.
+      setStrokeExclusion(DRAFT_SESSION);
+      const again = snapWorldPoint(ctx, g.clientX, g.clientY);
+      if (again) this.draft[0] = pointFromSnap(ctx.scene, host, again, ctx.settings.snap.enabled);
+    }
   }
 
   /** A draft has no measure of its own yet, so its points are expressed
@@ -186,7 +223,8 @@ export class MeasureTool implements Tool {
     const dragged = this.drag
       ? worldPointsOf(ctx.scene, ctx.scene.measures.find((m) => m.id === this.drag!.id)!)[this.drag.index]
       : undefined;
-    const snapped = snapWorldPoint(ctx, e.clientX, e.clientY, dragged);
+    const g = this.drag ? { clientX: e.clientX, clientY: e.clientY } : this.guided(ctx, e);
+    const snapped = snapWorldPoint(ctx, g.clientX, g.clientY, dragged);
     if (!snapped) return;
     this.preview = snapped.point;
     this.previewKind = snapped.kind;
@@ -242,6 +280,7 @@ export class MeasureTool implements Tool {
   onCancel(ctx: AppCtx): void { this.cancel(ctx); }
 
   private cancel(ctx: AppCtx): void {
+    if (this.draft.length) setStrokeExclusion(null);
     this.draft = [];
     this.extending = null;
     this.drag = null;
@@ -262,6 +301,7 @@ export class MeasureTool implements Tool {
     }
     this.draft = [];
     this.extending = null;
+    setStrokeExclusion(null);
   }
 
   drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
