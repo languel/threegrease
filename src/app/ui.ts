@@ -1135,7 +1135,7 @@ export class UI {
           : [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['UPRIGHT', 'Up from Ground'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)'], ['CURSOR', 'Cursor']]) as [PlaneMode, string][],
         (v) => { s.plane = v; }),
         'Up from Ground: a stroke starts on the floor — or on whatever the Placement snaps it to, '
-          + 'a floor-plan corner with Stroke or Nearest — and grows straight up on a vertical plane '
+          + 'a line of an existing floor plan with Placement: Nearest — and grows straight up on a vertical plane '
           + 'facing you. Draw the plan with Top, then lift it with this.'),
         ...(s.placement === 'STROKE' ? [
           selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][], (v) => { s.strokeTarget = v; }),
