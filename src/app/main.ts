@@ -161,6 +161,7 @@ import {
   refOfObject3D, objectName,
 } from '../tools/objects';
 import { UI, type AppHandle } from './ui';
+import { SilhouetteOutline, type OutlineGroup } from '../render/outline';
 import type { Tool } from '../tools/toolsys';
 import { Navigation } from './nav';
 import { possession, type PossessView } from './possess';
@@ -233,6 +234,12 @@ class App implements AppHandle {
   private depthHelper: THREE.Group;
   /** N2: Blender-style orange outlines + origin dots for selected objects */
   private selGlyphs = new THREE.Group();
+  /** silhouette rims for selections that have no surface to fatten */
+  private silhouette = new SilhouetteOutline();
+  private silhouetteGroups: OutlineGroup[] = [];
+  /** a splat's local bounds, which Spark computes by walking every splat —
+   *  once per loaded mesh, not once per frame */
+  private splatBounds = new WeakMap<THREE.Object3D, THREE.Box3>();
   private selHelpers = new Map<string, { box: THREE.Box3; helper: LineSegments2; dot: THREE.Points }>();
   private interpTool = new InterpolateTool();
   /** Out-of-process agent link (MCP/ACP relays). Idle until connected. */
@@ -3376,6 +3383,20 @@ class App implements AppHandle {
       null;
   }
 
+  /** The render root to take a SILHOUETTE of, for the kinds that get one;
+   *  null for everything that keeps the hull (meshes) or the box (empties,
+   *  triggers, streams, lights). */
+  private silhouetteRoot(ref: ObjRef): THREE.Object3D | null {
+    const scene = this.ctx.scene;
+    if (ref.kind === 'GP') return this.gp.objectGroups[gpIndexOf(scene, ref.id)] ?? null;
+    if (ref.kind === 'SPLAT') return this.splats.meshFor(ref.id);
+    if (ref.kind === 'ACTOR') return this.actors.rootFor(ref.id);
+    if (ref.kind === 'PCLOUD') {
+      return this.paints.group.children.find((c) => c.userData.pcloudId === ref.id) ?? null;
+    }
+    return null;
+  }
+
   /** World-space bounds of an editable mesh from its DATA — the render
    *  group's box is inflated by the unit-geometry instanced vertex
    *  handles, so selection outlines measure the topology itself. */
@@ -3399,7 +3420,19 @@ class App implements AppHandle {
     const box = new THREE.Box3();
     const isEmptyMesh = ref.kind === 'MESH' && scene.meshes.find((m) => m.id === ref.id)?.kind === 'EMPTY';
     if (ref.kind === 'POLY') this.polyDataBox(ref, box);
-    else if (!isEmptyMesh) box.setFromObject(root);
+    else if (ref.kind === 'SPLAT') {
+      // A SplatMesh's own geometry is ONE instanced quad, so setFromObject
+      // gives a small box at its origin whatever the cloud looks like. Spark
+      // knows the real extent (from the splat centres) — cached, since it
+      // walks every splat to find it.
+      let local = this.splatBounds.get(root);
+      const get = (root as unknown as { getBoundingBox?: (c?: boolean) => THREE.Box3 }).getBoundingBox;
+      if (!local && get) {
+        local = get.call(root, true);
+        if (!local.isEmpty()) this.splatBounds.set(root, local);
+      }
+      if (local && !local.isEmpty()) box.copy(local).applyMatrix4(root.matrixWorld);
+    } else if (!isEmptyMesh) box.setFromObject(root);
     if (isEmptyMesh || box.isEmpty()) {
       const center = new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref));
       const size = ref.kind === 'GP' || ref.kind === 'POLY' || isEmptyMesh ? 0.15 : 1;
@@ -3472,6 +3505,7 @@ class App implements AppHandle {
       // out of object mode there is no selection to show, and a stale hull
       // would sit lit up over a scene nobody is selecting in
       this.meshes.setSelectionOutlines(new Map());
+      this.silhouetteGroups = [];
       return;
     }
     const wanted = new Set<string>();
@@ -3501,6 +3535,25 @@ class App implements AppHandle {
       hulls.set(ref.id, `#${this.highlightColor(isActive).getHexString()}`);
     }
     this.meshes.setSelectionOutlines(hulls);
+
+    // Everything that can be DRAWN but has no surface to fatten wears a
+    // silhouette taken from its own render (render/outline.ts): grease
+    // pencil hugs its strokes, a splat its opaque cloud, an actor its body.
+    // Grouped by colour so the active object can be the brighter one.
+    const selGroup: THREE.Object3D[] = [];
+    const actGroup: THREE.Object3D[] = [];
+    const silhouetted = new Set<string>();
+    for (const ref of refs) {
+      const root = this.silhouetteRoot(ref);
+      if (!root || !root.visible) continue;
+      silhouetted.add(`${ref.kind}:${ref.id}`);
+      const isActive = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
+      (isActive ? actGroup : selGroup).push(root);
+    }
+    this.silhouetteGroups = [
+      { roots: selGroup, color: this.highlightColor(false) },
+      { roots: actGroup, color: this.highlightColor(true) },
+    ];
 
     for (const ref of refs) {
       const key = `${ref.kind}:${ref.id}`;
@@ -3534,7 +3587,10 @@ class App implements AppHandle {
       const meshKind = ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id)?.kind : undefined;
       // A hulled object needs no line at all; the origin dot stays, because
       // the pivot is the one thing a silhouette cannot show.
-      entry.helper.visible = !hulls.has(ref.id);
+      // (keyed by KIND as well as id: a GP object and a mesh can share a
+      // number, and one used to switch the other's outline off)
+      entry.helper.visible = !(ref.kind === 'MESH' && hulls.has(ref.id))
+        && !silhouetted.has(key);
       if (entry.helper.visible) {
         // EdgesGeometry every frame is not free, so only for the outlines
         // that are actually drawn
@@ -4148,6 +4204,10 @@ class App implements AppHandle {
         this.post.present(this.glRenderer, this.scene3, this.nav.active, look, now / 1000);
         this.glRenderer.setRenderTarget(null);
       }
+      // AFTER the look: a selection rim is interface, and belongs over the
+      // finished frame rather than inside the bloom or the paper wash
+      this.silhouette.draw(this.glRenderer, this.scene3, this.nav.active,
+        this.silhouetteGroups, ctx.settings.uiHighlightAlpha);
     }
 
     this.drawHud();

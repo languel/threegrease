@@ -863,6 +863,25 @@ the browser console or automated evals:
   vanishes on exactly the small things you are hunting for.
   `MeshManager.outlineResolution` must track the viewport (App.resize) or the
   width drifts.
+  **Everything drawable without a surface to fatten wears a SILHOUETTE**
+  (`render/outline.ts`, `App.silhouetteRoot`): grease pencil, splats, paint
+  clouds, actors. The selected roots are rendered ALONE — isolated by
+  visibility, the same lever the per-object FX pass uses — with their OWN
+  materials into a mask, and a rim is drawn wherever a pixel outside the
+  mask has a neighbour inside it (16 directions on two rings). Their own
+  materials, never an override: an override is what turns a GP stroke into
+  a slab and a point sprite into a square, and would outline something that
+  was never drawn. Two traps: Spark draws EVERY splat through one
+  SparkRenderer object, which is a SIBLING of the splat meshes rather than
+  an ancestor, so the isolation must leave it on (`userData.splatRenderer`)
+  while the other splat meshes go dark; and a SplatMesh's own geometry is ONE
+  instanced quad, so `Box3.setFromObject` put its bounding box small at the
+  origin whatever the cloud looked like — `computeObjectBox` asks Spark's
+  `getBoundingBox(true)` instead, once per mesh. The rim is drawn AFTER the
+  scene look, because selection is interface, not part of the picture; it
+  is not drawn in quad view. Verified: a GP path's rim hugs the stroke (no
+  box) and an active actor's shows through the column in front of it,
+  18,939 pixels of rim against a frame without it.
   In the end the 2D marker went away entirely: the inverted hull is now the
   ONE outline in the app — `MeshManager.setHover` for what is under the
   cursor and `setSelectionOutlines` for what is selected, any colour, and the

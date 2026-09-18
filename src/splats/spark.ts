@@ -32,6 +32,9 @@ export class SparkSplats {
   init(renderer: THREE.WebGLRenderer): void {
     if (this.spark) return;
     this.spark = new SparkRenderer({ renderer });
+    // the selection outline isolates objects by hiding everything else; the
+    // one renderer that draws EVERY splat must survive that (render/outline.ts)
+    this.spark.userData.splatRenderer = true;
     this.group.add(this.spark);
   }
 
