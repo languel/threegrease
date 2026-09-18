@@ -1384,7 +1384,8 @@ class App implements AppHandle {
       return;
     }
 
-    if (this.tools.handleKey(ctx, key, e)) { e.preventDefault(); return; }
+    // a tool's keys can re-run its drag (an axis lock), so through the pane
+    if (this.withPane(this.pointerPane, () => this.tools.handleKey(ctx, key, e))) { e.preventDefault(); return; }
 
     // fixed conveniences alongside the rebindable map
     if (key === 'Delete' || key === 'Backspace') {

@@ -407,6 +407,18 @@ the browser console or automated evals:
   Plane: NONE has no plane of its own — Placement, magnet and guide decide,
   an uncaught point faces the camera (as View does), and the grid rounds all
   three coordinates.
+- **Poly Build drags take G's axis locks** (`PolyPenTool.axisLock`): X / Y /
+  Z mid-drag locks a vertex move, a vertex extrude, an edge/face move or a
+  boundary extrusion to that WORLD axis, Shift+ to the plane square to it,
+  the same key again frees it; drawn as a coloured axis line with a label.
+  Under Plane: Up from Ground an edge or face drag STARTS locked to the up
+  axis — lifting a plan into walls is what that plane is for. The axis
+  point is the skew-line solve against the pointer ray (not a plane hit),
+  and grid rounding is done along the lock in WORLD space, so on a rotated
+  mesh the components across the lock stay exactly zero. Tool keys are
+  dispatched through `withPane`, since a lock re-runs the drag. Verified: an
+  edge lifted under Up from Ground and one locked with Z both kept x and y
+  exactly; Shift+Z kept z at 0.
 - **A box on a PLANE is a rectangle IN that plane**, edges along the plane's
   own axes (up-in-plane and across; X and Y on the floor), not the screen
   rectangle cast onto it — under perspective that is a trapezoid, and on Up

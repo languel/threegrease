@@ -100,6 +100,16 @@ interface Pending {
   alt: boolean;
 }
 
+/** A drag's axis lock, G-style: along one world axis, or (Shift) in the
+ *  plane square to it. */
+type AxisLock = { kind: 'AXIS' | 'PLANE'; axis: 'x' | 'y' | 'z' };
+const AXIS_DIR: Record<'x' | 'y' | 'z', THREE.Vector3> = {
+  x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1),
+};
+const AXIS_COLOR: Record<'x' | 'y' | 'z', string> = {
+  x: 'rgba(255,82,82,0.9)', y: 'rgba(130,210,60,0.9)', z: 'rgba(80,140,255,0.9)',
+};
+
 export class PolyPenTool implements Tool {
   id: string;
   cursor = 'crosshair';
@@ -108,6 +118,18 @@ export class PolyPenTool implements Tool {
   private pending: Pending | null = null;
   /** last hovered edge (for intent feedback + center-band classification) */
   private edgeHover: { edgeId: number; t: number; boundary: boolean } | null = null;
+  /**
+   * The axis lock of the drag in progress — the same X / Y / Z (and Shift+
+   * for the plane) that G uses, pressed mid-drag; pressing the same one
+   * again frees it. Under Plane: Up from Ground an edge or face drag STARTS
+   * locked to the up axis, since lifting a plan straight up into walls is
+   * what that plane is for.
+   */
+  private axisLock: AxisLock | null = null;
+  /** world point the lock is measured from (the dragged element at rest) */
+  private lockOrigin: THREE.Vector3 | null = null;
+  /** the last pointer event, to re-run the drag when the lock changes */
+  private lastEvent: ToolEvent | null = null;
 
   constructor(id = 'polypen', variant: PolyToolVariant = 'QUILT') {
     this.id = id;
@@ -242,6 +264,8 @@ export class PolyPenTool implements Tool {
   // ---- pointer -------------------------------------------------------------
 
   onDown(ctx: AppCtx, e: ToolEvent): void {
+    this.axisLock = null;
+    this.lockOrigin = null;
     const pm = this.ensureEditMesh(ctx);
     if (!pm || pm.lock) return;
     const hit = this.pick(ctx, e);
@@ -255,6 +279,7 @@ export class PolyPenTool implements Tool {
     const pm = this.editMesh(ctx);
     if (!pm) { clearPolyOverlay(); return; }
     polyOverlay.editMeshId = pm.id;
+    this.lastEvent = e;
 
     switch (this.state.kind) {
       case 'MOVE': this.updateMove(ctx, e, pm); return;
@@ -284,6 +309,8 @@ export class PolyPenTool implements Tool {
    *  loop-cuts from there; grabbed off-center it moves). */
   private beginDragOp(ctx: AppCtx, pm: TGPolyMesh, p: Pending, held: boolean): void {
     if (this.state.kind !== 'IDLE') return; // BUILD ignores drags
+    this.axisLock = null;
+    this.lockOrigin = null;
     const src = p.hit.source;
     if (src.kind === 'POLY_VERTEX' && src.meshId === pm.id) {
       if (held) {
@@ -297,6 +324,8 @@ export class PolyPenTool implements Tool {
       } else {
         this.state = { kind: 'MOVE', meshId: pm.id, vertexId: src.vertexId, before: takeSnapshot(pm), moved: false };
       }
+      const from = getVertex(pm, src.vertexId);
+      if (from) this.lockOrigin = new THREE.Vector3(...this.localToWorld(ctx, pm, from.co));
       return;
     }
     if (src.kind === 'POLY_EDGE' && src.meshId === pm.id) {
@@ -315,11 +344,13 @@ export class PolyPenTool implements Tool {
       } else {
         this.beginMoveElems(ctx, pm, [...edge.v]);
       }
+      this.defaultLock(ctx);
       return;
     }
     if (src.kind === 'POLY_FACE' && src.meshId === pm.id) {
       const face = getFace(pm, src.faceId);
       if (face) this.beginMoveElems(ctx, pm, [...face.vertices]);
+      this.defaultLock(ctx);
       return;
     }
     if (held) {
@@ -329,6 +360,61 @@ export class PolyPenTool implements Tool {
         a: new THREE.Vector2(p.x, p.y), b: new THREE.Vector2(p.x, p.y),
       };
     }
+  }
+
+  /** Up from Ground lifts: an edge/face drag starts locked to the up axis. */
+  private defaultLock(ctx: AppCtx): void {
+    if (ctx.settings.plane !== 'UPRIGHT') return;
+    if (this.state.kind !== 'EXTRUDE' && this.state.kind !== 'MOVE_ELEMS') return;
+    this.axisLock = { kind: 'AXIS', axis: ctx.settings.upAxis === 'Z' ? 'z' : 'y' };
+  }
+
+  /**
+   * Where the pointer puts a locked drag, in WORLD space: the point on the
+   * lock axis through `origin` nearest the pointer's ray, or where the ray
+   * meets the lock plane. Null when unlocked (or the ray runs parallel).
+   */
+  private lockedPoint(ctx: AppCtx, e: ToolEvent, origin: THREE.Vector3): THREE.Vector3 | null {
+    const lock = this.axisLock;
+    if (!lock) return null;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2((e.x / rect.width) * 2 - 1, -(e.y / rect.height) * 2 + 1), ctx.camera);
+    const dir = AXIS_DIR[lock.axis];
+    if (lock.kind === 'PLANE') {
+      const out = new THREE.Vector3();
+      return ray.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(dir, origin), out) ? out : null;
+    }
+    // closest point on the axis line to the ray (skew-line solve)
+    const r = ray.ray;
+    const w0 = origin.clone().sub(r.origin);
+    const b = dir.dot(r.direction);
+    const den = 1 - b * b;
+    if (den < 1e-6) return null;                      // looking straight down the axis
+    const t = (b * r.direction.dot(w0) - dir.dot(w0)) / den;
+    return origin.clone().addScaledVector(dir, t);
+  }
+
+  /** A locked delta, in the mesh's LOCAL space. The grid rounding is done in
+   *  WORLD space along the lock (the axes you locked to are world axes, and
+   *  on a rotated mesh its local ones point elsewhere), so the components
+   *  across the lock stay exactly zero. Ctrl skips the rounding. */
+  private lockedLocalDelta(ctx: AppCtx, pm: TGPolyMesh, e: ToolEvent, origin: THREE.Vector3): THREE.Vector3 | null {
+    const cur = this.lockedPoint(ctx, e, origin);
+    if (!cur) return null;
+    const snap = ctx.settings.snap;
+    if (!e.ctrl && snap.enabled && (snap.mode === 'INCREMENT' || snap.mode === 'GRID')) {
+      const g = snapIncrement(ctx.settings);
+      const d = cur.clone().sub(origin);
+      const n = 'xyz'.indexOf(this.axisLock!.axis);
+      for (let i = 0; i < 3; i++) {
+        const along = this.axisLock!.kind === 'AXIS' ? i === n : i !== n;
+        d.setComponent(i, along ? Math.round(d.getComponent(i) / g) * g : 0);
+      }
+      cur.copy(origin).add(d);
+    }
+    const inv = worldMatrixOf(ctx.scene, { kind: 'POLY', id: pm.id }).invert();
+    return cur.applyMatrix4(inv).sub(origin.clone().applyMatrix4(inv));
   }
 
   onUp(ctx: AppCtx, e: ToolEvent): void {
@@ -474,6 +560,10 @@ export class PolyPenTool implements Tool {
 
   private updateMove(ctx: AppCtx, e: ToolEvent, pm: TGPolyMesh): void {
     if (this.state.kind !== 'MOVE') return;
+    if (this.axisLock && this.lockOrigin && this.lockedVertex(ctx, pm, e, this.state.vertexId, this.state.before)) {
+      this.state.moved = true;
+      return;
+    }
     const hit = this.pick(ctx, e, [this.state.vertexId]);
     const v = getVertex(pm, this.state.vertexId);
     if (v) {
@@ -483,6 +573,17 @@ export class PolyPenTool implements Tool {
       touchPolyMesh(pm);
     }
     this.updateHover(ctx, e, hit);
+  }
+
+  /** A locked single-vertex drag: its rest position plus the locked delta. */
+  private lockedVertex(ctx: AppCtx, pm: TGPolyMesh, e: ToolEvent, id: number, before: string): boolean {
+    const d = this.lockedLocalDelta(ctx, pm, e, this.lockOrigin!);
+    const orig = (JSON.parse(before) as Pick<TGPolyMesh, 'vertices'>).vertices.find((v) => v.id === id);
+    const v = getVertex(pm, id);
+    if (!d || !orig || !v) return false;
+    v.co = [orig.co[0] + d.x, orig.co[1] + d.y, orig.co[2] + d.z];
+    touchPolyMesh(pm);
+    return true;
   }
 
   // ---- edge / face move (rigid, on a camera plane) --------------------------
@@ -504,13 +605,9 @@ export class PolyPenTool implements Tool {
   private updateMoveElems(ctx: AppCtx, e: ToolEvent, pm: TGPolyMesh): void {
     if (this.state.kind !== 'MOVE_ELEMS') return;
     const st = this.state;
-    const cur = this.planePoint(ctx, st.plane, e.x, e.y);
-    if (!cur) return;
+    const d = this.axisLock ? this.lockedLocalDelta(ctx, pm, e, st.startWorld) : this.planeDelta(ctx, pm, e, st.plane, st.startWorld);
+    if (!d) return;
     const snap = JSON.parse(st.before) as Pick<TGPolyMesh, 'vertices'>;
-    const inv = worldMatrixOf(ctx.scene, { kind: 'POLY', id: pm.id }).invert();
-    const p0 = new THREE.Vector3().copy(st.startWorld).applyMatrix4(inv);
-    const p1 = cur.clone().applyMatrix4(inv);
-    const d = e.ctrl ? p1.sub(p0) : this.snapLocalDelta(ctx, p1.sub(p0));
     for (const id of st.vertexIds) {
       const orig = snap.vertices.find((v) => v.id === id);
       const v = getVertex(pm, id);
@@ -519,10 +616,28 @@ export class PolyPenTool implements Tool {
     touchPolyMesh(pm);
   }
 
+  /** The unlocked rigid delta: on the camera plane through the element. */
+  private planeDelta(ctx: AppCtx, pm: TGPolyMesh, e: ToolEvent, plane: THREE.Plane, start: THREE.Vector3): THREE.Vector3 | null {
+    const cur = this.planePoint(ctx, plane, e.x, e.y);
+    if (!cur) return null;
+    const inv = worldMatrixOf(ctx.scene, { kind: 'POLY', id: pm.id }).invert();
+    const p0 = start.clone().applyMatrix4(inv);
+    const d = cur.applyMatrix4(inv).sub(p0);
+    return e.ctrl ? d : this.snapLocalDelta(ctx, d);
+  }
+
   // ---- vertex-drag edge extrusion (hold+drag on vertex) ---------------------
 
   private updateVertExtrude(ctx: AppCtx, e: ToolEvent, pm: TGPolyMesh): void {
     if (this.state.kind !== 'VERT_EXTRUDE') return;
+    if (this.axisLock && this.lockOrigin) {
+      // the new vertex starts where the one it grows from is
+      const from = getVertex(pm, this.state.fromId);
+      const v = getVertex(pm, this.state.newId);
+      const d = this.lockedLocalDelta(ctx, pm, e, this.lockOrigin);
+      if (from && v && d) { v.co = [from.co[0] + d.x, from.co[1] + d.y, from.co[2] + d.z]; touchPolyMesh(pm); }
+      return;
+    }
     const hit = this.pick(ctx, e, [this.state.newId]);
     const v = getVertex(pm, this.state.newId);
     if (v) {
@@ -560,18 +675,14 @@ export class PolyPenTool implements Tool {
   private updateExtrude(ctx: AppCtx, e: ToolEvent, pm: TGPolyMesh): void {
     if (this.state.kind !== 'EXTRUDE') return;
     const st = this.state;
-    const cur = this.planePoint(ctx, st.plane, e.x, e.y);
-    if (!cur) return;
+    const d = this.axisLock ? this.lockedLocalDelta(ctx, pm, e, st.startWorld) : this.planeDelta(ctx, pm, e, st.plane, st.startWorld);
+    if (!d) return;
     const snap = JSON.parse(st.before) as Pick<TGPolyMesh, 'vertices' | 'edges'>;
     const srcEdge = getEdge(pm, st.srcEdgeId) ?? null;
     const origA = snap.vertices.find((v) => v.id === srcEdge?.v[0]);
     const origB = snap.vertices.find((v) => v.id === srcEdge?.v[1]);
     const na = getVertex(pm, st.newVa), nb = getVertex(pm, st.newVb);
     if (!origA || !origB || !na || !nb) return;
-    const inv = worldMatrixOf(ctx.scene, { kind: 'POLY', id: pm.id }).invert();
-    const p0 = new THREE.Vector3().copy(st.startWorld).applyMatrix4(inv);
-    const p1 = cur.clone().applyMatrix4(inv);
-    const d = e.ctrl ? p1.sub(p0) : this.snapLocalDelta(ctx, p1.sub(p0));
     na.co = [origA.co[0] + d.x, origA.co[1] + d.y, origA.co[2] + d.z];
     nb.co = [origB.co[0] + d.x, origB.co[1] + d.y, origB.co[2] + d.z];
     touchPolyMesh(pm);
@@ -760,6 +871,21 @@ export class PolyPenTool implements Tool {
   // ---- keys ----------------------------------------------------------------
 
   onKey(ctx: AppCtx, key: string, e: KeyboardEvent): boolean {
+    const k = key.toLowerCase();
+    const dragging = this.state.kind === 'MOVE' || this.state.kind === 'MOVE_ELEMS'
+      || this.state.kind === 'EXTRUDE' || this.state.kind === 'VERT_EXTRUDE';
+    if (dragging && (k === 'x' || k === 'y' || k === 'z') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const next: AxisLock = { kind: e.shiftKey ? 'PLANE' : 'AXIS', axis: k };
+      const same = this.axisLock && this.axisLock.kind === next.kind && this.axisLock.axis === next.axis;
+      this.axisLock = same ? null : next;
+      if (!this.lockOrigin && (this.state.kind === 'MOVE_ELEMS' || this.state.kind === 'EXTRUDE')) {
+        this.lockOrigin = this.state.startWorld.clone();
+      }
+      const pm = this.editMesh(ctx);
+      if (pm && this.lastEvent) this.onMove(ctx, this.lastEvent);
+      ctx.requestRender();
+      return true;
+    }
     if (key === 'Escape') {
       if (this.state.kind === 'IDLE') return false;
       this.cancelModal(ctx);
@@ -783,6 +909,35 @@ export class PolyPenTool implements Tool {
     return false;
   }
 
+  /** The lock, drawn: the axis as a coloured line through the dragged
+   *  element (or, for a plane lock, its two in-plane axes), plus a label. */
+  private drawLock(ctx: AppCtx, hud: CanvasRenderingContext2D, at: THREE.Vector3): void {
+    const lock = this.axisLock!;
+    const axes = lock.kind === 'AXIS' ? [lock.axis] : (['x', 'y', 'z'] as const).filter((a) => a !== lock.axis);
+    hud.save();
+    hud.lineWidth = 1.5;
+    for (const a of axes) {
+      const s0 = this.screenOf(ctx, [at.x - AXIS_DIR[a].x * 50, at.y - AXIS_DIR[a].y * 50, at.z - AXIS_DIR[a].z * 50]);
+      const s1 = this.screenOf(ctx, [at.x + AXIS_DIR[a].x * 50, at.y + AXIS_DIR[a].y * 50, at.z + AXIS_DIR[a].z * 50]);
+      const c = this.screenOf(ctx, [at.x, at.y, at.z]);
+      if (!c) continue;
+      hud.strokeStyle = AXIS_COLOR[a];
+      hud.beginPath();
+      // a far end behind the camera cannot be projected; run from the centre
+      hud.moveTo((s0 ?? c).x, (s0 ?? c).y);
+      hud.lineTo((s1 ?? c).x, (s1 ?? c).y);
+      hud.stroke();
+    }
+    const c = this.screenOf(ctx, [at.x, at.y, at.z]);
+    if (c) {
+      hud.font = '11px ui-monospace, monospace';
+      hud.fillStyle = AXIS_COLOR[lock.axis];
+      hud.fillText(lock.kind === 'AXIS' ? `along ${lock.axis.toUpperCase()}`
+        : `in ${axes.join('').toUpperCase()}`, c.x + 12, c.y - 10);
+    }
+    hud.restore();
+  }
+
   private cancelModal(ctx: AppCtx): void {
     const pm = this.editMesh(ctx);
     if (pm && this.state.kind !== 'IDLE') restoreSnapshot(pm, this.state.before);
@@ -796,6 +951,9 @@ export class PolyPenTool implements Tool {
   // ---- hover / preview -----------------------------------------------------
 
   drawHud(ctx: AppCtx, hud: CanvasRenderingContext2D): void {
+    const lockAt = this.state.kind === 'MOVE_ELEMS' || this.state.kind === 'EXTRUDE'
+      ? this.state.startWorld : this.state.kind !== 'IDLE' ? this.lockOrigin : null;
+    if (this.axisLock && lockAt) this.drawLock(ctx, hud, lockAt);
     if (this.state.kind === 'KNIFE') {
       hud.beginPath();
       hud.moveTo(this.state.a.x, this.state.a.y);
