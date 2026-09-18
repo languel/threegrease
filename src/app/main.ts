@@ -1101,6 +1101,17 @@ class App implements AppHandle {
     window.addEventListener('change', (e) => {
       if ((e.target as HTMLElement)?.tagName === 'SELECT') (e.target as HTMLElement).blur();
     });
+    // ...but re-picking the item that is ALREADY selected fires no `change`
+    // at all, so that dropdown kept focus: shortcuts stayed dead and it
+    // wore a focus ring its neighbours did not. A native dropdown's popup
+    // takes the window's focus while it is open and hands it back when it
+    // closes, so the window regaining focus with a SELECT still active is
+    // exactly "the popup just closed" — whichever item was picked.
+    window.addEventListener('focus', () => {
+      const a = document.activeElement as HTMLElement | null;
+      if (a?.tagName === 'SELECT') a.blur();
+    });
+
     // General Escape fallback: blur a focused field, else close an open
     // popup menu, else deselect — whichever applies first. Capture phase
     // so it runs before onKey's own INPUT/SELECT bail (below) would

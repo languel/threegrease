@@ -106,6 +106,13 @@ button, select, input {
   border-radius: 4px; padding: 3px 7px; font: inherit; cursor: pointer;
 }
 button:hover { background: #35353c; }
+/* A dropdown that keeps focus after the mouse closes it wore the browser's
+   native focus ring — the doubled orange-and-white outline — while every
+   other control looked flat. The ring is for KEYBOARD users finding where
+   they are, so it becomes the app's own quiet accent border, and only for
+   keyboard focus; pointer focus shows nothing. */
+select:focus { outline: none; }
+select:focus-visible { border-color: var(--accent); }
 button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .tool-sep { height: 1px; background: var(--border); margin: 4px 3px; flex: none; }
 button.tool {
