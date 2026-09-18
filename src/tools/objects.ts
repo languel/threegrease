@@ -35,17 +35,15 @@ export function listSelected(scene: GPScene): ObjRef[] {
   return out;
 }
 
+/**
+ * Deselect everything — over `allRefs`, not a hand-written list of kinds.
+ * The list version missed MEASURE when it arrived, so grouping (which
+ * deselects all, then selects the new empty) left every ruler selected
+ * alongside its own group; the next kind would have been missed the same
+ * way.
+ */
 export function deselectAllObjects(scene: GPScene): void {
-  for (const ob of scene.objects) ob.select = false;
-  for (const c of scene.canvases) c.select = false;
-  for (const s of scene.splats) s.select = false;
-  for (const m of scene.meshes) m.select = false;
-  for (const t of scene.score.triggers) t.select = false;
-  for (const st of scene.mmStreams) st.select = false;
-  for (const p of scene.polyMeshes) p.select = false;
-  for (const pc of scene.paintClouds) pc.select = false;
-  for (const l of scene.lights) l.select = false;
-  for (const a of scene.actors) a.select = false;
+  for (const ref of allRefs(scene)) setObjectSelected(scene, ref, false);
 }
 
 function entityOf(scene: GPScene, ref: ObjRef):

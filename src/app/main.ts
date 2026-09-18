@@ -1427,12 +1427,7 @@ class App implements AppHandle {
         // selection can mix GP objects, meshes, splats and editable meshes,
         // and the one thing they all agree on is where they end up on screen.
         const box = new THREE.Box3();
-        for (const r of refs) {
-          const root = this.objectRoot(r);
-          if (!root) continue;
-          const b = new THREE.Box3().setFromObject(root);
-          if (!b.isEmpty()) box.union(b);
-        }
+        for (const r of refs) box.union(this.groupBounds(r));
         if (box.isEmpty()) break;
         const upAxis = ctx.settings.upAxis === 'Z' ? 2 : 1;
         const centre = box.getCenter(new THREE.Vector3());
@@ -2321,6 +2316,18 @@ class App implements AppHandle {
         copy.translation[0] += 0.3;
         scene.paintClouds.push(copy);
         clones.push({ kind: 'PCLOUD', id: copy.id });
+      } else if (ref.kind === 'MEASURE') {
+        // (the fallthrough below assumes "anything else is a mesh", so a
+        // measurement used to vanish from a Shift+D without a word). Free
+        // points ride the copy's offset; BOUND points stay on their targets,
+        // which is what binding means.
+        const src = scene.measures.find((m) => m.id === ref.id);
+        if (!src) continue;
+        const copy = { ...JSON.parse(JSON.stringify(src)), id: newId(), select: false };
+        copy.name += ' copy';
+        copy.translation[0] += 0.3;
+        scene.measures.push(copy);
+        clones.push({ kind: 'MEASURE', id: copy.id });
       } else {
         const src = scene.meshes.find((m) => m.id === ref.id);
         if (!src) continue;
@@ -3698,6 +3705,35 @@ class App implements AppHandle {
       ref.kind === 'STREAM' ? this.mmPoints.objectFor(ref.id) :
       ref.kind === 'POLY' ? this.polys.rootFor(ref.id) :
       null;
+  }
+
+  /**
+   * Where an object IS, for placing a group's pivot — for every kind.
+   *
+   * Grouping used to read bounds off each object's render root, and only
+   * some kinds have one: a measurement is drawn on the HUD and has no mesh
+   * at all, and actors, lights and triggers are not in `objectRoot`, so a
+   * selection of only those produced an empty box and Cmd-G silently did
+   * nothing. A splat's render root is one instanced quad, which gave a box
+   * at its origin. So: a measurement is its points, a splat asks Spark,
+   * an actor its body, and anything else with no geometry is at least a
+   * point where it stands.
+   */
+  private groupBounds(ref: ObjRef): THREE.Box3 {
+    const scene = this.ctx.scene;
+    const box = new THREE.Box3();
+    if (ref.kind === 'MEASURE') {
+      const m = scene.measures.find((x) => x.id === ref.id);
+      if (m) for (const p of worldPointsOf(scene, m)) box.expandByPoint(p);
+    } else if (ref.kind === 'SPLAT' || ref.kind === 'POLY') {
+      const b = this.computeObjectBox(ref);
+      if (b) box.copy(b);
+    } else {
+      const root = ref.kind === 'ACTOR' ? this.actors.rootFor(ref.id) : this.objectRoot(ref);
+      if (root) box.setFromObject(root);
+    }
+    if (box.isEmpty()) box.expandByPoint(new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(scene, ref)));
+    return box;
   }
 
   /** The render root to take a SILHOUETTE of, for the kinds that get one;
