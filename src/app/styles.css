@@ -815,3 +815,11 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
   display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center;
 }
 .imenu-extra > .field-row { display: contents; }
+
+/* Top-bar fields labelled by an icon instead of a word. */
+.tb-field { display: flex; align-items: center; gap: 5px; color: var(--dim); }
+.tb-field > svg { flex: none; }
+/* On/off settings as one icon button: lit when on (Blender's magnet). */
+.icon-toggle { display: flex; align-items: center; justify-content: center; padding: 3px 6px; color: var(--dim); }
+.icon-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.icon-toggle.on:hover { background: var(--accent); filter: brightness(1.1); }

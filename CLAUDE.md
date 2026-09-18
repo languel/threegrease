@@ -113,6 +113,12 @@ Key invariants:
   further settings as sections below — Blender's transform header. Menus are
   centred under their button and then nudged back inside the window, since
   near either end of the bar (or on a wrapped second row) they ran off it.
+  Top-bar fields are labelled by an ICON, the word moved into the tooltip
+  (`tbField`: Brush, Size, Strength, Radius, Weight, Eraser, Select); a
+  colour swatch needs no label at all. On/off settings are ONE icon button,
+  lit when on (`iconToggle`: the magnet, Proportional, Multiframe) — a
+  checkbox beside an icon said the same thing twice and read as two
+  controls.
 - **A checkbox's NAME goes in the label column and the box in the value
   column**, like every other row. It used to carry its own text, which put it
   the other way round — box first, name second, both adrift in the value

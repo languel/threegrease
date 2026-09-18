@@ -481,6 +481,29 @@ function checkbox(label: string, value: boolean, onChange: (v: boolean) => void,
 }
 
 /** Icon-only checkbox (no visible text) with a hover tooltip. */
+/**
+ * A top-bar control labelled by an ICON rather than a word, the name moved
+ * into the tooltip — the header is read at a glance, and "Size", "Radius"
+ * and "Strength" repeated across every mode were most of its width.
+ */
+function tbField(iconName: IconName, tip: string, control: HTMLElement): HTMLElement {
+  const sel = control.tagName === 'SELECT' ? control : control.querySelector('select');
+  if (sel && !sel.title) sel.title = tip;
+  return el('div', { class: 'tb-field', title: tip }, icon(iconName, 15), control);
+}
+
+/**
+ * An on/off setting as ONE icon button — lit (accent) when on, flat when
+ * off — the way Blender shows the magnet and proportional editing. A
+ * checkbox beside an icon said the same thing twice and read as two
+ * controls.
+ */
+function iconToggle(iconName: IconName, title: string, value: boolean, onChange: (v: boolean) => void): HTMLElement {
+  return btn(icon(iconName, 16), () => onChange(!value), {
+    cls: `icon-toggle${value ? ' on' : ''}`, title: `${title} — ${value ? 'on' : 'off'}`,
+  });
+}
+
 function iconCheckbox(iconEl: string | Node, title: string, value: boolean, onChange: (v: boolean) => void): HTMLElement {
   const input = el('input', { type: 'checkbox' }) as HTMLInputElement;
   input.checked = value;
@@ -1286,20 +1309,20 @@ export class UI {
       // DRAW (proper Color swatch instead of the flat brush.vertexColor
       // default nothing else exposed)
       bar.append(
-        selectField('Brush', s.paint.brush, [['DRAW', 'Draw'], ['BLUR', 'Blur'], ['AVERAGE', 'Average'], ['SMEAR', 'Smear']] as [PaintBrush, string][], (v) => { s.paint.brush = v; }),
-        colorField('Color', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }),
-        slider('Radius', s.paint.radius, 5, 150, 1, (v) => { s.paint.radius = v; }, { def: 40 }),
-        slider('Strength', s.paint.strength, 0.05, 1, 0.05, (v) => { s.paint.strength = v; }),
+        tbField('brush', 'Brush', selectField('', s.paint.brush, [['DRAW', 'Draw'], ['BLUR', 'Blur'], ['AVERAGE', 'Average'], ['SMEAR', 'Smear']] as [PaintBrush, string][], (v) => { s.paint.brush = v; })),
+        tip(colorField('', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }), 'Color'),
+        tbField('radius', 'Radius', slider('', s.paint.radius, 5, 150, 1, (v) => { s.paint.radius = v; }, { def: 40, title: 'Radius' })),
+        tbField('droplet', 'Strength', slider('', s.paint.strength, 0.05, 1, 0.05, (v) => { s.paint.strength = v; }, { title: 'Strength' })),
       );
     } else if (s.mode === 'DRAW' && s.activeTool === 'weightpaint') {
       bar.append(
-        slider('Weight', s.weight.target, 0, 1, 0.05, (v) => { s.weight.target = v; }),
-        slider('Radius', s.weight.radius, 5, 150, 1, (v) => { s.weight.radius = v; }, { def: 40 }),
-        slider('Strength', s.weight.strength, 0.05, 1, 0.05, (v) => { s.weight.strength = v; }),
+        tbField('weight', 'Weight', slider('', s.weight.target, 0, 1, 0.05, (v) => { s.weight.target = v; }, { title: 'Weight' })),
+        tbField('radius', 'Radius', slider('', s.weight.radius, 5, 150, 1, (v) => { s.weight.radius = v; }, { def: 40, title: 'Radius' })),
+        tbField('droplet', 'Strength', slider('', s.weight.strength, 0.05, 1, 0.05, (v) => { s.weight.strength = v; }, { title: 'Strength' })),
       );
     } else if (s.mode === 'DRAW') {
       bar.append(
-        selectField('Brush', s.brush.preset,
+        tbField('brush', 'Brush preset', selectField('', s.brush.preset,
           BRUSH_PRESETS.map((p) => [p.name, p.name]) as [string, string][],
           (name) => {
             const p = BRUSH_PRESETS.find((x) => x.name === name);
@@ -1310,28 +1333,30 @@ export class UI {
             s.brush.hardness = p.hardness;
             s.brush.style = { ...p.style };
             this.refresh();
-          }),
-        slider('Size', s.brush.size, 1, 80, 1, (v) => { s.brush.size = v; }, { def: 8, route: 'brush.size' }),
-        slider('Strength', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }, { def: 1, route: 'brush.strength' }),
+          })),
+        tbField('size', 'Size', slider('', s.brush.size, 1, 80, 1, (v) => { s.brush.size = v; }, { def: 8, route: 'brush.size', title: 'Size' })),
+        tbField('droplet', 'Strength', slider('', s.brush.strength, 0.05, 1, 0.05, (v) => { s.brush.strength = v; }, { def: 1, route: 'brush.strength', title: 'Strength' })),
         // splat/texture painting spray their color from the same
         // brush.vertexColor swatch as vertex paint — surface it here so
         // it's never a hidden default (this was previously invisible,
         // making the spray color look "stuck" on its orange default)
         ...(s.activeTool === 'splatpaint' || s.activeTool === 'texpaint' ? [
-          colorField('Color', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }),
+          tip(colorField('', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }), 'Color'),
         ] : []),
       );
       if (s.activeTool === 'erase') {
         bar.append(
-          selectField('Eraser', s.eraser.mode, [['POINT', 'Point'], ['STROKE', 'Stroke'], ['SOFT', 'Soft']] as [EraserMode, string][], (v) => { s.eraser.mode = v; }),
-          slider('Size', s.eraser.radius, 4, 120, 1, (v) => { s.eraser.radius = v; }, { def: 24 }),
+          tbField('eraser', 'Eraser', selectField('', s.eraser.mode, [['POINT', 'Point'], ['STROKE', 'Stroke'], ['SOFT', 'Soft']] as [EraserMode, string][], (v) => { s.eraser.mode = v; })),
+          tbField('size', 'Eraser size', slider('', s.eraser.radius, 4, 120, 1, (v) => { s.eraser.radius = v; }, { def: 24, title: 'Eraser size' })),
         );
       }
     } else if (s.mode === 'EDIT') {
       bar.append(
-        selectField('Select', s.selectMode, [['POINT', 'Point'], ['STROKE', 'Stroke']], (v) => { s.selectMode = v; ctx.requestRender(); }),
-        checkbox('Proportional', s.propEdit.enabled, (v) => { s.propEdit.enabled = v; }),
-        checkbox('Multiframe', s.multiframe, (v) => { s.multiframe = v; }),
+        tbField('cursorArrow', 'Select — points or whole strokes', selectField('', s.selectMode, [['POINT', 'Point'], ['STROKE', 'Stroke']], (v) => { s.selectMode = v; ctx.requestRender(); })),
+        iconToggle('proportional', 'Proportional editing — moving a point drags its neighbours with a falloff',
+          s.propEdit.enabled, (v) => { s.propEdit.enabled = v; this.buildTopbar(); }),
+        iconToggle('multiframe', 'Multiframe — edit every keyframe of the layer at once, not just the current one',
+          s.multiframe, (v) => { s.multiframe = v; this.buildTopbar(); }),
       );
     } else if (s.mode === 'SCULPT') {
       const brushes: [SculptBrush, string][] = [
@@ -1339,22 +1364,22 @@ export class UI {
         ['GRAB', 'Grab'], ['PUSH', 'Push'], ['TWIST', 'Twist'], ['PINCH', 'Pinch'], ['CLONE', 'Clone'],
       ];
       bar.append(
-        selectField('Brush', s.sculpt.brush, brushes, (v) => { s.sculpt.brush = v; }),
-        slider('Radius', s.sculpt.radius, 10, 200, 1, (v) => { s.sculpt.radius = v; }, { def: 50 }),
-        slider('Strength', s.sculpt.strength, 0.05, 1, 0.05, (v) => { s.sculpt.strength = v; }, { def: 0.5 }),
+        tbField('hand', 'Sculpt brush', selectField('', s.sculpt.brush, brushes, (v) => { s.sculpt.brush = v; })),
+        tbField('radius', 'Radius', slider('', s.sculpt.radius, 10, 200, 1, (v) => { s.sculpt.radius = v; }, { def: 50, title: 'Radius' })),
+        tbField('droplet', 'Strength', slider('', s.sculpt.strength, 0.05, 1, 0.05, (v) => { s.sculpt.strength = v; }, { def: 0.5, title: 'Strength' })),
       );
     } else if (s.mode === 'VERTEX') {
       bar.append(
-        selectField('Brush', s.paint.brush, [['DRAW', 'Draw'], ['BLUR', 'Blur'], ['AVERAGE', 'Average'], ['SMEAR', 'Smear']] as [PaintBrush, string][], (v) => { s.paint.brush = v; }),
-        colorField('Color', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }),
-        slider('Radius', s.paint.radius, 5, 150, 1, (v) => { s.paint.radius = v; }, { def: 40 }),
-        slider('Strength', s.paint.strength, 0.05, 1, 0.05, (v) => { s.paint.strength = v; }),
+        tbField('brush', 'Brush', selectField('', s.paint.brush, [['DRAW', 'Draw'], ['BLUR', 'Blur'], ['AVERAGE', 'Average'], ['SMEAR', 'Smear']] as [PaintBrush, string][], (v) => { s.paint.brush = v; })),
+        tip(colorField('', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }), 'Color'),
+        tbField('radius', 'Radius', slider('', s.paint.radius, 5, 150, 1, (v) => { s.paint.radius = v; }, { def: 40, title: 'Radius' })),
+        tbField('droplet', 'Strength', slider('', s.paint.strength, 0.05, 1, 0.05, (v) => { s.paint.strength = v; }, { title: 'Strength' })),
       );
     } else if (s.mode === 'WEIGHT') {
       bar.append(
-        slider('Weight', s.weight.target, 0, 1, 0.05, (v) => { s.weight.target = v; }),
-        slider('Radius', s.weight.radius, 5, 150, 1, (v) => { s.weight.radius = v; }, { def: 40 }),
-        slider('Strength', s.weight.strength, 0.05, 1, 0.05, (v) => { s.weight.strength = v; }),
+        tbField('weight', 'Weight', slider('', s.weight.target, 0, 1, 0.05, (v) => { s.weight.target = v; }, { title: 'Weight' })),
+        tbField('radius', 'Radius', slider('', s.weight.radius, 5, 150, 1, (v) => { s.weight.radius = v; }, { def: 40, title: 'Radius' })),
+        tbField('droplet', 'Strength', slider('', s.weight.strength, 0.05, 1, 0.05, (v) => { s.weight.strength = v; }, { title: 'Strength' })),
       );
     }
 
@@ -1374,7 +1399,7 @@ export class UI {
     // cursor (Shift+RMB drag). Magnet off = cursor moves freely on the
     // drawing plane.
     centre.append(
-      iconCheckbox(icon('magnet'), 'Magnet snapping', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
+      iconToggle('magnet', 'Snap (magnet)', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); this.buildTopbar(); }),
       this.iconMenu('snap', 'Snap Target', (s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode) as string, [
         ['INCREMENT', 'snapIncrement', 'Increment', 'round to the grid step'],
         ['GRID', 'snapGrid', 'Grid', 'the visible floor grid'],
@@ -1840,7 +1865,9 @@ export class UI {
       {
         id: 'brush', icon: 'brush', title: 'Brush & GP materials',
         build: () => [
-          this.brushPanel(), this.stencilPanel(), this.materialsPanel(),
+          // materials first: which colour you are drawing with is asked far
+          // more often than how the brush's dabs are spaced
+          this.materialsPanel(), this.brushPanel(), this.stencilPanel(),
           ...(ctx.settings.mode === 'EDIT' ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
         ],
       },
@@ -3725,7 +3752,7 @@ export class UI {
     const { ctx } = this.app;
     const b = ctx.settings.brush;
     const st = b.style;
-    return panel('Brush — Advanced',
+    return panel('Brush Properties',
       fieldRow('Size unit', selectField('', st.unit, [['VIEW', 'View (px)'], ['SCENE', 'Scene (world)']],
         (v) => { st.unit = v as 'VIEW' | 'SCENE'; })),
       checkbox('Stamp', st.stamp, (v) => { st.stamp = v; }),

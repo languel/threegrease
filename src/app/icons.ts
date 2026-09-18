@@ -91,6 +91,11 @@ const PATHS: Record<string, string> = {
   shadeSolid: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',
   shadeMaterial: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM10.8 8.5a1.8 1.8 0 1 1-3.6 0 1.8 1.8 0 1 1 3.6 0',
   shadeRendered: 'M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Zm0-15.75V4.5m0 15v2.25M2.25 12H4.5m15 0h2.25M5.11 5.11l1.59 1.59m10.6 10.6 1.59 1.59m0-13.78-1.59 1.59M6.7 17.3l-1.59 1.59',
+  size: 'M3.5 12a8.5 8.5 0 1 0 17.0 0a8.5 8.5 0 1 0 -17.0 0M7 12h10M9 10l-2 2 2 2M15 10l2 2-2 2',
+  radius: 'M3.5 12a8.5 8.5 0 1 0 17.0 0a8.5 8.5 0 1 0 -17.0 0M12 12h8.5M10.6 12a1.4 1.4 0 1 0 2.8 0a1.4 1.4 0 1 0 -2.8 0',
+  weight: 'M5.5 20.5h13L16 9H8ZM9.5 9V7a2.5 2.5 0 0 1 5 0v2',
+  proportional: 'M3.5 12a8.5 8.5 0 1 0 17.0 0a8.5 8.5 0 1 0 -17.0 0M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2',
+  multiframe: 'M8 4h12v12h-4M4 8h12v12H4Z',
   // Transform header: one glyph per Placement / Plane / Guide / Snap choice.
   placeOrigin: 'M9.8 12a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0 -4.4 0M12 3v5.5M12 15.5V21M3 12h5.5M15.5 12H21',
   placeCursor: 'M6 12a6 6 0 1 0 12 0a6 6 0 1 0 -12 0M12 2v4M12 18v4M2 12h4M18 12h4',
