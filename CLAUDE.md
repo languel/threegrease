@@ -435,6 +435,13 @@ the browser console or automated evals:
     the grab is begun with `undo: false`). A face region extrude KEEPS the
     original faces, turned over, so a floor becomes a closed block —
     Blender leaves that hole open.
+  - The top bar carries Blender's two rows: Vertex / Edge / Face (a cube
+    with that element filled in) and the five box-select operations
+    (`settings.selectOp`: Set, Extend, Subtract, Difference, Intersect —
+    two squares with the result region filled). Shift / Ctrl still force
+    Extend / Subtract for one drag. Icons can carry a FILLED region now
+    (`FILLS` in icons.ts, evenodd to punch out an overlap) — the outline-only
+    set could not draw "which part is selected".
   - Faces have no colour channel in the overlay, so a selected face is
     filled on the HUD by the tool.
   - `App.meshEditId` (not the overlay target, which follows the TOOL) says

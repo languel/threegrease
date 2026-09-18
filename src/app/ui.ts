@@ -1415,6 +1415,18 @@ export class UI {
         bar.append(btn(icon(ic), () => { s.meshSelectMode = m; this.app.setMeshSelectMode(m); this.buildTopbar(); },
           { active: s.meshSelectMode === m, title }));
       }
+      bar.append(el('div', { class: 'sep' }));
+      const ops: [typeof s.selectOp, IconName, string][] = [
+        ['SET', 'selOpSet', 'Box select: set a new selection'],
+        ['EXTEND', 'selOpExtend', 'Box select: extend the selection (Shift)'],
+        ['SUBTRACT', 'selOpSubtract', 'Box select: subtract from the selection (Ctrl)'],
+        ['DIFFERENCE', 'selOpDifference', 'Box select: invert what the box covers'],
+        ['INTERSECT', 'selOpIntersect', 'Box select: keep only what is already selected AND inside the box'],
+      ];
+      for (const [op, ic, title] of ops) {
+        bar.append(btn(icon(ic), () => { s.selectOp = op; this.buildTopbar(); }, { active: s.selectOp === op, title }));
+      }
+      bar.append(el('div', { class: 'sep' }));
       bar.append(iconToggle('proportional', 'Proportional editing — moving a vertex drags its neighbours with a falloff',
         s.propEdit.enabled, (v) => { s.propEdit.enabled = v; this.buildTopbar(); }));
     } else if ((s.mode === 'EDIT' && s.activeTool === 'sculpt') || s.mode === 'SCULPT') {

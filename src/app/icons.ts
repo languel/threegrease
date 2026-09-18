@@ -123,9 +123,16 @@ const PATHS: Record<string, string> = {
   snapGrid: 'M3 9h18M3 15h18M9 3v18M15 3v18',
   snapVertex: 'M5.3 7.5a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0 -4.4 0M14.3 7.5a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0 -4.4 0M5.3 16.5a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0 -4.4 0M14.3 16.5a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0 -4.4 0',
   snapEdge: 'M4 8h16M4 16h16',
-  selVertex: 'M6 6h12v12H6ZM15.8 18a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0 -4.4 0',
-  selEdge: 'M6 6h12v12H6ZM6 20.5h12M6 21.5h12',
-  selFace: 'M6 6h12v12H6ZM6 10l4-4M6 14l8-8M6 18l12-12M10 18l8-8M14 18l4-4',
+  // Blender's select-mode trio: one cube, the chosen element filled in
+  selVertex: 'M4 8h12v12H4ZM4 8l4-4h12v12l-4 4M16 8l4-4',
+  selEdge: 'M4 8h12v12H4ZM4 8l4-4h12v12l-4 4M16 8l4-4',
+  selFace: 'M4 8h12v12H4ZM4 8l4-4h12v12l-4 4M16 8l4-4',
+  // box-select operations: two squares, the result region filled in
+  selOpSet: 'M3 3h12v12H3ZM9 9h12v12H9Z',
+  selOpExtend: 'M3 3h12v12H3ZM9 9h12v12H9Z',
+  selOpSubtract: 'M3 3h12v12H3ZM9 9h12v12H9Z',
+  selOpDifference: 'M3 3h12v12H3ZM9 9h12v12H9Z',
+  selOpIntersect: 'M3 3h12v12H3ZM9 9h12v12H9Z',
   snapEdgeCenter: 'M4 20 20 4M9.6 12a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0',
   snapEdgePerp: 'M5 3v16h16M5 14h5v5',
   snapFace: 'M5 10h14v10H5ZM12 2v9M9 8l3 3 3-3',
@@ -138,6 +145,22 @@ export type IconName = keyof typeof PATHS;
 
 /** Inline SVG element, 1em square, stroke=currentColor so it tints with
  *  the surrounding text/button color (including :disabled/:hover states). */
+/**
+ * Filled regions drawn under an icon's outline, for glyphs whose meaning IS
+ * a filled area (which element of the cube, which part of two overlapping
+ * boxes). `evenodd` punches the overlap of two subpaths out.
+ */
+const FILLS: Partial<Record<IconName, { d: string; evenodd?: boolean }>> = {
+  selVertex: { d: 'M2 6h4v4H2Z' },
+  selEdge: { d: 'M14.6 7.2h2.8v13.6h-2.8Z' },
+  selFace: { d: 'M4 8h12v12H4Z' },
+  selOpSet: { d: 'M9 9h12v12H9Z' },
+  selOpExtend: { d: 'M3 3h12v12H3ZM9 9h12v12H9Z' },
+  selOpSubtract: { d: 'M3 3h12v12H3ZM9 9h6v6H9Z', evenodd: true },
+  selOpDifference: { d: 'M3 3h12v12H3ZM9 9h12v12H9Z', evenodd: true },
+  selOpIntersect: { d: 'M9 9h6v6H9Z' },
+};
+
 export function icon(name: IconName, size = 15): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -149,6 +172,16 @@ export function icon(name: IconName, size = 15): SVGSVGElement {
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
   svg.classList.add('hi');
+  const fill = FILLS[name];
+  if (fill) {
+    const f = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    f.setAttribute('d', fill.d);
+    f.setAttribute('fill', 'currentColor');
+    f.setAttribute('stroke', 'none');
+    f.setAttribute('opacity', '0.85');
+    if (fill.evenodd) f.setAttribute('fill-rule', 'evenodd');
+    svg.append(f);
+  }
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   path.setAttribute('d', PATHS[name] ?? PATHS.square);
   svg.append(path);

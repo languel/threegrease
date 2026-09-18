@@ -115,6 +115,10 @@ export interface Settings {
   selectMode: 'POINT' | 'STROKE';
   /** Edit mode on a mesh: which element a click selects (Blender 1/2/3) */
   meshSelectMode: 'VERTEX' | 'EDGE' | 'FACE';
+  /** what a box select does to the selection (Blender's five): replace,
+   *  add, take away, flip, keep only the overlap. Shift/Ctrl still add /
+   *  take away for one drag whatever this says. */
+  selectOp: 'SET' | 'EXTEND' | 'SUBTRACT' | 'DIFFERENCE' | 'INTERSECT';
   autoKey: boolean;
   additiveDraw: boolean;     // draw on new keyframes keeps previous strokes
   propEdit: { enabled: boolean; radius: number };
@@ -315,6 +319,7 @@ export function defaultSettings(): Settings {
     guide: { type: 'NONE', angle: 0, spacing: 40 },
     selectMode: 'POINT',
     meshSelectMode: 'VERTEX',
+    selectOp: 'SET',
     autoKey: false,
     additiveDraw: false,
     propEdit: { enabled: false, radius: 120 },

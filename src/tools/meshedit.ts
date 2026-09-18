@@ -108,9 +108,15 @@ export class MeshEditTool implements Tool {
         const s = toS(v.co);
         return !!s && s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1;
       }).map((v) => v.id));
-      // Shift adds, Ctrl takes away, plain replaces — Blender's box select
+      // Blender's box-select operation from the top bar; Shift / Ctrl force
+      // add / take away for this one drag
+      const op = down.ctrl ? 'SUBTRACT' : down.shift ? 'EXTEND' : ctx.settings.selectOp;
       const apply = (el: { select?: boolean }, hit: boolean) => {
-        if (down.ctrl) { if (hit) el.select = false; } else if (down.shift) { if (hit) el.select = true; } else el.select = hit;
+        if (op === 'SET') el.select = hit;
+        else if (op === 'EXTEND') { if (hit) el.select = true; }
+        else if (op === 'SUBTRACT') { if (hit) el.select = false; }
+        else if (op === 'DIFFERENCE') { if (hit) el.select = !el.select; }
+        else el.select = !!el.select && hit;
       };
       if (mode === 'VERTEX') for (const v of pm.vertices) apply(v, inside.has(v.id));
       else if (mode === 'EDGE') for (const ed of pm.edges) apply(ed, inside.has(ed.v[0]) && inside.has(ed.v[1]));
