@@ -407,6 +407,42 @@ the browser console or automated evals:
   Plane: NONE has no plane of its own — Placement, magnet and guide decide,
   an uncaught point faces the camera (as View does), and the grid rounds all
   three coordinates.
+- **Edit mode on a MESH is a vertex / edge / face editor** (`tools/meshedit.ts`,
+  ops in `core/polyedit.ts`). Entering Edit with a poly mesh selected opens
+  it; with a PRIMITIVE selected (box, sphere, cylinder, the platonics) the
+  primitive is CONVERTED in place to a TGPolyMesh first (`render/polyconvert.ts`,
+  one undo step back) — name, transform, material, parent and constraints
+  carried over, and every `{ kind: 'MESH', id }` reference in the scene
+  re-pointed to the new `{ kind: 'POLY', id }`. The conversion welds three's
+  triangle soup (vertex keys rounded with -0 folded into 0, or seams stay
+  split) and merges each EXACTLY coplanar edge-connected region into one
+  n-gon, so the topology is Blender's: box 6 quads, cylinder 24 quads + two
+  24-gon caps, dodecahedron 12 pentagons, UV sphere 704 quads + 64 pole
+  triangles. A loose coplanarity test (0.9999) folded the pole fans into
+  bent quads; it is 1e-6 and a matching plane offset now.
+  - Selection is kept consistent across the three kinds by
+    `flushSelection(pm, mode)` after EVERY change, because the transform only
+    reads vertices: edge/face picks select their vertices; in vertex mode an
+    edge is selected when both ends are. Switching mode flushes from vertices
+    first, then from the new mode's elements.
+  - G / R / S go through the SAME `ModalTransform` the stroke editor uses:
+    `beginMesh` gives it the mesh's local->world matrix and an onChange that
+    bumps `rev` (a poly mesh only redraws on a rev change). For a mesh the
+    axis locks are WORLD axes (Blender's default for G) — a stood-up
+    cylinder's local Z points sideways. Shift+X/Y/Z locks to the plane in
+    both editors now.
+  - E extrudes by mode and starts a grab; ONE undo step (the extrude pushes,
+    the grab is begun with `undo: false`). A face region extrude KEEPS the
+    original faces, turned over, so a floor becomes a closed block —
+    Blender leaves that hole open.
+  - Faces have no colour channel in the overlay, so a selected face is
+    filled on the HUD by the tool.
+  - `App.meshEditId` (not the overlay target, which follows the TOOL) says
+    Edit is on a mesh, so picking Measure mid-edit keeps the mesh toolbar.
+- **Sculpt is an Edit-mode tool**, not a mode: its brushes are in the Edit
+  toolbar and the top bar shows them when it is active. The SCULPT mode
+  still exists in the type for old scenes; the mode button and pie slot are
+  gone, and the `modeSculpt` action opens Edit with the tool.
 - **Poly Build drags take G's axis locks** (`PolyPenTool.axisLock`): X / Y /
   Z mid-drag locks a vertex move, a vertex extrude, an edge/face move or a
   boundary extrusion to that WORLD axis, Shift+ to the plane square to it,

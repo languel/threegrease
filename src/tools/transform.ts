@@ -9,7 +9,8 @@ import { allRefs, worldMatrixOf } from './objects';
 type TransformKind = 'move' | 'rotate' | 'scale' | 'shear';
 type AxisLock = 'none' | 'x' | 'y' | 'z';
 
-interface Affected { p: GPPoint; orig: Vec3; weight: number }
+/** anything with a position: a GP point, or a poly-mesh vertex */
+interface Affected { p: { co: Vec3 }; orig: Vec3; weight: number }
 interface AffectedCanvas {
   c: CanvasPlane;
   origT: Vec3;
@@ -31,9 +32,75 @@ export class ModalTransform {
   private centerLocal: Vec3 = [0, 0, 0];
   private startPointer = new THREE.Vector2();
   private axis: AxisLock = 'none';
+  /** Shift+axis: lock to the PLANE square to the axis instead of the axis */
+  private axisPlane = false;
+  /**
+   * The space the affected points live in, local -> world. Null means the
+   * active GP object's (a stroke edit); a mesh edit hands in the mesh's own
+   * matrix, so the same modal moves, turns and scales mesh vertices.
+   */
+  private space: THREE.Matrix4 | null = null;
+  /** called after every change (a poly mesh must bump its rev to redraw) */
+  private onChange: (() => void) | null = null;
   active = false;
 
+  private toWorld(ctx: AppCtx, co: Vec3): THREE.Vector3 {
+    return this.space ? new THREE.Vector3(...co).applyMatrix4(this.space) : objectToWorld(ctx, co);
+  }
+  private toLocal(ctx: AppCtx, w: THREE.Vector3): Vec3 {
+    if (!this.space) return worldToObject(ctx, w);
+    const v = w.clone().applyMatrix4(this.space.clone().invert());
+    return [v.x, v.y, v.z];
+  }
+  private toScreen(ctx: AppCtx, co: Vec3): THREE.Vector2 {
+    if (!this.space) return objectToScreen(ctx, co);
+    const rect = ctx.canvas.getBoundingClientRect();
+    const v = this.toWorld(ctx, co).project(ctx.camera);
+    return new THREE.Vector2((v.x * 0.5 + 0.5) * rect.width, (-v.y * 0.5 + 0.5) * rect.height);
+  }
+
+  /**
+   * G / R / S on poly-mesh vertices: `verts` move, `others` are the rest of
+   * the mesh (proportional editing pulls them in with falloff), `matrix` is
+   * the mesh's local -> world. `undo: false` when the caller already pushed
+   * one (extrude pushes before it builds, so extrude + grab is ONE step).
+   */
+  beginMesh(
+    ctx: AppCtx, kind: TransformKind, pointer: { x: number; y: number },
+    verts: { co: Vec3 }[], others: { co: Vec3 }[], matrix: THREE.Matrix4,
+    onChange: () => void, undo = true,
+  ): boolean {
+    if (!verts.length) return false;
+    if (undo) ctx.pushUndo();
+    this.space = matrix.clone();
+    this.onChange = onChange;
+    this.canvases = [];
+    this.kind = kind;
+    this.axis = 'none';
+    this.axisPlane = false;
+    this.startPointer.set(pointer.x, pointer.y);
+    const median: Vec3 = [0, 0, 0];
+    for (const v of verts) { median[0] += v.co[0]; median[1] += v.co[1]; median[2] += v.co[2]; }
+    this.centerLocal = median.map((x) => x / verts.length) as Vec3;
+    this.center = this.toScreen(ctx, this.centerLocal);
+    this.affected = verts.map((v) => ({ p: v, orig: [...v.co] as Vec3, weight: 1 }));
+    if (ctx.settings.propEdit.enabled) {
+      const radius = ctx.settings.propEdit.radius;
+      const sel = verts.map((v) => this.toScreen(ctx, v.co));
+      for (const o of others) {
+        const px = this.toScreen(ctx, o.co);
+        const w = falloff(Math.min(...sel.map((q) => q.distanceTo(px))), radius);
+        if (w > 0) this.affected.push({ p: o, orig: [...o.co] as Vec3, weight: w });
+      }
+    }
+    this.active = true;
+    return true;
+  }
+
   begin(ctx: AppCtx, kind: TransformKind, pointer: { x: number; y: number }): boolean {
+    this.space = null;
+    this.onChange = null;
+    this.axisPlane = false;
     const sel = selectedPoints(ctx);
     if (!sel.length) return this.beginCanvases(ctx, kind, pointer);
     ctx.pushUndo();
@@ -51,7 +118,7 @@ export class ModalTransform {
     }
     median[0] /= sel.length; median[1] /= sel.length; median[2] /= sel.length;
     this.centerLocal = median;
-    this.center = objectToScreen(ctx, median);
+    this.center = this.toScreen(ctx, median);
 
     const seen = new Set<GPPoint>();
     for (const { s, index } of sel) {
@@ -67,9 +134,9 @@ export class ModalTransform {
         for (const p of s.points) {
           if (seen.has(p)) continue;
           let minD = Infinity;
-          const px = objectToScreen(ctx, p.co);
+          const px = this.toScreen(ctx, p.co);
           for (const { s: ss, index } of sel) {
-            const d = objectToScreen(ctx, ss.points[index].co).distanceTo(px);
+            const d = this.toScreen(ctx, ss.points[index].co).distanceTo(px);
             if (d < minD) minD = d;
           }
           const w = falloff(minD, radius);
@@ -162,14 +229,14 @@ export class ModalTransform {
       target = moved.map((v) => Math.round(v / g) * g) as Vec3;
     } else if (snap.mode === 'POINT') {
       const world = nearestStrokePointAll(ctx, pointer.x, pointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
-      if (world) target = worldToObject(ctx, world);
+      if (world) target = this.toLocal(ctx, world);
     } else if (snap.mode === 'EDGE' || snap.mode === 'EDGE_CENTER' || snap.mode === 'EDGE_PERP') {
       const seg = nearestStrokeSegmentAll(ctx, pointer.x, pointer.y, 40, ctx.settings.snap.strokeScope ?? 'ANY');
       if (seg) {
         const world = snap.mode === 'EDGE_CENTER' ? seg.a.clone().lerp(seg.b, 0.5)
-          : snap.mode === 'EDGE_PERP' ? perpendicularFoot(seg.a, seg.b, objectToWorld(ctx, this.centerLocal))
+          : snap.mode === 'EDGE_PERP' ? perpendicularFoot(seg.a, seg.b, this.toWorld(ctx, this.centerLocal))
           : seg.a.clone().lerp(seg.b, seg.t);
-        target = worldToObject(ctx, world);
+        target = this.toLocal(ctx, world);
       }
     } else if (snap.mode === 'FACE_CENTER' || snap.mode === 'FACE_NEAREST') {
       const rect = ctx.canvas.getBoundingClientRect();
@@ -177,14 +244,14 @@ export class ModalTransform {
       if (hit) {
         const p = new THREE.Vector3();
         if (snap.mode === 'FACE_CENTER') hit.tri.getMidpoint(p);
-        else hit.tri.closestPointToPoint(objectToWorld(ctx, this.centerLocal), p);
-        target = worldToObject(ctx, p);
+        else hit.tri.closestPointToPoint(this.toWorld(ctx, this.centerLocal), p);
+        target = this.toLocal(ctx, p);
       }
     } else if (snap.mode === 'SURFACE' || snap.mode === 'CANVAS') {
       const rect = ctx.canvas.getBoundingClientRect();
       const hit = raycastSurfaces(ctx, pointer.x + rect.left, pointer.y + rect.top)
         ?? pickCanvas(ctx, pointer.x, pointer.y)?.point;
-      if (hit) target = worldToObject(ctx, hit);
+      if (hit) target = this.toLocal(ctx, hit);
     } else if (snap.mode === 'OBJECT') {
       const rect = ctx.canvas.getBoundingClientRect();
       let best: THREE.Vector3 | null = null;
@@ -197,7 +264,7 @@ export class ModalTransform {
         const d = screen.distanceTo(pointer);
         if (d < bestD) { bestD = d; best = pos; }
       }
-      if (best) target = worldToObject(ctx, best);
+      if (best) target = this.toLocal(ctx, best);
     }
     if (!target) return delta;
     return [
@@ -217,11 +284,24 @@ export class ModalTransform {
       const w0 = screenToWorld(ctx, this.startPointer.x + rect.left, this.startPointer.y + rect.top);
       const w1 = screenToWorld(ctx, cur.x + rect.left, cur.y + rect.top);
       if (!w0 || !w1) return;
-      const d0 = worldToObject(ctx, w0), d1 = worldToObject(ctx, w1);
-      let delta: Vec3 = [d1[0] - d0[0], d1[1] - d0[1], d1[2] - d0[2]];
-      if (this.axis !== 'none') {
+      if (this.space && this.axis !== 'none') {
+        // a MESH locks to WORLD axes (Blender's default for G): its local
+        // ones are wherever its rotation put them — a stood-up cylinder's
+        // local Z points sideways
         const keep = this.axis === 'x' ? 0 : this.axis === 'y' ? 1 : 2;
-        delta = delta.map((v, i) => (i === keep ? v : 0)) as Vec3;
+        const dw = w1.clone().sub(w0);
+        for (let i = 0; i < 3; i++) if ((i === keep) === this.axisPlane) dw.setComponent(i, 0);
+        const c = this.toWorld(ctx, this.centerLocal);
+        const moved = this.toLocal(ctx, c.add(dw));
+        w1.copy(this.toWorld(ctx, moved));
+        w0.copy(this.toWorld(ctx, this.centerLocal));
+      }
+      const d0 = this.toLocal(ctx, w0), d1 = this.toLocal(ctx, w1);
+      let delta: Vec3 = [d1[0] - d0[0], d1[1] - d0[1], d1[2] - d0[2]];
+      if (this.axis !== 'none' && !this.space) {
+        const keep = this.axis === 'x' ? 0 : this.axis === 'y' ? 1 : 2;
+        // an axis lock keeps that component; a plane lock drops it
+        delta = delta.map((v, i) => ((i === keep) !== this.axisPlane ? v : 0)) as Vec3;
       }
       delta = this.snapDelta(ctx, delta, cur);
       for (const a of this.affected) {
@@ -239,9 +319,10 @@ export class ModalTransform {
       for (const a of this.affected) {
         const s = 1 + (f - 1) * a.weight;
         const co: Vec3 = [...a.orig] as Vec3;
-        if (this.axis === 'none' || this.axis === 'x') co[0] = this.centerLocal[0] + (a.orig[0] - this.centerLocal[0]) * s;
-        if (this.axis === 'none' || this.axis === 'y') co[1] = this.centerLocal[1] + (a.orig[1] - this.centerLocal[1]) * s;
-        if (this.axis === 'none' || this.axis === 'z') co[2] = this.centerLocal[2] + (a.orig[2] - this.centerLocal[2]) * s;
+        const on = (k: AxisLock) => this.axis === 'none' || ((this.axis === k) !== this.axisPlane);
+        if (on('x')) co[0] = this.centerLocal[0] + (a.orig[0] - this.centerLocal[0]) * s;
+        if (on('y')) co[1] = this.centerLocal[1] + (a.orig[1] - this.centerLocal[1]) * s;
+        if (on('z')) co[2] = this.centerLocal[2] + (a.orig[2] - this.centerLocal[2]) * s;
         a.p.co = co;
       }
     } else if (this.kind === 'shear') {
@@ -252,26 +333,31 @@ export class ModalTransform {
         a.p.co = co;
       }
     }
+    this.onChange?.();
     ctx.requestRender();
   }
 
   /** Rotate around the view axis through the pivot. */
   private applyViewPlaneRotation(ctx: AppCtx, angle: number): void {
     const viewDir = ctx.camera.getWorldDirection(new THREE.Vector3());
-    const pivotWorld = objectToWorld(ctx, this.centerLocal);
+    const pivotWorld = this.toWorld(ctx, this.centerLocal);
     const q = new THREE.Quaternion().setFromAxisAngle(viewDir, angle);
     for (const a of this.affected) {
-      const w = objectToWorld(ctx, a.orig);
+      const w = this.toWorld(ctx, a.orig);
       const v = w.sub(pivotWorld).applyQuaternion(
         a.weight === 1 ? q : new THREE.Quaternion().setFromAxisAngle(viewDir, angle * a.weight),
       ).add(pivotWorld);
-      a.p.co = worldToObject(ctx, v);
+      a.p.co = this.toLocal(ctx, v);
     }
   }
 
-  setAxis(axis: AxisLock, ctx: AppCtx, pointer: { x: number; y: number }): void {
+  /** X / Y / Z lock to that axis, Shift+ to the plane square to it; the same
+   *  key again frees it. */
+  setAxis(axis: AxisLock, ctx: AppCtx, pointer: { x: number; y: number }, plane = false): void {
     if (!this.active) return;
-    this.axis = this.axis === axis ? 'none' : axis;
+    const same = this.axis === axis && this.axisPlane === plane;
+    this.axis = same ? 'none' : axis;
+    this.axisPlane = same ? false : plane;
     this.update(ctx, pointer);
   }
 
@@ -289,6 +375,7 @@ export class ModalTransform {
 
   cancel(ctx: AppCtx): void {
     for (const a of this.affected) a.p.co = a.orig;
+    this.onChange?.();
     for (const a of this.canvases) {
       a.c.translation = [...a.origT] as Vec3;
       const e = new THREE.Euler().setFromQuaternion(a.origQ);

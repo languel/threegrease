@@ -73,6 +73,9 @@ import type { ActorLayerSource } from '../core/types';
 
 export interface AppHandle {
   ctx: AppCtx;
+  /** Edit mode is open on a mesh (vertex / edge / face editor) */
+  meshEditing(): boolean;
+  setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
   /** the scene's environment/IBL manager — the World panel reads its
    *  load status, since an image or video source resolves asynchronously */
   world: { status: 'ok' | 'loading' | 'error'; error: string };
@@ -836,6 +839,10 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area; Backspace undoes a point, Esc cancels); drag a placed point to adjust it'],
     ['select-lasso', 'lasso', 'Lasso select'],
     ['select-circle', 'circle', 'Circle select ([ ] size)'],
+    // Sculpt lives here for now rather than as a mode of its own: its
+    // brushes reshape the strokes you are editing, and a mode with one tool
+    // in it was a room with nothing else in it
+    ['sculpt', 'hand', 'Sculpt — Smooth, Thickness, Strength, Randomize, Grab, Push, Twist, Pinch, Clone (pick the brush in the top bar)'],
     // the quilt trio (same entries as DRAW): retopologize over what you
     // are editing — strokes, meshes, and splats are snap sources
     ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
@@ -846,6 +853,16 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
   VERTEX: [['vertexpaint', 'brush', 'Vertex paint']],
   WEIGHT: [['weightpaint', 'adjustments', 'Weight paint']],
 };
+
+/** Edit mode on a MESH: the element editor first, then the poly tools that
+ *  build onto the same mesh, and the ruler. */
+const MESH_EDIT_TOOLS: [string, IconName, string][] = [
+  ['meshedit', 'squareTarget', 'Select — click a vertex / edge / face (the mode in the top bar), Shift adds, drag a box · G/R/S move/rotate/scale (X/Y/Z lock, Shift+ for the plane) · E extrude · F fill · X delete · A all, Alt+A none'],
+  ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area)'],
+  ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
+  ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
+  ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
+];
 
 export class UI {
   private app: AppHandle;
@@ -1324,7 +1341,7 @@ export class UI {
 
     const modes: [EditorMode, IconName, string][] = [
       ['OBJECT', 'cursorArrow', 'Object mode'], ['DRAW', 'pencil', 'Draw mode'], ['EDIT', 'pencilSquare', 'Edit mode'],
-      ['SCULPT', 'hand', 'Sculpt mode'], ['VERTEX', 'brush', 'Vertex paint'], ['WEIGHT', 'adjustments', 'Weight paint'],
+      ['VERTEX', 'brush', 'Vertex paint'], ['WEIGHT', 'adjustments', 'Weight paint'],
     ];
     for (const [m, iconName, label] of modes) {
       bar.append(btn(icon(iconName), () => this.app.setMode(m), { active: s.mode === m, title: label }));
@@ -1390,15 +1407,17 @@ export class UI {
           tbField('size', 'Eraser size', slider('', s.eraser.radius, 4, 120, 1, (v) => { s.eraser.radius = v; }, { def: 24, title: 'Eraser size' })),
         );
       }
-    } else if (s.mode === 'EDIT') {
-      bar.append(
-        tbField('cursorArrow', 'Select — points or whole strokes', selectField('', s.selectMode, [['POINT', 'Point'], ['STROKE', 'Stroke']], (v) => { s.selectMode = v; ctx.requestRender(); })),
-        iconToggle('proportional', 'Proportional editing — moving a point drags its neighbours with a falloff',
-          s.propEdit.enabled, (v) => { s.propEdit.enabled = v; this.buildTopbar(); }),
-        iconToggle('multiframe', 'Multiframe — edit every keyframe of the layer at once, not just the current one',
-          s.multiframe, (v) => { s.multiframe = v; this.buildTopbar(); }),
-      );
-    } else if (s.mode === 'SCULPT') {
+    } else if (s.mode === 'EDIT' && this.app.meshEditing()) {
+      const modes: ['VERTEX' | 'EDGE' | 'FACE', IconName, string][] = [
+        ['VERTEX', 'selVertex', 'Vertex select'], ['EDGE', 'selEdge', 'Edge select'], ['FACE', 'selFace', 'Face select'],
+      ];
+      for (const [m, ic, title] of modes) {
+        bar.append(btn(icon(ic), () => { s.meshSelectMode = m; this.app.setMeshSelectMode(m); this.buildTopbar(); },
+          { active: s.meshSelectMode === m, title }));
+      }
+      bar.append(iconToggle('proportional', 'Proportional editing — moving a vertex drags its neighbours with a falloff',
+        s.propEdit.enabled, (v) => { s.propEdit.enabled = v; this.buildTopbar(); }));
+    } else if ((s.mode === 'EDIT' && s.activeTool === 'sculpt') || s.mode === 'SCULPT') {
       const brushes: [SculptBrush, string][] = [
         ['SMOOTH', 'Smooth'], ['THICKNESS', 'Thickness'], ['STRENGTH', 'Strength'], ['RANDOMIZE', 'Randomize'],
         ['GRAB', 'Grab'], ['PUSH', 'Push'], ['TWIST', 'Twist'], ['PINCH', 'Pinch'], ['CLONE', 'Clone'],
@@ -1407,6 +1426,14 @@ export class UI {
         tbField('hand', 'Sculpt brush', selectField('', s.sculpt.brush, brushes, (v) => { s.sculpt.brush = v; })),
         tbField('radius', 'Radius', slider('', s.sculpt.radius, 10, 200, 1, (v) => { s.sculpt.radius = v; }, { def: 50, title: 'Radius' })),
         tbField('droplet', 'Strength', slider('', s.sculpt.strength, 0.05, 1, 0.05, (v) => { s.sculpt.strength = v; }, { def: 0.5, title: 'Strength' })),
+      );
+    } else if (s.mode === 'EDIT') {
+      bar.append(
+        tbField('cursorArrow', 'Select — points or whole strokes', selectField('', s.selectMode, [['POINT', 'Point'], ['STROKE', 'Stroke']], (v) => { s.selectMode = v; ctx.requestRender(); })),
+        iconToggle('proportional', 'Proportional editing — moving a point drags its neighbours with a falloff',
+          s.propEdit.enabled, (v) => { s.propEdit.enabled = v; this.buildTopbar(); }),
+        iconToggle('multiframe', 'Multiframe — edit every keyframe of the layer at once, not just the current one',
+          s.multiframe, (v) => { s.multiframe = v; this.buildTopbar(); }),
       );
     } else if (s.mode === 'VERTEX') {
       bar.append(
@@ -1470,7 +1497,8 @@ export class UI {
     const { ctx } = this.app;
     const bar = $('toolbar');
     bar.replaceChildren();
-    for (const [id, iconName, title] of TOOLS_BY_MODE[ctx.settings.mode]) {
+    const tools = ctx.settings.mode === 'EDIT' && this.app.meshEditing() ? MESH_EDIT_TOOLS : TOOLS_BY_MODE[ctx.settings.mode];
+    for (const [id, iconName, title] of tools) {
       // the editable-mesh trio is a distinct family — rule it off
       if (id === 'polypen') bar.append(el('div', { class: 'tool-sep' }));
       bar.append(btn(icon(iconName, 18), () => this.app.setTool(id), {
@@ -1515,7 +1543,6 @@ export class UI {
     type Slot = { mode: EditorMode; label: string; icon: IconName; key: string; angleDeg: number };
     const SLOTS: Slot[] = [
       { mode: 'DRAW', label: 'Draw', icon: 'pencil', key: '8', angleDeg: -90 },
-      { mode: 'SCULPT', label: 'Sculpt', icon: 'hand', key: '2', angleDeg: 90 },
       { mode: 'OBJECT', label: 'Object', icon: 'cursorArrow', key: '4', angleDeg: 180 },
       { mode: 'EDIT', label: 'Edit', icon: 'pencilSquare', key: '6', angleDeg: 0 },
       // pushed further from Draw (N, -90) than a plain ±45 hexagon would
@@ -1984,14 +2011,14 @@ export class UI {
           // materials first: which colour you are drawing with is asked far
           // more often than how the brush's dabs are spaced
           this.materialsPanel(), this.brushPanel(), this.stencilPanel(),
-          ...(ctx.settings.mode === 'EDIT' ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
+          ...(ctx.settings.mode === 'EDIT' && !this.app.meshEditing() ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
         ],
       },
       {
         id: 'data', icon: 'folder', title: 'Data — layers · strokes · onion skin',
         build: () => [
           this.layersPanel(),
-          ...(ctx.settings.mode === 'EDIT' ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
+          ...(ctx.settings.mode === 'EDIT' && !this.app.meshEditing() ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
           this.onionPanel(),
         ],
       },

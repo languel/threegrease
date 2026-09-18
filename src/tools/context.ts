@@ -113,6 +113,8 @@ export interface Settings {
   shapeSnap: 'ENDS' | 'EVERY';
   guide: { type: GuideType; angle: number; spacing: number };
   selectMode: 'POINT' | 'STROKE';
+  /** Edit mode on a mesh: which element a click selects (Blender 1/2/3) */
+  meshSelectMode: 'VERTEX' | 'EDGE' | 'FACE';
   autoKey: boolean;
   additiveDraw: boolean;     // draw on new keyframes keeps previous strokes
   propEdit: { enabled: boolean; radius: number };
@@ -312,6 +314,7 @@ export function defaultSettings(): Settings {
     shapeSnap: 'ENDS',
     guide: { type: 'NONE', angle: 0, spacing: 40 },
     selectMode: 'POINT',
+    meshSelectMode: 'VERTEX',
     autoKey: false,
     additiveDraw: false,
     propEdit: { enabled: false, radius: 120 },

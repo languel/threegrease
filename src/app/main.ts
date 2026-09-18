@@ -155,6 +155,10 @@ import { setSplatPickSource } from '../tools/splatpick';
 import { setStencilObjectResolver, setStencilVideoSource } from '../tools/stencil';
 import { SplatPaintTool } from '../tools/splatbrush';
 import { TexturePaintTool, setTexPaintMeshManager, setTexPaintPolyManager } from '../tools/texpaint';
+import { MeshEditTool } from '../tools/meshedit';
+import { primitiveToPoly, isConvertiblePrimitive } from '../render/polyconvert';
+import { touchPolyMesh } from '../core/polymesh';
+import { flushSelection } from '../core/polyedit';
 import { PolyPenTool } from '../tools/polytool';
 import { clearPolyOverlay, polyOverlay } from '../render/polymesh';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -180,6 +184,9 @@ import { AgentPanel } from '../agent/panel';
 import { webMcp } from '../agent/webmcp';
 import { WorldManager } from '../render/world';
 import { materialManager } from '../render/materialmgr';
+
+/** tools that work on a poly mesh (they target `polyOverlay.editMeshId`) */
+const MESH_TOOLS = new Set(['meshedit', 'polypen', 'polybuild', 'quadpatch']);
 
 const DEFAULT_TOOL: Record<EditorMode, string> = {
   OBJECT: 'object-select', DRAW: 'draw', EDIT: 'select',
@@ -324,6 +331,7 @@ class App implements AppHandle {
   private polyPen = new PolyPenTool('polypen', 'QUILT');
   private polyBuild = new PolyPenTool('polybuild', 'BUILD');
   private quadPatch = new PolyPenTool('quadpatch', 'PATCH');
+  private meshEdit = new MeshEditTool();
   private objectPick = new ObjectSelectTool('object-select', 'BOX');
   private objectPickLasso = new ObjectSelectTool('object-select-lasso', 'LASSO');
   private objectPickCircle = new ObjectSelectTool('object-select-circle', 'CIRCLE');
@@ -516,10 +524,11 @@ class App implements AppHandle {
       new SelectTool('select-circle', 'CIRCLE'), new SculptTool(),
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
-      this.polyPen, this.polyBuild, this.quadPatch, new SplatPaintTool(), new TexturePaintTool(),
+      this.polyPen, this.polyBuild, this.quadPatch, this.meshEdit, new SplatPaintTool(), new TexturePaintTool(),
       new ActorPoseTool(), new MeasureTool(), new DirectTool(),
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
+    this.meshEdit.beginTransform = (kind, undo) => this.withPane(this.pointerPane, () => this.beginMeshTransform(kind, undo));
 
     this.ui = new UI(this);
     // the library lives in IndexedDB, which only answers asynchronously —
@@ -601,18 +610,13 @@ class App implements AppHandle {
   private modeHistory: EditorMode[] = ['DRAW', 'EDIT'];
 
   setMode(mode: EditorMode): void {
-    // "Edit mode" edits whatever object is active — with an editable mesh
-    // as the selection, EDIT opens straight onto the PolyQuilt tool (no
-    // standalone poly mode; GP objects keep the GP point editor).
-    const enterPolyPen = mode === 'EDIT' && (() => {
-      const scene = this.ctx.scene;
-      const picked = this.objectPick.lastPicked;
-      const pickedPoly = picked?.kind === 'POLY'
-        && scene.polyMeshes.some((p) => p.id === picked.id && p.select);
-      const onlyPolySelected = scene.polyMeshes.some((p) => p.select)
-        && !scene.objects.some((o) => o.select);
-      return pickedPoly || onlyPolySelected;
-    })();
+    // "Edit mode" edits whatever object is active — with a mesh as the
+    // selection, EDIT opens the vertex / edge / face editor on it (a
+    // primitive is converted to an editable mesh first, as Blender's are
+    // just meshes); GP objects keep the GP point editor.
+    const meshTarget = mode === 'EDIT' ? this.editableMeshTarget() : null;
+    const enterPolyPen = meshTarget !== null;
+    this.meshEditId = meshTarget;
     if (mode !== this.ctx.settings.mode) this.modeHistory = [this.ctx.settings.mode, mode];
     // OBJECT mode (and the outliner) tolerate zero GP objects — every
     // other mode edits the active one, so create a blank on entry rather
@@ -623,10 +627,91 @@ class App implements AppHandle {
       this.ctx.scene.activeObject = 0;
     }
     this.ctx.settings.mode = mode;
-    this.setTool(enterPolyPen ? 'polypen' : DEFAULT_TOOL[mode]);
+    this.setTool(enterPolyPen ? 'meshedit' : DEFAULT_TOOL[mode]);
     this.gp.markDirty();
     this.refreshWidget();
     this.ui.refresh();
+  }
+
+  /** The mesh Edit mode is open on (null = the stroke editor). Kept apart
+   *  from the overlay's target, which follows the TOOL: picking Measure
+   *  mid-edit must not drop you back into the stroke editor's toolbar. */
+  private meshEditId: number | null = null;
+
+  /**
+   * The mesh Edit mode should open on, or null for the stroke editor: the
+   * picked or selected editable mesh, or a selected PRIMITIVE — which is
+   * converted to an editable mesh here, in place (same name, transform,
+   * material, parent; everything that pointed at it re-pointed). One undo
+   * step takes it back to the primitive.
+   */
+  private editableMeshTarget(): number | null {
+    const scene = this.ctx.scene;
+    const picked = this.objectPick.lastPicked;
+    const gpSelected = scene.objects.some((o) => o.select);
+    if (picked?.kind === 'POLY' && scene.polyMeshes.some((p) => p.id === picked.id && p.select)) return picked.id;
+    const prim = (picked?.kind === 'MESH' ? scene.meshes.find((m) => m.id === picked.id && m.select) : undefined)
+      ?? (gpSelected ? undefined : scene.meshes.find((m) => m.select && isConvertiblePrimitive(m)));
+    if (prim && isConvertiblePrimitive(prim)) return this.convertToEditable(prim.id);
+    if (!gpSelected) {
+      const pm = scene.polyMeshes.find((p) => p.select);
+      if (pm) return pm.id;
+    }
+    return null;
+  }
+
+  private convertToEditable(meshId: number): number | null {
+    const scene = this.ctx.scene;
+    const m = scene.meshes.find((x) => x.id === meshId);
+    if (!m) return null;
+    this.ctx.pushUndo();
+    let id = Date.now() % 1e9;
+    while (scene.polyMeshes.some((p) => p.id === id)) id++;
+    const pm = primitiveToPoly(m, id);
+    pm.select = true;
+    scene.meshes = scene.meshes.filter((x) => x !== m);
+    scene.polyMeshes.push(pm);
+    // re-point every reference to it (parents, constraint targets, routes,
+    // score attachments): anything shaped { kind: 'MESH', id } with its id
+    const walk = (o: unknown): void => {
+      if (!o || typeof o !== 'object') return;
+      if (Array.isArray(o)) { for (const x of o) walk(x); return; }
+      const r = o as Record<string, unknown>;
+      if (r.kind === 'MESH' && r.id === meshId && Object.keys(r).length <= 3) { r.kind = 'POLY'; r.id = id; return; }
+      for (const k in r) walk(r[k]);
+    };
+    walk(scene);
+    this.setLastPicked({ kind: 'POLY', id });
+    this.setStatusHint(`${m.name} is an editable mesh now`, 2500);
+    return id;
+  }
+
+  /** G / R / S on the edit mesh's selected vertices. */
+  private beginMeshTransform(kind: 'move' | 'rotate' | 'scale', undo = true): boolean {
+    const pm = this.meshEdit.editMesh(this.ctx);
+    if (!pm) return false;
+    const sel = pm.vertices.filter((v) => v.select);
+    const others = pm.vertices.filter((v) => !v.select);
+    const matrix = worldMatrixOf(this.ctx.scene, { kind: 'POLY', id: pm.id });
+    return this.modal.beginMesh(this.ctx, kind, this.tools.lastPointer, sel, others, matrix,
+      () => touchPolyMesh(pm), undo);
+  }
+
+  /** Switching vertex / edge / face keeps the selection, re-derived from
+   *  the new mode's point of view (Blender does the same). */
+  setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void {
+    this.ctx.settings.meshSelectMode = mode;
+    const pm = this.meshEdit.editMesh(this.ctx);
+    // derive edges/faces from the vertices, then the new mode's elements
+    // are the truth (an edge survives into face mode only inside a face)
+    if (pm) { flushSelection(pm, 'VERTEX'); flushSelection(pm, mode); }
+    this.ctx.requestRender();
+  }
+
+  /** Edit mode is on a mesh (the vertex / edge / face editor or a poly tool). */
+  meshEditing(): boolean {
+    return this.ctx.settings.mode === 'EDIT' && this.meshEditId !== null
+      && this.ctx.scene.polyMeshes.some((p) => p.id === this.meshEditId);
   }
 
   /** Tab: swap back to whichever mode you were in before the current one. */
@@ -642,10 +727,11 @@ class App implements AppHandle {
     // quilt overlays live and die with the quilt tools (no standalone
     // mode): activating one targets the picked/selected/first editable
     // mesh; leaving them hides the topology overlays
-    if (id === 'polypen' || id === 'polybuild' || id === 'quadpatch') {
+    if (MESH_TOOLS.has(id)) {
       const scene = this.ctx.scene;
       const picked = this.objectPick.lastPicked;
-      const target = (picked?.kind === 'POLY' ? scene.polyMeshes.find((p) => p.id === picked.id) : undefined)
+      const target = (this.meshEditId !== null ? scene.polyMeshes.find((p) => p.id === this.meshEditId) : undefined)
+        ?? (picked?.kind === 'POLY' ? scene.polyMeshes.find((p) => p.id === picked.id) : undefined)
         ?? scene.polyMeshes.find((p) => p.select)
         ?? scene.polyMeshes[0];
       polyOverlay.editMeshId = target?.id ?? null; // else first click creates one
@@ -1377,9 +1463,9 @@ class App implements AppHandle {
     if (this.modal.active) {
       if (key === 'Escape') { this.modal.cancel(ctx); }
       else if (key === 'Enter') { this.modal.confirm(ctx); }
-      else if (key === 'x' || key === 'X') this.withPane(this.pointerPane, () => this.modal.setAxis('x', ctx, this.tools.lastPointer));
-      else if (key === 'y' || key === 'Y') this.withPane(this.pointerPane, () => this.modal.setAxis('y', ctx, this.tools.lastPointer));
-      else if (key === 'z' || key === 'Z') this.withPane(this.pointerPane, () => this.modal.setAxis('z', ctx, this.tools.lastPointer));
+      else if (key === 'x' || key === 'X') this.withPane(this.pointerPane, () => this.modal.setAxis('x', ctx, this.tools.lastPointer, e.shiftKey));
+      else if (key === 'y' || key === 'Y') this.withPane(this.pointerPane, () => this.modal.setAxis('y', ctx, this.tools.lastPointer, e.shiftKey));
+      else if (key === 'z' || key === 'Z') this.withPane(this.pointerPane, () => this.modal.setAxis('z', ctx, this.tools.lastPointer, e.shiftKey));
       e.preventDefault();
       return;
     }
@@ -1451,7 +1537,8 @@ class App implements AppHandle {
       case 'snapPie': this.ui.openTransformPie('snap', this.canvasPointer()); break;
       case 'modeDraw': this.setMode('DRAW'); break;
       case 'modeEdit': this.setMode('EDIT'); break;
-      case 'modeSculpt': this.setMode('SCULPT'); break;
+      // Sculpt is an Edit-mode tool now, not a mode of its own
+      case 'modeSculpt': this.setMode('EDIT'); if (!this.meshEditing()) this.setTool('sculpt'); break;
       case 'modeVertex': this.setMode('VERTEX'); break;
       case 'modeWeight': this.setMode('WEIGHT'); break;
       case 'modePoly':
@@ -1466,18 +1553,21 @@ class App implements AppHandle {
       case 'move':
         this.withPane(this.pointerPane, () => {
           if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'move', this.tools.lastPointer);
+          else if (this.meshEditing()) this.beginMeshTransform('move');
           else if (this.editLike()) this.modal.begin(ctx, 'move', this.tools.lastPointer);
         });
         break;
       case 'rotate':
         this.withPane(this.pointerPane, () => {
           if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'rotate', this.tools.lastPointer);
+          else if (this.meshEditing()) this.beginMeshTransform('rotate');
           else if (this.editLike()) this.modal.begin(ctx, 'rotate', this.tools.lastPointer);
         });
         break;
       case 'scale':
         this.withPane(this.pointerPane, () => {
           if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'scale', this.tools.lastPointer);
+          else if (this.meshEditing()) this.beginMeshTransform('scale');
           else if (this.editLike()) this.modal.begin(ctx, 'scale', this.tools.lastPointer);
         });
         break;
