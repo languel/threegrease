@@ -64,6 +64,9 @@ void main() {
 export interface OutlineGroup {
   roots: THREE.Object3D[];
   color: THREE.Color;
+  /** world-space bounds of the roots, when known — lets both passes run in
+   *  a scissor around the selection instead of over the whole frame */
+  boxes?: THREE.Box3[];
 }
 
 export class SilhouetteOutline {
@@ -118,14 +121,31 @@ export class SilhouetteOutline {
     const savedClear = renderer.getClearColor(new THREE.Color());
     const savedClearAlpha = renderer.getClearAlpha();
     const savedAutoClear = renderer.autoClear;
+    const savedScissorTest = renderer.getScissorTest();
+    const savedScissor = renderer.getScissor(new THREE.Vector4());
+    const px = u.uWidth.value as number;
     for (const g of live) {
-      this.renderMask(renderer, scene, camera, g.roots);
+      // THE COST IS PIXELS, not objects: the rim shader reads the mask 32
+      // times per pixel, so a full-screen pass at retina resolution is most
+      // of a millisecond even when the selection is a speck in one corner.
+      // Both passes run in a scissor round the selection's projected bounds
+      // — the mask one wider by the rim width, so the composite's outermost
+      // samples still land on pixels the mask pass actually cleared.
+      // bounds are CENTRELINES and centres; a stroke's ribbon and a mesh's
+      // shading spill a little past them, so the rect gets a fixed margin
+      // on top of the rim width
+      const box = screenRect(g.boxes, camera, size);
+      const rect = box && grow(box, MARGIN_PX * renderer.getPixelRatio() + px, size);
+      this.renderMask(renderer, scene, camera, g.roots, rect && grow(rect, px, size));
       (u.uColor.value as THREE.Color).copy(g.color);
       renderer.setRenderTarget(savedTarget);
+      scissor(renderer, rect);
       renderer.autoClear = false;
       renderer.render(this.quadScene, this.quadCam);
       renderer.autoClear = savedAutoClear;
     }
+    renderer.setScissor(savedScissor);
+    renderer.setScissorTest(savedScissorTest);
     renderer.setClearColor(savedClear, savedClearAlpha);
   }
 
@@ -141,7 +161,7 @@ export class SilhouetteOutline {
    */
   private renderMask(
     renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera,
-    roots: THREE.Object3D[],
+    roots: THREE.Object3D[], rect: Rect | null,
   ): void {
     const keep = new Set(roots);
     const path = new Set<THREE.Object3D>();
@@ -163,6 +183,7 @@ export class SilhouetteOutline {
     scene.fog = null;
     scene.overrideMaterial = null;
     renderer.setRenderTarget(this.mask);
+    scissor(renderer, rect);
     renderer.setClearColor(0x000000, 0);
     renderer.clear();
     renderer.render(scene, camera);
@@ -176,4 +197,50 @@ export class SilhouetteOutline {
     this.mask.dispose();
     this.mat.dispose();
   }
+}
+
+/** Slack round the projected bounds, CSS px — covers a thick stroke's
+ *  ribbon, which is drawn this far outside the centreline its box measures. */
+const MARGIN_PX = 24;
+
+/** A pixel rectangle in DRAWING-BUFFER space, origin bottom-left (GL). */
+interface Rect { x: number; y: number; w: number; h: number }
+
+/**
+ * The screen rectangle covering some world boxes, or null for "the whole
+ * frame" — which is also the answer whenever a box reaches behind the
+ * camera, where projecting its corners gives nonsense rather than bounds.
+ */
+function screenRect(boxes: THREE.Box3[] | undefined, camera: THREE.Camera, size: THREE.Vector2): Rect | null {
+  if (!boxes?.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const v = new THREE.Vector3();
+  for (const b of boxes) {
+    if (b.isEmpty()) return null;
+    for (let i = 0; i < 8; i++) {
+      v.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera);
+      if (v.z < -1 || v.z > 1) return null;
+      x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x);
+      y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
+    }
+  }
+  const px = (n: number, s: number) => (n * 0.5 + 0.5) * s;
+  return { x: px(x0, size.x), y: px(y0, size.y), w: px(x1, size.x) - px(x0, size.x), h: px(y1, size.y) - px(y0, size.y) };
+}
+
+function grow(r: Rect, by: number, size: THREE.Vector2): Rect {
+  const x = Math.max(0, Math.floor(r.x - by));
+  const y = Math.max(0, Math.floor(r.y - by));
+  const x1 = Math.min(size.x, Math.ceil(r.x + r.w + by));
+  const y1 = Math.min(size.y, Math.ceil(r.y + r.h + by));
+  return { x, y, w: Math.max(0, x1 - x), h: Math.max(0, y1 - y) };
+}
+
+/** Scissor in drawing-buffer px. three's setScissor takes CSS px and
+ *  multiplies by the pixel ratio itself, so divide it back out. */
+function scissor(renderer: THREE.WebGLRenderer, r: Rect | null): void {
+  if (!r) { renderer.setScissorTest(false); return; }
+  const k = renderer.getPixelRatio();
+  renderer.setScissor(r.x / k, r.y / k, r.w / k, r.h / k);
+  renderer.setScissorTest(true);
 }

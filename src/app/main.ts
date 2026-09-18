@@ -3397,6 +3397,22 @@ class App implements AppHandle {
     return null;
   }
 
+  /** A splat's world bounds INCLUDING its gaussians' spread — the region its
+   *  silhouette can occupy. Cached per mesh; Spark walks every splat. */
+  private splatReachCache = new WeakMap<THREE.Object3D, THREE.Box3>();
+  private splatReach(ref: ObjRef): THREE.Box3 | null {
+    const root = this.splats.meshFor(ref.id);
+    const get = (root as unknown as { getBoundingBox?: (c?: boolean) => THREE.Box3 } | null)?.getBoundingBox;
+    if (!root || !get) return null;
+    let local = this.splatReachCache.get(root);
+    if (!local) {
+      local = get.call(root, false);
+      if (local.isEmpty()) return null;
+      this.splatReachCache.set(root, local);
+    }
+    return local.clone().applyMatrix4(root.matrixWorld);
+  }
+
   /** World-space bounds of an editable mesh from its DATA — the render
    *  group's box is inflated by the unit-geometry instanced vertex
    *  handles, so selection outlines measure the topology itself. */
@@ -3542,6 +3558,8 @@ class App implements AppHandle {
     // Grouped by colour so the active object can be the brighter one.
     const selGroup: THREE.Object3D[] = [];
     const actGroup: THREE.Object3D[] = [];
+    const selRefs: ObjRef[] = [];
+    const actRefs: ObjRef[] = [];
     const silhouetted = new Set<string>();
     for (const ref of refs) {
       const root = this.silhouetteRoot(ref);
@@ -3549,10 +3567,25 @@ class App implements AppHandle {
       silhouetted.add(`${ref.kind}:${ref.id}`);
       const isActive = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
       (isActive ? actGroup : selGroup).push(root);
+      (isActive ? actRefs : selRefs).push(ref);
     }
+    // Bounds for the scissor. ANY root without trustworthy bounds means the
+    // whole frame, because a scissor that is too small does not cost time,
+    // it cuts the outline off. A splat's reach is its gaussians, not its
+    // centres, so it uses Spark's full extent here rather than the
+    // centres-only box the Dimensions readout wants.
+    const boxesOf = (refsOf: ObjRef[]): THREE.Box3[] | undefined => {
+      const out: THREE.Box3[] = [];
+      for (const r of refsOf) {
+        const b = r.kind === 'SPLAT' ? this.splatReach(r) : this.computeObjectBox(r);
+        if (!b || b.isEmpty()) return undefined;
+        out.push(b);
+      }
+      return out;
+    };
     this.silhouetteGroups = [
-      { roots: selGroup, color: this.highlightColor(false) },
-      { roots: actGroup, color: this.highlightColor(true) },
+      { roots: selGroup, color: this.highlightColor(false), boxes: boxesOf(selRefs) },
+      { roots: actGroup, color: this.highlightColor(true), boxes: boxesOf(actRefs) },
     ];
 
     for (const ref of refs) {

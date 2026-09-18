@@ -881,7 +881,20 @@ the browser console or automated evals:
   scene look, because selection is interface, not part of the picture; it
   is not drawn in quad view. Verified: a GP path's rim hugs the stroke (no
   box) and an active actor's shows through the column in front of it,
-  18,939 pixels of rim against a frame without it.
+  18,939 pixels of rim against a frame without it; a 100k-splat scan wears
+  a ragged rim like Blender's.
+  THE COST IS PIXELS, not objects: the rim shader reads the mask 32 times
+  per pixel, so a full-screen pass is most of a millisecond at retina
+  resolution even when the selection is a speck (measured ~0.7 ms at
+  964x1454 before the fix). Both passes now run in a SCISSOR round the
+  selection's projected bounds, grown by a 24 px margin (a stroke's ribbon
+  spills past the centreline its box measures) and, for the mask, by the rim
+  width again so the composite's outermost samples read pixels the mask pass
+  actually cleared. A too-small scissor does not cost time, it CUTS THE
+  OUTLINE OFF — so any root without trustworthy bounds (an actor, today)
+  means the whole frame, and a splat uses Spark's FULL extent
+  (`splatReach`, gaussians included) rather than the centres-only box the
+  Dimensions readout wants.
   In the end the 2D marker went away entirely: the inverted hull is now the
   ONE outline in the app — `MeshManager.setHover` for what is under the
   cursor and `setSelectionOutlines` for what is selected, any colour, and the
