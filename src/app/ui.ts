@@ -1137,6 +1137,15 @@ export class UI {
         'Up from Ground: a stroke starts on the floor — or on whatever the Placement snaps it to, '
           + 'a line of an existing floor plan with Placement: Nearest — and grows straight up on a vertical plane '
           + 'facing you. Draw the plan with Top, then lift it with this.'),
+        ...(['line', 'polyline', 'arc', 'curve', 'box', 'circle'].includes(s.activeTool)
+          && (s.placement === 'SURFACE' || s.placement === 'STROKE'
+            || s.placement === 'SPLAT' || s.placement === 'NEAREST') ? [
+          tip(selectField('Snap', s.shapeSnap, [['ENDS', 'Ends'], ['EVERY', 'Every point']],
+            (v) => { s.shapeSnap = v as 'ENDS' | 'EVERY'; this.app.savePrefs(); }),
+          'Ends: only the points you place snap — a line\u2019s two ends, a box\u2019s corners — and the '
+            + 'shape between them is built straight in 3D. Every point: each sample snaps on its own, '
+            + 'so the shape drapes over whatever it crosses on screen.'),
+        ] : []),
         ...(s.placement === 'STROKE' ? [
           selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][], (v) => { s.strokeTarget = v; }),
         ] : []),

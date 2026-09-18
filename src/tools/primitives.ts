@@ -108,15 +108,88 @@ export class PrimitiveTool implements Tool {
 
   private rebuild(ctx: AppCtx): void {
     if (!this.stroke) return;
-    const pts2d = this.shape2D();
     const rect = ctx.canvas.getBoundingClientRect();
+    const world = ctx.settings.shapeSnap === 'EVERY'
+      ? this.shape2D().map((p) => screenToWorld(ctx, p.x + rect.left, p.y + rect.top))
+      : this.shapeFromEnds(ctx, rect);
     this.stroke.points = [];
-    for (const p of pts2d) {
-      const world = screenToWorld(ctx, p.x + rect.left, p.y + rect.top);
-      if (world) this.stroke.points.push(createPoint(worldToObject(ctx, world)));
-    }
+    for (const w of world) if (w) this.stroke.points.push(createPoint(worldToObject(ctx, w)));
     this.stroke.cyclic = this.kind === 'box' || this.kind === 'circle';
     ctx.requestRender();
+  }
+
+  /**
+   * The shape built from the points you actually PLACE.
+   *
+   * Only those go through the Placement; everything between them is made in
+   * 3D. Straight edges are a world-space lerp between their resolved ends,
+   * which is exactly the straight line in space (and still projects to the
+   * straight line you dragged). A curve's interior is cast at a depth that
+   * runs smoothly from one end's depth to the other's. Neither can snap onto
+   * something it merely crosses on screen — which is the whole point: a
+   * ceiling edge dragged between two wall tops used to hop onto every
+   * stroke behind it and break into a zigzag through depth.
+   */
+  private shapeFromEnds(ctx: AppCtx, rect: DOMRect): (THREE.Vector3 | null)[] {
+    const at = (p: THREE.Vector2) => screenToWorld(ctx, p.x + rect.left, p.y + rect.top);
+    const s = ctx.settings;
+    // After the first point, a sticky-plane mode already puts every point on
+    // one plane, and Origin/Cursor never snap to anything — so those can
+    // resolve interior points normally. Only the TARGET-seeking placements
+    // need the depth interpolation to stop them hopping between targets.
+    const seeking = (s.placement === 'SURFACE' || s.placement === 'STROKE'
+      || s.placement === 'SPLAT' || s.placement === 'NEAREST')
+      && s.plane !== 'VIEW_ORIGIN' && s.plane !== 'UPRIGHT';
+    const between = (p: THREE.Vector2, depth: number) =>
+      seeking ? pointAtDepth(ctx, p, rect, depth) : at(p);
+    const straight = (corners: (THREE.Vector3 | null)[], steps: number, closed: boolean) => {
+      const out: (THREE.Vector3 | null)[] = [];
+      const n = closed ? corners.length : corners.length - 1;
+      for (let i = 0; i < n; i++) {
+        const a = corners[i], b = corners[(i + 1) % corners.length];
+        if (!a || !b) continue;
+        for (let k = 0; k < steps; k++) out.push(a.clone().lerp(b, k / steps));
+      }
+      if (!closed && corners.length) out.push(corners[corners.length - 1]);
+      return out;
+    };
+
+    const a = this.anchors[0];
+    const cur = this.current;
+    switch (this.kind) {
+      case 'line': {
+        const A = at(a); const B = at(this.constrain(a, cur));
+        return straight([A, B], 8, false);
+      }
+      case 'polyline':
+        return straight([...this.anchors, cur].map(at), 4, false);
+      case 'box': {
+        const c = this.constrain(a, cur);
+        const A = at(a); const C = at(c);
+        // the two corners you did not place sit between the two you did
+        const d = A && C ? (viewDepth(ctx, A) + viewDepth(ctx, C)) / 2 : 0;
+        const B = A && C ? between(new THREE.Vector2(c.x, a.y), d) : null;
+        const D = A && C ? between(new THREE.Vector2(a.x, c.y), d) : null;
+        return straight([A, B, C, D], 6, true);
+      }
+      case 'arc':
+      case 'curve': {
+        const pts = this.shape2D();
+        const A = at(pts[0]); const B = at(pts[pts.length - 1]);
+        if (!A || !B) return [];
+        const dA = viewDepth(ctx, A), dB = viewDepth(ctx, B);
+        return pts.map((p, i) => (i === 0 ? A : i === pts.length - 1 ? B
+          : between(p, dA + (dB - dA) * (i / (pts.length - 1)))));
+      }
+      case 'circle': {
+        // a circle has no placed point ON it, so it lies flat at the depth
+        // of the corner you started the drag from
+        const A = at(a);
+        if (!A) return [];
+        const d = viewDepth(ctx, A);
+        return this.shape2D().map((p) => between(p, d));
+      }
+    }
   }
 
   private shape2D(): THREE.Vector2[] {
@@ -180,6 +253,28 @@ export class PrimitiveTool implements Tool {
     const m = Math.max(Math.abs(d.x), Math.abs(d.y));
     return a.clone().add(new THREE.Vector2(Math.sign(d.x) * m, Math.sign(d.y) * m));
   }
+}
+
+const ray = new THREE.Raycaster();
+
+/** Distance of a world point in front of the camera, along the view axis. */
+function viewDepth(ctx: AppCtx, p: THREE.Vector3): number {
+  const dir = ctx.camera.getWorldDirection(new THREE.Vector3());
+  return p.clone().sub(ctx.camera.getWorldPosition(new THREE.Vector3())).dot(dir);
+}
+
+/** Where the ray through a canvas pixel reaches a given view depth. */
+function pointAtDepth(
+  ctx: AppCtx, p: THREE.Vector2, rect: DOMRect, depth: number,
+): THREE.Vector3 | null {
+  ray.setFromCamera(new THREE.Vector2((p.x / rect.width) * 2 - 1, -(p.y / rect.height) * 2 + 1), ctx.camera);
+  const view = ctx.camera.getWorldDirection(new THREE.Vector3());
+  const cos = ray.ray.direction.dot(view);
+  if (Math.abs(cos) < 1e-6) return null;
+  // measured from the camera, like viewDepth — an ORTHO ray starts on the
+  // near plane, not at the camera, and would otherwise land short by it
+  const start = ray.ray.origin.clone().sub(ctx.camera.getWorldPosition(new THREE.Vector3())).dot(view);
+  return ray.ray.origin.clone().addScaledVector(ray.ray.direction, (depth - start) / cos);
 }
 
 function sample(fn: (t: number) => THREE.Vector2, n: number, inclusive = true): THREE.Vector2[] {

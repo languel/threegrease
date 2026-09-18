@@ -91,6 +91,21 @@ export interface Settings {
    *  (ORIGIN/CURSOR/SURFACE). Lock wins if both are on. */
   placementLock: boolean;
   placementSmooth: boolean;
+  /**
+   * Which points of a SHAPE (line, polyline, box, arc, curve, circle) go
+   * through the Placement.
+   *
+   * ENDS: only the points you actually place — a line's two ends, a
+   * polyline's clicks, a box's corners — and everything between them is
+   * built in 3D from those. A shape is a thing you aim at its ENDPOINTS;
+   * resolving every sample along it means a line dragged across a
+   * wireframe snaps its middle onto whatever strokes happen to lie behind
+   * it on screen, and breaks into a zigzag through depth.
+   * EVERY: the old behaviour, every sample resolved on its own. Kept on
+   * purpose — a line that drapes itself over whatever it crosses is an
+   * optical effect worth having, just not the default.
+   */
+  shapeSnap: 'ENDS' | 'EVERY';
   guide: { type: GuideType; angle: number; spacing: number };
   selectMode: 'POINT' | 'STROKE';
   autoKey: boolean;
@@ -193,7 +208,7 @@ const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'showGrid', 'showActorOverlay', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'snap',
-  'shading', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
+  'shading', 'shapeSnap', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -288,6 +303,7 @@ export function defaultSettings(): Settings {
     plane: 'VIEW',
     placementLock: false,
     placementSmooth: false,
+    shapeSnap: 'ENDS',
     guide: { type: 'NONE', angle: 0, spacing: 40 },
     selectMode: 'POINT',
     autoKey: false,

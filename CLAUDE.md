@@ -233,6 +233,26 @@ the browser console or automated evals:
   Placement NEAREST to start a lift on an existing plan line (lands at
   z = 0); STROKE is a poor fit — it returns a point at a stroke's DEPTH, not
   on the stroke, and measured 8 cm under the floor.
+- **A SHAPE snaps at the points you PLACE, not at every sample**
+  (`settings.shapeSnap`, default `ENDS`; `PrimitiveTool.shapeFromEnds`).
+  Line, polyline, box, arc, curve and circle used to resolve each of their
+  samples through the Placement independently, so under a target-seeking
+  placement (Stroke, Surface, Splat, Nearest) a line dragged between two
+  wall tops snapped its MIDDLE onto whatever stroke lay behind it on screen
+  — measured: one sample of nine jumped 5 m back to a far wall. Now only
+  the placed points resolve; straight edges are a world lerp between them
+  (the exact 3D line, and it still projects to the line you dragged), and a
+  curve's interior is cast at a depth running smoothly from one end's to the
+  other's. Same test: all nine points 0.000 m off the straight edge. A box's
+  two corners you did not place sit at the mean depth of the two you did; a
+  circle, having no placed point on it, lies flat at the start corner's
+  depth. Sticky-plane modes (View at Origin, Up from Ground, the two ⊥
+  placements) and Origin/Cursor cannot hop between targets, so their
+  interiors still resolve normally. `EVERY` keeps the old draping on
+  purpose — a line that clings to what it crosses is an effect worth having,
+  just not the default. Ortho trap in the depth helper: an ortho ray starts
+  on the NEAR PLANE, not at the camera, so depth must be measured from the
+  same point on both sides or every point lands short by the near distance.
 - Agent tools (`src/agent/tools.ts`) are the SINGLE registry behind the
   in-app chat, MCP, ACP and WebMCP — adding one there exposes it to Claude
   Code, Zed and the browser's own agent with no Node-side change.
