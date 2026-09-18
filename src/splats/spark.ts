@@ -10,6 +10,7 @@
 // statically or that saving is silently undone — import the facade.
 import * as THREE from 'three';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+import { resolveSrc, sourceName } from '../io/blobstore';
 import type { GPScene, TGSplat } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 
@@ -26,6 +27,9 @@ export class SparkSplats {
   }
 
   private meshes = new Map<number, { mesh: SplatMesh; src: string }>();
+  /** splats whose source is still being resolved to a URL */
+  private pending = new Set<number>();
+  private lastScene: GPScene | null = null;
   private spark: SparkRenderer | null = null;
 
   /** Must be called once with the app's WebGLRenderer before any splat loads. */
@@ -51,21 +55,37 @@ export class SparkSplats {
       }
     }
     for (const data of scene.splats) {
-      if (!this.meshes.has(data.id)) {
-        try {
-          const mesh = new SplatMesh({ url: data.src });
+      if (!this.meshes.has(data.id) && !this.pending.has(data.id)) {
+        // A stored file has to be turned into a URL first (asynchronously),
+        // so the mesh arrives a moment later; `pending` stops the next sync
+        // from starting a second load of the same splat meanwhile. The
+        // fileName goes along because Spark, like three, picks its parser by
+        // extension, and an object URL has none.
+        const src = data.src;
+        this.pending.add(data.id);
+        void resolveSrc(src).then((url) => {
+          this.pending.delete(data.id);
+          if (this.meshes.has(data.id)) return;
+          // only a name WITH an extension helps; an old blob: URL's "name"
+          // is a uuid, and Spark does better sniffing the bytes than trusting it
+          const name = sourceName(src);
+          const mesh = new SplatMesh(name.includes('.') ? { url, fileName: name } : { url });
           mesh.userData.splatId = data.id;
           this.group.add(mesh);
-          this.meshes.set(data.id, { mesh, src: data.src });
+          this.meshes.set(data.id, { mesh, src });
+          const now = this.lastScene?.splats.find((s) => s.id === data.id);
+          if (now && this.lastScene) this.applyTransform(mesh, now, this.lastScene);
           void Promise.resolve((mesh as unknown as { initialized?: Promise<unknown> }).initialized)
             .catch((err) => this.errors.set(data.id, String(err)));
-        } catch (err) {
+        }).catch((err) => {
+          this.pending.delete(data.id);
           this.errors.set(data.id, String(err));
-        }
+        });
       }
       const entry = this.meshes.get(data.id);
       if (entry) this.applyTransform(entry.mesh, data, scene);
     }
+    this.lastScene = scene;
     void wanted;
   }
 

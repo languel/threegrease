@@ -152,6 +152,9 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
       vertex/surface/origin stays on it, an actor's point rides its joint)
 - [x] Plane: Up from Ground — floor plan first, then lift walls straight up
 - [x] Shape tools snap at their ends (Snap: Ends / Every point)
+- [x] Drop files onto the viewport to place them (splats, models, images, GP json)
+- [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
+- [ ] Pack a scene with its stored files for moving between machines
 - [ ] Measurements: curved legs (arc/spline) and surface-following paths
 - [x] Shared snapping module so every tool gets the one magnet
 - [x] Semantic detection: open-vocabulary (text-query) streams feeding the

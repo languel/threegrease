@@ -25,7 +25,7 @@ import { mmCapture } from '../mm/capture';
 import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
 import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, multiLandmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
-import { deleteAsset, listAssets } from '../io/assets';
+import { ASSET_MIME, deleteAsset, listAssets, updateAsset } from '../io/assets';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
 import { exportPaintCloudPly } from '../render/paintclouds';
@@ -133,6 +133,8 @@ export interface AppHandle {
   addGPObject(): void;
   saveSelectedAsAsset(): void;
   addAssetToScene(asset: import('../io/assets').TGAsset): void;
+  refreshAssetThumb(assetId: number): void;
+  importFiles(files: File[]): Promise<void>;
   addMediaMimeTrigger(address: string, pos: [number, number, number]): void;
   addMediaMimeRig(address: string, target: import('../tools/objects').ObjRef): void;
   deleteMediaMimeRig(id: number): void;
@@ -990,14 +992,9 @@ export class UI {
       { label: 'Model / avatar (.glb/.gltf/.obj/.vrm)…', do: () => this.filePick('.glb,.gltf,.obj,.vrm', (f) => this.app.importModelFile(f)) },
       {
         label: 'Splat (.ply/.spz/.splat)…',
-        do: () => this.filePick('.ply,.spz,.splat,.ksplat,.sog', (f) => {
-          ctx.pushUndo();
-          ctx.scene.splats.push({
-            id: scoreId(ctx.scene), name: `${f.name} (session only)`, src: URL.createObjectURL(f),
-            translation: [0, 0, 0], rotation: [0, 0, 0], scale: 1, visible: true, select: false,
-          });
-          this.refresh();
-        }),
+        // through the same door as a drop: the file is STORED, so the scan
+        // is still there after a reload (it used to be "session only")
+        do: () => this.filePick('.ply,.spz,.splat,.ksplat,.sog', (f) => { void this.app.importFiles([f]); }),
       },
       { sep: true },
       { header: 'Export' },
@@ -1031,8 +1028,8 @@ export class UI {
       { sep: true },
       { header: 'Assets' },
       ...assetItems,
-      { label: 'Save selected as asset', do: () => this.app.saveSelectedAsAsset() },
-      ...(assetItems.length ? [{ label: 'Manage assets…', do: () => this.manageAssets() }] : []),
+      { label: 'Save selected to Library', do: () => this.app.saveSelectedAsAsset() },
+      { label: 'Open the Library…', do: () => { this.propsTab = 'library'; this.refresh(); } },
       { sep: true },
       { label: 'Plane', do: () => this.app.addMeshObject('PLANE') },
       { label: 'Box', do: () => this.app.addMeshObject('BOX') },
@@ -1745,6 +1742,10 @@ export class UI {
       {
         id: 'solvers', icon: 'variable', title: 'Solvers — splats · string art · wire art',
         build: () => [this.splatsPanel(), this.solverPanel()],
+      },
+      {
+        id: 'library', icon: 'cubeModel', title: 'Library — scans, models and drawings to place',
+        build: () => [this.libraryPanel()],
       },
       {
         id: 'agent', icon: 'sparkles', title: 'Agent — chat, tools, MCP/ACP link',
@@ -4749,17 +4750,65 @@ export class UI {
     return layer && s ? { objectIndex: obIndex, layerId: layer.id, strokeId: s.id } : null;
   }
 
-  /** N6: delete assets by picking from a list (minimal manager). */
-  private manageAssets(): void {
+  /**
+   * The Library: things to place — a gallery scan, quick models of the works
+   * to be installed, a drawn figure — as a grid of pictures.
+   *
+   * DRAG a tile into the viewport and it lands where it is dropped: on the
+   * floor of the scan, on a plinth, against a wall. CLICK places it at the
+   * 3D cursor. Files dropped on this panel go into the scene the same way
+   * (the viewport is where they are pictured), and "Save selected" is how
+   * anything in the scene becomes a tile. The files themselves are kept in
+   * this browser's file store, so a library outlives the page.
+   */
+  private libraryPanel(): HTMLElement {
     const assets = listAssets();
-    if (!assets.length) return;
-    const names = assets.map((a, i) => `${i + 1}. [${a.kind}] ${a.name}`).join('\n');
-    const pick = prompt(`Delete which asset? (number, blank cancels)\n${names}`);
-    const idx = Number(pick) - 1;
-    if (Number.isInteger(idx) && assets[idx]) {
-      deleteAsset(assets[idx].id);
-      this.refresh();
+    const grid = el('div', { class: 'lib-grid' });
+    for (const a of assets) {
+      const tile = el('div', { class: 'lib-tile', title: `${a.name} — drag into the viewport, or click to place at the 3D cursor` });
+      tile.draggable = true;
+      tile.ondragstart = (e) => {
+        e.dataTransfer?.setData(ASSET_MIME, String(a.id));
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
+      };
+      tile.onclick = () => this.app.addAssetToScene(a);
+      const pic = el('div', { class: 'lib-pic' });
+      if (a.thumb) pic.style.backgroundImage = `url(${a.thumb})`;
+      else pic.append(el('span', { class: 'lib-kind', text: a.kind === 'SPLAT' ? 'scan' : a.kind === 'GP' ? 'drawing' : 'model' }));
+      const name = el('div', { class: 'lib-name', text: a.name });
+      name.ondblclick = (e) => {
+        e.stopPropagation();
+        const v = prompt('Rename', a.name);
+        if (v && v.trim()) updateAsset(a.id, { name: v.trim() });
+      };
+      const tools = el('div', { class: 'lib-tools' },
+        btn(icon('camera', 12), () => this.app.refreshAssetThumb(a.id),
+          { cls: 'icon-btn', title: 'Re-take this picture from the selected object' }),
+        btn(icon('xMark', 12), () => {
+          if (confirm(`Remove "${a.name}" from the Library? Objects already placed stay.`)) deleteAsset(a.id);
+        }, { cls: 'icon-btn', title: 'Remove from the Library' }),
+      );
+      for (const b of tools.querySelectorAll('button')) b.addEventListener('click', (e) => e.stopPropagation());
+      tile.append(pic, name, tools);
+      grid.append(tile);
     }
+    const drop = el('div', { class: 'lib-drop', text: assets.length
+      ? 'Drop files here or on the viewport'
+      : 'Empty. Drop scans, models or images on the viewport, select them, and Save selected.' });
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+    drop.ondragleave = () => drop.classList.remove('over');
+    drop.ondrop = (e) => {
+      e.preventDefault();
+      drop.classList.remove('over');
+      const files = [...(e.dataTransfer?.files ?? [])];
+      if (files.length) void this.app.importFiles(files);
+    };
+    return panel('Library',
+      panelHint('Drag a tile into the viewport to place it where you drop it; click to place it at the 3D cursor.'),
+      fieldRow('', btn('Save selected', () => this.app.saveSelectedAsAsset(),
+        { title: 'Add every selected drawing, model and scan to the Library, with a picture of each' }), { full: true }),
+      grid, drop,
+    );
   }
 
   /** "Follow object" dropdown for triggers/attractors (N5). */

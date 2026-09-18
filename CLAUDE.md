@@ -1069,6 +1069,47 @@ the browser console or automated evals:
     scaling at all because whatever it is stuck to was just scaled underneath
     it. Curved legs and surface-following paths are not built; the data shape
     (a list of points with binds) admits them.
+- **Files are STORED, not linked** (`io/blobstore.ts`). A picked or dropped
+  file used to become a `blob:` URL, valid only while the tab was open, so
+  every scan in a scene vanished on reload ("session only"), and
+  localStorage (~5 MB for the whole app) could not hold one 24 MB scan. File
+  bytes now live in IndexedDB, keyed by SHA-256, and a scene refers to one as
+  `store:<hash>/<filename>` — the hash de-duplicates, and the FILENAME is kept
+  because three's and Spark's loaders pick a parser by extension and an
+  object URL has none (which is why an .obj picked from disk used to go to the
+  glTF loader and fail). `resolveSrc` turns a reference into an object URL,
+  so MeshManager and the splat manager load asynchronously; the splat manager
+  keeps a `pending` set so a second sync cannot start a second load. A saved
+  scene .json still only carries references — it is portable within this
+  browser, not to another machine, until scenes can be packed.
+- **Drop to place** (`App.importFiles`, `App.dropTarget`, `io/dropfiles.ts`).
+  Files dropped on the viewport land where they are dropped: on whatever the
+  ray meets (meshes and splats), else the ground plane, else the 3D cursor.
+  `.ply` is two formats under one name — a splat scan or a triangle mesh — so
+  the HEADER decides (f_dc_0 / scale_0 / rot_0 mean splat). glb/gltf/obj/fbx/
+  vrm are Y-up by convention and are stood up in a Z-up scene. A model is SET
+  DOWN once its geometry loads (`settlePlacements`): lifted until its lowest
+  point rests at the drop height, since its origin is usually its centre and
+  would otherwise bury half of it; verified to 0.2 mm. An image hangs ON the
+  wall it is dropped on (1 mm proud, upright, facing out), and on open floor
+  stands up facing the camera. Two loader traps found on the way: a file
+  with no normals lights solid BLACK (normals are computed on load), and OBJ
+  and FBX arrive with PHONG materials, which ignore the environment map that
+  is all of Solid shading's light — also black; they are converted to
+  Standard.
+- **The Library** (`io/assets.ts`, the Library tab) is object DEFINITIONS
+  plus thumbnails in IndexedDB — the files themselves are in the store, so an
+  entry stays small and a scan is kept once however often it is placed.
+  Drag a tile into the viewport to place it at the pointer (payload
+  `ASSET_MIME`), click to place at the 3D cursor; "Save selected" adds every
+  selected drawing, model and scan (copying any legacy blob: file into the
+  store first, or the entry would point at nothing after a reload). The old
+  localStorage library is migrated on first load. Thumbnails are the object
+  rendered ALONE (isolated by visibility, lights and Spark's renderer kept)
+  from a three-quarter view — framed for a scan by the 5th-95th percentile of
+  its splat centres (`splatCore`), because a capture's FLOATERS reach metres
+  out and a picture fitted to them shows the room as a speck (measured: core
+  ~1.4 x 2.3 x 2.3 m against a full reach of ~18 x 17 x 17).
 - **An actor can be a DRAW TARGET** (`TGActor.drawTarget`, the pencil icon on
   its outliner row). `ActorManager.drawTargets` joins the mesh, splat and poly
   lists in `ctx.surfaces`, so Placement: Surface lands strokes on the body

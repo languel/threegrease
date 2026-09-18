@@ -4,6 +4,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { resolveSrc, sourceExt } from '../io/blobstore';
 import type { GPScene, TGMesh, Vec3 } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 import { materialManager } from './materialmgr';
@@ -305,21 +309,63 @@ export class MeshManager {
     }
     if (data.kind === 'MODEL' && data.src) {
       const holder = new THREE.Group();
-      const ext = data.src.split('?')[0].split('.').pop()?.toLowerCase();
+      // The PARSER is chosen by the file's name, which for a stored file is
+      // kept in its reference (`store:<hash>/<name>`) precisely because an
+      // object URL has no extension to go on.
+      const ext = sourceExt(data.src);
       const onLoad = (obj: THREE.Object3D) => {
-        obj.traverse((o) => { o.userData.meshId = data.id; });
+        obj.traverse((o) => {
+          o.userData.meshId = data.id;
+          // A file with no normals (common in OBJ, and in anything exported
+          // "as points") lights as solid BLACK — every face reports a zero
+          // normal. Computing them is cheap and is what any viewer does.
+          const g = (o as THREE.Mesh).geometry;
+          if (g && !g.getAttribute('normal') && g.getAttribute('position')) g.computeVertexNormals();
+          // OBJ and FBX arrive with PHONG materials, and Phong ignores the
+          // scene's environment map — which is all the lighting Solid
+          // shading has — so they render BLACK while a glTF beside them is
+          // lit. Everything here is lit physically; convert to Standard,
+          // keeping what the file actually said.
+          const mesh = o as THREE.Mesh;
+          if (mesh.isMesh) {
+            const conv = (m: THREE.Material) => {
+              const ph = m as THREE.MeshPhongMaterial;
+              if (!ph.isMeshPhongMaterial && !(m as THREE.MeshLambertMaterial).isMeshLambertMaterial) return m;
+              const out = new THREE.MeshStandardMaterial({
+                color: ph.color, map: ph.map, vertexColors: ph.vertexColors,
+                transparent: ph.transparent, opacity: ph.opacity, side: ph.side,
+                roughness: 0.75, metalness: 0,
+              });
+              out.name = m.name;
+              m.dispose();
+              return out;
+            };
+            mesh.material = Array.isArray(mesh.material) ? mesh.material.map(conv) : conv(mesh.material);
+          }
+        });
         holder.add(obj);
       };
       const onErr = (err: unknown) => this.errors.set(data.id, String(err));
-      try {
-        if (ext === 'obj') new OBJLoader().load(data.src, onLoad, undefined, onErr);
+      // a plain-geometry format arrives as a BufferGeometry, not a scene
+      const asMesh = (geo: THREE.BufferGeometry) => {
+        if (!geo.getAttribute('normal') && geo.index) geo.computeVertexNormals();
+        const vc = !!geo.getAttribute('color');
+        onLoad(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+          vertexColors: vc, color: vc ? 0xffffff : 0xb8bcc6, side: THREE.DoubleSide,
+        })));
+      };
+      void resolveSrc(data.src).then((url) => {
+        if (ext === 'obj') new OBJLoader().load(url, onLoad, undefined, onErr);
+        else if (ext === 'fbx') new FBXLoader().load(url, onLoad, undefined, onErr);
+        else if (ext === 'stl') new STLLoader().load(url, asMesh, undefined, onErr);
+        else if (ext === 'ply') new PLYLoader().load(url, asMesh, undefined, onErr);
         else {
           const loader = new GLTFLoader();
           // Always registered: a VRM IS a glTF, so rather than sniffing the
-          // extension (blob: URLs have none anyway) we let the plugin decide
-          // and check whether it produced a humanoid.
+          // extension we let the plugin decide and check whether it
+          // produced a humanoid.
           VrmManager.prepare(loader);
-          loader.load(data.src, (g) => {
+          loader.load(url, (g) => {
             onLoad(g.scene);
             vrmManager.adopt(data.id, g as unknown as { scene: THREE.Object3D });
             // Keep the animation. It used to be dropped here, which is why
@@ -330,7 +376,7 @@ export class MeshManager {
             }
           }, undefined, onErr);
         }
-      } catch (err) { onErr(err); }
+      }).catch(onErr);
       return holder;
     }
     const mesh = new THREE.Mesh(

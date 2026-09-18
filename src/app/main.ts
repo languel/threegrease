@@ -5,7 +5,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { genId, createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
 import { History } from '../core/history';
-import type { GPScene, TGActor, TGActorLayer, TGLight, Vec3, ViewportShading } from '../core/types';
+import type { GPScene, TGActor, TGActorLayer, TGLight, TGMesh, Vec3, ViewportShading } from '../core/types';
 import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { ScenePost, postActive } from '../fx/scenefx';
@@ -85,7 +85,12 @@ import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
 import { BRUSH_PRESETS as BRUSH_PRESETS_CACHE } from '../core/brushes';
-import { listAssets, meshAssetPayload, saveAsset, splatAssetPayload, type TGAsset } from '../io/assets';
+import {
+  initAssets, listAssets, meshAssetPayload, onAssetsChanged, saveAsset, splatAssetPayload,
+  updateAsset, ASSET_MIME, type TGAsset,
+} from '../io/assets';
+import { isStoreRef, putFile } from '../io/blobstore';
+import { classifyFile, isYUpModel } from '../io/dropfiles';
 import { mediamime } from '../io/mediamime';
 import { createStream, mmStreamEngine, streamStore } from '../mm/streams';
 import { mmCapture } from '../mm/capture';
@@ -517,6 +522,10 @@ class App implements AppHandle {
     this.tools.setActive(this.ctx, 'draw');
 
     this.ui = new UI(this);
+    // the library lives in IndexedDB, which only answers asynchronously —
+    // panels list it from memory and redraw when it arrives or changes
+    onAssetsChanged(() => this.ui.refresh());
+    void initAssets();
     this.buildCommands();
     const tg = this as unknown as Record<string, unknown>;
     tg.execute = (q: string, args?: string) => this.commands.execute(q, args);
@@ -906,6 +915,31 @@ class App implements AppHandle {
 
   private bindEvents(canvas: HTMLCanvasElement): void {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // DROP: files from the desktop, or a tile dragged out of the Library.
+    // On the whole viewport, not the GL canvas — the HUD canvas and the
+    // status line sit on top of it and would swallow the drop.
+    const vp = document.getElementById('viewport')!;
+    vp.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer) return;
+      const t = e.dataTransfer.types;
+      if (t.includes('Files') || t.includes(ASSET_MIME)) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+    vp.addEventListener('drop', (e) => {
+      if (!e.dataTransfer) return;
+      e.preventDefault();
+      const assetId = e.dataTransfer.getData(ASSET_MIME);
+      if (assetId) {
+        const asset = listAssets().find((a) => String(a.id) === assetId);
+        if (asset) this.addAssetToScene(asset, this.dropTarget(e.clientX, e.clientY));
+        return;
+      }
+      const files = [...e.dataTransfer.files];
+      if (files.length) void this.importFiles(files, this.dropTarget(e.clientX, e.clientY));
+    });
 
     // Shift+RMB = drag the 3D cursor. MUST run in the capture phase:
     // OrbitControls registered its own pointerdown first (RIGHT = PAN),
@@ -2458,48 +2492,299 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
-  /** N6 assets: snapshot the (single) selected object into the library. */
-  saveSelectedAsAsset(): void {
+  /**
+   * Save every selected object to the Library.
+   *
+   * A scan or a model whose file only exists as a session `blob:` URL (an
+   * import from before files were stored) is copied into the file store
+   * first — otherwise the asset would point at nothing after a reload,
+   * which is the one thing a library entry must not do.
+   */
+  async saveSelectedAsAsset(): Promise<void> {
     const scene = this.ctx.scene;
-    const refs = listSelected(scene);
-    if (refs.length !== 1) { alert('Select exactly one object to save as asset'); return; }
-    const ref = refs[0];
-    if (ref.kind === 'GP') {
-      const ob = scene.objects.find((o) => o.id === ref.id);
-      if (ob) saveAsset(ob.name, 'GP', serializeGPObject(ob));
-    } else if (ref.kind === 'MESH') {
-      const m = scene.meshes.find((x) => x.id === ref.id);
-      if (m) saveAsset(m.name, 'MESH', meshAssetPayload(m));
-    } else if (ref.kind === 'SPLAT') {
-      const s = scene.splats.find((x) => x.id === ref.id);
-      if (s) saveAsset(s.name, 'SPLAT', splatAssetPayload(s));
-    } else {
-      alert('Canvases are legacy — save is not supported');
-      return;
+    const refs = listSelected(scene).filter((r) => r.kind === 'GP' || r.kind === 'MESH' || r.kind === 'SPLAT');
+    if (!refs.length) { this.setStatusHint('Select a drawing, a model or a scan to add it to the Library'); return; }
+    for (const ref of refs) {
+      const thumb = this.thumbFor(ref) ?? undefined;
+      if (ref.kind === 'GP') {
+        const ob = scene.objects.find((o) => o.id === ref.id);
+        if (ob) saveAsset(ob.name, 'GP', serializeGPObject(ob), thumb);
+      } else if (ref.kind === 'MESH') {
+        const m = scene.meshes.find((x) => x.id === ref.id);
+        if (!m) continue;
+        if (m.src) m.src = await this.ensureStored(m.src, m.name);
+        saveAsset(m.name, 'MESH', meshAssetPayload(m), thumb);
+      } else {
+        const sp = scene.splats.find((x) => x.id === ref.id);
+        if (!sp) continue;
+        sp.src = await this.ensureStored(sp.src, sp.name);
+        saveAsset(sp.name, 'SPLAT', splatAssetPayload(sp), thumb);
+      }
     }
-    this.ui.refresh();
+    this.setStatusHint(`Added ${refs.length} to the Library`);
   }
 
-  /** N6 assets: instance an asset at the 3D cursor. */
-  addAssetToScene(asset: TGAsset): void {
+  /** A session `blob:` source copied into the file store; anything already
+   *  stored, or remote, is returned as it is. */
+  private async ensureStored(src: string, name: string): Promise<string> {
+    if (!src.startsWith('blob:')) return src;
+    try {
+      const blob = await (await fetch(src)).blob();
+      return await putFile(blob, name.replace(/\s*\(session only\)$/, ''));
+    } catch { return src; }
+  }
+
+  /**
+   * Place a Library asset — at the pointer when it was dragged in, at the 3D
+   * cursor when it was clicked.
+   */
+  addAssetToScene(asset: TGAsset, at?: DropTarget): void {
     const scene = this.ctx.scene;
     this.ctx.pushUndo();
-    const at = [...scene.cursor] as [number, number, number];
+    const point = at?.point ?? [...scene.cursor] as Vec3;
     if (asset.kind === 'GP') {
       importGPObjects(scene, asset.payload);
       const ob = scene.objects[scene.objects.length - 1];
-      ob.translation = at;
+      ob.translation = [...point];
       scene.activeObject = scene.objects.length - 1;
       this.gp.markDirty();
     } else if (asset.kind === 'MESH') {
       const def = JSON.parse(asset.payload);
-      scene.meshes.push({ ...def, id: Date.now() % 1e9, parent: null, select: false, translation: at });
+      const id = Date.now() % 1e9;
+      scene.meshes.push({ ...def, id, parent: null, select: false, translation: [...point] });
       this.meshes.sync(scene);
+      if (def.kind === 'MODEL') this.placing.push({ ref: { kind: 'MESH', id }, ground: point, since: performance.now() });
     } else {
       const def = JSON.parse(asset.payload);
-      scene.splats.push({ ...def, id: Date.now() % 1e9, parent: null, select: false, translation: at });
+      scene.splats.push({ ...def, id: Date.now() % 1e9, parent: null, select: false, translation: [...point] });
     }
     this.ui.refresh();
+  }
+
+  /**
+   * Where a drop lands: on whatever is under the pointer — a wall, the floor
+   * of a scan, a plinth — else on the ground plane, else at the 3D cursor.
+   * The NORMAL comes along so an image can hang on the wall it was dropped
+   * on rather than lying on the floor in front of it.
+   */
+  dropTarget(clientX: number, clientY: number): DropTarget {
+    const ctx = this.ctx;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    ), ctx.camera);
+    const targets = [...ctx.pickableMeshes, ...this.splats.group.children.filter((c) => !c.userData.splatRenderer)];
+    const hit = ray.intersectObjects(targets, true).find((h) => h.object.visible);
+    if (hit) {
+      const n = hit.face
+        ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+        : null;
+      if (n && n.dot(ray.ray.direction) > 0) n.negate();
+      return { point: [hit.point.x, hit.point.y, hit.point.z], normal: n ? [n.x, n.y, n.z] : null, onSurface: true };
+    }
+    const up = ctx.settings.upAxis === 'Z' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    const out = new THREE.Vector3();
+    if (ray.ray.intersectPlane(new THREE.Plane(up, 0), out)) {
+      return { point: [out.x, out.y, out.z], normal: [up.x, up.y, up.z], onSurface: false };
+    }
+    return { point: [...ctx.scene.cursor] as Vec3, normal: null, onSurface: false };
+  }
+
+  /**
+   * Bring files into the scene — dropped on the viewport, or picked from the
+   * File menu — each as what it is: a scan, a model, an image, a drawing.
+   *
+   * The FILE goes into the store first, so the scene refers to something
+   * that survives a reload. Several files dropped together are spaced out
+   * along the view's right-hand direction instead of landing in one heap.
+   */
+  async importFiles(files: File[], at?: DropTarget): Promise<void> {
+    const scene = this.ctx.scene;
+    const target = at ?? { point: [...scene.cursor] as Vec3, normal: null, onSurface: false };
+    const right = new THREE.Vector3().setFromMatrixColumn(this.nav.active.matrixWorld, 0);
+    const upZ = this.ctx.settings.upAxis === 'Z';
+    let placed = 0;
+    let pushed = false;
+    const skipped: string[] = [];
+    for (const file of files) {
+      const kind = await classifyFile(file);
+      if (!kind) { skipped.push(file.name); continue; }
+      if (!pushed) { this.ctx.pushUndo(); pushed = true; }
+      const p = new THREE.Vector3(...target.point).addScaledVector(right, placed * 1.5);
+      const point: Vec3 = [p.x, p.y, p.z];
+      if (kind === 'GP_JSON') {
+        await this.importGPFile(file);
+        const ob = scene.objects[scene.objects.length - 1];
+        if (ob && at) ob.translation = [...point];
+      } else if (kind === 'IMAGE') {
+        this.importImagePlane(file, { ...target, point });
+      } else {
+        const ref = await putFile(file);
+        const id = Date.now() % 1e9 + placed;
+        if (kind === 'SPLAT') {
+          scene.splats.push({
+            id, name: file.name, src: ref, translation: point, rotation: [0, 0, 0],
+            scale: 1, visible: true, select: false, parent: null,
+          });
+        } else {
+          const mesh = createMeshObject(id, 'MODEL', point, ref);
+          mesh.name = file.name;
+          if (upZ && isYUpModel(file.name)) mesh.rotation = [Math.PI / 2, 0, 0];
+          scene.meshes.push(mesh);
+          this.placing.push({ ref: { kind: 'MESH', id }, ground: point, since: performance.now() });
+        }
+      }
+      placed++;
+    }
+    this.meshes.sync(scene, this.nav.active);
+    this.ui.refresh();
+    if (skipped.length) this.setStatusHint(`Not a format I can open: ${skipped.join(', ')}`, 5000);
+    else if (placed) this.setStatusHint(`Placed ${placed} file${placed > 1 ? 's' : ''}`);
+  }
+
+  /**
+   * Models whose geometry is still loading, waiting to be SET DOWN.
+   *
+   * A model's origin is wherever its author left it — usually its centre —
+   * so placing the origin at the drop point would bury half of it in the
+   * floor. Once it has loaded, it is lifted until its lowest point rests on
+   * the height it was dropped at, which is what "put this here" means in
+   * every level editor.
+   */
+  private placing: { ref: ObjRef; ground: Vec3; since: number }[] = [];
+
+  private settlePlacements(): void {
+    if (!this.placing.length) return;
+    const up = this.ctx.settings.upAxis === 'Z' ? 2 : 1;
+    const now = performance.now();
+    this.placing = this.placing.filter((p) => {
+      if (now - p.since > 60000) return false;           // never loaded: give up
+      const root = this.meshes.rootFor(p.ref.id);
+      if (!root) return true;
+      let hasGeo = false;
+      root.traverse((o) => { if ((o as THREE.Mesh).geometry) hasGeo = true; });
+      if (!hasGeo) return true;
+      root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(root);
+      if (box.isEmpty()) return true;
+      const m = this.ctx.scene.meshes.find((x) => x.id === p.ref.id);
+      if (m && !m.parent) {
+        const t = [...m.translation] as Vec3;
+        t[up] += p.ground[up] - box.min.getComponent(up);
+        m.translation = t;
+      }
+      return false;
+    });
+  }
+
+  /**
+   * A small picture of one object, for its Library tile: rendered alone,
+   * from a three-quarter view fitted to its bounds, over a dark ground.
+   * Isolated by visibility like the selection rims, keeping the lights (a
+   * model is black without them) and Spark's renderer (which draws every
+   * splat). Null when there is nothing loaded to picture yet.
+   */
+  private thumbFor(ref: ObjRef): string | null {
+    const root = ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) : this.silhouetteRoot(ref) ?? this.objectRoot(ref);
+    const box = ref.kind === 'SPLAT' ? this.splatCore(ref) : this.computeObjectBox(ref);
+    if (!root || !box || box.isEmpty()) return null;
+    const SIZE = 160;
+    const upZ = this.ctx.settings.upAxis === 'Z';
+    const centre = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(0.05, box.getSize(new THREE.Vector3()).length() / 2);
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.01, 1000);
+    cam.up.set(0, upZ ? 0 : 1, upZ ? 1 : 0);
+    const dir = (upZ ? new THREE.Vector3(0.55, -0.75, 0.42) : new THREE.Vector3(0.55, 0.42, 0.75)).normalize();
+    const dist = radius / Math.sin(THREE.MathUtils.degToRad(15)) * 1.05;
+    cam.position.copy(centre).addScaledVector(dir, dist);
+    cam.near = Math.max(0.01, dist - radius * 2);
+    cam.far = dist + radius * 2;
+    cam.lookAt(centre);
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld();
+
+    const keep = root;
+    const path = new Set<THREE.Object3D>();
+    for (let p = root.parent; p; p = p.parent) path.add(p);
+    const hidden: THREE.Object3D[] = [];
+    const walk = (o: THREE.Object3D) => {
+      for (const c of o.children) {
+        if (c === keep) continue;
+        if (path.has(c)) { walk(c); continue; }
+        if (c.userData.splatRenderer || (c as THREE.Light).isLight) continue;
+        if (c.visible) { c.visible = false; hidden.push(c); }
+      }
+    };
+    walk(this.scene3);
+    const rt = new THREE.WebGLRenderTarget(SIZE, SIZE);
+    rt.texture.colorSpace = THREE.SRGBColorSpace;   // encode like the screen, or it comes out dark
+    const saved = { bg: this.scene3.background, fog: this.scene3.fog, target: this.glRenderer.getRenderTarget() };
+    this.scene3.background = new THREE.Color(0x202024);
+    this.scene3.fog = null;
+    try {
+      this.glRenderer.setRenderTarget(rt);
+      this.glRenderer.clear();
+      this.glRenderer.render(this.scene3, cam);
+      const px = new Uint8Array(SIZE * SIZE * 4);
+      this.glRenderer.readRenderTargetPixels(rt, 0, 0, SIZE, SIZE, px);
+      const canvas = document.createElement('canvas');
+      canvas.width = SIZE; canvas.height = SIZE;
+      const g = canvas.getContext('2d')!;
+      const img = g.createImageData(SIZE, SIZE);
+      for (let y = 0; y < SIZE; y++) {                  // GL rows run bottom-up
+        img.data.set(px.subarray((SIZE - 1 - y) * SIZE * 4, (SIZE - y) * SIZE * 4), y * SIZE * 4);
+      }
+      g.putImageData(img, 0, 0);
+      return canvas.toDataURL('image/jpeg', 0.85);
+    } finally {
+      this.glRenderer.setRenderTarget(saved.target);
+      this.scene3.background = saved.bg;
+      this.scene3.fog = saved.fog;
+      for (const o of hidden) o.visible = true;
+      rt.dispose();
+    }
+  }
+
+  /**
+   * The part of a scan worth framing: the 5th to 95th percentile of its
+   * splat centres on each axis.
+   *
+   * A scan's real bounds include its FLOATERS — stray gaussians metres out
+   * in the air, which every capture has — so a picture fitted to them shows
+   * the room as a speck in the middle of nothing. Percentiles ignore the
+   * few that wander off and keep the mass. Sampled (at most ~20k centres),
+   * since this is for a thumbnail, not a measurement.
+   */
+  private splatCore(ref: ObjRef): THREE.Box3 | null {
+    const mesh = this.splats.meshFor(ref.id) as unknown as {
+      packedSplats?: { getNumSplats(): number; forEachSplat(cb: (i: number, c: THREE.Vector3) => void): void };
+      matrixWorld: THREE.Matrix4;
+    } | null;
+    const packed = mesh?.packedSplats;
+    const n = packed?.getNumSplats() ?? 0;
+    if (!mesh || !packed || !n) return null;
+    const step = Math.max(1, Math.floor(n / 20000));
+    const xs: number[] = [], ys: number[] = [], zs: number[] = [];
+    packed.forEachSplat((i, c) => {
+      if (i % step) return;
+      xs.push(c.x); ys.push(c.y); zs.push(c.z);
+    });
+    const q = (v: number[], f: number) => { v.sort((a, b) => a - b); return v[Math.floor((v.length - 1) * f)]; };
+    const box = new THREE.Box3(
+      new THREE.Vector3(q(xs, 0.05), q(ys, 0.05), q(zs, 0.05)),
+      new THREE.Vector3(q(xs, 0.95), q(ys, 0.95), q(zs, 0.95)),
+    );
+    return box.applyMatrix4(mesh.matrixWorld);
+  }
+
+  /** Re-take a Library tile's picture from the object it was placed as. */
+  refreshAssetThumb(assetId: number): void {
+    const refs = listSelected(this.ctx.scene);
+    const thumb = refs.length === 1 ? this.thumbFor(refs[0]) : null;
+    if (thumb) updateAsset(assetId, { thumb });
+    else this.setStatusHint('Select one loaded object to picture it');
   }
 
   /** MediaMime: spawn a trigger primitive at a live address's current
@@ -3334,7 +3619,17 @@ class App implements AppHandle {
   }
 
   /** Reference/image plane: textured unlit PLANE sized to the image aspect. */
-  importImagePlane(file: File): void {
+  /**
+   * An image as a flat panel — a reference photo, or the picture of a work
+   * to hang.
+   *
+   * Dropped ON a surface it lies against it, facing out, with its top toward
+   * the sky: dropped on a wall it hangs on the wall, which is the gesture
+   * for staging 2D works in a room. Dropped on open ground it stands up on
+   * the floor facing the camera. With no drop point (the Add menu) it keeps
+   * its old behaviour, lying at the 3D cursor.
+   */
+  importImagePlane(file: File, at?: DropTarget): void {
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = String(reader.result);
@@ -3342,14 +3637,18 @@ class App implements AppHandle {
       img.onload = () => {
         this.ctx.pushUndo();
         const id = Date.now() % 1e9;
-        const mesh = createMeshObject(id, 'PLANE', [...this.ctx.scene.cursor]);
+        const mesh = createMeshObject(id, 'PLANE', at ? [...at.point] as Vec3 : [...this.ctx.scene.cursor]);
         mesh.name = file.name;
         mesh.texture = dataUrl;
         mesh.unlit = true;
         mesh.drawTarget = false;   // reference by default; toggle in properties
         mesh.opacity = 1;
         const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
-        mesh.scale = [aspect, 1, 1];
+        // PLANE scale is HALF size. A dropped image is a work at a
+        // plausible 1 m tall; the menu's reference plane keeps its old 2 m.
+        const half = at ? 0.5 : 1;
+        mesh.scale = [aspect * half, half, 1];
+        if (at) this.orientPanel(mesh, at);
         this.ctx.scene.meshes.push(mesh);
         this.meshes.sync(this.ctx.scene, this.nav.active);
         this.ui.refresh();
@@ -3359,14 +3658,32 @@ class App implements AppHandle {
     reader.readAsDataURL(file);
   }
 
+  /** Turn a PLANE (normal +Z, top +Y in its own space) to face out of the
+   *  surface it was dropped on, top toward the up axis. */
+  private orientPanel(mesh: TGMesh, at: DropTarget): void {
+    const up = this.ctx.settings.upAxis === 'Z' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    let n = at.normal && at.onSurface ? new THREE.Vector3(...at.normal).normalize() : null;
+    const standing = !n || Math.abs(n.dot(up)) > 0.7;   // floor or ceiling: stand it up instead
+    if (standing) {
+      // face the camera, upright, resting on the point
+      const toCam = this.nav.active.getWorldPosition(new THREE.Vector3()).sub(new THREE.Vector3(...at.point));
+      toCam.addScaledVector(up, -toCam.dot(up));
+      n = toCam.lengthSq() > 1e-6 ? toCam.normalize() : new THREE.Vector3(0, -1, 0);
+      const lift = mesh.scale[1];                        // half height, so the bottom touches
+      mesh.translation = [at.point[0] + up.x * lift, at.point[1] + up.y * lift, at.point[2] + up.z * lift];
+    } else {
+      // hang: a millimetre proud of the wall, so it cannot z-fight with it
+      mesh.translation = [at.point[0] + n!.x * 0.001, at.point[1] + n!.y * 0.001, at.point[2] + n!.z * 0.001];
+    }
+    const z = n!.clone();
+    const x = new THREE.Vector3().crossVectors(up, z).normalize();
+    const y = new THREE.Vector3().crossVectors(z, x);
+    const e = new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+    mesh.rotation = [e.x, e.y, e.z];
+  }
+
   importModelFile(file: File): void {
-    this.ctx.pushUndo();
-    const id = Date.now() % 1e9;
-    const mesh = createMeshObject(id, 'MODEL', [...this.ctx.scene.cursor], URL.createObjectURL(file));
-    mesh.name = `${file.name} (session only)`;
-    this.ctx.scene.meshes.push(mesh);
-    this.meshes.sync(this.ctx.scene);
-    this.ui.refresh();
+    void this.importFiles([file]);
   }
 
   /** Cursor/trigger glyphs: rebuilt when the score roster changes, posed every frame. */
@@ -4042,6 +4359,7 @@ class App implements AppHandle {
     }
     this.splats.sync(ctx.scene);
     this.meshes.sync(ctx.scene, this.nav.active);
+    this.settlePlacements();
     this.polys.sync(ctx.scene, this.nav.active);
     this.lights.helpersVisible = !this.presentation && !this.infoOverlayHidden;
     // selection tint only reads as selection in object mode, same gate the
@@ -4502,6 +4820,14 @@ class App implements AppHandle {
   }
 }
 
+/** Where a drop landed, and which way the surface there faces. */
+export interface DropTarget {
+  point: Vec3;
+  normal: Vec3 | null;
+  /** true when it landed ON something, rather than on the ground plane */
+  onSurface: boolean;
+}
+
 /** Mark a subtree as EDITOR FURNITURE — gizmos, helpers, frusta. The scene
  *  look's edge prepass skips these (see `hideNonDrawing`), because a line
  *  drawing of the scene should not contain a drawing of the tools. */
@@ -4510,3 +4836,4 @@ function markOverlay(root: THREE.Object3D): void {
 }
 
 new App();
+

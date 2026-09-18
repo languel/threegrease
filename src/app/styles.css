@@ -739,3 +739,25 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .mat-tile.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .mat-tile.mat-add { color: var(--dim); font-size: 14px; }
 .mat-current { cursor: default; }
+
+/* Library: a grid of pictures. Drag a tile into the viewport to place it. */
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; padding: 4px 0 8px; }
+.lib-tile {
+  position: relative; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+  cursor: grab; overflow: hidden;
+}
+.lib-tile:hover { border-color: var(--accent); }
+.lib-pic {
+  aspect-ratio: 1; background: #202024 center / cover no-repeat;
+  display: flex; align-items: center; justify-content: center;
+}
+.lib-kind { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.lib-name { font-size: 11px; padding: 3px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-tools { position: absolute; top: 2px; right: 2px; display: none; gap: 2px; }
+.lib-tile:hover .lib-tools { display: flex; }
+.lib-tools .icon-btn { background: rgba(20,20,24,0.8); padding: 2px; }
+.lib-drop {
+  border: 1px dashed var(--border); border-radius: 6px; padding: 10px; color: var(--dim);
+  font-size: 11px; text-align: center;
+}
+.lib-drop.over { border-color: var(--accent); color: var(--text); }
