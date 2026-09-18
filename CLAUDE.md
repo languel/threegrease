@@ -119,6 +119,14 @@ Key invariants:
   lit when on (`iconToggle`: the magnet, Proportional, Multiframe) — a
   checkbox beside an icon said the same thing twice and read as two
   controls.
+- **Opt+, . / ' open PIE menus** for Placement, Plane, Guide and Snap at
+  the pointer (`UI.openTransformPie`; actions `placementPie`, `planePie`,
+  `guidePie`, `snapPie`). Their choices come from the same
+  `placementChoices`/`planeChoices`/`guideChoices`/`snapChoices` the top-bar
+  dropdowns read, so the two cannot drift. Number keys pick by position; the
+  Snap pie's centre toggles the magnet and picking a target turns it on.
+  `comboFromEvent` recovers these keys from `e.code` — under Option a Mac
+  reports `≤ ≥ ÷ æ` as `e.key`.
 - **A checkbox's NAME goes in the label column and the box in the value
   column**, like every other row. It used to carry its own text, which put it
   the other way round — box first, name second, both adrift in the value

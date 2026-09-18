@@ -1200,36 +1200,67 @@ export class UI {
     const tuned = s.placementLock || s.placementSmooth || s.surfaceOffset !== 0
       || s.strokeTarget !== 'ALL' || s.shapeSnap !== 'ENDS'
       || (s.placement === 'NEAREST' && s.nearestTarget !== 'ELEMENT');
-    const zUp = s.upAxis === 'Z';
     return [
-      this.iconMenu('place', 'Placement', s.placement, [
-        ['ORIGIN', 'placeOrigin', 'Origin', 'the drawing plane through the active object'],
-        ['CURSOR', 'placeCursor', '3D Cursor', 'the drawing plane through the 3D cursor'],
-        ['SURFACE', 'placeSurface', 'Surface', 'onto the mesh, splat or body under the pointer'],
-        ['SURFACE_PERP', 'placeSurfacePerp', 'Surface ⊥', 'start on a surface, then grow straight out of it'],
-        ['STROKE', 'placeStroke', 'Stroke', 'at the depth of the nearest stroke; a stroke’s ends land on it'],
-        ['STROKE_PERP', 'placeStrokePerp', 'Stroke ⊥', 'start on a stroke, then grow across it'],
-        ['SPLAT', 'placeSplat', 'Splat (nearest)', 'at the depth of the nearest splat'],
-        ['NEAREST', 'placeNearest', 'Nearest', 'onto the nearest vertex, edge or face — choose which below'],
-      ] as [PlacementMode, IconName, string, string][], (v) => { s.placement = v; }, this.placementOptions(), tuned),
-      this.iconMenu('plane', 'Plane', s.plane, [
-        ['NONE', 'planeNone', 'None', 'no plane of its own: the Placement, the magnet and the guide decide (a point nothing catches faces the camera), and the grid snaps in 3D'],
-        ['VIEW', 'planeView', 'View', 'facing the camera'],
-        ['VIEW_ORIGIN', 'planeViewOrigin', 'View at Origin', 'facing the camera, through wherever a stroke starts'],
-        ['UPRIGHT', 'planeUpright', 'Up from Ground', 'start on the floor, then grow straight up — draw the plan with Top, lift it with this'],
-        ['FRONT', 'planeFront', zUp ? 'Front (X·Z)' : 'Front (X·Y)', ''],
-        ['SIDE', 'planeSide', zUp ? 'Side (Y·Z)' : 'Side (Z·Y)', ''],
-        ['TOP', 'planeTop', zUp ? 'Top (X·Y)' : 'Top (X·Z)', 'the floor'],
-        ['CURSOR', 'planeCursor', 'Cursor', 'the 3D cursor’s own orientation'],
-      ] as [PlaneMode, IconName, string, string][], (v) => { s.plane = v; }),
-      this.iconMenu('guide', 'Guide', s.guide.type, [
-        ['NONE', 'guideNone', 'No Guide'],
-        ['CIRCULAR', 'guideCircular', 'Circular', 'circles about the 3D cursor'],
-        ['RADIAL', 'guideRadial', 'Radial', 'rays from the 3D cursor'],
-        ['PARALLEL', 'guideParallel', 'Parallel', 'lines at the guide angle'],
-        ['GRID', 'guideGrid', 'Grid', 'a screen grid'],
-        ['ISO', 'guideIso', 'Isometric', 'an isometric lattice'],
-      ] as [GuideType, IconName, string, string?][], (v) => { s.guide.type = v; }),
+      this.iconMenu('place', 'Placement', s.placement, this.placementChoices(),
+        (v) => { s.placement = v; }, this.placementOptions(), tuned),
+      this.iconMenu('plane', 'Plane', s.plane, this.planeChoices(), (v) => { s.plane = v; }),
+      this.iconMenu('guide', 'Guide', s.guide.type, this.guideChoices(), (v) => { s.guide.type = v; }),
+    ];
+  }
+
+  // The choices of the four "where things land" menus, in ONE place: the
+  // top-bar dropdowns and the Opt-key pie menus both read them, so the two
+  // can never offer different lists.
+  private placementChoices(): [PlacementMode, IconName, string, string][] {
+    return [
+      ['ORIGIN', 'placeOrigin', 'Origin', 'the drawing plane through the active object'],
+      ['CURSOR', 'placeCursor', '3D Cursor', 'the drawing plane through the 3D cursor'],
+      ['SURFACE', 'placeSurface', 'Surface', 'onto the mesh, splat or body under the pointer'],
+      ['SURFACE_PERP', 'placeSurfacePerp', 'Surface ⊥', 'start on a surface, then grow straight out of it'],
+      ['STROKE', 'placeStroke', 'Stroke', 'at the depth of the nearest stroke; a stroke’s ends land on it'],
+      ['STROKE_PERP', 'placeStrokePerp', 'Stroke ⊥', 'start on a stroke, then grow across it'],
+      ['SPLAT', 'placeSplat', 'Splat (nearest)', 'at the depth of the nearest splat'],
+      ['NEAREST', 'placeNearest', 'Nearest', 'onto the nearest vertex, edge or face — choose which below'],
+    ];
+  }
+
+  private planeChoices(): [PlaneMode, IconName, string, string][] {
+    const zUp = this.app.ctx.settings.upAxis === 'Z';
+    return [
+      ['NONE', 'planeNone', 'None', 'no plane of its own: the Placement, the magnet and the guide decide (a point nothing catches faces the camera), and the grid snaps in 3D'],
+      ['VIEW', 'planeView', 'View', 'facing the camera'],
+      ['VIEW_ORIGIN', 'planeViewOrigin', 'View at Origin', 'facing the camera, through wherever a stroke starts'],
+      ['UPRIGHT', 'planeUpright', 'Up from Ground', 'start on the floor, then grow straight up — draw the plan with Top, lift it with this'],
+      ['FRONT', 'planeFront', zUp ? 'Front (X·Z)' : 'Front (X·Y)', ''],
+      ['SIDE', 'planeSide', zUp ? 'Side (Y·Z)' : 'Side (Z·Y)', ''],
+      ['TOP', 'planeTop', zUp ? 'Top (X·Y)' : 'Top (X·Z)', 'the floor'],
+      ['CURSOR', 'planeCursor', 'Cursor', 'the 3D cursor’s own orientation'],
+    ];
+  }
+
+  private guideChoices(): [GuideType, IconName, string, string?][] {
+    return [
+      ['NONE', 'guideNone', 'No Guide'],
+      ['CIRCULAR', 'guideCircular', 'Circular', 'circles about the 3D cursor'],
+      ['RADIAL', 'guideRadial', 'Radial', 'rays from the 3D cursor'],
+      ['PARALLEL', 'guideParallel', 'Parallel', 'lines at the guide angle'],
+      ['GRID', 'guideGrid', 'Grid', 'a screen grid'],
+      ['ISO', 'guideIso', 'Isometric', 'an isometric lattice'],
+    ];
+  }
+
+  private snapChoices(): [string, IconName, string, string][] {
+    return [
+      ['INCREMENT', 'snapIncrement', 'Increment', 'round to the grid step'],
+      ['GRID', 'snapGrid', 'Grid', 'the visible floor grid'],
+      ['POINT', 'snapVertex', 'Vertex', 'stroke points'],
+      ['EDGE', 'snapEdge', 'Edge', 'anywhere along a stroke'],
+      ['EDGE_CENTER', 'snapEdgeCenter', 'Edge Center', 'the middle of a stroke segment'],
+      ['EDGE_PERP', 'snapEdgePerp', 'Edge Perpendicular', 'the foot of a perpendicular onto a stroke'],
+      ['SURFACE', 'snapFace', 'Face Project', 'onto the surface under the pointer'],
+      ['FACE_CENTER', 'snapFaceCenter', 'Face Center', 'the centre of the face under the pointer'],
+      ['FACE_NEAREST', 'snapFaceNearest', 'Face Nearest', 'the nearest point on the face under the pointer'],
+      ['OBJECT', 'snapObject', 'Object Origin', 'object origins'],
     ];
   }
 
@@ -1409,18 +1440,7 @@ export class UI {
     // drawing plane.
     centre.append(
       iconToggle('magnet', 'Snap (magnet)', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); this.buildTopbar(); }),
-      this.iconMenu('snap', 'Snap Target', (s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode) as string, [
-        ['INCREMENT', 'snapIncrement', 'Increment', 'round to the grid step'],
-        ['GRID', 'snapGrid', 'Grid', 'the visible floor grid'],
-        ['POINT', 'snapVertex', 'Vertex', 'stroke points'],
-        ['EDGE', 'snapEdge', 'Edge', 'anywhere along a stroke'],
-        ['EDGE_CENTER', 'snapEdgeCenter', 'Edge Center', 'the middle of a stroke segment'],
-        ['EDGE_PERP', 'snapEdgePerp', 'Edge Perpendicular', 'the foot of a perpendicular onto a stroke'],
-        ['SURFACE', 'snapFace', 'Face Project', 'onto the surface under the pointer'],
-        ['FACE_CENTER', 'snapFaceCenter', 'Face Center', 'the centre of the face under the pointer'],
-        ['FACE_NEAREST', 'snapFaceNearest', 'Face Nearest', 'the nearest point on the face under the pointer'],
-        ['OBJECT', 'snapObject', 'Object Origin', 'object origins'],
-      ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); },
+      this.iconMenu('snap', 'Snap Target', (s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode) as string, this.snapChoices(), (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); },
       ['POINT', 'EDGE', 'EDGE_CENTER', 'EDGE_PERP'].includes(s.snap.mode) ? [
         tip(selectField('Strokes', s.snap.strokeScope ?? 'ANY', [
           ['ANY', 'Any GP'], ['SELECTED', 'Selected only'],
@@ -1534,6 +1554,93 @@ export class UI {
         if (e.key === 'Escape') { this.closeModePie(); return; }
         const slot = SLOTS.find((s) => s.key === e.key);
         if (slot) { e.preventDefault(); choose(slot.mode); }
+        return;
+      }
+      if (!root.contains(e.target as Node)) this.closeModePie();
+    };
+    window.addEventListener('keydown', this.pieCloseHandler as (e: KeyboardEvent) => void, true);
+    window.addEventListener('mousedown', this.pieCloseHandler as (e: MouseEvent) => void, true);
+  }
+
+  /**
+   * A pie of Placement, Plane, Guide or Snap choices at the pointer (Opt+, .
+   * / '). Picking closes it; the number keys pick by position (1..9, then 0
+   * and -), Esc or a click outside cancels. The Snap pie's centre toggles
+   * the magnet, and picking a snap target turns the magnet on — choosing
+   * what to snap to is asking to snap.
+   */
+  openTransformPie(which: 'placement' | 'plane' | 'guide' | 'snap', center: { x: number; y: number }): void {
+    const s = this.app.ctx.settings;
+    const done = () => { this.app.savePrefs(); this.buildTopbar(); this.refresh(); };
+    type Item = { label: string; icon: IconName; active: boolean; hint?: string; pick: () => void };
+    const make = <T extends string>(list: [T, IconName, string, string?][], cur: string, set: (v: T) => void): Item[] =>
+      list.map(([v, ic, label, hint]) => ({ label, icon: ic, hint, active: v === cur, pick: () => { set(v); done(); } }));
+    let title = '';
+    let items: Item[] = [];
+    let centre: (() => void) | undefined;
+    if (which === 'placement') {
+      title = 'Placement';
+      items = make(this.placementChoices(), s.placement, (v) => { s.placement = v; });
+    } else if (which === 'plane') {
+      title = 'Plane';
+      items = make(this.planeChoices(), s.plane, (v) => { s.plane = v; });
+    } else if (which === 'guide') {
+      title = 'Guide';
+      items = make(this.guideChoices(), s.guide.type, (v) => { s.guide.type = v; });
+    } else {
+      title = s.snap.enabled ? 'Snap: on' : 'Snap: off';
+      const cur = s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode;
+      items = make(this.snapChoices(), s.snap.enabled ? cur : '', (v) => {
+        s.snap.mode = v as typeof s.snap.mode; s.snap.enabled = true;
+      });
+      centre = () => { s.snap.enabled = !s.snap.enabled; done(); };
+    }
+    this.openPie(center, title, items, centre);
+  }
+
+  private openPie(
+    center: { x: number; y: number }, title: string,
+    items: { label: string; icon: IconName; active: boolean; hint?: string; pick: () => void }[],
+    onCentre?: () => void,
+  ): void {
+    this.closeModePie();
+    const { ctx } = this.app;
+    const n = items.length;
+    // an ellipse, wider than tall, since the items are wide pills: past six
+    // of them a circle crowds the ones at the sides into each other
+    const ry = 95 + Math.max(0, n - 6) * 14;
+    const rx = ry * 1.35;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const cx = Math.min(Math.max(center.x, rx + 70), rect.width - rx - 70) + rect.left;
+    const cy = Math.min(Math.max(center.y, ry + 24), rect.height - ry - 24) + rect.top;
+    const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '='];
+
+    const root = el('div', { class: 'pie-root' });
+    root.style.left = `${cx}px`;
+    root.style.top = `${cy}px`;
+    const mid = el('div', { class: `pie-center${onCentre ? ' pie-center-btn' : ''}`, text: title });
+    if (onCentre) { mid.title = 'toggle'; mid.onclick = () => { this.closeModePie(); onCentre(); }; }
+    root.append(el('div', { class: 'pie-ring' }), mid);
+    const choose = (i: number) => { this.closeModePie(); items[i].pick(); };
+    items.forEach((it, i) => {
+      const rad = -Math.PI / 2 + (i / n) * Math.PI * 2;   // clockwise from the top
+      const node = el('div', { class: `pie-item${it.active ? ' pie-item-active' : ''}`, title: it.hint ?? '' },
+        el('span', { class: 'pie-icon' }, icon(it.icon, 16)),
+        el('span', { text: it.label }),
+        el('span', { class: 'pie-key', text: KEYS[i] ?? '' }),
+      );
+      node.style.left = `${rx * Math.cos(rad)}px`;
+      node.style.top = `${ry * Math.sin(rad)}px`;
+      node.onclick = () => choose(i);
+      root.append(node);
+    });
+    document.body.append(root);
+    this.pieEls = [root];
+    this.pieCloseHandler = (e: Event) => {
+      if (e instanceof KeyboardEvent) {
+        if (e.key === 'Escape') { e.preventDefault(); this.closeModePie(); return; }
+        const i = KEYS.indexOf(e.key);
+        if (i >= 0 && i < n) { e.preventDefault(); e.stopPropagation(); choose(i); }
         return;
       }
       if (!root.contains(e.target as Node)) this.closeModePie();

@@ -25,6 +25,10 @@ export const ACTIONS: ActionDef[] = [
   { id: 'toggleEdit', label: 'Toggle last two modes', combo: 'tab', category: 'Modes' },
   { id: 'modeObject', label: 'Object mode', combo: '', category: 'Modes' },
   { id: 'modePie', label: 'Mode pie menu', combo: 'alt+tab', category: 'Modes' },
+  { id: 'placementPie', label: 'Placement pie menu', combo: 'alt+,', category: 'Modes' },
+  { id: 'planePie', label: 'Plane pie menu', combo: 'alt+.', category: 'Modes' },
+  { id: 'guidePie', label: 'Guide pie menu', combo: 'alt+/', category: 'Modes' },
+  { id: 'snapPie', label: 'Snap pie menu', combo: "alt+'", category: 'Modes' },
   { id: 'modeDraw', label: 'Draw mode', combo: '1', category: 'Modes' },
   { id: 'modeEdit', label: 'Edit mode', combo: '2', category: 'Modes' },
   { id: 'modeSculpt', label: 'Sculpt mode', combo: '3', category: 'Modes' },
@@ -105,6 +109,10 @@ export function comboFromEvent(e: KeyboardEvent): string {
     else if (code === 'Backquote') key = '`';
     else if (code === 'Minus') key = '-';
     else if (code === 'Equal') key = '=';
+    else if (code === 'Comma') key = ',';
+    else if (code === 'Period') key = '.';
+    else if (code === 'Slash') key = '/';
+    else if (code === 'Quote') key = "'";
   }
   if (key === ' ') key = 'space';
   if (['control', 'meta', 'alt', 'shift'].includes(key)) return ''; // modifier alone

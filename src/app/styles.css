@@ -447,6 +447,12 @@ button.props-tab.active { background: var(--panel); border-color: var(--border);
 }
 .pie-item:hover { background: var(--accent); border-color: var(--accent); }
 .pie-item-active { border-color: var(--accent2); color: var(--accent2); }
+/* the Snap pie's centre is the magnet switch: a real target, over the ring */
+.pie-center-btn {
+  top: -9px; left: -40px; width: 80px; line-height: 18px;
+  pointer-events: auto; cursor: pointer; color: var(--fg, #e8e8ec);
+}
+.pie-center-btn:hover { color: var(--accent2); }
 .pie-icon { font-size: 14px; }
 .pie-key { margin-left: 4px; color: var(--dim); font: 10px ui-monospace, monospace; }
 .pie-item:hover .pie-key { color: #dfe8ff; }

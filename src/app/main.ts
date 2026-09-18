@@ -1444,6 +1444,10 @@ class App implements AppHandle {
       case 'toggleEdit': this.toggleLastMode(); break;
       case 'modeObject': this.setMode('OBJECT'); break;
       case 'modePie': this.ui.openModePie(this.canvasPointer()); break;
+      case 'placementPie': this.ui.openTransformPie('placement', this.canvasPointer()); break;
+      case 'planePie': this.ui.openTransformPie('plane', this.canvasPointer()); break;
+      case 'guidePie': this.ui.openTransformPie('guide', this.canvasPointer()); break;
+      case 'snapPie': this.ui.openTransformPie('snap', this.canvasPointer()); break;
       case 'modeDraw': this.setMode('DRAW'); break;
       case 'modeEdit': this.setMode('EDIT'); break;
       case 'modeSculpt': this.setMode('SCULPT'); break;
