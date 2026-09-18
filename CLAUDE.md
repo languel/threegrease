@@ -250,7 +250,20 @@ the browser console or automated evals:
   placements) and Origin/Cursor cannot hop between targets, so their
   interiors still resolve normally. `EVERY` keeps the old draping on
   purpose — a line that clings to what it crosses is an effect worth having,
-  just not the default. Ortho trap in the depth helper: an ortho ray starts
+  just not the default.
+  A PLACED point under Placement: Stroke lands ON the stroke it is near
+  (`strokeAnchorPoint`, within 28 px), not merely at that stroke's depth
+  along the pointer's own ray — which is what left a visible gap whenever a
+  line was released a few pixels short of a wall edge. The tie-break is the
+  judgement: screen distance alone picks whichever line passes closest,
+  and in a wireframe the strokes BEHIND your target peek out beside it
+  (measured: an end released 15 px short of a near wall landed on a stroke
+  5 m behind). So every stroke in range offers its best point and, among
+  those within 10 px of the closest, the one nearest the CAMERA wins —
+  precise aim still reaches a far stroke. Cmd/Ctrl held as a point is
+  placed opts that point out; the choice is frozen per anchor, and the
+  release REBUILDS the shape so the modifier at release is the one that
+  counts. Ortho trap in the depth helper: an ortho ray starts
   on the NEAR PLANE, not at the camera, so depth must be measured from the
   same point on both sides or every point lands short by the near distance.
 - Agent tools (`src/agent/tools.ts`) are the SINGLE registry behind the

@@ -5,7 +5,7 @@ import {
 } from '../core/gpdata';
 import type { AppCtx } from './context';
 import { brushWidth } from './draw';
-import { screenToWorld, setStrokeExclusion, worldToObject } from './projection';
+import { screenToWorld, setStrokeExclusion, strokeAnchorPoint, worldToObject } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 
 type PrimKind = 'line' | 'polyline' | 'arc' | 'curve' | 'box' | 'circle';
@@ -24,6 +24,10 @@ export class PrimitiveTool implements Tool {
   private current = new THREE.Vector2();
   private stroke: GPStroke | null = null;
   private shiftHeld = false;
+  /** Cmd/Ctrl held: the point being placed skips the stroke magnet */
+  private freeHeld = false;
+  /** that choice, frozen per placed anchor at the moment it was placed */
+  private anchorFree: boolean[] = [];
 
   constructor(kind: PrimKind) {
     this.kind = kind;
@@ -32,6 +36,7 @@ export class PrimitiveTool implements Tool {
 
   onDown(ctx: AppCtx, e: ToolEvent): void {
     this.shiftHeld = e.shift;
+    this.freeHeld = e.ctrl;
     this.current.set(e.x, e.y);
     if (this.phase === 'idle') {
       const ob = activeObject(ctx.scene);
@@ -45,10 +50,12 @@ export class PrimitiveTool implements Tool {
       frame.strokes.push(this.stroke);
       setStrokeExclusion(this.stroke.id);
       this.anchors = [new THREE.Vector2(e.x, e.y)];
+      this.anchorFree = [e.ctrl];
       this.phase = this.kind === 'polyline' ? 'poly' : 'drag';
       this.rebuild(ctx);
     } else if (this.phase === 'poly') {
       this.anchors.push(new THREE.Vector2(e.x, e.y));
+      this.anchorFree.push(e.ctrl);
       this.rebuild(ctx);
     } else if (this.phase === 'adjust') {
       this.commit(ctx);
@@ -58,6 +65,7 @@ export class PrimitiveTool implements Tool {
   onMove(ctx: AppCtx, e: ToolEvent): void {
     if (this.phase === 'idle') return;
     this.shiftHeld = e.shift;
+    this.freeHeld = e.ctrl;
     this.current.set(e.x, e.y);
     this.rebuild(ctx);
   }
@@ -65,11 +73,16 @@ export class PrimitiveTool implements Tool {
   onUp(ctx: AppCtx, e: ToolEvent): void {
     if (this.phase === 'drag') {
       this.current.set(e.x, e.y);
+      this.freeHeld = e.ctrl;
       if ((this.kind === 'arc' || this.kind === 'curve')) {
         this.anchors.push(this.current.clone());
+        this.anchorFree.push(e.ctrl);
         this.phase = 'adjust';
         this.rebuild(ctx);
       } else {
+        // the RELEASE is where the end lands — and whether Cmd was held
+        // then — so rebuild from it rather than from the last move
+        this.rebuild(ctx);
         this.commit(ctx);
       }
     }
@@ -101,6 +114,7 @@ export class PrimitiveTool implements Tool {
   private reset(ctx: AppCtx): void {
     this.stroke = null;
     this.anchors = [];
+    this.anchorFree = [];
     this.phase = 'idle';
     setStrokeExclusion(null);
     ctx.requestRender();
@@ -131,8 +145,26 @@ export class PrimitiveTool implements Tool {
    * stroke behind it and break into a zigzag through depth.
    */
   private shapeFromEnds(ctx: AppCtx, rect: DOMRect): (THREE.Vector3 | null)[] {
-    const at = (p: THREE.Vector2) => screenToWorld(ctx, p.x + rect.left, p.y + rect.top);
     const s = ctx.settings;
+    // A PLACED point under Placement: Stroke lands ON the stroke it is near,
+    // not merely at its depth. Stroke placement proper only borrows a depth
+    // for the pointer's own ray, which is right for freehand drawing and
+    // wrong for an endpoint: release a few pixels short of a wall edge and
+    // the line stops in mid-air beside it, a visible gap that reads as "the
+    // snap missed". So within ANCHOR_SNAP_PX the end goes to the nearest
+    // point on the stroke itself (honouring Target: all points, ends, or
+    // first), and only outside it does the ordinary placement take over.
+    // Holding Cmd/Ctrl as a point is placed opts THAT point out, for the
+    // times you want an end to stop exactly where you let go.
+    const at = (p: THREE.Vector2, free = false) => {
+      if (s.placement === 'STROKE' && !free) {
+        const hit = strokeAnchorPoint(ctx, p.x, p.y, ANCHOR_SNAP_PX, s.strokeTarget);
+        if (hit) return hit;
+      }
+      return screenToWorld(ctx, p.x + rect.left, p.y + rect.top);
+    };
+    const free0 = this.anchorFree[0] ?? false;
+    const freeNow = this.freeHeld;
     // After the first point, a sticky-plane mode already puts every point on
     // one plane, and Origin/Cursor never snap to anything — so those can
     // resolve interior points normally. Only the TARGET-seeking placements
@@ -158,14 +190,16 @@ export class PrimitiveTool implements Tool {
     const cur = this.current;
     switch (this.kind) {
       case 'line': {
-        const A = at(a); const B = at(this.constrain(a, cur));
+        const A = at(a, free0); const B = at(this.constrain(a, cur), freeNow);
         return straight([A, B], 8, false);
       }
       case 'polyline':
-        return straight([...this.anchors, cur].map(at), 4, false);
+        return straight([
+          ...this.anchors.map((q, i) => at(q, this.anchorFree[i] ?? false)), at(cur, freeNow),
+        ], 4, false);
       case 'box': {
         const c = this.constrain(a, cur);
-        const A = at(a); const C = at(c);
+        const A = at(a, free0); const C = at(c, freeNow);
         // the two corners you did not place sit between the two you did
         const d = A && C ? (viewDepth(ctx, A) + viewDepth(ctx, C)) / 2 : 0;
         const B = A && C ? between(new THREE.Vector2(c.x, a.y), d) : null;
@@ -175,7 +209,8 @@ export class PrimitiveTool implements Tool {
       case 'arc':
       case 'curve': {
         const pts = this.shape2D();
-        const A = at(pts[0]); const B = at(pts[pts.length - 1]);
+        const A = at(pts[0], free0);
+        const B = at(pts[pts.length - 1], this.phase === 'adjust' ? (this.anchorFree[1] ?? false) : freeNow);
         if (!A || !B) return [];
         const dA = viewDepth(ctx, A), dB = viewDepth(ctx, B);
         return pts.map((p, i) => (i === 0 ? A : i === pts.length - 1 ? B
@@ -184,7 +219,7 @@ export class PrimitiveTool implements Tool {
       case 'circle': {
         // a circle has no placed point ON it, so it lies flat at the depth
         // of the corner you started the drag from
-        const A = at(a);
+        const A = at(a, free0);
         if (!A) return [];
         const d = viewDepth(ctx, A);
         return this.shape2D().map((p) => between(p, d));
@@ -256,6 +291,11 @@ export class PrimitiveTool implements Tool {
 }
 
 const ray = new THREE.Raycaster();
+
+/** How close, in screen px, a placed shape point must be to a stroke to land
+ *  ON it under Placement: Stroke. Generous enough to forgive a release that
+ *  stops short, tight enough not to reach across to the next stroke over. */
+const ANCHOR_SNAP_PX = 28;
 
 /** Distance of a world point in front of the camera, along the view axis. */
 function viewDepth(ctx: AppCtx, p: THREE.Vector3): number {

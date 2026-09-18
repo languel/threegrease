@@ -334,6 +334,8 @@ export function pickCanvas(ctx: AppCtx, x: number, y: number): { id: number; poi
 export function nearestStrokePointAll(
   ctx: AppCtx, screenX: number, screenY: number, radius = 40,
   scope: 'ANY' | 'SELECTED' = 'ANY',
+  /** which points of a stroke count: all of them, its two ends, or its first */
+  which: 'ALL' | 'ENDS' | 'FIRST' = 'ALL',
 ): THREE.Vector3 | null {
   const rect = ctx.canvas.getBoundingClientRect();
   const projected = new THREE.Vector3();
@@ -349,8 +351,12 @@ export function nearestStrokePointAll(
       const frame = frameAt(layer, ctx.scene.frame);
       if (!frame) continue;
       for (const s of frame.strokes) {
+        if (s.id === excludedStrokeId) continue; // never snap a stroke onto itself
         if (scope === 'SELECTED' && !s.select && !s.points.some((p) => p.select)) continue;
-        for (const p of s.points) {
+        const pts = which === 'FIRST' ? s.points.slice(0, 1)
+          : which === 'ENDS' ? [s.points[0], s.points[s.points.length - 1]] : s.points;
+        for (const p of pts) {
+          if (!p) continue;
           const world = new THREE.Vector3(...p.co).applyMatrix4(matrix);
           projected.copy(world).project(ctx.camera);
           if (projected.z > 1) continue;
@@ -430,6 +436,86 @@ export function nearestStrokeSegmentAll(
     }
   }
   return best ? { a: best.a, b: best.b, t: best.t } : null;
+}
+
+/**
+ * Where a PLACED point should land when it is released near a stroke: on
+ * the stroke, at the nearest point (or the nearest end / first point, per
+ * `which`).
+ *
+ * The one judgement here is the tie-break. Screen distance alone picks
+ * whatever line happens to pass closest to the pointer, and in a wireframe
+ * the strokes BEHIND the one you are aiming at peek out right beside it —
+ * measured: an end released 15 px short of a near wall edge landed on a
+ * stroke 5 m behind it. So every stroke within `radius` offers its best
+ * point, and among those within `TIE_PX` of the closest, the one nearest the
+ * CAMERA wins. Aim precisely at a far stroke and it is still yours; aim
+ * roughly and you get the thing in front, which is the thing you can see.
+ */
+export function strokeAnchorPoint(
+  ctx: AppCtx, screenX: number, screenY: number, radius: number,
+  which: 'ALL' | 'ENDS' | 'FIRST' = 'ALL',
+): THREE.Vector3 | null {
+  const TIE_PX = 10;
+  const rect = ctx.canvas.getBoundingClientRect();
+  const camPos = ctx.camera.getWorldPosition(new THREE.Vector3());
+  const view = ctx.camera.getWorldDirection(new THREE.Vector3());
+  const tmp = new THREE.Vector3();
+  const toScreen = (w: THREE.Vector3) => {
+    tmp.copy(w).project(ctx.camera);
+    return tmp.z > 1 ? null
+      : { sx: (tmp.x * 0.5 + 0.5) * rect.width, sy: (-tmp.y * 0.5 + 0.5) * rect.height };
+  };
+  const cands: { d: number; depth: number; world: THREE.Vector3 }[] = [];
+  for (const ob of ctx.scene.objects) {
+    const matrix = new THREE.Matrix4().compose(
+      new THREE.Vector3(...ob.translation),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(...ob.rotation)),
+      new THREE.Vector3(...ob.scale),
+    );
+    for (const layer of ob.layers) {
+      if (layer.hide) continue;
+      const frame = frameAt(layer, ctx.scene.frame);
+      if (!frame) continue;
+      for (const s of frame.strokes) {
+        if (s.id === excludedStrokeId || !s.points.length) continue;
+        const world = s.points.map((p) => new THREE.Vector3(...p.co).applyMatrix4(matrix));
+        const scr = world.map(toScreen);
+        let best: { d: number; world: THREE.Vector3 } | null = null;
+        if (which === 'ALL' && world.length > 1) {
+          const n = s.cyclic ? world.length : world.length - 1;
+          for (let i = 0; i < n; i++) {
+            const j = (i + 1) % world.length;
+            const a = scr[i], b = scr[j];
+            if (!a || !b) continue;
+            const abx = b.sx - a.sx, aby = b.sy - a.sy;
+            const len2 = abx * abx + aby * aby;
+            const t = len2 < 1e-9 ? 0
+              : THREE.MathUtils.clamp(((screenX - a.sx) * abx + (screenY - a.sy) * aby) / len2, 0, 1);
+            const d = Math.hypot(a.sx + abx * t - screenX, a.sy + aby * t - screenY);
+            if (!best || d < best.d) best = { d, world: world[i].clone().lerp(world[j], t) };
+          }
+        } else {
+          const idx = which === 'FIRST' ? [0] : which === 'ENDS' ? [0, world.length - 1]
+            : world.map((_, i) => i);
+          for (const i of idx) {
+            const q = scr[i];
+            if (!q) continue;
+            const d = Math.hypot(q.sx - screenX, q.sy - screenY);
+            if (!best || d < best.d) best = { d, world: world[i] };
+          }
+        }
+        if (best && best.d < radius) {
+          cands.push({ ...best, depth: best.world.clone().sub(camPos).dot(view) });
+        }
+      }
+    }
+  }
+  if (!cands.length) return null;
+  const closest = Math.min(...cands.map((c) => c.d));
+  const near = cands.filter((c) => c.d <= closest + TIE_PX);
+  near.sort((x, y) => x.depth - y.depth);
+  return near[0].world.clone();
 }
 
 /** Foot of the perpendicular from `from` onto the segment [a,b] (clamped) —
