@@ -220,6 +220,19 @@ the browser console or automated evals:
   only that: ending the flight there races the lock's own async grant and
   kills the mode on the way in.
 
+- **Plane: Up from Ground (`UPRIGHT`) is floor-plan-then-walls.** Its resting
+  plane is the FLOOR at height zero (not a plane through the active object),
+  so a stroke's first point lands on the grid — or on whatever the Placement
+  snaps it to — and the rest of the stroke lives on the VERTICAL plane
+  through that point, captured once per stroke through the same sticky slot
+  VIEW_ORIGIN uses. The normal is the view direction with its up component
+  REMOVED: View at Origin faces the camera outright, so from any raised
+  viewpoint its plane leans back (22.8 degrees at a normal working angle)
+  and a line drawn up from the floor goes up and away. Verified: first point
+  exactly (1,1,0), every point 0.00000 off the vertical plane. Pair it with
+  Placement NEAREST to start a lift on an existing plan line (lands at
+  z = 0); STROKE is a poor fit — it returns a point at a stroke's DEPTH, not
+  on the stroke, and measured 8 cm under the floor.
 - Agent tools (`src/agent/tools.ts`) are the SINGLE registry behind the
   in-app chat, MCP, ACP and WebMCP — adding one there exposes it to Claude
   Code, Zed and the browser's own agent with no Node-side change.

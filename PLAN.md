@@ -150,6 +150,7 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Measurements as OBJECTS: outliner row, transform, parent, colour,
       closed rings with area, and per-point BINDING (a point snapped to a
       vertex/surface/origin stays on it, an actor's point rides its joint)
+- [x] Plane: Up from Ground — floor plan first, then lift walls straight up
 - [ ] Measurements: curved legs (arc/spline) and surface-following paths
 - [x] Shared snapping module so every tool gets the one magnet
 - [x] Semantic detection: open-vocabulary (text-query) streams feeding the

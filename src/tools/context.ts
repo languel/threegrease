@@ -14,7 +14,11 @@ export type PlacementMode =
   | 'ORIGIN' | 'CURSOR' | 'SURFACE' | 'SURFACE_PERP' | 'STROKE'
   | 'STROKE_PERP' | 'SPLAT' | 'NEAREST';
 export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
-export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR' | 'VIEW_ORIGIN';
+/** UPRIGHT: start on the GROUND, then grow straight up — the first point
+ *  lands on the floor (or on whatever the Placement snaps it to), and the
+ *  rest of the stroke lives on the VERTICAL plane through it that faces the
+ *  camera as much as a vertical plane can. Floor plan first, then walls. */
+export type PlaneMode = 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR' | 'VIEW_ORIGIN' | 'UPRIGHT';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
 export type EraserMode = 'POINT' | 'STROKE' | 'SOFT';
 export type SculptBrush =

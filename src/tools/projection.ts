@@ -26,6 +26,26 @@ let perpPlane: THREE.Plane | null = null;
  *  detaches the stroke back to the normal drawing plane instead of keeping
  *  it glued to the accretion depth forever. */
 let stickyAnchorPx: { x: number; y: number } | null = null;
+/**
+ * The normal of a VERTICAL plane that faces the camera as squarely as a
+ * vertical plane can: the view direction with its up component removed.
+ *
+ * VIEW_ORIGIN's plane faces the camera outright, so from any raised
+ * viewpoint it leans back and a line drawn "up" from the floor goes up AND
+ * away — a wall that tilts. Dropping the up component is what keeps it
+ * plumb. Looking straight down there is no horizontal part left to keep, so
+ * the camera's own up vector (which then points across the floor) stands
+ * in; the plane is edge-on from there and nobody draws a wall from above.
+ */
+function uprightNormal(ctx: AppCtx): THREE.Vector3 {
+  const up = ctx.settings.upAxis === 'Z' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  const flat = (v: THREE.Vector3) => v.addScaledVector(up, -v.dot(up));
+  let n = flat(ctx.camera.getWorldDirection(new THREE.Vector3()).negate());
+  if (n.lengthSq() < 1e-6) n = flat(new THREE.Vector3(0, 1, 0).applyQuaternion(ctx.camera.quaternion));
+  if (n.lengthSq() < 1e-6) n = new THREE.Vector3(1, 0, 0);
+  return n.normalize();
+}
+
 /** Plane.VIEW_ORIGIN's sticky standing plane: view-aligned, through
  *  wherever THIS stroke's first point actually landed (whatever the
  *  active Placement resolved it to), instead of a fixed cursor/object
@@ -475,6 +495,12 @@ export function drawingPlane(ctx: AppCtx): THREE.Plane {
     case 'FRONT': normal = zUp ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1); break;
     case 'SIDE': normal = new THREE.Vector3(1, 0, 0); break;
     case 'TOP': normal = zUp ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0); break;
+    // UPRIGHT's resting plane is the FLOOR itself — the grid you can see, at
+    // height zero, not a plane through the active object — because that is
+    // where a stroke's first point has to land. The upright part only exists
+    // once a stroke has started (see screenToWorld).
+    case 'UPRIGHT':
+      return new THREE.Plane(zUp ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0), 0);
     default: // VIEW and CURSOR: view-aligned (CURSOR differs only by anchor)
       normal = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
   }
@@ -550,7 +576,7 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
   );
   raycaster.setFromCamera(ndc, ctx.camera);
 
-  if (ctx.settings.plane === 'VIEW_ORIGIN') {
+  if (ctx.settings.plane === 'VIEW_ORIGIN' || ctx.settings.plane === 'UPRIGHT') {
     if (viewOriginPlane) {
       const out = new THREE.Vector3();
       if (raycaster.ray.intersectPlane(viewOriginPlane, out)) return out;
@@ -558,7 +584,9 @@ export function screenToWorld(ctx: AppCtx, x: number, y: number): THREE.Vector3 
     } else {
       const first = resolvePlacement(ctx, x, y, rect);
       if (first && excludedStrokeId !== null) {
-        const normal = ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
+        const normal = ctx.settings.plane === 'UPRIGHT'
+          ? uprightNormal(ctx)
+          : ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
         viewOriginPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, first);
       }
       return first;
