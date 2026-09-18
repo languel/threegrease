@@ -342,6 +342,19 @@ the browser console or automated evals:
   canvas code paths remain but always see an empty list — don't build new
   features on `scene.canvases`; use TGMesh with material fields (texture/
   unlit/doubleSided/billboard) instead.
+- **Quad view routes input per PANE by impersonation** (`App.withPane`).
+  Tools read the pointer against `ctx.canvas.getBoundingClientRect()` and
+  unproject through `ctx.camera` in ~60 places; in quad view both were the
+  whole canvas and the perspective camera whichever pane you touched, so a
+  mark landed where the pointer would be if the persp view filled the window.
+  For the length of one event, `ctx.camera` becomes the pane's camera and
+  `ctx.canvas` a Proxy whose bounding rect IS the pane. The pane is chosen at
+  pointerdown and kept for the whole gesture (hover follows the pointer).
+  Two traps: `resize()` early-outs on an unchanged size, so toggling quad view
+  must reset `this.sized` or the pane rects are never computed; and an ortho
+  pane camera's matrixWorld is only updated by the quad render, so
+  `withPane` updates it itself (a click before the first frame unprojected
+  through identity and put the point at infinity).
 - `setPointerCapture` is wrapped in `App.capture()` (throws on synthetic
   pointer ids) — use it, never call setPointerCapture directly.
 - Object mode: unified selection over GP/canvas/splat/mesh/trigger

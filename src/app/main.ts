@@ -897,6 +897,66 @@ class App implements AppHandle {
     try { this.ctx.canvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
   }
 
+  /** The quad-view pane a pointer gesture started in; it keeps the gesture
+   *  until release, so a stroke that wanders over a pane border does not
+   *  jump into another camera halfway. */
+  private inputPane: PaneId | null = null;
+
+  /** Which quad-view pane a client point is over (null outside quad view). */
+  private paneAt(clientX: number, clientY: number): PaneId | null {
+    if (!this.quadView || !this.paneRects) return null;
+    const r = this.glRenderer.domElement.getBoundingClientRect();
+    const x = clientX - r.left, y = clientY - r.top;
+    for (const id of ['persp', 'front', 'side', 'top'] as PaneId[]) {
+      const p = this.paneRects[id];
+      if (x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h) return id;
+    }
+    return null;
+  }
+
+  /**
+   * Run `fn` as if the viewport WERE one quad-view pane.
+   *
+   * Every tool measures the pointer against `ctx.canvas`'s bounding rect and
+   * unprojects it through `ctx.camera` — 61 places. In quad view both were
+   * the WHOLE canvas and the perspective camera whichever pane you touched,
+   * so a stroke drawn in the top-left pane landed where the pointer would be
+   * if the perspective view filled the window: the cursor here, the mark
+   * over there. Rather than teach 61 call sites about panes, this swaps the
+   * two things they read, for the duration of one event: the camera becomes
+   * the pane's own (perspective, front, side or top), and the canvas reports
+   * the pane's rectangle as its bounds (a proxy that forwards everything
+   * else to the real element). Outside quad view it simply calls `fn`.
+   */
+  private withPane<T>(pane: PaneId | null, fn: () => T): T {
+    if (!pane || !this.quadView || !this.paneRects) return fn();
+    const ctx = this.ctx;
+    const real = ctx.canvas;
+    const cr = real.getBoundingClientRect();
+    const pr = this.paneRects[pane];
+    const rect = new DOMRect(cr.left + pr.x, cr.top + pr.y, pr.w, pr.h);
+    const proxy = new Proxy(real, {
+      get: (t, prop) => {
+        if (prop === 'getBoundingClientRect') return () => rect;
+        const v = Reflect.get(t, prop, t);
+        return typeof v === 'function' ? v.bind(t) : v;
+      },
+      set: (t, prop, v) => Reflect.set(t, prop, v, t),
+    });
+    const cam = pane === 'persp' ? this.nav.active : this.orthoPanes.find((p) => p.id === pane)?.camera;
+    // an ortho pane's camera is otherwise only brought up to date by the
+    // quad render, so a click before its first frame unprojected through an
+    // identity matrix and put the point at infinity
+    cam?.updateMatrixWorld();
+    const savedCam = ctx.camera;
+    ctx.canvas = proxy;
+    if (cam) ctx.camera = cam;
+    try { return fn(); } finally {
+      ctx.canvas = real;
+      ctx.camera = savedCam;
+    }
+  }
+
   private toolEvent(e: PointerEvent): ToolEvent {
     const rect = this.ctx.canvas.getBoundingClientRect();
     return {
@@ -1008,7 +1068,8 @@ class App implements AppHandle {
       // transform widget owns clicks that land on its gizmo
       if (this.ctx.settings.mode === 'OBJECT' && this.widget.enabled && this.widget.axis) return;
       this.capture(e);
-      this.tools.handleDown(this.ctx, this.toolEvent(e));
+      this.inputPane = this.paneAt(e.clientX, e.clientY);
+      this.withPane(this.inputPane, () => this.tools.handleDown(this.ctx, this.toolEvent(e)));
     });
 
     canvas.addEventListener('pointermove', (e) => {
@@ -1043,7 +1104,11 @@ class App implements AppHandle {
       // coalesced events give smoother strokes
       const coalesced = e.getCoalescedEvents?.();
       const events = coalesced && coalesced.length ? coalesced : [e];
-      for (const ce of events) this.tools.handleMove(this.ctx, this.toolEvent(ce as PointerEvent));
+      // a gesture keeps the pane it started in; a hover follows the pointer
+      const pane = this.tools.isPointerDown ? this.inputPane : this.paneAt(e.clientX, e.clientY);
+      this.withPane(pane, () => {
+        for (const ce of events) this.tools.handleMove(this.ctx, this.toolEvent(ce as PointerEvent));
+      });
     });
 
     canvas.addEventListener('pointerup', (e) => {
@@ -1067,7 +1132,8 @@ class App implements AppHandle {
         return;
       }
       if (this.navDrag) { this.navDrag = null; return; }
-      this.tools.handleUp(this.ctx, this.toolEvent(e));
+      this.withPane(this.inputPane, () => this.tools.handleUp(this.ctx, this.toolEvent(e)));
+      this.inputPane = null;
     });
 
     window.addEventListener('keyup', (e) => { this.nav.handleFlyKey(e, false); });
@@ -1364,7 +1430,9 @@ class App implements AppHandle {
           }
           break;
         }
-        if (this.editLike()) {
+        // DRAW mode shares edit mode's stroke selection (restyling picks
+        // strokes there), so X has to delete them too, not silently no-op
+        if (this.editLike() || ctx.settings.mode === 'DRAW') {
           const selCanvases = ctx.scene.canvases.filter((c) => c.select);
           if (selCanvases.length && !hasSelectedPoints(ctx)) {
             ctx.pushUndo();
@@ -1718,6 +1786,10 @@ class App implements AppHandle {
     } else {
       this.refreshWidget(); // restore selection-driven visibility (step 1 forces it hidden while on)
     }
+    // resize() returns early when the window size is unchanged — which it
+    // always is on a toggle — so the pane rectangles were never computed and
+    // quad view stayed a single view until something else resized the page
+    this.sized = { w: 0, h: 0, dpr: 0 };
     this.resize();
   }
 
