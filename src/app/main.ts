@@ -5,7 +5,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { genId, createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
 import { History } from '../core/history';
-import type { GPScene, TGActor, TGActorLayer, TGLight, TGMesh, Vec3, ViewportShading } from '../core/types';
+import type { GPObject, GPScene, TGActor, TGActorLayer, TGLight, TGMesh, Vec3, ViewportShading } from '../core/types';
 import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { ScenePost, postActive } from '../fx/scenefx';
@@ -619,7 +619,7 @@ class App implements AppHandle {
     // than force one to always exist (lets "delete the last GP object"
     // actually empty the scene while staying in Object mode).
     if (mode !== 'OBJECT' && this.ctx.scene.objects.length === 0) {
-      this.ctx.scene.objects.push(createObject('Pencil1'));
+      this.ctx.scene.objects.push(this.newPencil('Pencil1'));
       this.ctx.scene.activeObject = 0;
     }
     this.ctx.settings.mode = mode;
@@ -901,6 +901,12 @@ class App implements AppHandle {
    *  until release, so a stroke that wanders over a pane border does not
    *  jump into another camera halfway. */
   private inputPane: PaneId | null = null;
+  /** the pane the LAST pointer event was routed through. `tools.lastPointer`
+   *  is relative to that pane, so anything that reads it back (the plane and
+   *  depth helpers, the placement preview, a tool's HUD) must read it
+   *  through the same pane or it lands where the pointer would be in the
+   *  full-size view */
+  private pointerPane: PaneId | null = null;
 
   /** Which quad-view pane a client point is over (null outside quad view). */
   private paneAt(clientX: number, clientY: number): PaneId | null {
@@ -1069,6 +1075,7 @@ class App implements AppHandle {
       if (this.ctx.settings.mode === 'OBJECT' && this.widget.enabled && this.widget.axis) return;
       this.capture(e);
       this.inputPane = this.paneAt(e.clientX, e.clientY);
+      this.pointerPane = this.inputPane;
       this.withPane(this.inputPane, () => this.tools.handleDown(this.ctx, this.toolEvent(e)));
     });
 
@@ -1106,6 +1113,7 @@ class App implements AppHandle {
       const events = coalesced && coalesced.length ? coalesced : [e];
       // a gesture keeps the pane it started in; a hover follows the pointer
       const pane = this.tools.isPointerDown ? this.inputPane : this.paneAt(e.clientX, e.clientY);
+      this.pointerPane = pane;
       this.withPane(pane, () => {
         for (const ce of events) this.tools.handleMove(this.ctx, this.toolEvent(ce as PointerEvent));
       });
@@ -3622,12 +3630,34 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** The GP object the user last worked in. Held by REFERENCE (the scene is
+   *  plain data, so a deleted object's record lives on here) and refreshed
+   *  every frame — cheaper than chasing every door an object can leave by. */
+  private lastPencil: GPObject | null = null;
+
+  /**
+   * A fresh pencil that continues where the last one left off: its material
+   * slots and active slot are copied from the pencil you were last using,
+   * rather than reset to the app's defaults. Deleting everything and going
+   * back to Draw used to hand you a black pen whatever you had been drawing
+   * with — a new object is a new container, not a reset of your pen.
+   */
+  private newPencil(name: string): GPObject {
+    const ob = createObject(name);
+    const src = this.lastPencil;
+    if (src && src.materials.length) {
+      ob.materials = structuredClone(src.materials);
+      ob.activeMaterial = Math.min(src.activeMaterial, ob.materials.length - 1);
+    }
+    return ob;
+  }
+
   /** Blender Add > Grease Pencil > Blank: new empty GP object at the 3D cursor. */
   addGPObject(at?: [number, number, number]): void {
     const scene = this.ctx.scene;
     this.ctx.pushUndo();
     const n = scene.objects.length + 1;
-    const ob = createObject(`Pencil${n}`);
+    const ob = this.newPencil(`Pencil${n}`);
     ob.translation = at ?? [...scene.cursor];
     scene.objects.push(ob);
     scene.activeObject = scene.objects.length - 1;
@@ -4605,10 +4635,13 @@ class App implements AppHandle {
         console.error('GP rebuild failed:', err);
       }
     }
+    if (ctx.scene.objects.length) this.lastPencil = activeObject(ctx.scene);
     this.cursorMarker.position.set(...ctx.scene.cursor);
     this.updateCursorMarker();
-    this.updatePlaneHelper();
-    this.updateDepthHelper();
+    this.withPane(this.pointerPane, () => {
+      this.updatePlaneHelper();
+      this.updateDepthHelper();
+    });
 
     // hide groups whose object has active effects; composite them after
     const fxJobs: { group: THREE.Group; obIndex: number }[] = [];
@@ -4793,6 +4826,20 @@ class App implements AppHandle {
     };
   }
 
+  /** Draw pointer-relative HUD in the pane the pointer is in: pane camera,
+   *  pane-local coordinates, clipped to the pane. Outside quad view, just fn. */
+  private paneHud(g: CanvasRenderingContext2D, fn: () => void): void {
+    const pane = this.pointerPane;
+    if (!pane || !this.quadView || !this.paneRects) { fn(); return; }
+    const r = this.paneRects[pane];
+    g.save();
+    g.beginPath();
+    g.rect(r.x, r.y, r.w, r.h);
+    g.clip();
+    g.translate(r.x, r.y);
+    try { this.withPane(pane, fn); } finally { g.restore(); }
+  }
+
   private drawHud(): void {
     const g = this.hud.getContext('2d')!;
     g.clearRect(0, 0, this.hud.width, this.hud.height);
@@ -4804,7 +4851,7 @@ class App implements AppHandle {
     // an annotation of the scene. The tool adds the rubber-band leg on top,
     // so it draws them itself and this stands down while it is running.
     if (this.tools.active?.id !== 'measure') drawMeasures(this.ctx, g);
-    this.tools.active?.drawHud?.(this.ctx, g);
+    this.paneHud(g, () => this.tools.active?.drawHud?.(this.ctx, g));
     if (this.objModal.active) {
       const w = this.hud.width / devicePixelRatio;
       const kind = this.objModal.trackball ? 'Rotate (trackball)'
@@ -4824,7 +4871,7 @@ class App implements AppHandle {
     }
     // Placement preview: show what the pointer will snap to (every mode
     // with a discrete target — ORIGIN/CURSOR have none, so no HUD there)
-    if (this.ctx.settings.mode === 'DRAW' && !this.nav.flying) {
+    if (this.ctx.settings.mode === 'DRAW' && !this.nav.flying) this.paneHud(g, () => {
       const { x, y } = this.tools.lastPointer;
       const anchor = placementPreview(this.ctx, x, y);
       if (anchor) {
@@ -4840,7 +4887,7 @@ class App implements AppHandle {
         g.lineWidth = 1.6;
         g.stroke();
       }
-    }
+    });
     if (!this.presentation) {
       const inset = this.ui.inspectorOpen ? 250 : 0;
       this.nav.drawGizmo(g, this.hud.width / devicePixelRatio - inset);

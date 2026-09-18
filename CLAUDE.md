@@ -355,6 +355,15 @@ the browser console or automated evals:
   pane camera's matrixWorld is only updated by the quad render, so
   `withPane` updates it itself (a click before the first frame unprojected
   through identity and put the point at infinity).
+  `tools.lastPointer` is PANE-relative after that, so everything that reads
+  it back — the plane and depth helpers, the placement preview, a tool's
+  HUD — goes through `withPane(this.pointerPane)` (`paneHud` for the 2D
+  part: translated and clipped to the pane), or it lands where the pointer
+  would be in the full-size view.
+- **A new pencil continues the last one** (`App.newPencil`): its material
+  slots and active slot are copied from the GP object last active
+  (`lastPencil`, held by reference so a deleted object still answers), not
+  reset to the black-pen defaults.
 - `setPointerCapture` is wrapped in `App.capture()` (throws on synthetic
   pointer ids) — use it, never call setPointerCapture directly.
 - Object mode: unified selection over GP/canvas/splat/mesh/trigger
