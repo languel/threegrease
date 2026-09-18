@@ -1107,6 +1107,60 @@ export class UI {
   // ------------------------------------------------------------- topbar
 
   /**
+   * A header dropdown that shows only an ICON — Blender's transform header.
+   *
+   * The bar carries just the current choice's glyph; the name lives in the
+   * tooltip, and opening it lists every choice with its icon AND its name,
+   * the current one lit. `extra` is appended below the list as further
+   * sections (a placement's refinements, the magnet's scope). `tuned` puts
+   * an orange dot on the button when one of those hidden refinements is
+   * away from its default — a setting quietly ON behind an icon is the
+   * worst kind.
+   */
+  private iconMenu<T extends string>(
+    id: string, title: string, value: T,
+    items: [T, IconName, string, string?][],
+    onPick: (v: T) => void,
+    extra: Node[] = [], tuned = false,
+  ): HTMLElement {
+    const cur = items.find((i) => i[0] === value) ?? items[0];
+    const open = this.topbarPopover === id;
+    const wrap = el('div', { class: 'tb-pop-wrap' });
+    const button = btn('', () => {
+      this.topbarPopover = open ? null : id;
+      this.buildTopbar();
+    }, {
+      cls: `imenu-btn${open ? ' open' : ''}${tuned ? ' tuned' : ''}`,
+      title: `${title}: ${cur[2]}${cur[3] ? ` — ${cur[3]}` : ''}`,
+    });
+    button.append(icon(cur[1], 17), icon('chevronDown', 9));
+    wrap.append(button);
+    if (open) {
+      const pop = el('div', { class: 'imenu' }, el('div', { class: 'imenu-title', text: title }));
+      for (const [v, ic, label, hint] of items) {
+        const row = el('div', { class: `imenu-row${v === value ? ' active' : ''}`, title: hint ?? '' },
+          icon(ic, 16), el('span', { text: label }));
+        row.onclick = () => { this.topbarPopover = null; onPick(v); this.refresh(); };
+        pop.append(row);
+      }
+      if (extra.length) pop.append(el('div', { class: 'imenu-extra' }, ...extra));
+      wrap.append(pop);
+      // Centred under its button, a menu near either end of the bar (or on
+      // a wrapped second row, which starts at the left edge) runs off the
+      // window; once laid out, nudge it back inside with a small margin.
+      requestAnimationFrame(() => {
+        const r = pop.getBoundingClientRect();
+        const pad = 6;
+        let dx = 0;
+        if (r.left < pad) dx = pad - r.left;
+        else if (r.right > innerWidth - pad) dx = innerWidth - pad - r.right;
+        if (dx) pop.style.transform = `translateX(calc(-50% + ${dx}px))`;
+      });
+    }
+    return wrap;
+  }
+
+  /**
    * WHERE THINGS LAND — Placement, Plane and Guide — as one global cluster in
    * the middle of the top bar, the way Blender parks its transform pivot and
    * snapping between the tool's own settings (left) and the view (right).
@@ -1114,55 +1168,48 @@ export class UI {
    * These decide where every placed or MOVED point resolves: a stroke, a
    * shape, a measurement, and a point dragged with G in Edit mode, which
    * unprojects both pointer positions through exactly the same chain
-   * (`screenToWorld`). They used to live inside Draw mode's tool settings,
-   * so in Edit mode the settings moving your points were invisible, and the
-   * Measure tool had to borrow them one mode at a time.
-   *
-   * The per-placement refinements (Lock, Smooth, Offset, Target, shape
-   * snapping) live in a popover behind the ⋯ button, which lights up when
-   * any of them is set away from its default — hidden settings that are
-   * quietly ON are the worst kind.
+   * (`screenToWorld`). Each is an icon dropdown; a placement's refinements
+   * (Lock, Smooth, Offset, Target, shape snapping) are a section at the foot
+   * of the Placement menu.
    */
   private placementCluster(): Node[] {
     const s = this.app.ctx.settings;
-    const opts = this.placementOptions();
     const tuned = s.placementLock || s.placementSmooth || s.surfaceOffset !== 0
       || s.strokeTarget !== 'ALL' || s.shapeSnap !== 'ENDS';
-    const nodes: Node[] = [
-      tip(selectField('Place', s.placement, [['ORIGIN', 'Origin'], ['CURSOR', '3D Cursor'], ['SURFACE', 'Surface'], ['SURFACE_PERP', 'Surface ⊥'], ['STROKE', 'Stroke'], ['STROKE_PERP', 'Stroke ⊥'], ['SPLAT', 'Splat (nearest)'], ['NEAREST', 'Nearest Object']] as [PlacementMode, string][],
-        (v) => { s.placement = v; this.refresh(); }),
-        'Placement — what a new point lands on: the drawing plane through the origin or the 3D cursor, '
-          + 'a surface, a stroke, a splat, or whatever object is nearest'),
+    const zUp = s.upAxis === 'Z';
+    return [
+      this.iconMenu('place', 'Placement', s.placement, [
+        ['ORIGIN', 'placeOrigin', 'Origin', 'the drawing plane through the active object'],
+        ['CURSOR', 'placeCursor', '3D Cursor', 'the drawing plane through the 3D cursor'],
+        ['SURFACE', 'placeSurface', 'Surface', 'onto the mesh, splat or body under the pointer'],
+        ['SURFACE_PERP', 'placeSurfacePerp', 'Surface ⊥', 'start on a surface, then grow straight out of it'],
+        ['STROKE', 'placeStroke', 'Stroke', 'at the depth of the nearest stroke; a stroke’s ends land on it'],
+        ['STROKE_PERP', 'placeStrokePerp', 'Stroke ⊥', 'start on a stroke, then grow across it'],
+        ['SPLAT', 'placeSplat', 'Splat (nearest)', 'at the depth of the nearest splat'],
+        ['NEAREST', 'placeNearest', 'Nearest Object', 'onto whatever geometry is nearest the pointer'],
+      ] as [PlacementMode, IconName, string, string][], (v) => { s.placement = v; }, this.placementOptions(), tuned),
+      this.iconMenu('plane', 'Plane', s.plane, [
+        ['VIEW', 'planeView', 'View', 'facing the camera'],
+        ['VIEW_ORIGIN', 'planeViewOrigin', 'View at Origin', 'facing the camera, through wherever a stroke starts'],
+        ['UPRIGHT', 'planeUpright', 'Up from Ground', 'start on the floor, then grow straight up — draw the plan with Top, lift it with this'],
+        ['FRONT', 'planeFront', zUp ? 'Front (X·Z)' : 'Front (X·Y)', ''],
+        ['SIDE', 'planeSide', zUp ? 'Side (Y·Z)' : 'Side (Z·Y)', ''],
+        ['TOP', 'planeTop', zUp ? 'Top (X·Y)' : 'Top (X·Z)', 'the floor'],
+        ['CURSOR', 'planeCursor', 'Cursor', 'the 3D cursor’s own orientation'],
+      ] as [PlaneMode, IconName, string, string][], (v) => { s.plane = v; }),
+      this.iconMenu('guide', 'Guide', s.guide.type, [
+        ['NONE', 'guideNone', 'No Guide'],
+        ['CIRCULAR', 'guideCircular', 'Circular', 'circles about the 3D cursor'],
+        ['RADIAL', 'guideRadial', 'Radial', 'rays from the 3D cursor'],
+        ['PARALLEL', 'guideParallel', 'Parallel', 'lines at the guide angle'],
+        ['GRID', 'guideGrid', 'Grid', 'a screen grid'],
+        ['ISO', 'guideIso', 'Isometric', 'an isometric lattice'],
+      ] as [GuideType, IconName, string, string?][], (v) => { s.guide.type = v; }),
     ];
-    if (opts.length) {
-      const wrap = el('div', { class: 'tb-pop-wrap' });
-      wrap.append(btn(icon('adjustments', 14), () => {
-        this.topbarPopover = this.topbarPopover === 'placement' ? null : 'placement';
-        this.buildTopbar();
-      }, {
-        cls: `icon-btn${tuned ? ' tuned' : ''}${this.topbarPopover === 'placement' ? ' active' : ''}`,
-        title: tuned ? 'Placement options (some are set)' : 'Placement options',
-      }));
-      if (this.topbarPopover === 'placement') wrap.append(el('div', { class: 'tb-pop' }, ...opts));
-      nodes.push(wrap);
-    }
-    nodes.push(
-      tip(selectField('Plane', s.plane, (s.upAxis === 'Z'
-        ? [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['UPRIGHT', 'Up from Ground'], ['FRONT', 'Front (X·Z)'], ['SIDE', 'Side (Y·Z)'], ['TOP', 'Top (X·Y)'], ['CURSOR', 'Cursor']]
-        : [['VIEW', 'View'], ['VIEW_ORIGIN', 'View at Origin'], ['UPRIGHT', 'Up from Ground'], ['FRONT', 'Front (X·Y)'], ['SIDE', 'Side (Z·Y)'], ['TOP', 'Top (X·Z)'], ['CURSOR', 'Cursor']]) as [PlaneMode, string][],
-      (v) => { s.plane = v; }),
-      'Plane — the surface a point lands on when nothing is snapped. Up from Ground: a stroke starts on '
-        + 'the floor (or on whatever the Placement snaps it to) and grows straight up on a vertical plane '
-        + 'facing you. Draw the plan with Top, then lift it with this.'),
-      tip(selectField('Guide', s.guide.type, [['NONE', 'No Guide'], ['CIRCULAR', 'Circular'], ['RADIAL', 'Radial'], ['PARALLEL', 'Parallel'], ['GRID', 'Grid'], ['ISO', 'Isometric']] as [GuideType, string][],
-        (v) => { s.guide.type = v; }),
-      'Guide — constrain the pointer on screen: parallel lines, circles or rays about the 3D cursor, a grid'),
-    );
-    return nodes;
   }
 
-  /** The refinements of the current placement, for the ⋯ popover. Empty
-   *  when the placement has none, in which case the button is not shown. */
+  /** The refinements of the current placement, for the foot of the
+   *  Placement menu. Empty when the placement has none. */
   private placementOptions(): Node[] {
     const s = this.app.ctx.settings;
     const seeking = s.placement === 'SURFACE' || s.placement === 'STROKE'
@@ -1193,7 +1240,7 @@ export class UI {
   }
 
   /** which top-bar popover is open, if any (runtime UI state) */
-  private topbarPopover: 'placement' | null = null;
+  private topbarPopover: string | null = null;
   private popoverCloserBound = false;
 
   private buildTopbar(): void {
@@ -1328,18 +1375,24 @@ export class UI {
     // drawing plane.
     centre.append(
       iconCheckbox(icon('magnet'), 'Magnet snapping', s.snap.enabled, (v) => { s.snap.enabled = v; this.app.savePrefs(); }),
-      selectField('', s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode, [
-        ['INCREMENT', 'Increment'], ['GRID', 'Grid'], ['POINT', 'Vertex'],
-        ['EDGE', 'Edge'], ['EDGE_CENTER', 'Edge Center'], ['EDGE_PERP', 'Edge Perpendicular'],
-        ['SURFACE', 'Face Project'], ['FACE_CENTER', 'Face Center'], ['FACE_NEAREST', 'Face Nearest'],
-        ['OBJECT', 'Object Origin'],
-      ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); }),
-      ...(['POINT', 'EDGE', 'EDGE_CENTER', 'EDGE_PERP'].includes(s.snap.mode) ? [
-        selectField('', s.snap.strokeScope ?? 'ANY', [
+      this.iconMenu('snap', 'Snap Target', (s.snap.mode === 'CANVAS' ? 'SURFACE' : s.snap.mode) as string, [
+        ['INCREMENT', 'snapIncrement', 'Increment', 'round to the grid step'],
+        ['GRID', 'snapGrid', 'Grid', 'the visible floor grid'],
+        ['POINT', 'snapVertex', 'Vertex', 'stroke points'],
+        ['EDGE', 'snapEdge', 'Edge', 'anywhere along a stroke'],
+        ['EDGE_CENTER', 'snapEdgeCenter', 'Edge Center', 'the middle of a stroke segment'],
+        ['EDGE_PERP', 'snapEdgePerp', 'Edge Perpendicular', 'the foot of a perpendicular onto a stroke'],
+        ['SURFACE', 'snapFace', 'Face Project', 'onto the surface under the pointer'],
+        ['FACE_CENTER', 'snapFaceCenter', 'Face Center', 'the centre of the face under the pointer'],
+        ['FACE_NEAREST', 'snapFaceNearest', 'Face Nearest', 'the nearest point on the face under the pointer'],
+        ['OBJECT', 'snapObject', 'Object Origin', 'object origins'],
+      ], (v) => { s.snap.mode = v as typeof s.snap.mode; this.app.savePrefs(); },
+      ['POINT', 'EDGE', 'EDGE_CENTER', 'EDGE_PERP'].includes(s.snap.mode) ? [
+        tip(selectField('Strokes', s.snap.strokeScope ?? 'ANY', [
           ['ANY', 'Any GP'], ['SELECTED', 'Selected only'],
-        ], (v) => { s.snap.strokeScope = v as 'ANY' | 'SELECTED'; this.app.savePrefs(); },
-        ),
-      ] : []),
+        ], (v) => { s.snap.strokeScope = v as 'ANY' | 'SELECTED'; this.app.savePrefs(); this.buildTopbar(); }),
+        'which strokes the magnet may snap to'),
+      ] : [], (s.snap.strokeScope ?? 'ANY') !== 'ANY'),
     );
 
     // Viewport shading, pushed to the far right the way Blender parks it

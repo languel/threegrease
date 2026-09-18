@@ -103,9 +103,16 @@ Key invariants:
   mode's G unprojects both pointer positions through `screenToWorld` — and
   they used to be hidden in Edit mode while moving its points. The
   per-placement refinements (Lock, Smooth, Offset, Target, shape snapping)
-  sit in a popover behind the ⋯ button, which turns orange when any of them
-  is away from its default: a hidden setting that is quietly ON is the worst
-  kind.
+  are a section at the foot of the Placement menu, and an orange dot on its
+  bar icon says when any of them is away from its default: a hidden setting
+  that is quietly ON is the worst kind.
+  Placement, Plane, Guide and the magnet's Snap Target are ICON dropdowns
+  (`UI.iconMenu`): the bar shows only the current choice's glyph (every
+  choice has its own, in `icons.ts`), its name is the tooltip, and opening it
+  lists every choice with icon AND name, the current one lit, with any
+  further settings as sections below — Blender's transform header. Menus are
+  centred under their button and then nudged back inside the window, since
+  near either end of the bar (or on a wrapped second row) they ran off it.
 - **A checkbox's NAME goes in the label column and the box in the value
   column**, like every other row. It used to carry its own text, which put it
   the other way round — box first, name second, both adrift in the value

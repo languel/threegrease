@@ -783,3 +783,35 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .tb-pop > .field-row { display: contents; }
 /* an options button whose hidden settings are not at their defaults */
 .icon-btn.tuned { color: var(--accent2); }
+
+/* Icon dropdowns in the header (Blender's transform header): the bar shows
+   only the current choice's glyph; the menu lists every choice with its
+   icon and its name. */
+.imenu-btn {
+  display: flex; align-items: center; gap: 2px; padding: 3px 5px;
+  position: relative;
+}
+.imenu-btn.open { background: var(--accent); border-color: var(--accent); color: #fff; }
+.imenu-btn.tuned::after {
+  content: ''; position: absolute; top: 2px; right: 2px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--accent2);
+}
+.imenu {
+  position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  z-index: 60; min-width: 210px; padding: 6px; border-radius: 7px;
+  background: var(--panel); border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.imenu-title { color: var(--dim); font-size: 11px; padding: 2px 8px 6px; }
+.imenu-row {
+  display: flex; align-items: center; gap: 9px; padding: 5px 8px; border-radius: 4px;
+  cursor: pointer; white-space: nowrap;
+}
+.imenu-row:hover { background: #35353c; }
+.imenu-row.active { background: var(--accent); color: #fff; }
+.imenu-extra {
+  margin-top: 6px; padding: 8px 4px 2px; border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center;
+}
+.imenu-extra > .field-row { display: contents; }
