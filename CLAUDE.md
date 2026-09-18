@@ -360,6 +360,20 @@ the browser console or automated evals:
   HUD — goes through `withPane(this.pointerPane)` (`paneHud` for the 2D
   part: translated and clipped to the pane), or it lands where the pointer
   would be in the full-size view.
+  Everything else that reads the pointer goes through the pane too: the
+  G/R/S modals (begun through `pointerPane`, which stays frozen while one
+  runs, and updated through it), their axis keys and radius wheel, Shift+RMB
+  cursor placement, object picking, and the `hud._pointer` the brush circles
+  read — that one was set from the raw event, so in a side pane the circle
+  drew offset from the pointer and the brush seemed not to follow it. The
+  mode pie is placed in the PAGE, so it takes `canvasPointer()` (the
+  pane-relative pointer added back to the pane's corner).
+  LEAVING quad view with the pointer over an ortho pane makes that view the
+  single view (`Navigation.adoptOrthoView`, Maya's rule): its direction,
+  framing and target, but at the current orbit distance — a pane camera sits
+  hundreds of units out, which as an orbit distance would make every later
+  orbit swing wildly. `hoverPane` is cleared on pointerleave, so toggling
+  from the menu bar keeps the perspective view.
   Measurements are drawn in EVERY pane (`eachPaneHud`) — they are scene
   objects that happen to be drawn on the HUD, so a quad view must show them
   through all four cameras, draft included.
@@ -397,6 +411,12 @@ the browser console or automated evals:
   triangle under the pointer), Edge (poly edge, anywhere along a stroke, the
   nearest side of that triangle), Face (poly face, mesh surface). Mesh
   "edges" are the renderer's triangles, so a box face's diagonal counts.
+- **The outliner has keyboard focus when the last pointerdown was in it**
+  (`App.outlinerFocused`; rows are divs rebuilt on every refresh, so DOM
+  focus cannot say). X, Delete and Cmd+Backspace then delete the SELECTED
+  OBJECTS in any mode — in Draw or Edit mode X otherwise means "delete
+  strokes", which is not what clicking a row in the object list asks for. A
+  drawing mode that deletes its last pencil gets a fresh one.
 - **A new pencil continues the last one** (`App.newPencil`): its material
   slots and active slot are copied from the GP object last active
   (`lastPencil`, held by reference so a deleted object still answers), not

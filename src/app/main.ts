@@ -907,6 +907,9 @@ class App implements AppHandle {
    *  through the same pane or it lands where the pointer would be in the
    *  full-size view */
   private pointerPane: PaneId | null = null;
+  /** the pane the pointer is over right now (null once it leaves the
+   *  viewport) — what leaving quad view keeps */
+  private hoverPane: PaneId | null = null;
 
   /** Which quad-view pane a client point is over (null outside quad view). */
   private paneAt(clientX: number, clientY: number): PaneId | null {
@@ -961,6 +964,35 @@ class App implements AppHandle {
       ctx.canvas = real;
       ctx.camera = savedCam;
     }
+  }
+
+  /** a pointer went down in the outliner and nowhere else since: keys then
+   *  act on its object selection (see onKey) */
+  private outlinerFocused = false;
+
+  private deleteSelectedObjects(): void {
+    const ctx = this.ctx;
+    const refs = listSelected(ctx.scene);
+    if (!refs.length) return;
+    ctx.pushUndo();
+    for (const ref of refs) deleteObject(ctx.scene, ref);
+    // every mode but Object edits the active pencil, so one must remain
+    if (ctx.settings.mode !== 'OBJECT' && !ctx.scene.objects.length) {
+      ctx.scene.objects.push(this.newPencil('Pencil1'));
+      ctx.scene.activeObject = 0;
+    }
+    this.syncCanvases();
+    this.gp.markDirty();
+    this.refreshWidget();
+    this.ui.refresh();
+  }
+
+  /** `tools.lastPointer` back in whole-canvas px (it is pane-relative in
+   *  quad view), for things placed in the page rather than in a view */
+  private canvasPointer(): { x: number; y: number } {
+    const p = this.tools.lastPointer;
+    const r = this.pointerPane && this.quadView && this.paneRects ? this.paneRects[this.pointerPane] : null;
+    return r ? { x: p.x + r.x, y: p.y + r.y } : p;
   }
 
   private toolEvent(e: PointerEvent): ToolEvent {
@@ -1027,12 +1059,14 @@ class App implements AppHandle {
       e.stopImmediatePropagation();
       e.preventDefault();
       this.cursorDrag = true;
-      this.placeCursor(e.clientX, e.clientY);
+      this.pointerPane = this.paneAt(e.clientX, e.clientY);
+      this.withPane(this.pointerPane, () => this.placeCursor(e.clientX, e.clientY));
       this.capture(e);
     }, { capture: true });
 
     canvas.addEventListener('pointerdown', (e) => {
-      (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer = this.toolEvent(e);
+      (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer =
+        this.withPane(this.paneAt(e.clientX, e.clientY), () => this.toolEvent(e));
       if (this.nav.flying) {
         // possession keeps the mouse for looking around: Enter/Esc exit,
         // a click does not (it is the character's action button)
@@ -1063,7 +1097,7 @@ class App implements AppHandle {
       }
       if (e.button !== 0) return;
       if (this.objectPicking) {
-        const hit = this.objectPick.pick(this.ctx, this.toolEvent(e));
+        const hit = this.withPane(this.paneAt(e.clientX, e.clientY), () => this.objectPick.pick(this.ctx, this.toolEvent(e)));
         const cb = this.objectPicking;
         this.objectPicking = null;
         this.ctx.canvas.style.cursor = 'default';
@@ -1081,9 +1115,13 @@ class App implements AppHandle {
 
     canvas.addEventListener('pointermove', (e) => {
       const te = this.toolEvent(e);
-      (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer = te;
+      // brush circles are drawn through the pointer's pane (paneHud), so the
+      // position they read must be relative to that pane as well
+      (this.hud as HTMLCanvasElement & { _pointer?: { x: number; y: number } })._pointer = this.withPane(
+        this.tools.isPointerDown || this.modal.active || this.objModal.active ? this.pointerPane : this.paneAt(e.clientX, e.clientY),
+        () => this.toolEvent(e));
       if (this.cursorDrag) {
-        this.placeCursor(e.clientX, e.clientY);
+        this.withPane(this.pointerPane, () => this.placeCursor(e.clientX, e.clientY));
         return;
       }
       if (this.gizmoDrag) {
@@ -1104,21 +1142,23 @@ class App implements AppHandle {
         return;
       }
       if (this.objModal.active) {
-        this.objModal.update(this.ctx, te, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+        this.withPane(this.pointerPane, () => this.objModal.update(this.ctx, this.toolEvent(e), { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey }));
         return;
       }
-      if (this.modal.active) { this.modal.update(this.ctx, te); return; }
+      if (this.modal.active) { this.withPane(this.pointerPane, () => this.modal.update(this.ctx, this.toolEvent(e))); return; }
       // coalesced events give smoother strokes
       const coalesced = e.getCoalescedEvents?.();
       const events = coalesced && coalesced.length ? coalesced : [e];
       // a gesture keeps the pane it started in; a hover follows the pointer
       const pane = this.tools.isPointerDown ? this.inputPane : this.paneAt(e.clientX, e.clientY);
       this.pointerPane = pane;
+      this.hoverPane = this.paneAt(e.clientX, e.clientY);
       this.withPane(pane, () => {
         for (const ce of events) this.tools.handleMove(this.ctx, this.toolEvent(ce as PointerEvent));
       });
     });
 
+    canvas.addEventListener('pointerleave', () => { this.hoverPane = null; });
     canvas.addEventListener('pointerup', (e) => {
       if (e.button === 2) {
         if (this.cursorDrag) { this.cursorDrag = false; return; }
@@ -1148,7 +1188,7 @@ class App implements AppHandle {
 
     canvas.addEventListener('wheel', (e) => {
       if (this.modal.active && this.ctx.settings.propEdit.enabled) {
-        this.modal.adjustRadius(this.ctx, -e.deltaY, this.tools.lastPointer);
+        this.withPane(this.pointerPane, () => this.modal.adjustRadius(this.ctx, -e.deltaY, this.tools.lastPointer));
         e.preventDefault();
         return;
       }
@@ -1166,6 +1206,12 @@ class App implements AppHandle {
     }, { passive: false });
 
     window.addEventListener('keydown', (e) => this.onKey(e));
+    // outliner "focus": the rows are plain divs rebuilt on every refresh, so
+    // DOM focus cannot say whether you are working in the list — the last
+    // pointerdown can
+    window.addEventListener('pointerdown', (e) => {
+      this.outlinerFocused = !!(e.target as HTMLElement)?.closest?.('.sidebar-outliner');
+    }, true);
 
     // Dropdowns keep keyboard focus after a pick (or after Escape closes
     // the native popup without picking), which silently disables every
@@ -1244,6 +1290,16 @@ class App implements AppHandle {
     const mod = e.ctrlKey || e.metaKey;
 
     if (this.ui.settingsOpen) return; // dialog handles its own keys
+    // The OUTLINER has focus: X / Delete / Cmd+Backspace delete the objects
+    // selected there, whatever the mode. In Draw or Edit mode X means "delete
+    // strokes", which is not what someone who just clicked a row in the
+    // object list is asking for.
+    if (this.outlinerFocused && !e.repeat
+      && ((key === 'x' || key === 'X') && !mod || key === 'Delete' || (key === 'Backspace' && mod))) {
+      e.preventDefault();
+      this.deleteSelectedObjects();
+      return;
+    }
     if (this.objectPicking && key === 'Escape') {
       const cb = this.objectPicking;
       this.objectPicking = null;
@@ -1289,9 +1345,9 @@ class App implements AppHandle {
       else if (key === 'g' || key === 'G') om.switchKind(ctx, 'move');
       else if (key === 'r' || key === 'R') om.switchKind(ctx, 'rotate');
       else if (key === 's' || key === 'S') om.switchKind(ctx, 'scale');
-      else if (key === 'x' || key === 'X') om.setAxis(ctx, 'x', e.shiftKey);
-      else if (key === 'y' || key === 'Y') om.setAxis(ctx, 'y', e.shiftKey);
-      else if (key === 'z' || key === 'Z') om.setAxis(ctx, 'z', e.shiftKey);
+      else if (key === 'x' || key === 'X') this.withPane(this.pointerPane, () => om.setAxis(ctx, 'x', e.shiftKey));
+      else if (key === 'y' || key === 'Y') this.withPane(this.pointerPane, () => om.setAxis(ctx, 'y', e.shiftKey));
+      else if (key === 'z' || key === 'Z') this.withPane(this.pointerPane, () => om.setAxis(ctx, 'z', e.shiftKey));
       else om.handleNumeric(ctx, key);
       e.preventDefault();
       return;
@@ -1321,9 +1377,9 @@ class App implements AppHandle {
     if (this.modal.active) {
       if (key === 'Escape') { this.modal.cancel(ctx); }
       else if (key === 'Enter') { this.modal.confirm(ctx); }
-      else if (key === 'x' || key === 'X') this.modal.setAxis('x', ctx, this.tools.lastPointer);
-      else if (key === 'y' || key === 'Y') this.modal.setAxis('y', ctx, this.tools.lastPointer);
-      else if (key === 'z' || key === 'Z') this.modal.setAxis('z', ctx, this.tools.lastPointer);
+      else if (key === 'x' || key === 'X') this.withPane(this.pointerPane, () => this.modal.setAxis('x', ctx, this.tools.lastPointer));
+      else if (key === 'y' || key === 'Y') this.withPane(this.pointerPane, () => this.modal.setAxis('y', ctx, this.tools.lastPointer));
+      else if (key === 'z' || key === 'Z') this.withPane(this.pointerPane, () => this.modal.setAxis('z', ctx, this.tools.lastPointer));
       e.preventDefault();
       return;
     }
@@ -1387,7 +1443,7 @@ class App implements AppHandle {
       case 'toggleMaximize': this.togglePresentation(); break;
       case 'toggleEdit': this.toggleLastMode(); break;
       case 'modeObject': this.setMode('OBJECT'); break;
-      case 'modePie': this.ui.openModePie(this.tools.lastPointer); break;
+      case 'modePie': this.ui.openModePie(this.canvasPointer()); break;
       case 'modeDraw': this.setMode('DRAW'); break;
       case 'modeEdit': this.setMode('EDIT'); break;
       case 'modeSculpt': this.setMode('SCULPT'); break;
@@ -1403,16 +1459,22 @@ class App implements AppHandle {
       case 'toolErase': if (ctx.settings.mode === 'DRAW') this.setTool('erase'); break;
       case 'toolFill': if (ctx.settings.mode === 'DRAW') this.setTool('fill'); break;
       case 'move':
-        if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'move', this.tools.lastPointer);
-        else if (this.editLike()) this.modal.begin(ctx, 'move', this.tools.lastPointer);
+        this.withPane(this.pointerPane, () => {
+          if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'move', this.tools.lastPointer);
+          else if (this.editLike()) this.modal.begin(ctx, 'move', this.tools.lastPointer);
+        });
         break;
       case 'rotate':
-        if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'rotate', this.tools.lastPointer);
-        else if (this.editLike()) this.modal.begin(ctx, 'rotate', this.tools.lastPointer);
+        this.withPane(this.pointerPane, () => {
+          if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'rotate', this.tools.lastPointer);
+          else if (this.editLike()) this.modal.begin(ctx, 'rotate', this.tools.lastPointer);
+        });
         break;
       case 'scale':
-        if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'scale', this.tools.lastPointer);
-        else if (this.editLike()) this.modal.begin(ctx, 'scale', this.tools.lastPointer);
+        this.withPane(this.pointerPane, () => {
+          if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'scale', this.tools.lastPointer);
+          else if (this.editLike()) this.modal.begin(ctx, 'scale', this.tools.lastPointer);
+        });
         break;
       case 'selectAll': if (this.editLike()) { selectAll(ctx, 'all'); this.gp.markDirty(); } break;
       case 'selectNone': if (this.editLike()) { selectAll(ctx, 'none'); this.gp.markDirty(); } break;
@@ -1426,18 +1488,7 @@ class App implements AppHandle {
       case 'selectMore': if (this.editLike()) { selectMoreLess(ctx, true); this.gp.markDirty(); } break;
       case 'selectLess': if (this.editLike()) { selectMoreLess(ctx, false); this.gp.markDirty(); } break;
       case 'delete':
-        if (ctx.settings.mode === 'OBJECT') {
-          const refs = listSelected(ctx.scene);
-          if (refs.length) {
-            ctx.pushUndo();
-            for (const ref of refs) deleteObject(ctx.scene, ref);
-            this.syncCanvases();
-            this.gp.markDirty();
-            this.refreshWidget();
-            this.ui.refresh();
-          }
-          break;
-        }
+        if (ctx.settings.mode === 'OBJECT') { this.deleteSelectedObjects(); break; }
         // DRAW mode shares edit mode's stroke selection (restyling picks
         // strokes there), so X has to delete them too, not silently no-op
         if (this.editLike() || ctx.settings.mode === 'DRAW') {
@@ -1461,7 +1512,7 @@ class App implements AppHandle {
         if (ctx.settings.mode === 'OBJECT') this.duplicateSelectedObjects();
         else if (this.editLike()) {
           ops.duplicateSelected(ctx);
-          this.modal.begin(ctx, 'move', this.tools.lastPointer);
+          this.withPane(this.pointerPane, () => this.modal.begin(ctx, 'move', this.tools.lastPointer));
         }
         break;
       case 'copy': ops.copySelected(ctx); break;
@@ -1785,6 +1836,11 @@ class App implements AppHandle {
    *  so drawing/navigating currently still targets the single active camera
    *  regardless of which pane it visually renders into. */
   toggleQuadView(): void {
+    // leaving the four-up with the pointer over an ortho pane: that view
+    // becomes the single view (Maya), rather than always the perspective
+    const from = this.quadView && this.hoverPane && this.hoverPane !== 'persp'
+      ? this.orthoPanes.find((p) => p.id === this.hoverPane) : undefined;
+    if (from) this.nav.adoptOrthoView(from.camera, from.target);
     this.quadView = !this.quadView;
     if (this.quadView) {
       // reframe the 3 ortho panes from the persp camera's CURRENT distance,
@@ -4964,13 +5020,13 @@ class App implements AppHandle {
       g.font = '13px sans-serif';
       g.fillText('FLY — WASD move · Q/E down/up · wheel speed · Shift boost · Enter/click accept · Esc cancel', 16, 24);
     }
-    if (this.modal.active && this.ctx.settings.propEdit.enabled) {
+    if (this.modal.active && this.ctx.settings.propEdit.enabled) this.paneHud(g, () => {
       const { x, y } = this.tools.lastPointer;
       g.beginPath();
       g.arc(x, y, this.ctx.settings.propEdit.radius, 0, Math.PI * 2);
       g.strokeStyle = 'rgba(160,160,170,0.5)';
       g.stroke();
-    }
+    });
     g.restore();
   }
 

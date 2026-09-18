@@ -200,6 +200,29 @@ export class Navigation {
     this.controls.update();
   }
 
+  /**
+   * Take over an orthographic view — a quad-view pane's — as the single view:
+   * its direction, its framing and its target, at the current orbit distance
+   * (a pane camera sits hundreds of units out, which as an orbit distance
+   * would make every later orbit swing wildly). Maya's rule when you leave
+   * the four-up: the view you were pointing at is the one you get.
+   */
+  adoptOrthoView(cam: THREE.OrthographicCamera, target: THREE.Vector3): void {
+    if (this.flying) return;
+    const d = this.distance;
+    const dir = cam.position.clone().sub(target).normalize();
+    this.target.copy(target);
+    this.ortho.position.copy(target).addScaledVector(dir, d);
+    this.ortho.quaternion.copy(cam.quaternion);
+    this.active = this.ortho;
+    this.syncOrthoFrustum();
+    const paneH = (cam.top - cam.bottom) / cam.zoom;
+    this.ortho.zoom = Math.max(0.05, (this.ortho.top - this.ortho.bottom) / paneH);
+    this.ortho.updateProjectionMatrix();
+    this.controls.object = this.active;
+    this.controls.update();
+  }
+
   snapView(view: ViewName): void {
     if (this.flying) return;
     const [dir, up] = viewDirs(this.upAxis)[view];
