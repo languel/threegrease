@@ -886,6 +886,13 @@ const MESH_EDIT_TOOLS: [string, IconName, string][] = [
   ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
 ];
 
+/** A light's own glyph — projector when it throws a picture, else its kind. */
+function lightIcon(l: TGLight): IconName {
+  if (l.kind === 'SPOT' && l.projection?.src) return 'lightProjector';
+  return l.kind === 'AMBIENT' ? 'lightAmbient' : l.kind === 'SUN' ? 'lightSun'
+    : l.kind === 'POINT' ? 'lightPoint' : 'lightSpot';
+}
+
 export class UI {
   private app: AppHandle;
   private tlCanvas: HTMLCanvasElement;
@@ -1868,9 +1875,16 @@ export class UI {
       'The picture sits in the beam at this shape, its diagonal across the cone — so the lit patch is the projector\'s rectangle, not a circle.')),
       fieldRow('Fit', selectField('', p.fit ?? 'CONTAIN', [['CONTAIN', 'Fit inside'], ['COVER', 'Fill (crop)']],
         (v) => set({ fit: v as 'CONTAIN' | 'COVER' }))),
+      checkbox('Flat (ignore lighting)', !!p.flat, (v) => set({ flat: v }),
+        'The picture is added to the surfaces at its own brightness instead of being thrown as light: '
+        + 'undimmed, untinted, unaffected by anything else lighting the room — a projection in a blacked-out '
+        + 'room, and how you want to see media while placing it. It shows in every shading mode, and is '
+        + 'blocked by objects only when the light casts shadows.'),
       fieldRow('Brightness', slider('', p.gain ?? 1, 0, 2, 0.05, (v) => { set({ gain: v }); }, { def: 1 })),
       fieldRow('Rotate', slider('', p.rotation ?? 0, -Math.PI, Math.PI, 0.01, (v) => { set({ rotation: v }); }, { def: 0 })),
       checkbox('Mirror', !!p.flip, (v) => set({ flip: v }), 'rear projection'),
+      ...this.projectorMaskRows(l, set),
+      ...this.projectorBlendRows(l, set),
       el('div', { class: 'row', text: throwAt
         ? `throw ${unit(throwAt.distance)} · image ${unit(throwAt.width)} × ${unit(throwAt.height)}`
         : 'throw — nothing in the beam' }),
@@ -1888,6 +1902,55 @@ export class UI {
       rows.push(row);
     }
     return rows;
+  }
+
+  /** The MASK: a picture whose brightness multiplies the projection, so it
+   *  can be kept off a ceiling or inside a shape. */
+  private projectorMaskRows(l: TGLight, set: (patch: Partial<NonNullable<TGLight['projection']>>) => void): Node[] {
+    const p = l.projection!;
+    const pick = el('input', { type: 'file', accept: 'image/*' }) as HTMLInputElement;
+    pick.style.display = 'none';
+    pick.onchange = () => {
+      const f = pick.files?.[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () => set({ maskSrc: String(r.result), maskName: f.name });
+      r.readAsDataURL(f);
+    };
+    const btnEl: HTMLElement = btn(p.maskSrc ? (p.maskName ?? 'mask') : 'none…', () => {
+      const r = btnEl.getBoundingClientRect();
+      const usable = listAssets().filter((a) => a.kind === 'MESH' && !!assetTexture(a));
+      this.openContextMenu(r.left, r.bottom + 2, [
+        { header: 'Mask with' },
+        ...usable.map((a) => ({ label: a.name, do: () => set({ maskSrc: assetTexture(a)!, maskName: a.name }) })),
+        ...(usable.length ? [{ sep: true as const }] : []),
+        { label: 'From a file…', do: () => pick.click() },
+        ...(p.maskSrc ? [{ label: 'No mask', do: () => set({ maskSrc: null, maskName: undefined }) }] : []),
+      ]);
+    }, { title: 'A picture whose brightness multiplies the projection: black hides, white shows' });
+    return [
+      fieldRow('Mask', el('div', { class: 'row' }, btnEl, pick)),
+      ...(p.maskSrc ? [checkbox('Invert mask', !!p.maskInvert, (v) => set({ maskInvert: v }))] : []),
+    ];
+  }
+
+  /** EDGE BLEND: the ramp each edge fades over, for overlapping projectors. */
+  private projectorBlendRows(l: TGLight, set: (patch: Partial<NonNullable<TGLight['projection']>>) => void): Node[] {
+    const p = l.projection!;
+    const b = p.blend ?? {};
+    const edge = (key: 'left' | 'right' | 'top' | 'bottom') =>
+      numField(key[0].toUpperCase(), b[key] ?? 0,
+        (v) => set({ blend: { ...b, [key]: Math.max(0, Math.min(0.5, v)) } }), 0.01, { def: 0, min: 0, max: 0.5 });
+    const on = !!(b.left || b.right || b.top || b.bottom);
+    return [
+      tip(el('div', { class: 'row' },
+        el('span', { class: 'grow', text: 'Edge blend' }),
+        edge('left'), edge('right'), edge('top'), edge('bottom'),
+      ), 'How far in from each edge the picture fades to black, as a fraction of its size — overlap two '
+        + 'projectors and fade each across the overlap so the seam disappears instead of doubling in brightness.'),
+      ...(on ? [fieldRow('Blend curve', slider('', b.gamma ?? 1, 0.3, 3, 0.05,
+        (v) => set({ blend: { ...b, gamma: v } }), { def: 1, title: 'the ramp\'s shape; raise it if the overlap still reads bright' }))] : []),
+    ];
   }
 
   openStrokeOpsContextMenu(clientX: number, clientY: number): void {
@@ -3212,7 +3275,8 @@ export class UI {
         toggleSel((v) => { ob.select = v; }, !!ob.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
-        btn(icon('arrowDownTray'), () => this.app.exportActiveGP(), { cls: 'icon-btn', title: 'Export this GP object' }),
+        // no export button here: it is on the right-click menu, and a row
+        // of buttons you rarely press is a row you read past
         ...viewLockBtns(
           { kind: 'GP', id: ob.id },
           !!ob.hide, (v) => { ob.hide = v; ctx.requestRender(); },
@@ -3344,14 +3408,13 @@ export class UI {
       rename: (v) => { m.name = v; },
     });
     for (const l of scene.lights) nodes.push({
-      ref: { kind: 'LIGHT', id: l.id }, icon: icon('boltCircle'), name: l.name,
+      ref: { kind: 'LIGHT', id: l.id }, icon: icon(lightIcon(l)), name: l.name,
       selected: l.select, parent: l.parent,
       onSelect: (e) => {
         this.app.setLastPicked({ kind: 'LIGHT', id: l.id });
         toggleSel((v) => { l.select = v; }, l.select, !!(e?.metaKey || e?.ctrlKey));
       },
       extras: [
-        el('span', { text: l.kind.toLowerCase(), title: 'light type' }),
         ...(l.kind !== 'AMBIENT' ? [btn(l.castShadow ? icon('circle') : icon('dot'),
           () => { l.castShadow = !l.castShadow; this.refresh(); },
           { cls: 'icon-btn', title: 'Cast shadows' })] : []),

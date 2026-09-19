@@ -156,6 +156,8 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)
+- [x] Projectors: FLAT (unlit) projection, edge blending, masking, and
+      "look through the light" (Ctrl+0) to aim one by flying it
 - [x] PROJECTORS: a spot light that throws a picture — a gobo (a shape cut
       into the beam) or a projection (image, video, camera), at a real
       aspect, with the throw readout (distance and image size on what it

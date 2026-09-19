@@ -32,7 +32,7 @@ interface Entry {
   proj?: {
     canvas: HTMLCanvasElement;
     texture: THREE.CanvasTexture;
-    img?: HTMLImageElement;
+    imgs: Map<string, HTMLImageElement>;
     key: string;
     live: boolean;
     frame: number;
@@ -133,14 +133,14 @@ function sourceOf(entry: Entry, src: string): CanvasImageSource | null {
   const live = liveKeyOf(src);
   if (live) return liveSources.get(live)?.canvas ?? liveSources.textureFor(live).image as HTMLCanvasElement;
   const p = entry.proj!;
-  if (p.img?.dataset.src !== src) {
-    const img = new Image();
-    img.dataset.src = src;
-    img.onload = () => { p.frame = -1; };     // force a repaint once it is here
+  let img = p.imgs.get(src);
+  if (!img) {
+    img = new Image();
+    img.onload = () => { p.key = ''; };       // force a repaint once it is here
     img.src = src;
-    p.img = img;
+    p.imgs.set(src, img);
   }
-  return p.img.complete && p.img.naturalWidth ? p.img : null;
+  return img.complete && img.naturalWidth ? img : null;
 }
 
 function makeLight(kind: TGLight['kind']): AnyLight {
@@ -264,29 +264,35 @@ export class LightManager {
       this.shapeBeam(entry, data, 0);
       return;
     }
+    // a FLAT projector's picture is not carried as light (App collects it
+    // for render/projectors.ts instead), so the lamp throws no map
     if (!entry.proj) {
       const canvas = document.createElement('canvas');
       canvas.width = PROJ_SIZE; canvas.height = PROJ_SIZE;
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
-      entry.proj = { canvas, texture, key: '', live: false, frame: -1 };
+      entry.proj = { canvas, texture, imgs: new Map(), key: '', live: false, frame: -1 };
     }
     const p = entry.proj;
     const liveKey = liveKeyOf(src);
     const ls = liveKey ? liveSources.get(liveKey) : undefined;
+    const b = proj!.blend;
     const key = `${src}|${proj!.mode ?? 'PROJECT'}|${proj!.aspect ?? 0}|${proj!.fit ?? 'CONTAIN'}`
-      + `|${proj!.rotation ?? 0}|${proj!.flip ? 1 : 0}|${proj!.gain ?? 1}`;
+      + `|${proj!.rotation ?? 0}|${proj!.flip ? 1 : 0}|${proj!.gain ?? 1}|${proj!.flat ? 1 : 0}`
+      + `|${proj!.maskSrc ?? ''}|${proj!.maskInvert ? 1 : 0}`
+      + `|${b ? [b.left, b.right, b.top, b.bottom, b.gamma].join(',') : ''}`;
     const frame = ls?.frame ?? 0;
     if (key !== p.key || frame !== p.frame) {
       const picture = sourceOf(entry, src);
+      const mask = proj!.maskSrc ? sourceOf(entry, proj!.maskSrc) : null;
       if (picture) {
-        paintProjection(p.canvas, picture, proj!);
+        paintProjection(p.canvas, picture, proj!, mask);
         p.texture.needsUpdate = true;
         p.key = key;
         p.frame = frame;
       }
     }
-    light.map = p.texture;
+    light.map = proj!.flat ? null : p.texture;
     this.shapeBeam(entry, data, proj!.aspect ?? 0);
   }
 
@@ -302,6 +308,13 @@ export class LightManager {
     lines.geometry.dispose();
     lines.geometry = beamLines(angle, aspect, 0.9);
   }
+
+  /** The three.js light for a scene light (flat projectors need its own
+   *  frustum matrix and shadow map). */
+  lightFor(id: number): AnyLight | null { return this.entries.get(id)?.light ?? null; }
+
+  /** The picture a projector is currently throwing, painted into its canvas. */
+  projectionTexture(id: number): THREE.Texture | null { return this.entries.get(id)?.proj?.texture ?? null; }
 
   /** Root for selection glyphs / picking, like MeshManager.rootFor. */
   rootFor(id: number): THREE.Object3D | null { return this.entries.get(id)?.root ?? null; }
@@ -334,7 +347,10 @@ export class LightManager {
  * rectangle rather than three's circular spot. A GOBO is greyscaled, since
  * what a gobo carries is a shape, and the light's own colour tints it.
  */
-function paintProjection(canvas: HTMLCanvasElement, picture: CanvasImageSource, proj: TGProjection): void {
+function paintProjection(
+  canvas: HTMLCanvasElement, picture: CanvasImageSource, proj: TGProjection,
+  mask: CanvasImageSource | null = null,
+): void {
   const g = canvas.getContext('2d')!;
   const S = canvas.width;
   g.setTransform(1, 0, 0, 1, 0, 0);
@@ -371,5 +387,47 @@ function paintProjection(canvas: HTMLCanvasElement, picture: CanvasImageSource, 
   g.rect(-rw / 2, -rh / 2, rw, rh);
   g.clip();
   g.drawImage(picture, -dw / 2, -dh / 2, dw, dh);
+  // MASK and EDGE BLEND multiply what was just drawn, inside the same clip:
+  // black hides, white shows. Both belong here rather than in a shader
+  // because the picture is painted once and BOTH paths — the light's own map
+  // and the flat projector — read this canvas, so they cannot disagree.
+  g.filter = proj.maskInvert ? 'grayscale(1) invert(1)' : 'grayscale(1)';
+  g.globalCompositeOperation = 'multiply';
+  if (mask) g.drawImage(mask, -rw / 2, -rh / 2, rw, rh);
+  g.filter = 'none';
+  const bl = proj.blend;
+  if (bl) {
+    const gamma = bl.gamma ?? 1;
+    // a few stops shaped by gamma: a straight ramp over-brightens the
+    // overlap, which is the whole thing edge blending exists to avoid
+    const ramp = (x0: number, y0: number, x1: number, y1: number) => {
+      const grad = g.createLinearGradient(x0, y0, x1, y1);
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8;
+        const v = Math.round(255 * Math.pow(t, gamma));
+        grad.addColorStop(t, `rgb(${v},${v},${v})`);
+      }
+      return grad;
+    };
+    const L = (bl.left ?? 0) * rw, R = (bl.right ?? 0) * rw;
+    const T = (bl.top ?? 0) * rh, B = (bl.bottom ?? 0) * rh;
+    if (L > 0) {                                    // black at the edge -> white inward
+      g.fillStyle = ramp(-rw / 2, 0, -rw / 2 + L, 0);
+      g.fillRect(-rw / 2, -rh / 2, L, rh);
+    }
+    if (R > 0) {
+      g.fillStyle = ramp(rw / 2, 0, rw / 2 - R, 0);
+      g.fillRect(rw / 2 - R, -rh / 2, R, rh);
+    }
+    if (T > 0) {
+      g.fillStyle = ramp(0, -rh / 2, 0, -rh / 2 + T);
+      g.fillRect(-rw / 2, -rh / 2, rw, T);
+    }
+    if (B > 0) {
+      g.fillStyle = ramp(0, rh / 2, 0, rh / 2 - B);
+      g.fillRect(-rw / 2, rh / 2 - B, rw, B);
+    }
+  }
+  g.globalCompositeOperation = 'source-over';
   g.restore();
 }

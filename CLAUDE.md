@@ -492,6 +492,10 @@ the browser console or automated evals:
     filled on the HUD by the tool.
   - `App.meshEditId` (not the overlay target, which follows the TOOL) says
     Edit is on a mesh, so picking Measure mid-edit keeps the mesh toolbar.
+- Outliner rows carry ICONS, not words: a light's kind (and a projector's
+  own glyph when it throws a picture) rather than the words "ambient",
+  "sun", "spot", which read as labels instead of a column you can scan. The
+  GP export button is gone from the row — it is on the right-click menu.
 - **Sculpt is an Edit-mode tool**, not a mode: its brushes are in the Edit
   toolbar and the top bar shows them when it is active. The SCULPT mode
   still exists in the type for old scenes; the mode button and pie slot are
@@ -1462,6 +1466,43 @@ the browser console or automated evals:
     projection (and takes the picture's own aspect).
   - Lamps only light the scene in RENDERED shading, so the panel says so and
     offers the switch — otherwise a working projector reads as a broken one.
+  - **FLAT projection** (`projection.flat`, `render/projectors.ts`) is the
+    second half of the feature: the picture is ADDED to surfaces after
+    lighting — undimmed, untinted, unaffected by anything else in the room —
+    which is how a projection looks in a blacked-out room and how you want to
+    see media while placing it. It is projective texturing patched into the
+    materials the scene already uses (`receiveProjection` from
+    materialManager.apply, one shared uniform block, so a projector moving or
+    changing picture recompiles nothing), NOT a separate pass. Measured in a
+    blacked-out room: flat 9.4 against 6.5 for the lit path at full lamp
+    power and 4.4 for nothing. Because it lives in the material and not in
+    the lamp, it shows in EVERY shading mode.
+    - The projection matrix IS three's `light.shadow.matrix` (world -> the
+      spot's [0,1] frustum) — the same matrix three samples a spot map with.
+    - Occlusion reads the light's OWN shadow map (RGBA-packed depth,
+      `unpackRGBAToDepth`), so a flat projection is blocked by objects only
+      when the light casts shadows (measured: 10.9 -> 9.7 with a box in the
+      beam). Two shader traps: `#include <packing>` is ALREADY in every
+      material three builds, and including it again redefines every one of
+      its functions; and three's loop unroller only substitutes the index
+      inside `[ i ]`, so a bound test has to be written
+      `UNROLLED_LOOP_INDEX < uFlatCount` or `i` comes out undeclared.
+    - MAX_FLAT is 4 (a sampler array cannot be indexed dynamically, so the
+      loop is unrolled); patched materials cover meshes and poly meshes —
+      grease pencil, splats and actors do not receive flat projections yet.
+  - **Edge blend and mask are painted into the projector's canvas**, not into
+    a shader, so BOTH paths (the lamp's own map and the flat projector) read
+    one picture and cannot disagree. The mask multiplies (black hides, white
+    shows, invertible); each edge ramps to black over a fraction of the
+    picture with a gamma curve, which is what makes two overlapping
+    projectors join without a bright seam. Verified on the painted canvas:
+    edge 5, quarter-in 129, centre 255; a half-black mask gives 0 / 255.
+  - **Look through a light** (Ctrl+0, `App.toggleViewThrough`): the viewport
+    camera BECOMES the light, so orbiting, panning and flying aim it, and a
+    spot's cone becomes the field of view — a projector cannot be aimed any
+    other way, since you have to stand behind it. Whatever moved the camera
+    is written back each frame (through the parent's space when it has one),
+    and zooming the view opens the beam.
 - **Dropping an image or camera ON a selected object textures it**
   (`App.textureTargetAt` / `applyTexture`): a Library image or camera asset,
   or a single image file from Finder, dropped on a SELECTED primitive mesh

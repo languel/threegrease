@@ -19,6 +19,7 @@
 // textures need an atlas).
 import * as THREE from 'three';
 import { liveKeyOf, liveSources } from '../io/livesources';
+import { receiveProjection } from './projectors';
 import type { GPScene, TGMaterial, TGTextureSlot, TextureSlotName, Vec3 } from '../core/types';
 
 /** The pre-datablock per-object appearance fields. Used when an object has
@@ -194,6 +195,9 @@ export class MaterialManager {
     target: StdMat, scene: GPScene,
     materialId: number | null | undefined, legacy: LegacyLook, live = false,
   ): void {
+    // every surface the material manager paints can receive a FLAT
+    // projection (render/projectors.ts); patched once per material
+    receiveProjection(target);
     const mat = materialId == null ? undefined : scene.materials.find((m) => m.id === materialId);
     if (mat) this.applyMaterial(target, scene, mat, live);
     else this.applyLegacy(target, legacy, live);

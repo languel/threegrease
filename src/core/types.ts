@@ -625,6 +625,27 @@ export interface TGProjection {
   /** brightness of the picture itself, 0..2 (the light's own Power still
    *  applies) */
   gain?: number;
+  /**
+   * FLAT: the picture is added to the surfaces at its own brightness rather
+   * than thrown as light — undimmed, untinted, unaffected by anything else
+   * lighting the room (render/projectors.ts). What a projection looks like
+   * in a blacked-out room, and how you want to see media while placing it.
+   * Absent = lit, which is what a projector physically does.
+   */
+  flat?: boolean;
+  /**
+   * EDGE BLEND: how far in from each edge the picture ramps down to black,
+   * as a fraction of its width or height (0..0.5). Two projectors aimed at
+   * one wall are made to overlap and each is faded across the overlap, so
+   * the seam disappears instead of doubling in brightness.
+   */
+  blend?: { left?: number; right?: number; top?: number; bottom?: number; gamma?: number };
+  /** MASK: a picture whose brightness multiplies the projection — black
+   *  hides, white shows. What keeps a projection off the ceiling, inside a
+   *  shape, or away from a doorway. */
+  maskSrc?: string | null;
+  maskName?: string;
+  maskInvert?: boolean;
 }
 
 /** A mesh scene object: primitive solid, plane, or imported model —

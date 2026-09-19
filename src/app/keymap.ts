@@ -79,6 +79,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'fly', label: 'Flythrough (Enter accepts, Esc teleports back)', combo: '~', category: 'View' },
   { id: 'possess', label: 'Possess actor (walk it — V switches view, R records)', combo: 'shift+p', category: 'View' },
   { id: 'cameraView', label: 'Look through camera', combo: '0', category: 'View' },
+  { id: 'viewThrough', label: 'Look through the selected light / projector (fly to aim it)', combo: 'ctrl+0', category: 'View' },
   { id: 'cycleCamera', label: 'Next camera', combo: 'ctrl+shift+c', category: 'View' },
   { id: 'viewAll', label: 'Frame all (view fit)', combo: 'home', category: 'View' },
   { id: 'viewSelected', label: 'Frame selection', combo: 'shift+home', category: 'View' },

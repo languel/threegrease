@@ -92,6 +92,7 @@ import {
 } from '../io/assets';
 import { LIVE_PREFIX, isMediaName, liveKeyOf, liveSources, testCardDataUrl } from '../io/livesources';
 import { perf, PerfOverlay } from './perf';
+import { MAX_FLAT, setFlatProjectors, type FlatProjector } from '../render/projectors';
 
 function hasLight(o: THREE.Object3D): boolean {
   let found = false;
@@ -1768,6 +1769,7 @@ class App implements AppHandle {
         break;
       }
       case 'cameraView': this.toggleCameraView(); break;
+      case 'viewThrough': this.toggleViewThrough(); break;
       case 'cycleCamera': this.cycleCamera(); break;
       case 'save': this.saveScene(); break;
       case 'open': void this.loadScene(); break;
@@ -1986,6 +1988,79 @@ class App implements AppHandle {
       // the camera being looked through hides its own helper
       helper.visible = !(this.cameraView && i === this.ctx.scene.activeCamera);
     });
+  }
+
+  /**
+   * The view a LIGHT has, Blender's "set the active object as camera" for
+   * lamps: the viewport camera becomes the light, so orbiting, panning and
+   * flying AIM IT. A projector cannot be aimed any other way — you have to
+   * stand behind it — and its cone angle becomes the field of view, so what
+   * you see is what it throws.
+   */
+  viewThrough: { kind: 'LIGHT'; id: number } | null = null;
+
+  toggleViewThrough(): void {
+    if (this.viewThrough) {
+      this.viewThrough = null;
+      this.camera.fov = 50;
+      this.camera.updateProjectionMatrix();
+      this.controls.enabled = true;
+      this.setStatusHint('Back to the free view');
+      this.ui.refresh();
+      return;
+    }
+    const l = listSelected(this.ctx.scene).find((r) => r.kind === 'LIGHT')
+      ?? (this.objectPick.lastPicked?.kind === 'LIGHT' ? this.objectPick.lastPicked : null);
+    const light = l ? this.ctx.scene.lights.find((x) => x.id === l.id) : null;
+    if (!light || light.kind === 'AMBIENT') {
+      this.setStatusHint('Select a light or projector to look through it');
+      return;
+    }
+    if (this.cameraView) this.toggleCameraView();
+    if (this.nav.isOrtho) this.nav.toggleOrtho();
+    this.viewThrough = { kind: 'LIGHT', id: light.id };
+    // stand where it stands, looking where it looks
+    const m = worldMatrixOf(this.ctx.scene, { kind: 'LIGHT', id: light.id });
+    const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
+    m.decompose(pos, quat, scl);
+    this.camera.position.copy(pos);
+    this.camera.quaternion.copy(quat);
+    // a light looks down its own -Z, like a camera, so the transform carries
+    // straight over; the cone becomes the lens
+    this.camera.fov = light.kind === 'SPOT'
+      ? THREE.MathUtils.clamp(THREE.MathUtils.radToDeg((light.angle ?? Math.PI / 6) * 2), 5, 150) : 50;
+    this.camera.updateProjectionMatrix();
+    // the orbit pivot goes in front of it, so orbiting turns it in place
+    this.controls.target.copy(pos).addScaledVector(new THREE.Vector3(0, 0, -1).applyQuaternion(quat), 2);
+    this.setStatusHint(`Looking through ${light.name} — fly (~) or orbit to aim it, Ctrl+0 to leave`, 4000);
+    this.ui.refresh();
+  }
+
+  /** While looking through a light, the VIEW is the light: whatever moved
+   *  the camera this frame (orbit, pan, fly, possession) is written back. */
+  private syncViewThrough(): void {
+    const ref = this.viewThrough;
+    if (!ref) return;
+    const scene = this.ctx.scene;
+    const light = scene.lights.find((x) => x.id === ref.id);
+    if (!light) { this.viewThrough = null; return; }
+    const pos = this.camera.position.clone();
+    const quat = this.camera.quaternion.clone();
+    if (light.parent) {
+      // its transform is stored in the parent's space
+      const inv = worldMatrixOf(scene, light.parent as ObjRef).invert();
+      const m = new THREE.Matrix4().compose(pos, quat, new THREE.Vector3(1, 1, 1)).premultiply(inv);
+      const s = new THREE.Vector3();
+      m.decompose(pos, quat, s);
+    }
+    light.translation = [pos.x, pos.y, pos.z];
+    const e = new THREE.Euler().setFromQuaternion(quat);
+    light.rotation = [e.x, e.y, e.z];
+    // a spot's cone follows the lens, so zooming the view opens the beam
+    if (light.kind === 'SPOT') {
+      const angle = THREE.MathUtils.degToRad(this.camera.fov) / 2;
+      if (Math.abs((light.angle ?? 0) - angle) > 1e-4) light.angle = angle;
+    }
   }
 
   toggleCameraView(): void {
@@ -4541,6 +4616,41 @@ class App implements AppHandle {
     this.setStatusHint('Projector added — drop an image, video or camera on it to throw it');
   }
 
+  /**
+   * Hand this frame's FLAT projectors to the materials (render/projectors.ts).
+   * Their picture is added to surfaces after lighting rather than thrown as
+   * light, so it reads at its own brightness whatever the room is doing —
+   * and, because it is in the material and not in the lamp, it shows in
+   * every shading mode rather than only in Rendered.
+   */
+  private syncFlatProjectors(): void {
+    const scene = this.ctx.scene;
+    const flats: FlatProjector[] = [];
+    for (const l of scene.lights) {
+      const p = l.projection;
+      if (!p?.src || !p.flat || l.kind !== 'SPOT' || !l.visible) continue;
+      const light = this.lights.lightFor(l.id) as THREE.SpotLight | null;
+      const map = this.lights.projectionTexture(l.id);
+      if (!light || !map) continue;
+      this.lights.rootFor(l.id)?.updateMatrixWorld(true);
+      // three's own world -> [0,1] frustum matrix for this spot: the shadow
+      // matrix IS the projection matrix (it is how three samples a spot map)
+      light.shadow.updateMatrices(light);
+      flats.push({
+        matrix: light.shadow.matrix,
+        map,
+        gain: p.gain ?? 1,
+        penumbra: l.penumbra ?? 0.1,
+        // occlusion comes from the light's own shadow map, so a flat
+        // projection is only blocked by things when the light casts shadows
+        shadow: l.castShadow ? light.shadow.map?.texture ?? null : null,
+        shadowBias: Math.abs(l.shadowBias ?? 0.0005) + 0.0015,
+      });
+      if (flats.length >= MAX_FLAT) break;
+    }
+    setFlatProjectors(flats);
+  }
+
   /** Throw a file (an image, or a video/GIF, which plays) from a light. */
   async projectFile(lightId: number, file: File): Promise<void> {
     const moving = isMediaName(file.name);
@@ -5467,6 +5577,7 @@ class App implements AppHandle {
       }
       this.controls.enabled = this.lockCamToView && !this.player.playing && !this.nav.flying;
     }
+    this.syncViewThrough();
     if (this.navLocked) this.controls.enabled = false;
     this.syncCameraHelpers();
     if (!this.nav.flying) this.controls.update();
@@ -5589,6 +5700,7 @@ class App implements AppHandle {
     this.actors.sync(ctx.scene);
     perf.lap('actors');
     this.lights.sync(ctx.scene);
+    this.syncFlatProjectors();
     // Blender semantics: Solid/Wireframe are modelling views lit by a fixed
     // studio environment, so the scene's own lamps are held back until
     // Material/Rendered. Material shows the world but still ignores lamps;
