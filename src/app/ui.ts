@@ -25,7 +25,10 @@ import { mmCapture } from '../mm/capture';
 import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
 import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, multiLandmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
-import { ASSET_MIME, deleteAsset, listAssets, updateAsset } from '../io/assets';
+import {
+  ASSET_MIME, addFolder, deleteAsset, deleteFolder, listAssets, listFolders, moveAsset, renameFolder,
+  updateAsset, type TGAsset,
+} from '../io/assets';
 import { liveSources } from '../io/livesources';
 import { perf } from './perf';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
@@ -147,6 +150,10 @@ export interface AppHandle {
   openCamera(deviceId?: string): Promise<void>;
   cameraDevices(): Promise<{ id: string; label: string }[]>;
   openTestCamera(): void;
+  renderToLibrary(mode: 'VIEW' | 'SELECTION'): void;
+  exportLibrary(): Promise<void>;
+  importLibraryFrom(files: File[]): Promise<void>;
+  saveSelectedAsAsset(): Promise<void>;
   addTestCard(): void;
   liveAction(key: string, action: 'pause' | 'resume' | 'close'): void;
   addMediaMimeTrigger(address: string, pos: [number, number, number]): void;
@@ -1887,6 +1894,8 @@ export class UI {
       { label: 'Delete', action: 'delete' },
       { sep: true },
       { label: 'Group under empty', action: 'groupToEmpty' },
+      { label: 'Add to Library', do: () => { void this.app.saveSelectedAsAsset(); } },
+      { label: 'Render selection to Library', do: () => this.app.renderToLibrary('SELECTION') },
       {
         label: 'Export selection as…',
         items: EXPORT_FORMAT_LABELS.map(([id, label]) => ({
@@ -5232,10 +5241,9 @@ export class UI {
    * anything in the scene becomes a tile. The files themselves are kept in
    * this browser's file store, so a library outlives the page.
    */
-  private libraryPanel(): HTMLElement {
-    const assets = listAssets();
-    const grid = el('div', { class: 'lib-grid' });
-    for (const a of assets) {
+  /** One Library tile. */
+  private libTile(a: TGAsset): HTMLElement {
+    {
       const stream = a.kind === 'STREAM' ? JSON.parse(a.payload) as { key: string; label: string; deviceId: string } : null;
       const live = stream ? liveSources.get(stream.key) : undefined;
       const open = !!live && (live.status === 'on' || live.status === 'paused' || live.status === 'starting');
@@ -5294,8 +5302,74 @@ export class UI {
       );
       for (const b of tools.querySelectorAll('button')) b.addEventListener('click', (e) => e.stopPropagation());
       tile.append(pic, name, tools);
-      grid.append(tile);
+      return tile;
     }
+  }
+
+  /** A drop target for Library tiles: dropping one files it under `folder`
+   *  (undefined = unfiled). */
+  private folderDrop(node: HTMLElement, folder: string | undefined): void {
+    node.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer?.types.includes(ASSET_MIME)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      node.classList.add('over');
+    });
+    node.addEventListener('dragleave', (e) => { if (!node.contains(e.relatedTarget as Node)) node.classList.remove('over'); });
+    node.addEventListener('drop', (e) => {
+      const id = e.dataTransfer?.getData(ASSET_MIME);
+      node.classList.remove('over');
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      moveAsset(Number(id), folder);
+    });
+  }
+
+  private libraryPanel(): HTMLElement {
+    const assets = listAssets();
+    const folders = listFolders();
+    const sections: HTMLElement[] = [];
+    for (const f of folders) {
+      const items = assets.filter((a) => a.folder === f);
+      const open = readUiFlag(`libFolder:${f}`, true);
+      const header = el('div', { class: 'lib-folder', title: 'Drop tiles here to file them · double-click to rename' },
+        el('span', { class: 'tree-tri', text: open ? '▾' : '▸' }),
+        icon('folder', 13),
+        el('span', { class: 'grow', text: f }),
+        el('span', { class: 'lib-count', text: String(items.length) }),
+      );
+      const del = btn(icon('xMark', 11), () => {
+        if (confirm(`Remove the folder "${f}"? Its ${items.length} asset(s) stay in the Library, unfiled.`)) deleteFolder(f);
+      }, { cls: 'icon-btn', title: 'Remove the folder (its assets stay, unfiled)' });
+      del.addEventListener('click', (e) => e.stopPropagation());
+      header.append(del);
+      header.onclick = () => { writeUiFlag(`libFolder:${f}`, !open); this.refresh(); };
+      header.ondblclick = (e) => {
+        e.stopPropagation();
+        const v = prompt('Rename folder', f);
+        if (v && v.trim() && v.trim() !== f) renameFolder(f, v.trim());
+      };
+      this.folderDrop(header, f);
+      sections.push(header);
+      if (open) {
+        const grid = el('div', { class: 'lib-grid' }, ...items.map((a) => this.libTile(a)));
+        if (!items.length) grid.append(el('div', { class: 'lib-empty', text: 'drop tiles here' }));
+        this.folderDrop(grid, f);
+        sections.push(grid);
+      }
+    }
+    const loose = assets.filter((a) => !a.folder || !folders.includes(a.folder));
+    if (folders.length) {
+      const header = el('div', { class: 'lib-folder lib-unfiled', title: 'Drop a tile here to take it out of its folder' },
+        el('span', { class: 'grow', text: 'Unfiled' }), el('span', { class: 'lib-count', text: String(loose.length) }));
+      this.folderDrop(header, undefined);
+      sections.push(header);
+    }
+    const grid = el('div', { class: 'lib-grid' }, ...loose.map((a) => this.libTile(a)));
+    this.folderDrop(grid, undefined);
+    sections.push(grid);
     const drop = el('div', { class: 'lib-drop', text: assets.length
       ? 'Drop files here to add them'
       : 'Empty. Drop scans, models and images here to keep them, then drag them into the scene.' });
@@ -5315,13 +5389,38 @@ export class UI {
         { label: 'Test card (still)', do: () => this.app.addTestCard() },
       ]);
     })(), { title: 'Open a camera as a live stream: it joins the Library, and can be dragged onto the scene or used for capture' });
+    const renderBtn: HTMLElement = btn(iconLabel('photo', 'Render'), () => {
+      const r = renderBtn.getBoundingClientRect();
+      this.openContextMenu(r.left, r.bottom + 2, [
+        { header: 'Render to Library' },
+        { label: 'View', do: () => this.app.renderToLibrary('VIEW') },
+        { label: 'Selection (transparent)', do: () => this.app.renderToLibrary('SELECTION') },
+      ]);
+    }, { title: 'Keep a picture of the view, or of the selection cut out on a transparent background, as an image in the Library' });
+    const zipIn = el('input', { type: 'file', accept: '.zip,application/zip' }) as HTMLInputElement;
+    zipIn.style.display = 'none';
+    zipIn.onchange = () => { if (zipIn.files?.length) void this.app.importLibraryFrom([...zipIn.files]); };
+    const dirIn = el('input', { type: 'file' }) as HTMLInputElement;
+    dirIn.setAttribute('webkitdirectory', '');
+    dirIn.style.display = 'none';
+    dirIn.onchange = () => { if (dirIn.files?.length) void this.app.importLibraryFrom([...dirIn.files]); };
+    const moreBtn: HTMLElement = btn(icon('dots', 14), () => {
+      const r = moreBtn.getBoundingClientRect();
+      this.openContextMenu(r.left, r.bottom + 2, [
+        { label: 'New folder…', do: () => { const v = prompt('Folder name'); if (v && v.trim()) addFolder(v.trim()); } },
+        { sep: true },
+        { label: 'Export Library (zip)…', do: () => { void this.app.exportLibrary(); } },
+        { label: 'Import Library from zip…', do: () => zipIn.click() },
+        { label: 'Import from folder…', do: () => dirIn.click() },
+      ]);
+    }, { cls: 'icon-btn', title: 'Folders, export and import' });
     const root = panel('Library',
-      panelHint('Drop files on the Library to keep them here. Drag a tile into the viewport to place it where you drop it; double-click to place it at the 3D cursor, facing the way the Plane setting says (Up from Ground stands it up, Top lays it flat) and on the grid when the magnet is on.'),
+      panelHint('Drop files on the Library to keep them here. Drag a tile into the viewport to place it where you drop it; double-click to place it at the 3D cursor, facing the way the Plane setting says (Up from Ground stands it up, Top lays it flat) and on the grid when the magnet is on. Drag tiles onto a folder to file them.'),
       el('div', { class: 'row' },
-        btn('Save selected', () => this.app.saveSelectedAsAsset(),
-          { title: 'Add every selected drawing, model and scan to the Library, with a picture of each' }),
-        addCamera),
-      grid, drop,
+        btn('Save selected', () => { void this.app.saveSelectedAsAsset(); },
+          { title: 'Add every selected drawing, mesh, model and scan to the Library, with a picture of each (also on the right-click menu)' }),
+        addCamera, renderBtn, moreBtn, zipIn, dirIn),
+      ...sections, drop,
     );
     // the whole panel takes a drop — FILES go into the Library (a tile
     // dragged within the panel is not a file, and is ignored)

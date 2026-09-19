@@ -853,3 +853,16 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .perf-overlay[hidden] { display: none; }
 .perf-overlay canvas { display: block; margin-bottom: 4px; }
 .perf-overlay pre { margin: 0; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Library folders */
+.lib-folder {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px; margin: 6px 0 2px;
+  border-radius: 5px; cursor: pointer; color: var(--fg, #e8e8ec); font-size: 12px;
+  border: 1px solid transparent;
+}
+.lib-folder:hover { background: rgba(255,255,255,0.05); }
+.lib-folder.over, .lib-grid.over { border-color: var(--accent); background: rgba(255,255,255,0.06); }
+.lib-grid { border: 1px solid transparent; border-radius: 6px; min-height: 12px; }
+.lib-unfiled { cursor: default; color: var(--dim); }
+.lib-count { color: var(--dim); font-size: 11px; }
+.lib-empty { grid-column: 1 / -1; color: var(--dim); font-size: 11px; padding: 8px; text-align: center; }

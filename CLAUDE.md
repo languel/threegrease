@@ -1385,6 +1385,29 @@ the browser console or automated evals:
   permission; `testCardDataUrl()` is a still 16:9 image (grid, bars, grey
   ramp, a circle for aspect, a corner mark for orientation) added to the
   Library as an image. Use them to verify camera work in the preview pane.
+- **Library extras** (`io/assets.ts`, `App.renderToLibrary`):
+  - Editable meshes save as `POLY` assets; "Add to Library" and "Render
+    selection to Library" are on the object right-click menu, which the
+    outliner shares.
+  - RENDER VIEW keeps the view as it looks minus editor furniture (grid,
+    gizmo, `markOverlay`ed helpers, the hull rims); RENDER SELECTION renders
+    the selection alone on a transparent background, cropped to what it drew
+    (+8 px). Both become image assets (the look/post is not applied). Two
+    traps found on the way: reading pixels back from an MSAA render target
+    came out BLACK with correct alpha, so the target is plain; and isolating
+    by visibility must WALK INTO a group that holds lights (Solid shading's
+    studio rig) rather than hide it — hiding it rendered every isolated
+    object black, thumbnails included (`hasLight`).
+  - FOLDERS are a name on each asset (`TGAsset.folder`) plus a localStorage
+    list so an empty folder survives; drag a tile onto a folder header or
+    grid to file it, onto Unfiled to take it out; double-click a folder to
+    rename; removing one leaves its assets unfiled.
+  - EXPORT is one zip: `library.json` (records, thumbnails, folders) plus
+    `files/<hash>/<name>` for every stored file an asset refers to — the scans
+    and models are the point of moving a library. Stored uncompressed (the
+    media is already compressed). IMPORT takes that zip, or a FOLDER of the
+    same, adding beside what is there with fresh ids; a zip or folder with no
+    library.json is imported as loose files (scans, models, images).
 - **A camera is a Library ASSET** (`io/livesources.ts`), not something the
   capture panel owns. `liveSources.open(deviceId?)` opens a webcam as a
   source keyed `cam:<deviceId>`; each source draws its video into its OWN

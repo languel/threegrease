@@ -88,9 +88,16 @@ import { BRUSH_PRESETS as BRUSH_PRESETS_CACHE } from '../core/brushes';
 import {
   initAssets, listAssets, meshAssetPayload, onAssetsChanged, saveAsset, splatAssetPayload,
   streamAsset, updateAsset, ASSET_MIME, type TGAsset,
+  exportLibrary as packLibrary, importLibrary, zipEntries,
 } from '../io/assets';
 import { LIVE_PREFIX, liveSources, testCardDataUrl } from '../io/livesources';
 import { perf, PerfOverlay } from './perf';
+
+function hasLight(o: THREE.Object3D): boolean {
+  let found = false;
+  o.traverse((c) => { if ((c as THREE.Light).isLight) found = true; });
+  return found;
+}
 
 /** A Library tile's picture of an image: the image itself, fitted into the
  *  tile's square over the tile's own dark ground. */
@@ -2839,13 +2846,19 @@ class App implements AppHandle {
    */
   async saveSelectedAsAsset(): Promise<void> {
     const scene = this.ctx.scene;
-    const refs = listSelected(scene).filter((r) => r.kind === 'GP' || r.kind === 'MESH' || r.kind === 'SPLAT');
-    if (!refs.length) { this.setStatusHint('Select a drawing, a model or a scan to add it to the Library'); return; }
+    const refs = listSelected(scene).filter((r) => r.kind === 'GP' || r.kind === 'MESH' || r.kind === 'SPLAT' || r.kind === 'POLY');
+    if (!refs.length) { this.setStatusHint('Select a drawing, a mesh, a model or a scan to add it to the Library'); return; }
     for (const ref of refs) {
       const thumb = this.thumbFor(ref) ?? undefined;
       if (ref.kind === 'GP') {
         const ob = scene.objects.find((o) => o.id === ref.id);
         if (ob) saveAsset(ob.name, 'GP', serializeGPObject(ob), thumb);
+      } else if (ref.kind === 'POLY') {
+        const pm = scene.polyMeshes.find((x) => x.id === ref.id);
+        if (!pm) continue;
+        const { id, parent, select, ...def } = pm;
+        void id; void parent; void select;
+        saveAsset(pm.name, 'POLY', JSON.stringify(def), thumb);
       } else if (ref.kind === 'MESH') {
         const m = scene.meshes.find((x) => x.id === ref.id);
         if (!m) continue;
@@ -2886,6 +2899,11 @@ class App implements AppHandle {
       ob.translation = [...point];
       scene.activeObject = scene.objects.length - 1;
       this.gp.markDirty();
+    } else if (asset.kind === 'POLY') {
+      const def = JSON.parse(asset.payload);
+      let id = Date.now() % 1e9;
+      while (scene.polyMeshes.some((p) => p.id === id)) id++;
+      scene.polyMeshes.push({ ...def, id, parent: null, select: false, translation: [...point], rev: 0 });
     } else if (asset.kind === 'STREAM') {
       // a camera goes on as a picture of itself: an unlit plane whose
       // texture IS the stream, at the camera's own aspect
@@ -3093,6 +3111,9 @@ class App implements AppHandle {
         if (c === keep) continue;
         if (path.has(c)) { walk(c); continue; }
         if (c.userData.splatRenderer || (c as THREE.Light).isLight) continue;
+        // a group HOLDING lights (Solid shading's studio rig) is walked
+        // into, not hidden — hiding it rendered everything black
+        if (hasLight(c)) { walk(c); continue; }
         if (c.visible) { c.visible = false; hidden.push(c); }
       }
     };
@@ -3301,6 +3322,150 @@ class App implements AppHandle {
       mm?.sync(base);
       sm?.sync(base);
     }
+  }
+
+  /**
+   * Render the view (as it is) or the SELECTION (alone, on a transparent
+   * background, cropped to what it drew) into a PNG, and keep it in the
+   * Library as an image — a reference board of your own views, or a cut-out
+   * to hang in the scene. The scene look (post) is not applied: the render
+   * is the scene's own colours.
+   */
+  renderToLibrary(mode: 'VIEW' | 'SELECTION'): void {
+    const scene = this.ctx.scene;
+    const refs = mode === 'SELECTION' ? listSelected(scene) : [];
+    if (mode === 'SELECTION' && !refs.length) { this.setStatusHint('Select something to render it'); return; }
+    const canvas = this.glRenderer.domElement;
+    const k = Math.min(1, 2048 / Math.max(canvas.width, canvas.height));
+    const W = Math.round(canvas.width * k), H = Math.round(canvas.height * k);
+    const hidden: THREE.Object3D[] = [];
+    if (mode === 'SELECTION') {
+      const keep = new Set<THREE.Object3D>();
+      for (const r of refs) {
+        const root = r.kind === 'SPLAT' ? this.splats.meshFor(r.id) : this.silhouetteRoot(r) ?? this.objectRoot(r);
+        if (root) keep.add(root);
+      }
+      const path = new Set<THREE.Object3D>();
+      for (const root of keep) for (let p = root.parent; p; p = p.parent) path.add(p);
+      const walk = (o: THREE.Object3D) => {
+        for (const c of o.children) {
+          if (keep.has(c)) continue;
+          if (path.has(c)) { walk(c); continue; }
+          if (c.userData.splatRenderer || (c as THREE.Light).isLight) continue;
+        // a group HOLDING lights (Solid shading's studio rig) is walked
+        // into, not hidden — hiding it rendered everything black
+        if (hasLight(c)) { walk(c); continue; }
+          if (c.visible) { c.visible = false; hidden.push(c); }
+        }
+      };
+      walk(this.scene3);
+    } else {
+      // the view as it LOOKS, minus the editor's furniture: grid, gizmo,
+      // helpers, selection glyphs, the 3D cursor (all `markOverlay`ed)
+      const furniture: THREE.Object3D[] = [this.grid, this.widget.getHelper()];
+      this.scene3.traverse((o) => { if (o.userData.overlay && o.visible) furniture.push(o); });
+      for (const o of furniture) if (o?.visible) { o.visible = false; hidden.push(o); }
+    }
+    // the selection/hover rims ride INSIDE the objects (inverted hulls), so
+    // they would be in either render; they are interface, not the thing
+    this.scene3.traverse((o) => { if (o.userData.hoverShell && o.visible) { o.visible = false; hidden.push(o); } });
+    // no MSAA target: reading pixels back from one came out black (alpha
+    // survived, colour did not) — render at up to 2x instead where it fits
+    const rt = new THREE.WebGLRenderTarget(W, H);
+    rt.texture.colorSpace = THREE.SRGBColorSpace;
+    const saved = { bg: this.scene3.background, target: this.glRenderer.getRenderTarget(), clear: this.glRenderer.getClearAlpha() };
+    const px = new Uint8Array(W * H * 4);
+    try {
+      if (mode === 'SELECTION') { this.scene3.background = null; this.glRenderer.setClearAlpha(0); }
+      this.glRenderer.setRenderTarget(rt);
+      this.glRenderer.clear();
+      this.glRenderer.render(this.scene3, this.nav.active);
+      this.glRenderer.readRenderTargetPixels(rt, 0, 0, W, H, px);
+    } finally {
+      this.glRenderer.setRenderTarget(saved.target);
+      this.scene3.background = saved.bg;
+      this.glRenderer.setClearAlpha(saved.clear);
+      for (const o of hidden) o.visible = true;
+      rt.dispose();
+    }
+    // rows come bottom-up; flip, and for a selection find the drawn box
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    const img = new ImageData(W, H);
+    for (let y = 0; y < H; y++) {
+      const src = (H - 1 - y) * W * 4;
+      img.data.set(px.subarray(src, src + W * 4), y * W * 4);
+      if (mode === 'SELECTION') {
+        for (let x = 0; x < W; x++) if (px[src + x * 4 + 3] > 2) {
+          if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        }
+      }
+    }
+    if (mode === 'SELECTION' && x1 < 0) { this.setStatusHint('The selection drew nothing in this view'); return; }
+    const full = document.createElement('canvas');
+    full.width = W; full.height = H;
+    full.getContext('2d')!.putImageData(img, 0, 0);
+    let out = full;
+    if (mode === 'SELECTION') {
+      const pad = 8;
+      x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad);
+      x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + pad);
+      out = document.createElement('canvas');
+      out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+      out.getContext('2d')!.drawImage(full, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    }
+    const url = out.toDataURL('image/png');
+    const name = mode === 'VIEW' ? `View ${new Date().toLocaleTimeString()}`
+      : `${refs.length === 1 ? (this.nameOf(refs[0]) ?? 'Selection') : `${refs.length} objects`} render`;
+    const mesh = createMeshObject(0, 'PLANE', [0, 0, 0]);
+    mesh.name = name;
+    mesh.texture = url;
+    mesh.unlit = true;
+    mesh.drawTarget = false;
+    mesh.opacity = 1;
+    const aspect = out.width / Math.max(1, out.height);
+    mesh.scale = [aspect * 0.5, 0.5, 1];
+    const pic = new Image();
+    pic.onload = () => {
+      saveAsset(name, 'MESH', meshAssetPayload(mesh), imageThumb(pic));
+      this.setStatusHint(`${name} added to the Library`);
+    };
+    pic.src = url;
+  }
+
+  private nameOf(ref: ObjRef): string | null {
+    const s = this.ctx.scene;
+    switch (ref.kind) {
+      case 'GP': return s.objects.find((o) => o.id === ref.id)?.name ?? null;
+      case 'MESH': return s.meshes.find((o) => o.id === ref.id)?.name ?? null;
+      case 'SPLAT': return s.splats.find((o) => o.id === ref.id)?.name ?? null;
+      case 'POLY': return s.polyMeshes.find((o) => o.id === ref.id)?.name ?? null;
+      case 'ACTOR': return s.actors.find((o) => o.id === ref.id)?.name ?? null;
+      default: return null;
+    }
+  }
+
+  /** Download the whole Library as one zip (records, pictures, files). */
+  async exportLibrary(): Promise<void> {
+    this.setStatusHint('Packing the Library…', 10000);
+    const blob = await packLibrary();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `library-${new Date().toISOString().slice(0, 10)}.zip`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    this.setStatusHint(`Library exported (${(blob.size / 1048576).toFixed(1)} MB)`);
+  }
+
+  /** Import a Library zip, or a folder (an exported Library, or any folder of
+   *  scans, models and images — those come in as new entries). */
+  async importLibraryFrom(files: File[]): Promise<void> {
+    let entries = new Map<string, Blob>();
+    if (files.length === 1 && /\.zip$/i.test(files[0].name)) entries = await zipEntries(files[0]);
+    else for (const f of files) entries.set((f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name, f);
+    const { added, loose } = await importLibrary(entries);
+    if (loose.length) await this.importToLibrary(loose);
+    else this.setStatusHint(`Imported ${added} asset${added === 1 ? '' : 's'} into the Library`);
+    this.ui.refresh();
   }
 
   // ------------------------------------------------------- live cameras
