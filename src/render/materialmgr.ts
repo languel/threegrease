@@ -18,6 +18,7 @@
 // shader module — an unrelated system (see its note on why per-stroke
 // textures need an atlas).
 import * as THREE from 'three';
+import { liveKeyOf, liveSources } from '../io/livesources';
 import type { GPScene, TGMaterial, TGTextureSlot, TextureSlotName, Vec3 } from '../core/types';
 
 /** The pre-datablock per-object appearance fields. Used when an object has
@@ -57,6 +58,8 @@ export class MaterialManager {
   textureForImage(scene: GPScene, imageId: number): THREE.Texture | null {
     const img = scene.images.find((i) => i.id === imageId);
     if (!img) return null;
+    const live = liveKeyOf(img.src);
+    if (live) return liveSources.textureFor(live);
     const hit = this.textures.get(imageId);
     if (hit && hit.src === img.src) return hit.tex;
     hit?.tex.dispose();
@@ -68,6 +71,9 @@ export class MaterialManager {
 
   /** Texture for a raw dataURL/URL (legacy per-object `texture` field). */
   textureForSrc(src: string): THREE.Texture {
+    // a live camera: its source's own canvas texture, redrawn every frame
+    const live = liveKeyOf(src);
+    if (live) return liveSources.textureFor(live);
     let tex = this.legacyTextures.get(src);
     if (!tex) {
       tex = new THREE.TextureLoader().load(src);

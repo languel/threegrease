@@ -26,6 +26,7 @@ import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
 import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, multiLandmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
 import { ASSET_MIME, deleteAsset, listAssets, updateAsset } from '../io/assets';
+import { liveSources } from '../io/livesources';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
 import { exportPaintCloudPly } from '../render/paintclouds';
@@ -140,13 +141,17 @@ export interface AppHandle {
   addAssetToScene(asset: import('../io/assets').TGAsset): void;
   refreshAssetThumb(assetId: number): void;
   importFiles(files: File[]): Promise<void>;
+  importToLibrary(files: File[]): Promise<void>;
+  openCamera(deviceId?: string): Promise<void>;
+  cameraDevices(): Promise<{ id: string; label: string }[]>;
+  liveAction(key: string, action: 'pause' | 'resume' | 'close'): void;
   addMediaMimeTrigger(address: string, pos: [number, number, number]): void;
   addMediaMimeRig(address: string, target: import('../tools/objects').ObjRef): void;
   deleteMediaMimeRig(id: number): void;
   addMMStreams(kinds: import('../core/types').MMStream['kind'][], source: 'CAMERA' | 'BUS', busAddress?: string): void;
   deleteMMStream(id: number): void;
   mmCaptureToggle(): void;
-  mmCaptureStart(source?: { url?: string; file?: File }): void;
+  mmCaptureStart(source?: { url?: string; file?: File; live?: string }): void;
   mmSetPlaybackRate(rate: number): void;
   togglePossess(actorId: number): void;
   actorGoTo(actorId: number, point: Vec3): void;
@@ -5214,15 +5219,35 @@ export class UI {
     const assets = listAssets();
     const grid = el('div', { class: 'lib-grid' });
     for (const a of assets) {
-      const tile = el('div', { class: 'lib-tile', title: `${a.name} — drag into the viewport, or click to place at the 3D cursor` });
+      const stream = a.kind === 'STREAM' ? JSON.parse(a.payload) as { key: string; label: string; deviceId: string } : null;
+      const live = stream ? liveSources.get(stream.key) : undefined;
+      const open = !!live && (live.status === 'on' || live.status === 'paused' || live.status === 'starting');
+      const tile = el('div', {
+        class: `lib-tile${stream ? ' lib-stream' : ''}`,
+        title: stream && !open ? `${a.name} — click to open this camera`
+          : `${a.name} — drag into the viewport, or click to place at the 3D cursor`,
+      });
       tile.draggable = true;
       tile.ondragstart = (e) => {
         e.dataTransfer?.setData(ASSET_MIME, String(a.id));
         if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
       };
-      tile.onclick = () => this.app.addAssetToScene(a);
+      tile.onclick = () => {
+        if (stream && !open) void this.app.openCamera(stream.deviceId || undefined);
+        else this.app.addAssetToScene(a);
+      };
       const pic = el('div', { class: 'lib-pic' });
-      if (a.thumb) pic.style.backgroundImage = `url(${a.thumb})`;
+      if (stream) {
+        // a camera's tile IS the camera: a small canvas repainted from it
+        if (open) {
+          const c = el('canvas', { class: 'lib-live' }) as HTMLCanvasElement;
+          c.width = 160; c.height = 160;
+          c.dataset.live = stream.key;
+          pic.append(c);
+        }
+        pic.append(el('span', { class: 'lib-kind', text: live?.status === 'paused' ? 'paused'
+          : live?.status === 'on' ? 'live' : live?.status === 'starting' ? '…' : 'camera' }));
+      } else if (a.thumb) pic.style.backgroundImage = `url(${a.thumb})`;
       else pic.append(el('span', { class: 'lib-kind', text: a.kind === 'SPLAT' ? 'scan' : a.kind === 'GP' ? 'drawing' : 'model' }));
       const name = el('div', { class: 'lib-name', text: a.name });
       name.ondblclick = (e) => {
@@ -5231,10 +5256,17 @@ export class UI {
         if (v && v.trim()) updateAsset(a.id, { name: v.trim() });
       };
       const tools = el('div', { class: 'lib-tools' },
-        btn(icon('camera', 12), () => this.app.refreshAssetThumb(a.id),
-          { cls: 'icon-btn', title: 'Re-take this picture from the selected object' }),
+        ...(stream && open ? [
+          btn(icon(live?.status === 'on' ? 'pause' : 'play', 12),
+            () => this.app.liveAction(stream.key, live?.status === 'on' ? 'pause' : 'resume'),
+            { cls: 'icon-btn', title: live?.status === 'on' ? 'Pause — the camera stops and everything showing it holds the last frame' : 'Resume the camera' }),
+        ] : []),
+        ...(!stream ? [btn(icon('camera', 12), () => this.app.refreshAssetThumb(a.id),
+          { cls: 'icon-btn', title: 'Re-take this picture from the selected object' })] : []),
         btn(icon('xMark', 12), () => {
-          if (confirm(`Remove "${a.name}" from the Library? Objects already placed stay.`)) deleteAsset(a.id);
+          if (!confirm(`Remove "${a.name}" from the Library? Objects already placed stay.`)) return;
+          if (stream) this.app.liveAction(stream.key, 'close');
+          deleteAsset(a.id);
         }, { cls: 'icon-btn', title: 'Remove from the Library' }),
       );
       for (const b of tools.querySelectorAll('button')) b.addEventListener('click', (e) => e.stopPropagation());
@@ -5242,22 +5274,44 @@ export class UI {
       grid.append(tile);
     }
     const drop = el('div', { class: 'lib-drop', text: assets.length
-      ? 'Drop files here or on the viewport'
-      : 'Empty. Drop scans, models or images on the viewport, select them, and Save selected.' });
-    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
-    drop.ondragleave = () => drop.classList.remove('over');
-    drop.ondrop = (e) => {
-      e.preventDefault();
-      drop.classList.remove('over');
-      const files = [...(e.dataTransfer?.files ?? [])];
-      if (files.length) void this.app.importFiles(files);
-    };
-    return panel('Library',
-      panelHint('Drag a tile into the viewport to place it where you drop it; click to place it at the 3D cursor.'),
-      fieldRow('', btn('Save selected', () => this.app.saveSelectedAsAsset(),
-        { title: 'Add every selected drawing, model and scan to the Library, with a picture of each' }), { full: true }),
+      ? 'Drop files here to add them'
+      : 'Empty. Drop scans, models and images here to keep them, then drag them into the scene.' });
+    const addCamera: HTMLElement = btn(iconLabel('camera', 'Camera'), () => void (async () => {
+      // one camera: just open it; several: say which
+      const devs = await this.app.cameraDevices();
+      const labelled = devs.filter((d) => d.label && d.id);
+      if (labelled.length < 2) { void this.app.openCamera(); return; }
+      const r = addCamera.getBoundingClientRect();
+      this.openContextMenu(r?.left ?? 200, (r?.bottom ?? 200) + 2, [
+        { header: 'Open camera' },
+        ...labelled.map((d) => ({ label: d.label, do: () => { void this.app.openCamera(d.id); } })),
+      ]);
+    })(), { title: 'Open a camera as a live stream: it joins the Library, and can be dragged onto the scene or used for capture' });
+    const root = panel('Library',
+      panelHint('Drop files on the Library to keep them here. Drag a tile into the viewport to place it where you drop it; click to place it at the 3D cursor.'),
+      el('div', { class: 'row' },
+        btn('Save selected', () => this.app.saveSelectedAsAsset(),
+          { title: 'Add every selected drawing, model and scan to the Library, with a picture of each' }),
+        addCamera),
       grid, drop,
     );
+    // the whole panel takes a drop — FILES go into the Library (a tile
+    // dragged within the panel is not a file, and is ignored)
+    root.ondragover = (e) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      drop.classList.add('over');
+    };
+    root.ondragleave = (e) => { if (!root.contains(e.relatedTarget as Node)) drop.classList.remove('over'); };
+    root.ondrop = (e) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      drop.classList.remove('over');
+      const files = [...e.dataTransfer.files];
+      if (files.length) void this.app.importToLibrary(files);
+    };
+    return root;
   }
 
   /** "Follow object" dropdown for triggers/attractors (N5). */
@@ -5987,6 +6041,9 @@ export class UI {
     ];
   }
 
+  /** the Library camera the capture panel is set to read ('' = any open) */
+  private captureLive = '';
+
   private mmStreamsPanel(): HTMLElement {
     const { ctx } = this.app;
     const streams = ctx.scene.mmStreams;
@@ -5995,10 +6052,20 @@ export class UI {
     const capLabel = mmCapture.status === 'on' ? `Stop (${mmCapture.sourceLabel})`
       : mmCapture.status === 'starting' ? 'Starting…'
       : 'Camera';
+    // The source is any open Library camera (a camera is an asset now, and
+    // capture READS it rather than owning one); none open = the default
+    // camera, opened on Start and listed in the Library from then on.
+    const cams = liveSources.list();
+    if (this.captureLive && !cams.some((c) => c.key === this.captureLive)) this.captureLive = '';
+    const camPick = cams.length > 1 ? [tip(selectField('', this.captureLive || cams[0].key,
+      cams.map((c) => [c.key, `${c.label}${c.status === 'paused' ? ' (paused)' : ''}`] as [string, string]),
+      (v) => { this.captureLive = v; if (running) this.app.mmCaptureStart({ live: v }); }),
+    'Which Library camera capture reads')] : [];
     const capRow = el('div', { class: 'row' },
       btn(iconLabel('camera', capLabel),
-        () => { running ? this.app.mmCaptureToggle() : this.app.mmCaptureStart(); },
-        { active: mmCapture.status === 'on', title: running ? 'Stop capture' : 'Webcam capture (MediaPipe, in-app — no bridge)' }),
+        () => { running ? this.app.mmCaptureToggle() : this.app.mmCaptureStart({ live: this.captureLive || cams[0]?.key }); },
+        { active: mmCapture.status === 'on', title: running ? 'Stop capture' : 'Capture from a Library camera (MediaPipe, in-app — no bridge)' }),
+      ...camPick,
       btn('＋Pose', () => this.app.addMMStreams(['POSE'], 'CAMERA'), { title: 'Body stream (33 points, flat by default — pose depth is noisy)' }),
       btn('＋Hands', () => this.app.addMMStreams(['HAND_LEFT', 'HAND_RIGHT'], 'CAMERA'), { title: 'Left + right hand streams (21 points each, with relative depth)' }),
       btn('＋Face', () => this.app.addMMStreams(['FACE', 'IRIS'], 'CAMERA'), { title: 'Face mesh (478 points) + iris (10 points) streams, with relative depth' }),
@@ -6108,7 +6175,14 @@ export class UI {
       srcRow,
       ...(mmCapture.status === 'error' ? [el('div', { class: 'row', text: `! ${mmCapture.error.slice(0, 90)}` })] : []),
       ...(running && mmCapture.sourceLabel !== 'camera' ? [speedRow] : []),
-      ...(mmCapture.status === 'on' || mmCapture.status === 'starting' ? [mmCapture.sourceEl] : []),
+      ...(mmCapture.status === 'on' || mmCapture.status === 'starting' ? [mmCapture.liveKey ? (() => {
+        // a Library camera is previewed through its own small canvas; the
+        // source canvas must stay put, it is what every texture reads
+        const c = el('canvas', { class: 'cap-live' }) as HTMLCanvasElement;
+        c.width = 320; c.height = 180;
+        c.dataset.live = mmCapture.liveKey!;
+        return c;
+      })() : mmCapture.sourceEl] : []),
       busRow,
       ...(rows.length ? rows : [el('div', { class: 'row', text: 'no streams yet — add Pose/Hands then Start camera, or feed one from the bus' })]),
     );

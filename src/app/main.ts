@@ -87,8 +87,24 @@ import { CommandRegistry } from './commands';
 import { BRUSH_PRESETS as BRUSH_PRESETS_CACHE } from '../core/brushes';
 import {
   initAssets, listAssets, meshAssetPayload, onAssetsChanged, saveAsset, splatAssetPayload,
-  updateAsset, ASSET_MIME, type TGAsset,
+  streamAsset, updateAsset, ASSET_MIME, type TGAsset,
 } from '../io/assets';
+import { LIVE_PREFIX, liveSources } from '../io/livesources';
+
+/** A Library tile's picture of an image: the image itself, fitted into the
+ *  tile's square over the tile's own dark ground. */
+function imageThumb(img: HTMLImageElement): string {
+  const S = 160;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#202024';
+  g.fillRect(0, 0, S, S);
+  const k = Math.min(S / img.naturalWidth, S / img.naturalHeight);
+  const w = img.naturalWidth * k, h = img.naturalHeight * k;
+  g.drawImage(img, (S - w) / 2, (S - h) / 2, w, h);
+  return c.toDataURL('image/jpeg', 0.85);
+}
 import { isStoreRef, putFile } from '../io/blobstore';
 import { classifyFile, isYUpModel } from '../io/dropfiles';
 import { mediamime } from '../io/mediamime';
@@ -468,6 +484,7 @@ class App implements AppHandle {
     this.scene3.add(this.paints.group);
     this.scene3.add(this.mmPoints.group);
     mmCapture.onStatus = () => this.ui?.refresh();
+    liveSources.onChange(() => this.ui?.refresh());
     // mesh objects use MeshStandardMaterial — GP shaders ignore lights.
     // Lights are scene data now (scene.lights, migrated from the two that
     // used to be hardcoded here); LightManager mirrors them each frame.
@@ -2849,10 +2866,29 @@ class App implements AppHandle {
       ob.translation = [...point];
       scene.activeObject = scene.objects.length - 1;
       this.gp.markDirty();
+    } else if (asset.kind === 'STREAM') {
+      // a camera goes on as a picture of itself: an unlit plane whose
+      // texture IS the stream, at the camera's own aspect
+      const { key, label } = JSON.parse(asset.payload) as { key: string; label: string };
+      const src = liveSources.get(key);
+      const aspect = src && src.canvas.width > 64 ? src.canvas.width / src.canvas.height : 16 / 9;
+      const mesh = createMeshObject(Date.now() % 1e9, 'PLANE', [...point] as Vec3);
+      mesh.name = label;
+      mesh.texture = `${LIVE_PREFIX}${key}`;
+      mesh.unlit = true;
+      mesh.drawTarget = false;
+      mesh.opacity = 1;
+      mesh.scale = [aspect * 0.5, 0.5, 1];
+      if (at) this.orientPanel(mesh, at);
+      scene.meshes.push(mesh);
+      this.meshes.sync(scene, this.nav.active);
     } else if (asset.kind === 'MESH') {
       const def = JSON.parse(asset.payload);
       const id = Date.now() % 1e9;
-      scene.meshes.push({ ...def, id, parent: null, select: false, translation: [...point] });
+      const placed = { ...def, id, parent: null, select: false, translation: [...point] };
+      // an image hangs on the wall it is dropped on, as a direct drop does
+      if (def.kind === 'PLANE' && at) this.orientPanel(placed, at);
+      scene.meshes.push(placed);
       this.meshes.sync(scene);
       if (def.kind === 'MODEL') this.placing.push({ ref: { kind: 'MESH', id }, ground: point, since: performance.now() });
     } else {
@@ -2991,6 +3027,26 @@ class App implements AppHandle {
     const root = ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) : this.silhouetteRoot(ref) ?? this.objectRoot(ref);
     const box = ref.kind === 'SPLAT' ? this.splatCore(ref) : this.computeObjectBox(ref);
     if (!root || !box || box.isEmpty()) return null;
+    const keep = root;
+    const path = new Set<THREE.Object3D>();
+    for (let p = root.parent; p; p = p.parent) path.add(p);
+    const hidden: THREE.Object3D[] = [];
+    const walk = (o: THREE.Object3D) => {
+      for (const c of o.children) {
+        if (c === keep) continue;
+        if (path.has(c)) { walk(c); continue; }
+        if (c.userData.splatRenderer || (c as THREE.Light).isLight) continue;
+        if (c.visible) { c.visible = false; hidden.push(c); }
+      }
+    };
+    walk(this.scene3);
+    try { return this.renderThumbnail(this.scene3, box); }
+    finally { for (const o of hidden) o.visible = true; }
+  }
+
+  /** Render `scene` from a three-quarter view fitted to `box` into a small
+   *  JPEG — the picture on a Library tile. */
+  private renderThumbnail(scene: THREE.Scene, box: THREE.Box3): string | null {
     const SIZE = 160;
     const upZ = this.ctx.settings.upAxis === 'Z';
     const centre = box.getCenter(new THREE.Vector3());
@@ -3006,28 +3062,15 @@ class App implements AppHandle {
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
 
-    const keep = root;
-    const path = new Set<THREE.Object3D>();
-    for (let p = root.parent; p; p = p.parent) path.add(p);
-    const hidden: THREE.Object3D[] = [];
-    const walk = (o: THREE.Object3D) => {
-      for (const c of o.children) {
-        if (c === keep) continue;
-        if (path.has(c)) { walk(c); continue; }
-        if (c.userData.splatRenderer || (c as THREE.Light).isLight) continue;
-        if (c.visible) { c.visible = false; hidden.push(c); }
-      }
-    };
-    walk(this.scene3);
     const rt = new THREE.WebGLRenderTarget(SIZE, SIZE);
     rt.texture.colorSpace = THREE.SRGBColorSpace;   // encode like the screen, or it comes out dark
-    const saved = { bg: this.scene3.background, fog: this.scene3.fog, target: this.glRenderer.getRenderTarget() };
-    this.scene3.background = new THREE.Color(0x202024);
-    this.scene3.fog = null;
+    const saved = { bg: scene.background, fog: scene.fog, target: this.glRenderer.getRenderTarget() };
+    scene.background = new THREE.Color(0x202024);
+    scene.fog = null;
     try {
       this.glRenderer.setRenderTarget(rt);
       this.glRenderer.clear();
-      this.glRenderer.render(this.scene3, cam);
+      this.glRenderer.render(scene, cam);
       const px = new Uint8Array(SIZE * SIZE * 4);
       this.glRenderer.readRenderTargetPixels(rt, 0, 0, SIZE, SIZE, px);
       const canvas = document.createElement('canvas');
@@ -3041,9 +3084,8 @@ class App implements AppHandle {
       return canvas.toDataURL('image/jpeg', 0.85);
     } finally {
       this.glRenderer.setRenderTarget(saved.target);
-      this.scene3.background = saved.bg;
-      this.scene3.fog = saved.fog;
-      for (const o of hidden) o.visible = true;
+      scene.background = saved.bg;
+      scene.fog = saved.fog;
       rt.dispose();
     }
   }
@@ -3059,7 +3101,11 @@ class App implements AppHandle {
    * since this is for a thumbnail, not a measurement.
    */
   private splatCore(ref: ObjRef): THREE.Box3 | null {
-    const mesh = this.splats.meshFor(ref.id) as unknown as {
+    return this.splatCoreOf(this.splats.meshFor(ref.id));
+  }
+
+  private splatCoreOf(obj: THREE.Object3D | null): THREE.Box3 | null {
+    const mesh = obj as unknown as {
       packedSplats?: { getNumSplats(): number; forEachSplat(cb: (i: number, c: THREE.Vector3) => void): void };
       matrixWorld: THREE.Matrix4;
     } | null;
@@ -3078,6 +3124,172 @@ class App implements AppHandle {
       new THREE.Vector3(q(xs, 0.95), q(ys, 0.95), q(zs, 0.95)),
     );
     return box.applyMatrix4(mesh.matrixWorld);
+  }
+
+  // ------------------------------------------------------------ Library
+
+  /**
+   * Files dropped on the LIBRARY become entries in it and nothing else: the
+   * Library is a container of things to place, and a drop on it used to
+   * place the file in the scene too (it went through the viewport's
+   * importer). Each file is stored (io/blobstore.ts), described as the
+   * object it would become, and pictured.
+   */
+  async importToLibrary(files: File[]): Promise<void> {
+    const upZ = this.ctx.settings.upAxis === 'Z';
+    let added = 0;
+    const skipped: string[] = [];
+    for (const file of files) {
+      const kind = await classifyFile(file);
+      if (!kind) { skipped.push(file.name); continue; }
+      if (kind === 'IMAGE') {
+        const dataUrl = await new Promise<string>((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(String(r.result));
+          r.onerror = () => rej(r.error);
+          r.readAsDataURL(file);
+        });
+        const img = await new Promise<HTMLImageElement>((res, rej) => {
+          const i = new Image();
+          i.onload = () => res(i);
+          i.onerror = rej;
+          i.src = dataUrl;
+        });
+        const mesh = createMeshObject(0, 'PLANE', [0, 0, 0]);
+        mesh.name = file.name;
+        mesh.texture = dataUrl;
+        mesh.unlit = true;
+        mesh.drawTarget = false;
+        mesh.opacity = 1;
+        const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
+        mesh.scale = [aspect * 0.5, 0.5, 1];
+        saveAsset(file.name, 'MESH', meshAssetPayload(mesh), imageThumb(img));
+      } else if (kind === 'GP_JSON') {
+        const text = await file.text();
+        saveAsset(file.name.replace(/\.json$/i, ''), 'GP', text);
+      } else {
+        const src = await putFile(file);
+        if (kind === 'SPLAT') {
+          const def = { name: file.name, src, translation: [0, 0, 0] as Vec3, rotation: [0, 0, 0] as Vec3, scale: 1, visible: true };
+          const asset = saveAsset(file.name, 'SPLAT', JSON.stringify(def));
+          void this.studioThumb('SPLAT', def).then((t) => { if (t) updateAsset(asset.id, { thumb: t }); });
+        } else {
+          const mesh = createMeshObject(0, 'MODEL', [0, 0, 0], src);
+          mesh.name = file.name;
+          if (upZ && isYUpModel(file.name)) mesh.rotation = [Math.PI / 2, 0, 0];
+          const asset = saveAsset(file.name, 'MESH', meshAssetPayload(mesh));
+          void this.studioThumb('MESH', mesh).then((t) => { if (t) updateAsset(asset.id, { thumb: t }); });
+        }
+      }
+      added++;
+    }
+    if (skipped.length) this.setStatusHint(`Not a format I can open: ${skipped.join(', ')}`, 5000);
+    else if (added) this.setStatusHint(`Added ${added} to the Library`);
+  }
+
+  /**
+   * A picture of a model or scan that is NOT in the scene: it is loaded into
+   * a private "studio" — its own MeshManager or SplatManager, its own
+   * lights, the scene's environment — rendered once it has arrived, and
+   * thrown away. Nothing appears in the scene, the outliner or the undo
+   * history while it loads.
+   */
+  private async studioThumb(kind: 'MESH' | 'SPLAT', def: object): Promise<string | undefined> {
+    const STAGE_ID = -7;
+    const studio = new THREE.Scene();
+    studio.environment = this.scene3.environment;
+    studio.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.8);
+    sun.position.set(3, -4, 6);
+    studio.add(sun);
+    const base = { ...this.ctx.scene, meshes: [], splats: [] } as GPScene;
+    const entity = { ...def, id: STAGE_ID, parent: null, select: false, visible: true, translation: [0, 0, 0] };
+    const staged = kind === 'MESH' ? { ...base, meshes: [entity] } as unknown as GPScene
+      : { ...base, splats: [entity] } as unknown as GPScene;
+    const mm = kind === 'MESH' ? new MeshManager() : null;
+    const sm = kind === 'SPLAT' ? new SplatManager() : null;
+    if (mm) studio.add(mm.group);
+    if (sm) { sm.init(this.glRenderer); studio.add(sm.group); }
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      for (let t = 0; t < 400; t++) {          // up to ~60 s for a big scan
+        mm?.sync(staged);
+        sm?.sync(staged);
+        let box: THREE.Box3 | null = null;
+        if (mm) {
+          const root = mm.rootFor(STAGE_ID);
+          let geo = false;
+          root?.traverse((o) => { if ((o as THREE.Mesh).geometry) geo = true; });
+          if (root && geo) { root.updateMatrixWorld(true); box = new THREE.Box3().setFromObject(root); }
+        } else {
+          const m = sm!.meshFor(STAGE_ID);
+          if (m) { m.updateMatrixWorld(true); box = this.splatCoreOf(m); }
+        }
+        if (box && !box.isEmpty()) {
+          // Spark sorts its splats during a render, so the first frame can
+          // come out empty: render a couple before keeping one
+          this.renderThumbnail(studio, box);
+          await wait(120);
+          this.renderThumbnail(studio, box);
+          await wait(120);
+          return this.renderThumbnail(studio, box) ?? undefined;
+        }
+        await wait(150);
+      }
+      return undefined;
+    } catch (err) {
+      console.warn('library thumbnail:', err);
+      return undefined;
+    } finally {
+      mm?.sync(base);
+      sm?.sync(base);
+    }
+  }
+
+  // ------------------------------------------------------- live cameras
+
+  /** Open a camera (the default, or a device) and list it in the Library. */
+  async openCamera(deviceId?: string): Promise<void> {
+    try {
+      const src = await liveSources.open(deviceId);
+      if (!streamAsset(src.key)) {
+        saveAsset(src.label, 'STREAM', JSON.stringify({ key: src.key, label: src.label, deviceId: src.deviceId }));
+      }
+      this.ui.refresh();
+    } catch (err) {
+      this.setStatusHint(`Camera: ${err instanceof Error ? err.message : String(err)}`, 5000);
+    }
+  }
+
+  async cameraDevices(): Promise<{ id: string; label: string }[]> {
+    return (await liveSources.devices()).map((d, i) => ({ id: d.deviceId, label: d.label || `Camera ${i + 1}` }));
+  }
+
+  liveAction(key: string, action: 'pause' | 'resume' | 'close'): void {
+    if (action === 'pause') liveSources.pause(key);
+    else if (action === 'close') liveSources.close(key);
+    else void liveSources.resume(key).catch((err) => this.setStatusHint(`Camera: ${err}`, 5000));
+    this.ui.refresh();
+  }
+
+  /** Library tiles and the capture panel show a camera through small
+   *  canvases tagged `data-live`; repainted from the source a few times a
+   *  second (the source canvas itself stays where the texture reads it). */
+  private livePreviewAt = 0;
+  private paintLivePreviews(): void {
+    const now = performance.now();
+    if (now - this.livePreviewAt < 100) return;
+    this.livePreviewAt = now;
+    for (const c of document.querySelectorAll<HTMLCanvasElement>('canvas[data-live]')) {
+      const src = liveSources.get(c.dataset.live!);
+      if (!src || src.canvas.width < 2) continue;
+      const g = c.getContext('2d');
+      if (!g) continue;
+      const w = c.width, h = c.height;
+      const s = Math.max(w / src.canvas.width, h / src.canvas.height);
+      const dw = src.canvas.width * s, dh = src.canvas.height * s;
+      g.drawImage(src.canvas, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    }
   }
 
   /** Re-take a Library tile's picture from the object it was placed as. */
@@ -3177,7 +3389,7 @@ class App implements AppHandle {
 
   /** Start capture from a URL or file (video, or animated webp/gif) instead
    *  of the webcam — test/iterate without camera access. */
-  mmCaptureStart(source?: { url?: string; file?: File }): void {
+  mmCaptureStart(source?: { url?: string; file?: File; live?: string }): void {
     void mmCapture.start(this.ctx.scene, source);
     this.ui.refresh();
   }
@@ -4678,6 +4890,8 @@ class App implements AppHandle {
     // subscribed, replay CLIP streams, sample any active recording, re-emit
     // world landmarks, then GPU-sync the point sprites. Runs BEFORE
     // mediamime.update so re-emitted events reach rigs this frame.
+    liveSources.tick();
+    this.paintLivePreviews();
     mmCapture.tick(ctx.scene);
     mmStreamEngine.sync(ctx.scene);
     updateClipStreams(ctx.scene, dt);

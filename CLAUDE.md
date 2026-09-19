@@ -1318,6 +1318,41 @@ the browser console or automated evals:
   its splat centres (`splatCore`), because a capture's FLOATERS reach metres
   out and a picture fitted to them shows the room as a speck (measured: core
   ~1.4 x 2.3 x 2.3 m against a full reach of ~18 x 17 x 17).
+- **The Library is a CONTAINER; dropping on it does not place anything**
+  (`App.importToLibrary`). Files dropped on the Library panel become entries
+  and stay out of the scene — they used to go through the viewport's
+  importer, so a drop on the Library also placed the file. Pictures come
+  from a private STUDIO (`App.studioThumb`): its own MeshManager or
+  SplatManager, lights and the scene's environment, polled until the thing
+  has loaded, rendered, then thrown away — nothing enters the scene, the
+  outliner or the undo history. A splat needs a couple of renders before
+  the kept one (Spark sorts during a render, so the first can be empty).
+  Measured: a 24 MB scan pictured in ~0.5 s with the scene untouched, and
+  the main scene's splats unaffected by the studio's own SparkRenderer. An
+  image's picture is the image itself. Placing a PLANE asset orients it like
+  a direct drop (on a wall, or upright facing the camera).
+  **In an eval, the Library's `listAssets` must be read through the DOM or
+  the app** — `import('/src/io/assets.ts')` is a second module instance with
+  its own empty cache (the general trap above).
+- **A camera is a Library ASSET** (`io/livesources.ts`), not something the
+  capture panel owns. `liveSources.open(deviceId?)` opens a webcam as a
+  source keyed `cam:<deviceId>`; each source draws its video into its OWN
+  canvas every frame and exposes a CanvasTexture over it. A mesh shows one
+  through a texture src of `live:<key>` (`materialManager.textureForSrc`
+  resolves it), so the same camera can be on several planes AND under
+  detection at once. PAUSE stops the camera and stops redrawing, so every
+  consumer holds the last frame — that indirection is why it is a canvas and
+  not the video element. Several cameras can be open; the Library's Camera
+  button opens the default, or asks which when there is more than one. A
+  STREAM asset records `{key, label, deviceId}` and outlives the stream: a
+  closed camera's tile reopens it on click, and a saved plane shows a grey
+  placeholder until then. Library tiles and the capture preview repaint
+  small `canvas[data-live]` copies (`App.paintLivePreviews`) — the source
+  canvas itself must never be moved into the DOM, every texture reads it.
+  MMCapture takes `{ live: key }` and READS that source (`external`),
+  detecting on its frame counter; with none named it uses whichever camera
+  is open, else opens the default. The preview browser pane blocks camera
+  access: verify with a `canvas.captureStream()` stand-in for getUserMedia.
 - **An actor can be a DRAW TARGET** (`TGActor.drawTarget`, the pencil icon on
   its outliner row). `ActorManager.drawTargets` joins the mesh, splat and poly
   lists in `ctx.surfaces`, so Placement: Surface lands strokes on the body

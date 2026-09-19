@@ -15,8 +15,11 @@ import { idb } from './blobstore';
 export interface TGAsset {
   id: number;
   name: string;
-  kind: 'GP' | 'MESH' | 'SPLAT';
-  /** GP: serializeGPObject JSON; MESH/SPLAT: the entity def, id/parent/select stripped */
+  kind: 'GP' | 'MESH' | 'SPLAT' | 'STREAM';
+  /** GP: serializeGPObject JSON; MESH/SPLAT: the entity def, id/parent/select
+   *  stripped; STREAM: { key, label, deviceId } of a live camera
+   *  (io/livesources.ts) — the entry outlives the stream, so a camera you
+   *  used stays in the Library and reopens from its tile */
   payload: string;
   /** a small picture of it, as a data URL */
   thumb?: string;
@@ -90,6 +93,11 @@ export function splatAssetPayload(s: TGSplat): string {
   const { id, parent, select, ...def } = s;
   void id; void parent; void select;
   return JSON.stringify(def);
+}
+
+/** The Library entry for a live camera, if it has one. */
+export function streamAsset(key: string): TGAsset | undefined {
+  return cache.find((a) => a.kind === 'STREAM' && (JSON.parse(a.payload) as { key: string }).key === key);
 }
 
 export type { GPObject };

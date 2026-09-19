@@ -19,6 +19,7 @@
 import type { GPScene, MMStream } from '../core/types';
 import { streamStore, STREAM_POINT_COUNTS, IRIS_INDICES } from './streams';
 import { packDetections, semanticDetector } from './detect';
+import { liveSources, type LiveSource } from '../io/livesources';
 
 // pinned to the installed @mediapipe/tasks-vision version
 const WASM_LOCAL = '/node_modules/@mediapipe/tasks-vision/wasm';
@@ -42,7 +43,11 @@ type ImageDecoderCtor = new (init: { data: ArrayBuffer; type: string }) => {
 const ImgDecoder = (globalThis as { ImageDecoder?: ImageDecoderCtor }).ImageDecoder;
 
 export type CaptureStatus = 'off' | 'starting' | 'on' | 'error';
-export type CaptureSource = { url?: string; file?: File };
+/** `live`: the key of a Library camera (io/livesources.ts) — capture reads
+ *  that camera's frames rather than opening one of its own, so the same
+ *  webcam can be on a plane in the scene and under detection at once, and
+ *  pausing it pauses both. */
+export type CaptureSource = { url?: string; file?: File; live?: string };
 
 export class MMCapture {
   status: CaptureStatus = 'off';
@@ -82,10 +87,17 @@ export class MMCapture {
     }
   }
 
+  /** a Library camera being read, when the source is one */
+  private external: LiveSource | null = null;
+
   /** the element detection reads from (and the panel previews) */
   get sourceEl(): HTMLVideoElement | HTMLCanvasElement {
+    if (this.external) return this.external.canvas;
     return this.usingCanvas ? this.canvas : this.video;
   }
+
+  /** the Library camera capture is reading, if any */
+  get liveKey(): string | null { return this.external?.key ?? null; }
 
   private setStatus(s: CaptureStatus, err = ''): void {
     this.status = s;
@@ -149,17 +161,18 @@ export class MMCapture {
 
   private async startSource(source?: CaptureSource): Promise<void> {
     if (!source?.url && !source?.file) {
-      // webcam (mirror the preview like a selfie view)
-      this.sourceLabel = 'camera';
-      this.video.style.transform = 'scaleX(-1)';
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 }, audio: false,
-      });
-      this.video.srcObject = this.stream;
+      // a Library camera: the named one, else whichever is open, else the
+      // default camera opened now (it then appears in the Library too)
+      const src = (source?.live ? liveSources.get(source.live) : undefined)
+        ?? liveSources.list().find((l) => l.status === 'on' || l.status === 'paused')
+        ?? await liveSources.open();
+      if (src.status === 'closed') await liveSources.resume(src.key);
+      this.external = src;
+      this.sourceLabel = src.label;
       this.usingCanvas = false;
-      await this.video.play();
       return;
     }
+    this.external = null;
     this.video.style.transform = '';
     if (source.file) {
       this.sourceLabel = source.file.name;
@@ -238,6 +251,8 @@ export class MMCapture {
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this.imgLoop++; // cancels the image-anim loop
+    // a Library camera is shared — detection lets go of it, it keeps running
+    this.external = null;
     this.usingCanvas = false;
     this.video.pause();
     this.video.srcObject = null;
@@ -255,12 +270,13 @@ export class MMCapture {
     // keep working from whatever the latest frame is rather than being
     // skipped whenever two ticks land on one frame.
     this.tickDetect(scene);
-    const frameKey = this.usingCanvas ? this.canvasFrame : this.video.currentTime;
+    const frameKey = this.external ? this.external.frame
+      : this.usingCanvas ? this.canvasFrame : this.video.currentTime;
     if (frameKey === this.lastFrameKey) return;
     this.lastFrameKey = frameKey;
     const src = this.sourceEl;
-    const w = this.usingCanvas ? this.canvas.width : this.video.videoWidth;
-    const h = this.usingCanvas ? this.canvas.height : this.video.videoHeight;
+    const w = this.external ? this.external.canvas.width : this.usingCanvas ? this.canvas.width : this.video.videoWidth;
+    const h = this.external ? this.external.canvas.height : this.usingCanvas ? this.canvas.height : this.video.videoHeight;
     if (!w || !h) return;
     const now = performance.now();
     const aspect = w / h;
@@ -331,8 +347,8 @@ export class MMCapture {
     );
     if (!streams.length) return;
     const src = this.sourceEl;
-    const w = this.usingCanvas ? this.canvas.width : this.video.videoWidth;
-    const h = this.usingCanvas ? this.canvas.height : this.video.videoHeight;
+    const w = this.external ? this.external.canvas.width : this.usingCanvas ? this.canvas.width : this.video.videoWidth;
+    const h = this.external ? this.external.canvas.height : this.usingCanvas ? this.canvas.height : this.video.videoHeight;
     if (!w || !h) return;
     const aspect = w / h;
     const now = performance.now();
