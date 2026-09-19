@@ -1437,6 +1437,31 @@ the browser console or automated evals:
     media is already compressed). IMPORT takes that zip, or a FOLDER of the
     same, adding beside what is there with fresh ids; a zip or folder with no
     library.json is imported as loose files (scans, models, images).
+- **A PROJECTOR is a SPOT light that throws a picture** (`TGProjection` on
+  `TGLight`, painted in `render/lights.ts`): one mechanism for both a GOBO (a
+  shape cut into the beam, greyscaled, tinted by the light's own colour) and
+  a PROJECTION (an image, a video, a camera thrown onto the room), because
+  they differ only in what the picture means. Add ▸ Projector makes one aimed
+  at the origin with shadows ON — a projector nothing can stand in front of
+  is no use for planning an installation.
+  - three maps a spot light's texture over its SQUARE frustum and the cone
+    cuts the inscribed circle out of it, so the picture is laid into a
+    rectangle INSCRIBED IN THAT CIRCLE (its diagonal spans the cone) on a
+    1024px canvas with black — "no light" — around it. That is what makes the
+    lit patch the projector's rectangle rather than three's circular spot.
+    `aspect: 0` keeps the circle, which is the round-gobo case.
+  - `light.map` works WITHOUT castShadow (three updates the light matrix for
+    a map alone), but shadows are what let objects block the beam.
+  - A live source (camera, video, GIF) repaints the canvas on its frame
+    counter; a still image is painted once, and again when it finishes
+    loading. The beam glyph is rebuilt only when its angle or aspect change.
+  - `App.projectorThrow` measures the beam CENTRE to the first thing it
+    hits and reports the picture's size there ("throw 6.03 m · image
+    5.06 × 2.85 m") — the number an installation is planned around, and one
+    a cone cannot show. Dropping a picture on a selected spot light sets its
+    projection (and takes the picture's own aspect).
+  - Lamps only light the scene in RENDERED shading, so the panel says so and
+    offers the switch — otherwise a working projector reads as a broken one.
 - **Dropping an image or camera ON a selected object textures it**
   (`App.textureTargetAt` / `applyTexture`): a Library image or camera asset,
   or a single image file from Finder, dropped on a SELECTED primitive mesh

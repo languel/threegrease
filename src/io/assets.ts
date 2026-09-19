@@ -11,6 +11,7 @@
 // them synchronously while it builds panels.
 import type { GPObject, TGMesh, TGSplat } from '../core/types';
 import { getBlob, idb, putFile } from './blobstore';
+import { LIVE_PREFIX } from './livesources';
 import { unzipSync, zipSync, strToU8, strFromU8 } from 'three/examples/jsm/libs/fflate.module.js';
 
 export interface TGAsset {
@@ -124,6 +125,15 @@ export function splatAssetPayload(s: TGSplat): string {
 /** The Library entry for a live camera, if it has one. */
 export function streamAsset(key: string): TGAsset | undefined {
   return cache.find((a) => a.kind === 'STREAM' && (JSON.parse(a.payload) as { key: string }).key === key);
+}
+
+/** The texture a Library asset can give an object: an image asset's picture,
+ *  or a camera's live stream. Null for everything else (models, scans...). */
+export function assetTexture(asset: TGAsset): string | null {
+  if (asset.kind === 'STREAM') return `${LIVE_PREFIX}${(JSON.parse(asset.payload) as { key: string }).key}`;
+  if (asset.kind !== 'MESH') return null;
+  const def = JSON.parse(asset.payload) as { kind?: string; texture?: string | null };
+  return def.kind === 'PLANE' && def.texture ? def.texture : null;
 }
 
 // ---- folders ---------------------------------------------------------------

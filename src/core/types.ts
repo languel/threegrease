@@ -580,6 +580,8 @@ export interface TGLight {
   /** SPOT cone */
   angle?: number;
   penumbra?: number;
+  /** SPOT only: the light PROJECTS a picture (render/lights.ts) */
+  projection?: TGProjection;
   castShadow: boolean;
   shadowBias?: number;
   shadowRadius?: number;
@@ -590,6 +592,39 @@ export interface TGLight {
   lock?: boolean;
   parent?: ParentRef | null;
   constraints?: TGConstraint[];
+}
+
+/**
+ * A projector: what a SPOT light throws.
+ *
+ * One mechanism serves both things an installation needs — a GOBO (a shape
+ * cut into the beam, read as a mask) and a PROJECTION (an image, a video, a
+ * camera thrown onto the room) — because they differ only in what the
+ * picture means, not in how it is cast.
+ *
+ * The picture is laid into the beam at `aspect` (0 = fill the cone, which is
+ * the round gobo case), so the lit shape on the wall is the projector's
+ * rectangle rather than three's circular spot.
+ */
+export interface TGProjection {
+  /** a data URL, a `store:` file, or `live:<key>` (camera, video, GIF) */
+  src: string | null;
+  /** what it is, for the panel */
+  name?: string;
+  /** GOBO reads the picture as a mask (greyscale, tinted by the light's
+   *  colour); PROJECT throws its own colours */
+  mode?: 'GOBO' | 'PROJECT';
+  /** the picture's shape inside the beam; 0 = fill the cone (round gobo) */
+  aspect?: number;
+  /** CONTAIN fits the whole picture in the rectangle, COVER fills it */
+  fit?: 'CONTAIN' | 'COVER';
+  /** spin the picture in the beam, radians */
+  rotation?: number;
+  /** mirror it (rear projection) */
+  flip?: boolean;
+  /** brightness of the picture itself, 0..2 (the light's own Power still
+   *  applies) */
+  gain?: number;
 }
 
 /** A mesh scene object: primitive solid, plane, or imported model —

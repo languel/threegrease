@@ -1,6 +1,6 @@
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget, type NearestTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
-import type { GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
+import type { TGLight, GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
 import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, forEachSelectedStroke, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
@@ -26,7 +26,7 @@ import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
 import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, multiLandmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
 import {
-  ASSET_MIME, addFolder, canRestoreAssets, deleteFolder, listAssets, listFolders, moveAsset, removeAssets,
+  ASSET_MIME, addFolder, assetTexture, canRestoreAssets, deleteFolder, listAssets, listFolders, moveAsset, removeAssets,
   renameFolder, restoreAssets, updateAsset, type TGAsset,
 } from '../io/assets';
 import { liveSources } from '../io/livesources';
@@ -81,6 +81,9 @@ export interface AppHandle {
   /** Edit mode is open on a mesh (vertex / edge / face editor) */
   meshEditing(): boolean;
   setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
+  applyTexture(ref: { kind: string; id: number }, src: string, name: string): void;
+  projectorThrow(lightId: number): { distance: number; width: number; height: number } | null;
+  projectFile(lightId: number, file: File): Promise<void>;
   setRenderScale(scale: number): void;
   gpSeparate(how: 'SELECTION' | 'MATERIAL' | 'LOOSE'): number;
   meshOp(op: 'extrude' | 'fill' | 'delete' | 'selectAll' | 'selectNone' | 'separateSelection' | 'separateLoose'): void;
@@ -1810,6 +1813,81 @@ export class UI {
       { label: 'Select None', do: m('selectNone') },
     ];
     this.openContextMenu(clientX, clientY, items);
+  }
+
+  /**
+   * A spot light's PROJECTION: the picture it throws (app/render/lights.ts).
+   * One section for both a gobo and a projector — they differ only in what
+   * the picture means — plus the throw readout, which is the number an
+   * installation is actually planned around.
+   */
+  private projectionRows(l: TGLight): Node[] {
+    const { ctx } = this.app;
+    const p = l.projection;
+    const set = (patch: Partial<NonNullable<TGLight['projection']>>) => {
+      l.projection = { src: null, mode: 'PROJECT', fit: 'CONTAIN', aspect: 16 / 9, gain: 1, ...p, ...patch };
+      this.refresh();
+    };
+    const pickFile = el('input', { type: 'file', accept: 'image/*,video/*' }) as HTMLInputElement;
+    pickFile.style.display = 'none';
+    pickFile.onchange = () => {
+      const f = pickFile.files?.[0];
+      if (f) void this.app.projectFile(l.id, f);
+    };
+    const sourceBtn: HTMLElement = btn(p?.src ? (p.name ?? 'picture') : 'none…', () => {
+      const r = sourceBtn.getBoundingClientRect();
+      const usable = listAssets().filter((a) => !!assetTexture(a));
+      this.openContextMenu(r.left, r.bottom + 2, [
+        { header: 'Project' },
+        ...usable.map((a) => ({
+          label: a.name,
+          do: () => { ctx.pushUndo(); this.app.applyTexture({ kind: 'LIGHT', id: l.id }, assetTexture(a)!, a.name); },
+        })),
+        ...(usable.length ? [{ sep: true as const }] : []),
+        { label: 'From a file…', do: () => pickFile.click() },
+        ...(p?.src ? [{ label: 'Nothing (plain light)', do: () => set({ src: null, name: undefined }) }] : []),
+      ]);
+    }, { title: 'The image, video or camera this light throws — Library assets, or a file' });
+
+    const rows: Node[] = [
+      el('div', { class: 'menu-header', text: 'Projection' }),
+      fieldRow('Source', el('div', { class: 'row' }, sourceBtn, pickFile)),
+    ];
+    if (!p?.src) return rows;
+    const throwAt = this.app.projectorThrow(l.id);
+    const unit = (m: number) => `${m.toFixed(2)} m`;
+    rows.push(
+      fieldRow('Kind', tip(selectField('', p.mode ?? 'PROJECT', [
+        ['PROJECT', 'Projection (its colours)'], ['GOBO', 'Gobo (a shape in the beam)'],
+      ], (v) => set({ mode: v as 'GOBO' | 'PROJECT' })),
+      'A gobo is read as a shape and takes the light\'s own colour; a projection throws the picture\'s colours.')),
+      fieldRow('Shape', tip(selectField('', String(p.aspect ?? 0), [
+        ['1.7777777777777777', '16:9'], ['1.3333333333333333', '4:3'], ['1.85', '1.85:1'],
+        ['2.39', '2.39:1'], ['1', 'Square'], ['0', 'Fill the cone (round)'],
+      ], (v) => set({ aspect: Number(v) })),
+      'The picture sits in the beam at this shape, its diagonal across the cone — so the lit patch is the projector\'s rectangle, not a circle.')),
+      fieldRow('Fit', selectField('', p.fit ?? 'CONTAIN', [['CONTAIN', 'Fit inside'], ['COVER', 'Fill (crop)']],
+        (v) => set({ fit: v as 'CONTAIN' | 'COVER' }))),
+      fieldRow('Brightness', slider('', p.gain ?? 1, 0, 2, 0.05, (v) => { set({ gain: v }); }, { def: 1 })),
+      fieldRow('Rotate', slider('', p.rotation ?? 0, -Math.PI, Math.PI, 0.01, (v) => { set({ rotation: v }); }, { def: 0 })),
+      checkbox('Mirror', !!p.flip, (v) => set({ flip: v }), 'rear projection'),
+      el('div', { class: 'row', text: throwAt
+        ? `throw ${unit(throwAt.distance)} · image ${unit(throwAt.width)} × ${unit(throwAt.height)}`
+        : 'throw — nothing in the beam' }),
+    );
+    if (!l.castShadow) {
+      rows.push(el('div', { class: 'row', text: 'Shadows are off: the beam passes through everything.' }));
+    }
+    // lamps only light the scene in Rendered shading (Blender's rule, see
+    // the world note): a projector is invisible in the others, which reads
+    // as "the projector is broken" rather than "the view ignores lamps"
+    if (ctx.settings.shading !== 'RENDERED') {
+      const row = el('div', { class: 'row' },
+        el('span', { class: 'grow', text: 'Only Rendered shading shows lights.' }),
+        btn('Rendered', () => { this.app.setShading('RENDERED'); this.refresh(); }));
+      rows.push(row);
+    }
+    return rows;
   }
 
   openStrokeOpsContextMenu(clientX: number, clientY: number): void {
@@ -3755,6 +3833,7 @@ export class UI {
         ...(spot ? [
           fieldRow('Cone', slider('', l.angle ?? Math.PI / 6, 0.05, Math.PI / 2, 0.01, (v) => { l.angle = v; }, { def: Math.PI / 6 })),
           fieldRow('Penumbra', slider('', l.penumbra ?? 0.2, 0, 1, 0.01, (v) => { l.penumbra = v; }, { def: 0.2 })),
+          ...this.projectionRows(l),
         ] : []),
         ...(l.kind === 'AMBIENT' ? [] : [
           el('div', { class: 'menu-header', text: 'Shadow' }),

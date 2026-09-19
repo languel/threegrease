@@ -87,7 +87,7 @@ import { CommandRegistry } from './commands';
 import { BRUSH_PRESETS as BRUSH_PRESETS_CACHE } from '../core/brushes';
 import {
   initAssets, listAssets, meshAssetPayload, onAssetsChanged, saveAsset, splatAssetPayload,
-  streamAsset, updateAsset, ASSET_MIME, type TGAsset,
+  streamAsset, updateAsset, ASSET_MIME, assetTexture, type TGAsset,
   exportLibrary as packLibrary, importLibrary, zipEntries,
 } from '../io/assets';
 import { LIVE_PREFIX, isMediaName, liveKeyOf, liveSources, testCardDataUrl } from '../io/livesources';
@@ -99,13 +99,19 @@ function hasLight(o: THREE.Object3D): boolean {
   return found;
 }
 
-/** The texture a Library asset can give an object: an image asset's picture,
- *  or a camera's live stream. Null for everything else (models, scans...). */
-function assetTexture(asset: TGAsset): string | null {
-  if (asset.kind === 'STREAM') return `${LIVE_PREFIX}${(JSON.parse(asset.payload) as { key: string }).key}`;
-  if (asset.kind !== 'MESH') return null;
-  const def = JSON.parse(asset.payload) as { kind?: string; texture?: string | null };
-  return def.kind === 'PLANE' && def.texture ? def.texture : null;
+/** The width/height of a picture source, once it is known. */
+async function pictureAspect(src: string): Promise<number | null> {
+  const live = liveKeyOf(src);
+  if (live) {
+    const s = liveSources.get(live);
+    return s && s.canvas.width > 64 ? s.canvas.width / s.canvas.height : null;
+  }
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => res(img.naturalWidth / Math.max(1, img.naturalHeight));
+    img.onerror = () => res(null);
+    img.src = src;
+  });
 }
 
 /** A Library tile's picture of a canvas (a video's or GIF's first frame). */
@@ -2766,6 +2772,7 @@ class App implements AppHandle {
       { label: 'Sun light', icon: 'boltCircle', do: () => this.addLight('SUN', cursorAt) },
       { label: 'Point light', icon: 'boltCircle', do: () => this.addLight('POINT', cursorAt) },
       { label: 'Spot light', icon: 'boltCircle', do: () => this.addLight('SPOT', cursorAt) },
+      { label: 'Projector', icon: 'photo', do: () => this.addProjector(cursorAt) },
       { sep: true },
       { label: 'Traveler here', icon: 'cursorArrow', do: () => this.addTravelerObjectAt(hereAt, px.x, px.y), disabled: !strokeHit },
       { label: 'Trigger here', icon: 'boltCircle', do: () => this.addTriggerAt(hereAt) },
@@ -3060,6 +3067,11 @@ class App implements AppHandle {
       return m && m.select && m.kind !== 'MODEL' && m.kind !== 'EMPTY' ? ref : null;
     }
     if (ref.kind === 'POLY') return scene.polyMeshes.find((x) => x.id === ref.id)?.select ? ref : null;
+    if (ref.kind === 'LIGHT') {
+      // a spot light takes a picture too: it throws it (a projector)
+      const l = scene.lights.find((x) => x.id === ref.id);
+      return l && l.select && l.kind === 'SPOT' ? ref : null;
+    }
     if (ref.kind === 'GP') {
       const ob = scene.objects.find((o) => o.id === ref.id);
       return ob && (ob.select || (ctx.settings.mode === 'EDIT' && ob === activeObject(scene))) ? ref : null;
@@ -3113,6 +3125,25 @@ class App implements AppHandle {
       }
       if (ref.kind === 'POLY') touchPolyMesh(target as TGPolyMesh);
       this.meshes.sync(scene, this.nav.active);
+    } else if (ref.kind === 'LIGHT') {
+      const l = scene.lights.find((x) => x.id === ref.id);
+      if (!l) return;
+      const prev = l.projection;
+      l.projection = {
+        ...prev, src, name,
+        mode: prev?.mode ?? 'PROJECT',
+        fit: prev?.fit ?? 'CONTAIN',
+        gain: prev?.gain ?? 1,
+        aspect: prev?.aspect ?? 16 / 9,
+      };
+      // the picture's OWN shape, so it is not stretched into a guess
+      void pictureAspect(src).then((a) => {
+        if (a && l.projection) l.projection.aspect = a;
+        this.ui.refresh();
+      });
+      this.setStatusHint(`${l.name} projects ${name}`);
+      this.ui.refresh();
+      return;
     } else if (ref.kind === 'GP') {
       if (liveKeyOf(src)) { this.setStatusHint('A camera cannot texture strokes yet — drop it on a mesh or a plane', 4000); return; }
       const ob = scene.objects.find((o) => o.id === ref.id);
@@ -4476,6 +4507,85 @@ class App implements AppHandle {
 
   /** Add a light at the 3D cursor, selected and active like any other
    *  object (lights are ordinary scene objects — see render/lights.ts). */
+  /**
+   * A PROJECTOR: a spot light that throws a picture. Aimed at the scene's
+   * centre from where it is put, with a 16:9 image and shadows on — a
+   * projector that nothing can stand in front of would be no use for
+   * planning an installation.
+   */
+  addProjector(at?: [number, number, number]): void {
+    const scene = this.ctx.scene;
+    this.ctx.pushUndo();
+    const l = createLight('SPOT', `Projector ${scene.lights.filter((x) => x.projection).length + 1}`, at ?? [...scene.cursor]);
+    l.angle = Math.PI / 7;          // ~26 degrees to the corner: a room projector
+    l.intensity = 60;
+    l.penumbra = 0.02;              // a projector's edge is sharp
+    l.castShadow = true;
+    l.projection = { src: null, mode: 'PROJECT', aspect: 16 / 9, fit: 'CONTAIN', gain: 1 };
+    // point it at the world origin, which is where a scene is usually built
+    const from = new THREE.Vector3(...l.translation);
+    const look = new THREE.Object3D();
+    look.position.copy(from);
+    look.lookAt(0, 0, 0);
+    // a light's beam runs down its own -Z, like a camera's view, so lookAt
+    // (which points +Z for non-cameras) has to be turned around
+    look.rotateY(Math.PI);
+    const e = new THREE.Euler().setFromQuaternion(look.quaternion);
+    l.rotation = [e.x, e.y, e.z];
+    scene.lights.push(l);
+    deselectAllObjects(scene);
+    l.select = true;
+    this.setLastPicked({ kind: 'LIGHT', id: l.id });
+    this.refreshWidget();
+    this.ui.refresh();
+    this.setStatusHint('Projector added — drop an image, video or camera on it to throw it');
+  }
+
+  /** Throw a file (an image, or a video/GIF, which plays) from a light. */
+  async projectFile(lightId: number, file: File): Promise<void> {
+    const moving = isMediaName(file.name);
+    this.ctx.pushUndo();
+    if (moving) {
+      const src = await putFile(file);
+      await liveSources.openMedia(src, file.name).catch(() => null);
+      this.applyTexture({ kind: 'LIGHT', id: lightId }, `${LIVE_PREFIX}media:${src}`, file.name);
+      return;
+    }
+    const url = await new Promise<string>((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result));
+      r.onerror = () => rej(r.error);
+      r.readAsDataURL(file);
+    });
+    this.applyTexture({ kind: 'LIGHT', id: lightId }, url, file.name);
+  }
+
+  /**
+   * What a projector throws where it is pointing: the distance to the first
+   * thing in the beam and the size of the picture there. The one number an
+   * installation plan needs — "will it fill that wall from the back of the
+   * room" — and it cannot be read off a cone.
+   */
+  projectorThrow(lightId: number): { distance: number; width: number; height: number } | null {
+    const l = this.ctx.scene.lights.find((x) => x.id === lightId);
+    if (!l || l.kind !== 'SPOT') return null;
+    const root = this.lights.rootFor(lightId);
+    if (!root) return null;
+    root.updateMatrixWorld(true);
+    const from = new THREE.Vector3().setFromMatrixPosition(root.matrixWorld);
+    const dir = new THREE.Vector3(0, 0, -1).transformDirection(root.matrixWorld).normalize();
+    const ray = new THREE.Raycaster(from, dir);
+    const hit = ray.intersectObjects([...this.ctx.pickableMeshes, ...this.ctx.surfaces], true)
+      .find((h) => h.object.visible && !h.object.userData.lightHelper && !h.object.userData.overlay);
+    const distance = hit?.distance ?? (l.distance || 5);
+    const angle = l.angle ?? Math.PI / 6;
+    const aspect = l.projection?.aspect ?? 0;
+    const r = Math.tan(angle) * distance;      // half the beam at that range
+    const width = aspect ? 2 * r * aspect / Math.hypot(1, aspect) : 2 * r;
+    const height = aspect ? 2 * r / Math.hypot(1, aspect) : 2 * r;
+    return { distance, width, height };
+  }
+
   addLight(kind: TGLight['kind'], at?: [number, number, number]): void {
     const scene = this.ctx.scene;
     this.ctx.pushUndo();

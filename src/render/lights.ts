@@ -10,8 +10,14 @@
 // properties. Helper glyphs are unlit line art so a light is visible and
 // clickable even though the light itself renders nothing.
 import * as THREE from 'three';
-import type { GPScene, TGLight } from '../core/types';
+import type { GPScene, TGLight, TGProjection } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
+import { liveKeyOf, liveSources } from '../io/livesources';
+
+/** The projector canvas is square because three maps a spot light's texture
+ *  over its SQUARE frustum; the cone then cuts the inscribed circle out of
+ *  it, and the picture is laid inside that circle. */
+const PROJ_SIZE = 1024;
 
 type AnyLight = THREE.AmbientLight | THREE.DirectionalLight | THREE.PointLight | THREE.SpotLight;
 
@@ -21,6 +27,18 @@ interface Entry {
   helper: THREE.Object3D;
   kind: TGLight['kind'];
   shadowMapSize: number;
+  /** the projected picture: its canvas, the texture over it, and what was
+   *  last painted there (so a still image is painted once) */
+  proj?: {
+    canvas: HTMLCanvasElement;
+    texture: THREE.CanvasTexture;
+    img?: HTMLImageElement;
+    key: string;
+    live: boolean;
+    frame: number;
+  };
+  /** the beam glyph's current shape, so it is only rebuilt when it changes */
+  beamKey?: string;
 }
 
 /** Unlit wire glyph per kind, so lights read at a glance in the viewport.
@@ -78,6 +96,51 @@ function makeHelper(kind: TGLight['kind'], color: THREE.ColorRepresentation): TH
   pick.userData.lightHelper = true;
   g.add(lines, pick);
   return g;
+}
+
+/**
+ * The beam a projector throws, as wire: a rectangular pyramid at the
+ * picture's own aspect, inscribed in the cone (the picture's DIAGONAL spans
+ * the cone, which is how the texture is laid in). A round gobo, or a spot
+ * with no picture, keeps the cone.
+ */
+function beamLines(angle: number, aspect: number, length: number): THREE.BufferGeometry {
+  const pts: number[] = [];
+  const r = Math.tan(angle) * length;
+  if (aspect > 0) {
+    const w = r * aspect / Math.hypot(1, aspect), h = r / Math.hypot(1, aspect);
+    const corners: [number, number][] = [[-w, -h], [w, -h], [w, h], [-w, h]];
+    for (let i = 0; i < 4; i++) {
+      const a = corners[i], b = corners[(i + 1) % 4];
+      pts.push(a[0], a[1], -length, b[0], b[1], -length);
+      pts.push(0, 0, 0, a[0], a[1], -length);
+    }
+  } else {
+    for (let i = 0; i < 24; i++) {
+      const a0 = (i / 24) * Math.PI * 2, a1 = ((i + 1) / 24) * Math.PI * 2;
+      pts.push(Math.cos(a0) * r, Math.sin(a0) * r, -length, Math.cos(a1) * r, Math.sin(a1) * r, -length);
+      if (i % 6 === 0) pts.push(0, 0, 0, Math.cos(a0) * r, Math.sin(a0) * r, -length);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return geo;
+}
+
+/** The picture the projection points at, as something drawable: a live
+ *  source's canvas (camera, video, GIF) or a loaded image. */
+function sourceOf(entry: Entry, src: string): CanvasImageSource | null {
+  const live = liveKeyOf(src);
+  if (live) return liveSources.get(live)?.canvas ?? liveSources.textureFor(live).image as HTMLCanvasElement;
+  const p = entry.proj!;
+  if (p.img?.dataset.src !== src) {
+    const img = new Image();
+    img.dataset.src = src;
+    img.onload = () => { p.frame = -1; };     // force a repaint once it is here
+    img.src = src;
+    p.img = img;
+  }
+  return p.img.complete && p.img.naturalWidth ? p.img : null;
 }
 
 function makeLight(kind: TGLight['kind']): AnyLight {
@@ -160,6 +223,7 @@ export class LightManager {
     if (light instanceof THREE.SpotLight) {
       light.angle = data.angle ?? Math.PI / 6;
       light.penumbra = data.penumbra ?? 0.2;
+      this.applyProjection(entry, light, data);
     }
     // AmbientLight has no shadow at all
     if (!(light instanceof THREE.AmbientLight)) {
@@ -187,6 +251,58 @@ export class LightManager {
     }
   }
 
+  /**
+   * Paint the projector's picture into the light's map, and shape its beam
+   * glyph to match. A live source repaints every frame it moves; a still
+   * image is painted once (and again when it finishes loading).
+   */
+  private applyProjection(entry: Entry, light: THREE.SpotLight, data: TGLight): void {
+    const proj = data.projection;
+    const src = proj?.src ?? null;
+    if (!src) {
+      if (light.map) { light.map = null; }
+      this.shapeBeam(entry, data, 0);
+      return;
+    }
+    if (!entry.proj) {
+      const canvas = document.createElement('canvas');
+      canvas.width = PROJ_SIZE; canvas.height = PROJ_SIZE;
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      entry.proj = { canvas, texture, key: '', live: false, frame: -1 };
+    }
+    const p = entry.proj;
+    const liveKey = liveKeyOf(src);
+    const ls = liveKey ? liveSources.get(liveKey) : undefined;
+    const key = `${src}|${proj!.mode ?? 'PROJECT'}|${proj!.aspect ?? 0}|${proj!.fit ?? 'CONTAIN'}`
+      + `|${proj!.rotation ?? 0}|${proj!.flip ? 1 : 0}|${proj!.gain ?? 1}`;
+    const frame = ls?.frame ?? 0;
+    if (key !== p.key || frame !== p.frame) {
+      const picture = sourceOf(entry, src);
+      if (picture) {
+        paintProjection(p.canvas, picture, proj!);
+        p.texture.needsUpdate = true;
+        p.key = key;
+        p.frame = frame;
+      }
+    }
+    light.map = p.texture;
+    this.shapeBeam(entry, data, proj!.aspect ?? 0);
+  }
+
+  /** The wire beam, rebuilt only when its shape changes. */
+  private shapeBeam(entry: Entry, data: TGLight, aspect: number): void {
+    if (entry.kind !== 'SPOT') return;
+    const angle = data.angle ?? Math.PI / 6;
+    const key = `${angle.toFixed(4)}|${aspect}`;
+    if (entry.beamKey === key) return;
+    entry.beamKey = key;
+    const lines = entry.helper.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
+    if (!lines) return;
+    lines.geometry.dispose();
+    lines.geometry = beamLines(angle, aspect, 0.9);
+  }
+
   /** Root for selection glyphs / picking, like MeshManager.rootFor. */
   rootFor(id: number): THREE.Object3D | null { return this.entries.get(id)?.root ?? null; }
 
@@ -206,4 +322,54 @@ export class LightManager {
       mat?.dispose?.();
     });
   }
+}
+
+/**
+ * Lay the picture into the beam.
+ *
+ * The canvas IS the spot's square frustum and the cone cuts its inscribed
+ * circle, so a rectangle of the wanted aspect is inscribed in THAT circle —
+ * its diagonal spans the beam. Everything outside is black, which in a light
+ * means "no light", so the lit shape on the wall is the projector's
+ * rectangle rather than three's circular spot. A GOBO is greyscaled, since
+ * what a gobo carries is a shape, and the light's own colour tints it.
+ */
+function paintProjection(canvas: HTMLCanvasElement, picture: CanvasImageSource, proj: TGProjection): void {
+  const g = canvas.getContext('2d')!;
+  const S = canvas.width;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.filter = 'none';
+  g.globalAlpha = 1;
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, S, S);
+  const sw = (picture as HTMLCanvasElement).width || (picture as HTMLImageElement).naturalWidth || 1;
+  const sh = (picture as HTMLCanvasElement).height || (picture as HTMLImageElement).naturalHeight || 1;
+  const aspect = proj.aspect && proj.aspect > 0 ? proj.aspect : 0;
+  // the beam's disc is the inscribed circle: diameter S
+  const rw = aspect ? S * aspect / Math.hypot(1, aspect) : S;
+  const rh = aspect ? S / Math.hypot(1, aspect) : S;
+  g.save();
+  g.translate(S / 2, S / 2);
+  if (proj.rotation) g.rotate(proj.rotation);
+  if (proj.flip) g.scale(-1, 1);
+  const gain = proj.gain ?? 1;
+  const filters: string[] = [];
+  if (proj.mode === 'GOBO') filters.push('grayscale(1)');
+  if (gain !== 1) filters.push(`brightness(${Math.max(0, gain)})`);
+  g.filter = filters.length ? filters.join(' ') : 'none';
+  if (!aspect) {
+    // round gobo: the picture fills the disc, cropped to it
+    g.beginPath();
+    g.arc(0, 0, S / 2, 0, Math.PI * 2);
+    g.clip();
+  }
+  const k = proj.fit === 'COVER'
+    ? Math.max(rw / sw, rh / sh)
+    : Math.min(rw / sw, rh / sh);
+  const dw = sw * k, dh = sh * k;
+  g.beginPath();
+  g.rect(-rw / 2, -rh / 2, rw, rh);
+  g.clip();
+  g.drawImage(picture, -dw / 2, -dh / 2, dw, dh);
+  g.restore();
 }
