@@ -425,3 +425,47 @@ export function snapCursorToStrokeEnd(ctx: AppCtx, which: 'start' | 'end'): void
   ctx.scene.cursor = [...target] as Vec3;
   ctx.requestRender();
 }
+
+/**
+ * Separate ▸ By Material: one GP object per material slot the active object
+ * actually uses, across every layer and keyframe. The strokes of the lowest
+ * slot stay where they are. Each new object is named after its material,
+ * keeps the full material list (so `materialIndex` stays valid) and the
+ * source's transform. Returns objects created.
+ */
+export function separateByMaterial(ctx: AppCtx): number {
+  const ob = activeObject(ctx.scene);
+  const used = new Set<number>();
+  for (const l of ob.layers) for (const f of l.frames) for (const s of f.strokes) used.add(s.materialIndex);
+  const slots = [...used].sort((a, b) => a - b);
+  if (slots.length < 2) return 0;
+  ctx.pushUndo();
+  let at = ctx.scene.objects.indexOf(ob);
+  for (const slot of slots.slice(1)) {
+    const newOb = createObject(`${ob.name} ${ob.materials[slot]?.name ?? `slot ${slot}`}`);
+    newOb.translation = [...ob.translation];
+    newOb.rotation = [...ob.rotation];
+    newOb.scale = [...ob.scale];
+    newOb.parent = ob.parent ? { ...ob.parent } : null;
+    newOb.materials = ob.materials.map((m) => ({ ...m }));
+    newOb.activeMaterial = slot;
+    newOb.layers = [];
+    for (const layer of ob.layers) {
+      const nl = createLayer(layer.name);
+      for (const frame of layer.frames) {
+        const moving = frame.strokes.filter((s) => s.materialIndex === slot);
+        if (!moving.length) continue;
+        frame.strokes = frame.strokes.filter((s) => s.materialIndex !== slot);
+        const nf = createFrame(frame.frameNumber);
+        nf.strokes = moving;
+        nl.frames.push(nf);
+      }
+      if (nl.frames.length) newOb.layers.push(nl);
+    }
+    if (!newOb.layers.length) continue;
+    newOb.activeLayerId = newOb.layers[0].id;
+    ctx.scene.objects.splice(++at, 0, newOb);
+  }
+  ctx.requestRender();
+  return slots.length - 1;
+}

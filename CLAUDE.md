@@ -442,6 +442,16 @@ the browser console or automated evals:
     Extend / Subtract for one drag. Icons can carry a FILLED region now
     (`FILLS` in icons.ts, evenodd to punch out an overlap) — the outline-only
     set could not draw "which part is selected".
+  - SEPARATE (P, or the right-click menu, which on a mesh is now a MESH
+    menu — it used to be the stroke editor's and did nothing to the mesh):
+    `separatePoly` splits the selection, or every edge-connected piece, into
+    NEW TGPolyMeshes with the source's transform, look and element ids. A
+    vertex on the border between a leaving and a staying face is DUPLICATED
+    (Blender does too), so both halves stay whole; an edge or vertex leaves
+    the source only if nothing that stays still uses it. Strokes separate by
+    Selection, By Material (`separateByMaterial`: one object per material
+    slot used, across every layer and keyframe, named after the material)
+    or By Loose Parts (the existing `separateConnectedIntoObjects`).
   - Faces have no colour channel in the overlay, so a selected face is
     filled on the HUD by the tool.
   - `App.meshEditId` (not the overlay target, which follows the TOOL) says

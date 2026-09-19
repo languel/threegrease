@@ -225,3 +225,94 @@ export function deleteSelection(pm: TGPolyMesh, mode: MeshSelectMode): boolean {
 }
 
 export { touchPolyMesh };
+
+/**
+ * Blender's Separate (P) on a mesh: split elements out into NEW meshes and
+ * return them (the caller adds them to the scene).
+ *
+ * SELECTION: the selected faces, edges and vertices leave; a vertex on the
+ * border between a selected and an unselected face is DUPLICATED, one copy
+ * in each mesh, so both halves stay whole (Blender does the same).
+ * LOOSE: every edge-connected piece becomes its own mesh; the first piece
+ * stays in `pm`.
+ *
+ * The new meshes keep the source's transform, material and look, and its
+ * element ids (ids are per mesh, so nothing collides).
+ */
+export function separatePoly(
+  pm: TGPolyMesh, how: 'SELECTION' | 'LOOSE', newId: () => number,
+): TGPolyMesh[] {
+  const parts: { faces: Set<number>; edges: Set<number>; verts: Set<number> }[] = [];
+  if (how === 'SELECTION') {
+    const faces = new Set(pm.faces.filter((f) => f.select).map((f) => f.id));
+    const edges = new Set(pm.edges.filter((e) => e.select).map((e) => e.id));
+    const verts = new Set(pm.vertices.filter((v) => v.select).map((v) => v.id));
+    if (!faces.size && !edges.size && !verts.size) return [];
+    // nothing left behind is not a separation
+    if (verts.size === pm.vertices.length) return [];
+    parts.push({ faces, edges, verts });
+  } else {
+    const root = new Map<number, number>(pm.vertices.map((v) => [v.id, v.id]));
+    const find = (x: number): number => { const r = root.get(x)!; if (r === x) return x; const f = find(r); root.set(x, f); return f; };
+    const join = (a: number, b: number) => root.set(find(a), find(b));
+    for (const e of pm.edges) join(e.v[0], e.v[1]);
+    for (const f of pm.faces) for (let i = 1; i < f.vertices.length; i++) join(f.vertices[0], f.vertices[i]);
+    const byRoot = new Map<number, number[]>();
+    for (const v of pm.vertices) (byRoot.get(find(v.id)) ?? byRoot.set(find(v.id), []).get(find(v.id))!).push(v.id);
+    const groups = [...byRoot.values()];
+    for (const g of groups.slice(1)) {
+      const verts = new Set(g);
+      parts.push({
+        verts,
+        edges: new Set(pm.edges.filter((e) => verts.has(e.v[0])).map((e) => e.id)),
+        faces: new Set(pm.faces.filter((f) => verts.has(f.vertices[0])).map((f) => f.id)),
+      });
+    }
+  }
+
+  const out: TGPolyMesh[] = [];
+  parts.forEach((part, i) => {
+    const faces = pm.faces.filter((f) => part.faces.has(f.id));
+    const edges = pm.edges.filter((e) => part.edges.has(e.id));
+    // everything a moving face or edge needs comes along with it
+    const need = new Set(part.verts);
+    for (const f of faces) for (const v of f.vertices) need.add(v);
+    for (const e of edges) { need.add(e.v[0]); need.add(e.v[1]); }
+    const edgeKeys = new Set(edges.map((e) => `${Math.min(...e.v)}:${Math.max(...e.v)}`));
+    const moveEdges = [...edges];
+    for (const f of faces) for (const [a, b] of faceEdges(f.vertices)) {
+      const k = `${Math.min(a, b)}:${Math.max(a, b)}`;
+      const e = findEdge(pm, a, b);
+      if (e && !edgeKeys.has(k)) { edgeKeys.add(k); moveEdges.push(e); }
+    }
+    const np: TGPolyMesh = {
+      ...structuredClone({ ...pm, vertices: [], edges: [], faces: [] }),
+      id: newId(),
+      name: `${pm.name}.${String(i + 1).padStart(3, '0')}`,
+      vertices: pm.vertices.filter((v) => need.has(v.id)).map((v) => ({ ...structuredClone(v), select: false })),
+      edges: moveEdges.map((e) => ({ ...structuredClone(e), select: false })),
+      faces: faces.map((f) => ({ ...structuredClone(f), select: false })),
+      select: false,
+      rev: 0,
+    };
+    out.push(np);
+
+    // take them out of the source: the faces always; an edge or vertex only
+    // when nothing that STAYS still uses it (those are the shared border)
+    pm.faces = pm.faces.filter((f) => !part.faces.has(f.id));
+    const usedV = new Set<number>();
+    const usedE = new Set<string>();
+    for (const f of pm.faces) for (const [a, b] of faceEdges(f.vertices)) {
+      usedV.add(a); usedE.add(`${Math.min(a, b)}:${Math.max(a, b)}`);
+    }
+    pm.edges = pm.edges.filter((e) => {
+      const k = `${Math.min(...e.v)}:${Math.max(...e.v)}`;
+      const leaving = part.edges.has(e.id) || edgeKeys.has(k);
+      return !leaving || usedE.has(k);
+    });
+    for (const e of pm.edges) { usedV.add(e.v[0]); usedV.add(e.v[1]); }
+    pm.vertices = pm.vertices.filter((v) => !need.has(v.id) || usedV.has(v.id));
+  });
+  if (out.length) { clearSelection(pm); touchPolyMesh(pm); }
+  return out;
+}

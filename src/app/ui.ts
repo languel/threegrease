@@ -76,6 +76,8 @@ export interface AppHandle {
   /** Edit mode is open on a mesh (vertex / edge / face editor) */
   meshEditing(): boolean;
   setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
+  gpSeparate(how: 'SELECTION' | 'MATERIAL' | 'LOOSE'): number;
+  meshOp(op: 'extrude' | 'fill' | 'delete' | 'selectAll' | 'selectNone' | 'separateSelection' | 'separateLoose'): void;
   /** the scene's environment/IBL manager — the World panel reads its
    *  load status, since an image or video source resolves asynchronously */
   world: { status: 'ok' | 'loading' | 'error'; error: string };
@@ -1738,6 +1740,47 @@ export class UI {
   }
 
   /** Blender Stroke/Point context menu (RMB in the viewport, Edit mode). */
+  /** Separate's three (strokes) or two (a mesh has one material) ways. */
+  private separateItems(): CtxItem[] {
+    if (this.app.meshEditing()) {
+      return [
+        { label: 'Selection', do: () => this.app.meshOp('separateSelection') },
+        { label: 'By Loose Parts', do: () => this.app.meshOp('separateLoose') },
+      ];
+    }
+    return [
+      { label: 'Selection', do: () => { this.app.gpSeparate('SELECTION'); } },
+      { label: 'By Material', do: () => { this.app.gpSeparate('MATERIAL'); } },
+      { label: 'By Loose Parts', do: () => { this.app.gpSeparate('LOOSE'); } },
+    ];
+  }
+
+  /** P: the Separate menu on its own, at the pointer (Blender). */
+  openSeparateMenu(clientX: number, clientY: number): void {
+    this.openContextMenu(clientX, clientY, [{ header: 'Separate' }, ...this.separateItems()]);
+  }
+
+  /** Right-click while editing a MESH: its own operations, not the stroke
+   *  editor's (which acted on grease pencil and did nothing to the mesh). */
+  openMeshOpsContextMenu(clientX: number, clientY: number): void {
+    const m = (op: Parameters<AppHandle['meshOp']>[0]) => () => this.app.meshOp(op);
+    const items: CtxItem[] = [
+      { label: 'Move', action: 'move' },
+      { label: 'Rotate', action: 'rotate' },
+      { label: 'Scale', action: 'scale' },
+      { sep: true },
+      { label: 'Extrude', do: m('extrude') },
+      { label: 'Fill', do: m('fill') },
+      { label: 'Delete', do: m('delete') },
+      { sep: true },
+      { label: 'Separate', items: this.separateItems() },
+      { sep: true },
+      { label: 'Select All', do: m('selectAll') },
+      { label: 'Select None', do: m('selectNone') },
+    ];
+    this.openContextMenu(clientX, clientY, items);
+  }
+
   openStrokeOpsContextMenu(clientX: number, clientY: number): void {
     const { ctx } = this.app;
     const ob = activeObject(ctx.scene);
@@ -1753,7 +1796,7 @@ export class UI {
       { label: 'Dissolve', do: run(() => ops.deleteSelected(ctx, true)) },
       { sep: true },
       { label: 'Split', action: 'split' },
-      { label: 'Separate', action: 'separate' },
+      { label: 'Separate', items: this.separateItems() },
       { label: 'Join', action: 'join' },
       { label: 'Merge by Distance', do: run(() => ops.mergeByDistance(ctx)) },
       { sep: true },

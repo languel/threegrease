@@ -158,7 +158,8 @@ import { TexturePaintTool, setTexPaintMeshManager, setTexPaintPolyManager } from
 import { MeshEditTool } from '../tools/meshedit';
 import { primitiveToPoly, isConvertiblePrimitive } from '../render/polyconvert';
 import { touchPolyMesh } from '../core/polymesh';
-import { flushSelection } from '../core/polyedit';
+import { separateConnectedIntoObjects } from '../tools/objectops';
+import { deleteSelection, extrudeSelection, fillSelection, flushSelection, selectAllElems, separatePoly } from '../core/polyedit';
 import { PolyPenTool } from '../tools/polytool';
 import { clearPolyOverlay, polyOverlay } from '../render/polymesh';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -708,6 +709,50 @@ class App implements AppHandle {
     this.ctx.requestRender();
   }
 
+  /** Separate on strokes: the selection, one object per material, or one
+   *  per connected piece. Returns how many objects were made. */
+  gpSeparate(how: 'SELECTION' | 'MATERIAL' | 'LOOSE'): number {
+    const ctx = this.ctx;
+    let n = 0;
+    if (how === 'SELECTION') n = ops.separateSelected(ctx) > 0 ? 1 : 0;
+    else if (how === 'MATERIAL') n = ops.separateByMaterial(ctx);
+    else {
+      const ob = ctx.scene.objects[ctx.scene.activeObject];
+      if (ob) { ctx.pushUndo(); n = separateConnectedIntoObjects(ctx.scene, { kind: 'GP', id: ob.id }); }
+    }
+    this.setStatusHint(n ? `separated into ${n} new object${n === 1 ? '' : 's'}` : 'nothing to separate', 2500);
+    this.gp.markDirty();
+    this.ui.refresh();
+    return n;
+  }
+
+  /** Mesh edit-mode operations, for the right-click menu (the keys do the
+   *  same through the tool). */
+  meshOp(op: 'extrude' | 'fill' | 'delete' | 'selectAll' | 'selectNone' | 'separateSelection' | 'separateLoose'): void {
+    const ctx = this.ctx;
+    const pm = this.meshEdit.editMesh(ctx);
+    if (!pm) return;
+    const mode = ctx.settings.meshSelectMode;
+    ctx.pushUndo();
+    if (op === 'extrude') { if (extrudeSelection(pm, mode)) this.withPane(this.pointerPane, () => this.beginMeshTransform('move', false)); }
+    else if (op === 'fill') { fillSelection(pm); flushSelection(pm, 'VERTEX'); }
+    else if (op === 'delete') deleteSelection(pm, mode);
+    else if (op === 'selectAll' || op === 'selectNone') selectAllElems(pm, op === 'selectAll', mode);
+    else {
+      const made = separatePoly(pm, op === 'separateLoose' ? 'LOOSE' : 'SELECTION', () => {
+        let id = Date.now() % 1e9;
+        while (ctx.scene.polyMeshes.some((p) => p.id === id)) id++;
+        return id;
+      });
+      const at = ctx.scene.polyMeshes.indexOf(pm);
+      ctx.scene.polyMeshes.splice(at + 1, 0, ...made);
+      this.setStatusHint(made.length ? `separated into ${made.length} new mesh${made.length === 1 ? '' : 'es'}` : 'nothing to separate', 2500);
+    }
+    touchPolyMesh(pm);
+    ctx.requestRender();
+    this.ui.refresh();
+  }
+
   /** Edit mode is on a mesh (the vertex / edge / face editor or a poly tool). */
   meshEditing(): boolean {
     return this.ctx.settings.mode === 'EDIT' && this.meshEditId !== null
@@ -1252,6 +1297,7 @@ class App implements AppHandle {
         this.rmbDown = null;
         if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5 && !this.presentation) {
           if (this.ctx.settings.mode === 'OBJECT') this.ui.openObjectContextMenu(e.clientX, e.clientY);
+          else if (this.meshEditing()) this.ui.openMeshOpsContextMenu(e.clientX, e.clientY);
           else if (this.ctx.settings.mode === 'EDIT') this.ui.openStrokeOpsContextMenu(e.clientX, e.clientY);
         }
         return;
@@ -1578,7 +1624,13 @@ class App implements AppHandle {
       case 'selectConnected': if (this.editLike()) { ctx.pushUndo(); selectConnected(ctx); this.gp.markDirty(); this.ui.refresh(); } break;
       case 'join': if (this.editLike()) { ops.joinSelected(ctx); this.ui.refresh(); } break;
       case 'split': if (this.editLike()) { ops.splitSelected(ctx); this.ui.refresh(); } break;
-      case 'separate': if (this.editLike()) { ops.separateSelected(ctx); this.gp.markDirty(); this.ui.refresh(); } break;
+      // Blender's P: a small menu at the pointer — Selection / By Material /
+      // By Loose Parts for strokes, Selection / By Loose Parts for a mesh
+      case 'separate': if (this.editLike()) {
+        const r = ctx.canvas.getBoundingClientRect();
+        const p = this.canvasPointer();
+        this.ui.openSeparateMenu(r.left + p.x, r.top + p.y);
+      } break;
       case 'renameObject': this.ui.renameActiveObject(); break;
       case 'selectMore': if (this.editLike()) { selectMoreLess(ctx, true); this.gp.markDirty(); } break;
       case 'selectLess': if (this.editLike()) { selectMoreLess(ctx, false); this.gp.markDirty(); } break;
