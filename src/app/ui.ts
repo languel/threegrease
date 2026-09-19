@@ -5241,15 +5241,18 @@ export class UI {
       const open = !!live && (live.status === 'on' || live.status === 'paused' || live.status === 'starting');
       const tile = el('div', {
         class: `lib-tile${stream ? ' lib-stream' : ''}`,
-        title: stream && !open ? `${a.name} — click to open this camera`
-          : `${a.name} — drag into the viewport, or click to place at the 3D cursor`,
+        title: stream && !open ? `${a.name} — double-click to open this camera`
+          : `${a.name} — drag into the viewport, or double-click to place at the 3D cursor (Plane and grid snap apply)`,
       });
       tile.draggable = true;
       tile.ondragstart = (e) => {
         e.dataTransfer?.setData(ASSET_MIME, String(a.id));
         if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
       };
-      tile.onclick = () => {
+      // DOUBLE-click places (a single click used to, and a stray one put
+      // things in the scene); a closed camera's double-click reopens it
+      tile.ondblclick = (e) => {
+        if ((e.target as HTMLElement).closest('.lib-name, .lib-tools')) return;
         if (stream && !open) {
           if (stream.key.startsWith('test:')) this.app.openTestCamera();
           else void this.app.openCamera(stream.deviceId || undefined);
@@ -5313,7 +5316,7 @@ export class UI {
       ]);
     })(), { title: 'Open a camera as a live stream: it joins the Library, and can be dragged onto the scene or used for capture' });
     const root = panel('Library',
-      panelHint('Drop files on the Library to keep them here. Drag a tile into the viewport to place it where you drop it; click to place it at the 3D cursor.'),
+      panelHint('Drop files on the Library to keep them here. Drag a tile into the viewport to place it where you drop it; double-click to place it at the 3D cursor, facing the way the Plane setting says (Up from Ground stands it up, Top lays it flat) and on the grid when the magnet is on.'),
       el('div', { class: 'row' },
         btn('Save selected', () => this.app.saveSelectedAsAsset(),
           { title: 'Add every selected drawing, model and scan to the Library, with a picture of each' }),

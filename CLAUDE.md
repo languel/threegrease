@@ -1363,6 +1363,13 @@ the browser console or automated evals:
   has loaded, rendered, then thrown away — nothing enters the scene, the
   outliner or the undo history. A splat needs a couple of renders before
   the kept one (Spark sorts during a render, so the first can be empty).
+  A tile is placed by DRAG (where it is dropped) or DOUBLE-click — a single
+  click used to place it, and a stray one put things in the scene. Double-
+  click places at the 3D cursor through `App.cursorTarget`: the magnet's
+  lattice rounds the point, and the PLANE decides how an image faces (Up from
+  Ground stands it on the floor facing the view, Top lays it flat —
+  `DropTarget.flat` — Front/Side hang it on that plane, View/None face the
+  camera). The Guide has nothing to act on for a single point.
   Measured: a 24 MB scan pictured in ~0.5 s with the scene untouched, and
   the main scene's splats unaffected by the studio's own SparkRenderer. An
   image's picture is the image itself. Placing a PLANE asset orients it like

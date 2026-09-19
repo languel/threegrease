@@ -131,7 +131,7 @@ import { PolyMeshManager } from '../render/polymesh';
 import { LightManager } from '../render/lights';
 import { ActorManager } from '../render/actors';
 import { ActorPoseTool } from '../tools/actorpose';
-import { snapWorldPoint } from '../tools/snapping';
+import { snapToLattice, snapWorldPoint } from '../tools/snapping';
 import {
   driveStreamFromActor, driveStreamFromObject, driverOf, isDriven,
   stopDrivingStream, tickSimStreams,
@@ -2875,10 +2875,11 @@ class App implements AppHandle {
    * Place a Library asset — at the pointer when it was dragged in, at the 3D
    * cursor when it was clicked.
    */
-  addAssetToScene(asset: TGAsset, at?: DropTarget): void {
+  addAssetToScene(asset: TGAsset, dropped?: DropTarget): void {
     const scene = this.ctx.scene;
     this.ctx.pushUndo();
-    const point = at?.point ?? [...scene.cursor] as Vec3;
+    const at = dropped ?? this.cursorTarget();
+    const point = at.point;
     if (asset.kind === 'GP') {
       importGPObjects(scene, asset.payload);
       const ob = scene.objects[scene.objects.length - 1];
@@ -2915,6 +2916,43 @@ class App implements AppHandle {
       scene.splats.push({ ...def, id: Date.now() % 1e9, parent: null, select: false, translation: [...point] });
     }
     this.ui.refresh();
+  }
+
+  /**
+   * Where a Library asset lands when it is PLACED rather than dragged (a
+   * double-click on its tile): at the 3D cursor, resolved through the same
+   * settings a drawn point is. The magnet's lattice rounds the position;
+   * the PLANE decides how an image faces — Up from Ground stands it
+   * upright on the floor facing the view, Top lays it flat, Front / Side
+   * hang it on that plane, View (and None) turn it to the camera.
+   */
+  cursorTarget(): DropTarget {
+    const ctx = this.ctx;
+    const s = ctx.settings;
+    let p = new THREE.Vector3(...ctx.scene.cursor);
+    if (s.snap.enabled && (s.snap.mode === 'INCREMENT' || s.snap.mode === 'GRID')) p = snapToLattice(ctx, p);
+    const point: Vec3 = [p.x, p.y, p.z];
+    const zUp = s.upAxis === 'Z';
+    const towardCam = (n: THREE.Vector3) => {
+      const toCam = this.nav.active.getWorldPosition(new THREE.Vector3()).sub(p);
+      return n.dot(toCam) < 0 ? n.negate() : n;
+    };
+    switch (s.plane) {
+      case 'UPRIGHT':
+        return { point, normal: null, onSurface: false };
+      case 'TOP':
+        return { point, normal: zUp ? [0, 0, 1] : [0, 1, 0], onSurface: false, flat: true };
+      case 'FRONT':
+      case 'SIDE': {
+        const n = towardCam(s.plane === 'SIDE' ? new THREE.Vector3(1, 0, 0)
+          : zUp ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1));
+        return { point, normal: [n.x, n.y, n.z], onSurface: true };
+      }
+      default: {
+        const n = this.nav.active.getWorldDirection(new THREE.Vector3()).negate();
+        return { point, normal: [n.x, n.y, n.z], onSurface: true };
+      }
+    }
   }
 
   /**
@@ -4243,6 +4281,17 @@ class App implements AppHandle {
    *  surface it was dropped on, top toward the up axis. */
   private orientPanel(mesh: TGMesh, at: DropTarget): void {
     const up = this.ctx.settings.upAxis === 'Z' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    if (at.flat) {
+      // lying on the floor, a millimetre up, its top edge away from the view
+      const fwd = this.nav.active.getWorldDirection(new THREE.Vector3());
+      fwd.addScaledVector(up, -fwd.dot(up));
+      const y = fwd.lengthSq() > 1e-6 ? fwd.normalize() : new THREE.Vector3(0, 1, 0);
+      const x = new THREE.Vector3().crossVectors(y, up).normalize();
+      const e = new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, up.clone()));
+      mesh.rotation = [e.x, e.y, e.z];
+      mesh.translation = [at.point[0] + up.x * 0.001, at.point[1] + up.y * 0.001, at.point[2] + up.z * 0.001];
+      return;
+    }
     let n = at.normal && at.onSurface ? new THREE.Vector3(...at.normal).normalize() : null;
     const standing = !n || Math.abs(n.dot(up)) > 0.7;   // floor or ceiling: stand it up instead
     if (standing) {
@@ -5520,6 +5569,8 @@ export interface DropTarget {
   normal: Vec3 | null;
   /** true when it landed ON something, rather than on the ground plane */
   onSurface: boolean;
+  /** lay an image FLAT on the point (Plane: Top) rather than standing it up */
+  flat?: boolean;
 }
 
 /** Mark a subtree as EDITOR FURNITURE — gizmos, helpers, frusta. The scene
