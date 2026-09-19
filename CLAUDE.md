@@ -1408,6 +1408,21 @@ the browser console or automated evals:
     media is already compressed). IMPORT takes that zip, or a FOLDER of the
     same, adding beside what is there with fresh ids; a zip or folder with no
     library.json is imported as loose files (scans, models, images).
+- **Dropping an image or camera ON a selected object textures it**
+  (`App.textureTargetAt` / `applyTexture`): a Library image or camera asset,
+  or a single image file from Finder, dropped on a SELECTED primitive mesh
+  (not a MODEL or EMPTY), editable mesh or pencil becomes its texture instead
+  of a new picture plane. Only selected targets, so a drop near something you
+  were not working on still hangs as a picture. A mesh gets it in its
+  material's base slot — its OWN material (a shared one is copied first) and
+  a NEW image datablock (never overwriting one in use), base colour set to
+  white so the image is not tinted. An unrotated SPHERE is stood up (+90 X)
+  in a Z-up scene, because three builds it Y-up and a 360 panorama would
+  otherwise come out with its horizon vertical (verified: sky on top). A
+  pencil gets it on the stroke texture (and the fill when shown); in Edit
+  mode with strokes selected, those strokes move to a new material slot so
+  the rest of the drawing is untouched. Cameras cannot texture strokes yet
+  (the stroke atlas is static).
 - **A camera is a Library ASSET** (`io/livesources.ts`), not something the
   capture panel owns. `liveSources.open(deviceId?)` opens a webcam as a
   source keyed `cam:<deviceId>`; each source draws its video into its OWN

@@ -3,9 +3,9 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { genId, createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture } from '../core/gpdata';
+import { genId, createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture, createImage, ensureMaterial } from '../core/gpdata';
 import { History } from '../core/history';
-import type { GPObject, GPScene, TGActor, TGActorLayer, TGLight, TGMesh, Vec3, ViewportShading } from '../core/types';
+import type { GPMaterial, TGPolyMesh, GPObject, GPScene, TGActor, TGActorLayer, TGLight, TGMesh, Vec3, ViewportShading } from '../core/types';
 import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { ScenePost, postActive } from '../fx/scenefx';
@@ -90,13 +90,22 @@ import {
   streamAsset, updateAsset, ASSET_MIME, type TGAsset,
   exportLibrary as packLibrary, importLibrary, zipEntries,
 } from '../io/assets';
-import { LIVE_PREFIX, liveSources, testCardDataUrl } from '../io/livesources';
+import { LIVE_PREFIX, liveKeyOf, liveSources, testCardDataUrl } from '../io/livesources';
 import { perf, PerfOverlay } from './perf';
 
 function hasLight(o: THREE.Object3D): boolean {
   let found = false;
   o.traverse((c) => { if ((c as THREE.Light).isLight) found = true; });
   return found;
+}
+
+/** The texture a Library asset can give an object: an image asset's picture,
+ *  or a camera's live stream. Null for everything else (models, scans...). */
+function assetTexture(asset: TGAsset): string | null {
+  if (asset.kind === 'STREAM') return `${LIVE_PREFIX}${(JSON.parse(asset.payload) as { key: string }).key}`;
+  if (asset.kind !== 'MESH') return null;
+  const def = JSON.parse(asset.payload) as { kind?: string; texture?: string | null };
+  return def.kind === 'PLANE' && def.texture ? def.texture : null;
 }
 
 /** A Library tile's picture of an image: the image itself, fitted into the
@@ -1191,10 +1200,24 @@ class App implements AppHandle {
       const assetId = e.dataTransfer.getData(ASSET_MIME);
       if (assetId) {
         const asset = listAssets().find((a) => String(a.id) === assetId);
-        if (asset) this.addAssetToScene(asset, this.dropTarget(e.clientX, e.clientY));
+        if (!asset) return;
+        // an image or a camera dropped ON a selected object that takes a
+        // texture textures it, instead of adding a picture beside it
+        const tex = assetTexture(asset);
+        const onto = tex ? this.textureTargetAt(e.clientX, e.clientY) : null;
+        if (tex && onto) { this.applyTexture(onto, tex, asset.name); return; }
+        this.addAssetToScene(asset, this.dropTarget(e.clientX, e.clientY));
         return;
       }
       const files = [...e.dataTransfer.files];
+      const onto = files.length === 1 && files[0].type.startsWith('image/')
+        ? this.textureTargetAt(e.clientX, e.clientY) : null;
+      if (onto) {
+        const r = new FileReader();
+        r.onload = () => this.applyTexture(onto, String(r.result), files[0].name);
+        r.readAsDataURL(files[0]);
+        return;
+      }
       if (files.length) void this.importFiles(files, this.dropTarget(e.clientX, e.clientY));
     });
 
@@ -2971,6 +2994,121 @@ class App implements AppHandle {
         return { point, normal: [n.x, n.y, n.z], onSurface: true };
       }
     }
+  }
+
+  /**
+   * The SELECTED object under the pointer that can take a texture, if any:
+   * a primitive mesh (not an imported model — it owns its materials — and
+   * not an empty), an editable mesh, or a pencil. Only selected ones, so an
+   * image dropped near something you were not working on still hangs as a
+   * picture rather than repainting it.
+   */
+  textureTargetAt(clientX: number, clientY: number): ObjRef | null {
+    const ctx = this.ctx;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const pane = this.paneAt(clientX, clientY);
+    const ref = this.withPane(pane, () => {
+      const r = ctx.canvas.getBoundingClientRect();
+      return this.objectPick.pick(ctx, {
+        x: clientX - r.left, y: clientY - r.top, pressure: 0.5,
+        shift: false, ctrl: false, alt: false, clientX, clientY,
+      });
+    });
+    void rect;
+    if (!ref) {
+      // strokes are thin: in Edit mode, selected strokes of the active
+      // pencil take it wherever it is dropped
+      if (ctx.settings.mode === 'EDIT' && !this.meshEditing() && ctx.scene.objects.length
+        && selectedPoints(ctx).length) return { kind: 'GP', id: activeObject(ctx.scene).id };
+      return null;
+    }
+    const scene = ctx.scene;
+    if (ref.kind === 'MESH') {
+      const m = scene.meshes.find((x) => x.id === ref.id);
+      return m && m.select && m.kind !== 'MODEL' && m.kind !== 'EMPTY' ? ref : null;
+    }
+    if (ref.kind === 'POLY') return scene.polyMeshes.find((x) => x.id === ref.id)?.select ? ref : null;
+    if (ref.kind === 'GP') {
+      const ob = scene.objects.find((o) => o.id === ref.id);
+      return ob && (ob.select || (ctx.settings.mode === 'EDIT' && ob === activeObject(scene))) ? ref : null;
+    }
+    return null;
+  }
+
+  /**
+   * Put an image (a data URL, a stored file, or a `live:` camera) on an
+   * object. A mesh gets it in its material's BASE COLOUR slot (made for it
+   * if it had none), which on a sphere's own UVs maps a 360 equirect the
+   * right way round. A pencil gets it on its STROKE texture (and the fill,
+   * when the fill is shown): in Edit mode with strokes selected, those
+   * strokes move to a new material slot carrying it, so the rest of the
+   * drawing is untouched; otherwise the active material takes it.
+   */
+  applyTexture(ref: ObjRef, src: string, name: string): void {
+    const ctx = this.ctx;
+    const scene = ctx.scene;
+    ctx.pushUndo();
+    if (ref.kind === 'MESH' || ref.kind === 'POLY') {
+      const target = ref.kind === 'MESH'
+        ? scene.meshes.find((m) => m.id === ref.id)
+        : scene.polyMeshes.find((p) => p.id === ref.id);
+      if (!target) return;
+      // Its OWN material and a NEW image: a material shared with other
+      // objects is copied for this one first, and the image never
+      // overwrites one already in use — a drop onto the sphere must not
+      // quietly repaint the box that shared its material.
+      let mat = ensureMaterial(scene, target);
+      const users = [...scene.meshes, ...scene.polyMeshes].filter((o) => o.materialId === mat.id);
+      if (users.length > 1) {
+        const copy = { ...structuredClone(mat), id: genId(), name: `${target.name} material` };
+        scene.materials.push(copy);
+        target.materialId = copy.id;
+        mat = copy;
+      }
+      const img = createImage(name, src);
+      scene.images.push(img);
+      mat.slots.base = { imageId: img.id, offset: [0, 0], scale: [1, 1], rotation: 0, factor: 1, enabled: true };
+      mat.baseColor = [1, 1, 1];      // show the image, not a tint of it
+      target.texture = src;
+      // A UV sphere's poles run along ITS Y (three builds primitives Y-up),
+      // which in a Z-up scene lies on its side — a 360 panorama would come
+      // out with the horizon standing vertical. A sphere looks the same
+      // turned, so an unrotated one is stood up to put its poles on Z.
+      const m = ref.kind === 'MESH' ? target as TGMesh : null;
+      if (m?.kind === 'SPHERE' && ctx.settings.upAxis === 'Z'
+        && m.rotation[0] === 0 && m.rotation[1] === 0 && m.rotation[2] === 0) {
+        m.rotation = [Math.PI / 2, 0, 0];
+      }
+      if (ref.kind === 'POLY') touchPolyMesh(target as TGPolyMesh);
+      this.meshes.sync(scene, this.nav.active);
+    } else if (ref.kind === 'GP') {
+      if (liveKeyOf(src)) { this.setStatusHint('A camera cannot texture strokes yet — drop it on a mesh or a plane', 4000); return; }
+      const ob = scene.objects.find((o) => o.id === ref.id);
+      if (!ob) return;
+      const img = createImage(name, src);
+      scene.images.push(img);
+      const texture = (m: GPMaterial) => {
+        m.strokeShade = 'TEXTURE';
+        m.strokeImageId = img.id;
+        m.strokeTexBlend = 0;
+        if (m.showFill) { m.fillStyle = 'TEXTURE'; m.fillImageId = img.id; m.fillTexBlend = 0; }
+      };
+      const picked = ctx.settings.mode === 'EDIT' && ob === activeObject(scene) ? selectedPoints(ctx) : [];
+      const strokes = [...new Set(picked.map((p) => p.s))];
+      if (strokes.length) {
+        const base = ob.materials[strokes[0].materialIndex] ?? ob.materials[ob.activeMaterial];
+        const m: GPMaterial = { ...base, name: `${base.name} · ${name}` };
+        texture(m);
+        ob.materials.push(m);
+        const slot = ob.materials.length - 1;
+        for (const s of strokes) s.materialIndex = slot;
+      } else {
+        texture(ob.materials[ob.activeMaterial]);
+      }
+      this.gp.markDirty();
+    }
+    this.setStatusHint(`Textured with ${name}`);
+    this.ui.refresh();
   }
 
   /**
