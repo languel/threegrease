@@ -115,6 +115,8 @@ export interface Settings {
   selectMode: 'POINT' | 'STROKE';
   /** Edit mode on a mesh: which element a click selects (Blender 1/2/3) */
   meshSelectMode: 'VERTEX' | 'EDGE' | 'FACE';
+  /** sides of a drawn POLYGON object (tools/objectdraw.ts) */
+  polygonSides?: number;
   /** what a box select does to the selection (Blender's five): replace,
    *  add, take away, flip, keep only the overlap. Shift/Ctrl still add /
    *  take away for one drag whatever this says. */
@@ -222,7 +224,7 @@ export function snapIncrement(s: Settings): number {
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'showGrid', 'showActorOverlay', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
-  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'showPerf', 'renderScale', 'snap',
+  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'showPerf', 'renderScale', 'polygonSides', 'snap',
   'shading', 'shapeSnap', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
 ] as const;
 
@@ -323,6 +325,7 @@ export function defaultSettings(): Settings {
     guide: { type: 'NONE', angle: 0, spacing: 40 },
     selectMode: 'POINT',
     meshSelectMode: 'VERTEX',
+    polygonSides: 6,
     selectOp: 'SET',
     autoKey: false,
     additiveDraw: false,

@@ -834,6 +834,20 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
     ['actorpose', 'actorPose', 'Pose — drag a joint (the body follows through physics; Shift+click pins it), or drag a physics prop to move and throw it (Shift-drag scenery to make it one)'],
     ['direct', 'actorDirect', 'Direct — click the world to send a character there. Pick the verb in the HUD: walk / run / sneak / march / jump / look / stop'],
     ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area; Backspace undoes a point, Esc cancels); drag a placed point to adjust it'],
+    // Draw the object where it goes: same Placement / Plane / Guide / magnet
+    // as a stroke, so a wall drawn with Up from Ground stands on the floor
+    ['draw-plane', 'drawPlane', 'Draw Plane — drag out a panel in the drawing plane'],
+    ['draw-rect', 'drawRect', 'Draw Rectangle — a four-corner EDITABLE face (drag its corners afterwards)'],
+    ['draw-triangle', 'drawTriangle', 'Draw Triangle — an editable three-corner face, drawn from its centre'],
+    ['draw-polygon', 'drawPolygon', 'Draw Polygon — an editable n-gon, drawn from its centre (sides in the top bar)'],
+    ['draw-box', 'cube', 'Draw Box — drag the base, then move away from the plane to raise it'],
+    ['draw-cylinder', 'drawCylinder', 'Draw Cylinder — drag the base, then raise it'],
+    ['draw-pyramid', 'drawPyramid', 'Draw Pyramid — drag the base, then raise it'],
+    ['draw-sphere', 'circle', 'Draw Sphere — drag a radius from its centre; it rests on the drawing plane'],
+    ['draw-tetra', 'drawTetra', 'Draw Tetrahedron — fire'],
+    ['draw-octa', 'drawOcta', 'Draw Octahedron — air'],
+    ['draw-dodeca', 'drawDodeca', 'Draw Dodecahedron — the cosmos'],
+    ['draw-icosa', 'drawIcosa', 'Draw Icosahedron — water'],
   ],
   DRAW: [
     ['draw', 'pencil', 'Draw (D)'], ['erase', 'eraser', 'Erase (E)'],
@@ -1391,6 +1405,11 @@ export class UI {
     }
     bar.append(el('div', { class: 'sep' }));
 
+    if (s.mode === 'OBJECT' && s.activeTool === 'draw-polygon') {
+      bar.append(tbField('drawPolygon', 'Sides', numField('', s.polygonSides ?? 6,
+        (v) => { s.polygonSides = Math.max(3, Math.min(64, Math.round(v))); this.app.savePrefs(); }, 1,
+        { def: 6, min: 3, max: 64 })));
+    }
     if (s.mode === 'OBJECT') {
       bar.append(
         btn(icon('compass'), () => { s.showGizmo = !s.showGizmo; this.app.savePrefs(); this.app.refreshWidget(); this.refresh(); },

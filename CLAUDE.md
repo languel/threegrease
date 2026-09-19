@@ -1441,6 +1441,30 @@ the browser console or automated evals:
     media is already compressed). IMPORT takes that zip, or a FOLDER of the
     same, adding beside what is there with fresh ids; a zip or folder with no
     library.json is imported as loose files (scans, models, images).
+- **DRAW an object where it goes** (`tools/objectdraw.ts`, Object mode's
+  toolbar): Add ▸ Box gives you a cube at the cursor that then has to be
+  moved, turned and scaled — three operations to say one thing. These draw it
+  in place, resolving every point through the SAME chain a stroke does
+  (Placement, Plane, Guide, the magnet), so a panel drawn with Up from Ground
+  stands on the floor (verified: bottom exactly at z = 0, normal horizontal,
+  its own up axis up, grid-snapped) and one drawn under Placement: Surface
+  lies on the scan. Cmd skips the magnet, Shift squares a footprint, Esc
+  cancels the draft, and the finished object is selected.
+  - Three gestures by what the thing is: FLAT (plane, rect, triangle,
+    polygon) is one drag; RAISED (box, cylinder, pyramid) drags the base then
+    moves away from the plane to raise the height — measured as the
+    skew-line solve against the pointer's ray, because the height runs along
+    the view as often as across it; RADIAL (sphere and the four platonic
+    solids) is one drag from the centre, a radius, and they are set down ON
+    the plane rather than sunk half-way into it.
+  - The flat n-gons are EDITABLE meshes, not primitives: the next thing you
+    do to a blockout panel is drag one of its corners onto the real corner of
+    the room. `settings.polygonSides` (top bar, Object mode) sets the n.
+  - Primitive orientation is the trap the rest of the file already documents:
+    a PLANE's normal is its own +Z so it takes the plane's basis (u, v, n),
+    while a CYLINDER and a PYRAMID are built Y-UP and must stand their Y on
+    the normal instead; a cylinder's geometry is also 1.2 tall, so its height
+    scale is h / 1.2.
 - **A PROJECTOR is a SPOT light that throws a picture** (`TGProjection` on
   `TGLight`, painted in `render/lights.ts`): one mechanism for both a GOBO (a
   shape cut into the beam, greyscaled, tinted by the light's own colour) and

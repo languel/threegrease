@@ -210,6 +210,7 @@ import { setStencilObjectResolver, setStencilVideoSource } from '../tools/stenci
 import { SplatPaintTool } from '../tools/splatbrush';
 import { TexturePaintTool, setTexPaintMeshManager, setTexPaintPolyManager } from '../tools/texpaint';
 import { MeshEditTool } from '../tools/meshedit';
+import { ObjectDrawTool, type ObjectDrawKind } from '../tools/objectdraw';
 import { primitiveToPoly, isConvertiblePrimitive } from '../render/polyconvert';
 import { touchPolyMesh } from '../core/polymesh';
 import { separateConnectedIntoObjects } from '../tools/objectops';
@@ -388,6 +389,11 @@ class App implements AppHandle {
   private polyBuild = new PolyPenTool('polybuild', 'BUILD');
   private quadPatch = new PolyPenTool('quadpatch', 'PATCH');
   private meshEdit = new MeshEditTool();
+  /** Draw an object where it goes (tools/objectdraw.ts) — one per shape. */
+  private drawTools = ([
+    'PLANE', 'RECT', 'TRIANGLE', 'POLYGON', 'BOX', 'CYLINDER', 'PYRAMID',
+    'SPHERE', 'TETRA', 'OCTA', 'DODECA', 'ICOSA',
+  ] as ObjectDrawKind[]).map((k) => new ObjectDrawTool(k));
   private objectPick = new ObjectSelectTool('object-select', 'BOX');
   private objectPickLasso = new ObjectSelectTool('object-select-lasso', 'LASSO');
   private objectPickCircle = new ObjectSelectTool('object-select-circle', 'CIRCLE');
@@ -581,11 +587,46 @@ class App implements AppHandle {
       new SelectTool('select-circle', 'CIRCLE'), new SculptTool(),
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
-      this.polyPen, this.polyBuild, this.quadPatch, this.meshEdit, new SplatPaintTool(), new TexturePaintTool(),
+      this.polyPen, this.polyBuild, this.quadPatch, this.meshEdit, ...this.drawTools, new SplatPaintTool(), new TexturePaintTool(),
       new ActorPoseTool(), new MeasureTool(), new DirectTool(),
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, 'draw');
     this.meshEdit.beginTransform = (kind, undo) => this.withPane(this.pointerPane, () => this.beginMeshTransform(kind, undo));
+    // drawing an object: the scene's ids, the renderers and the outliner are
+    // the App's, so the tools ask for them rather than reaching in
+    for (const t of this.drawTools) {
+      t.host = {
+        addMesh: (m) => {
+          this.ctx.pushUndo();
+          let id = Date.now() % 1e9;
+          while (this.ctx.scene.meshes.some((x) => x.id === id)) id++;
+          const made = { ...m, id };
+          this.ctx.scene.meshes.push(made);
+          this.meshes.sync(this.ctx.scene, this.nav.active);
+          return made;
+        },
+        addPoly: (p) => {
+          this.ctx.pushUndo();
+          let id = Date.now() % 1e9;
+          while (this.ctx.scene.polyMeshes.some((x) => x.id === id)) id++;
+          p.id = id;
+          this.ctx.scene.polyMeshes.push(p);
+          return p;
+        },
+        changed: () => {
+          this.meshes.sync(this.ctx.scene, this.nav.active);
+          this.polys.sync(this.ctx.scene, this.nav.active);
+        },
+        finished: (made) => {
+          if (!made) { this.refreshWidget(); return; }
+          deselectAllObjects(this.ctx.scene);
+          const ref = made as ObjRef;
+          setObjectSelected(this.ctx.scene, ref, true);
+          this.setLastPicked(ref);
+          this.refreshWidget();
+        },
+      };
+    }
 
     this.ui = new UI(this);
     // the library lives in IndexedDB, which only answers asynchronously —
