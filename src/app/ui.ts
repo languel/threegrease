@@ -27,6 +27,7 @@ import { penLandmarkHint } from '../mm/pen';
 import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, multiLandmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
 import { ASSET_MIME, deleteAsset, listAssets, updateAsset } from '../io/assets';
 import { liveSources } from '../io/livesources';
+import { perf } from './perf';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
 import { exportPaintCloudPly } from '../render/paintclouds';
@@ -77,6 +78,7 @@ export interface AppHandle {
   /** Edit mode is open on a mesh (vertex / edge / face editor) */
   meshEditing(): boolean;
   setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
+  setRenderScale(scale: number): void;
   gpSeparate(how: 'SELECTION' | 'MATERIAL' | 'LOOSE'): number;
   meshOp(op: 'extrude' | 'fill' | 'delete' | 'selectAll' | 'selectNone' | 'separateSelection' | 'separateLoose'): void;
   /** the scene's environment/IBL manager — the World panel reads its
@@ -144,6 +146,8 @@ export interface AppHandle {
   importToLibrary(files: File[]): Promise<void>;
   openCamera(deviceId?: string): Promise<void>;
   cameraDevices(): Promise<{ id: string; label: string }[]>;
+  openTestCamera(): void;
+  addTestCard(): void;
   liveAction(key: string, action: 'pause' | 'resume' | 'close'): void;
   addMediaMimeTrigger(address: string, pos: [number, number, number]): void;
   addMediaMimeRig(address: string, target: import('../tools/objects').ObjRef): void;
@@ -958,6 +962,14 @@ export class UI {
       deferredRefresh = () => this.refresh();
       return;
     }
+    const t0 = performance.now();
+    try { this.refreshNow(); } finally {
+      perf.count('UI rebuild');
+      perf.count('UI rebuild ms', performance.now() - t0);
+    }
+  }
+
+  private refreshNow(): void {
     this.buildMenubar();
     this.buildTopbar();
     this.buildToolbar();
@@ -1122,6 +1134,11 @@ export class UI {
       { sep: true },
       { label: 'Presentation mode', action: 'presentation' },
       { label: 'Inspector panel', action: 'inspector' },
+      { label: 'Performance overlay', check: !!ctx.settings.showPerf, action: 'perfOverlay' },
+      ...[1, 0.75, 0.5].map((v) => ({
+        label: `Render resolution ${Math.round(v * 100)}%`, check: (ctx.settings.renderScale ?? 1) === v,
+        do: () => this.app.setRenderScale(v),
+      })),
       { label: 'World axes', check: ctx.settings.showAxes, do: () => { this.app.setShowAxes(!ctx.settings.showAxes); this.refresh(); } },
       { sep: true },
       { header: 'Viewpoint' },
@@ -5233,7 +5250,10 @@ export class UI {
         if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
       };
       tile.onclick = () => {
-        if (stream && !open) void this.app.openCamera(stream.deviceId || undefined);
+        if (stream && !open) {
+          if (stream.key.startsWith('test:')) this.app.openTestCamera();
+          else void this.app.openCamera(stream.deviceId || undefined);
+        }
         else this.app.addAssetToScene(a);
       };
       const pic = el('div', { class: 'lib-pic' });
@@ -5277,14 +5297,19 @@ export class UI {
       ? 'Drop files here to add them'
       : 'Empty. Drop scans, models and images here to keep them, then drag them into the scene.' });
     const addCamera: HTMLElement = btn(iconLabel('camera', 'Camera'), () => void (async () => {
-      // one camera: just open it; several: say which
+      // every camera the browser can name, then the test sources (which
+      // need no device or permission at all)
       const devs = await this.app.cameraDevices();
       const labelled = devs.filter((d) => d.label && d.id);
-      if (labelled.length < 2) { void this.app.openCamera(); return; }
       const r = addCamera.getBoundingClientRect();
-      this.openContextMenu(r?.left ?? 200, (r?.bottom ?? 200) + 2, [
+      this.openContextMenu(r.left, r.bottom + 2, [
         { header: 'Open camera' },
-        ...labelled.map((d) => ({ label: d.label, do: () => { void this.app.openCamera(d.id); } })),
+        ...(labelled.length
+          ? labelled.map((d) => ({ label: d.label, do: () => { void this.app.openCamera(d.id); } }))
+          : [{ label: 'Default camera', do: () => { void this.app.openCamera(); } }]),
+        { sep: true },
+        { label: 'Test camera', do: () => this.app.openTestCamera() },
+        { label: 'Test card (still)', do: () => this.app.addTestCard() },
       ]);
     })(), { title: 'Open a camera as a live stream: it joins the Library, and can be dragged onto the scene or used for capture' });
     const root = panel('Library',

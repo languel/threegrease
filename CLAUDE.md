@@ -181,6 +181,42 @@ the browser console or automated evals:
 - Dev-server module URLs are importable in evals:
   `await import('/src/tools/editops.ts')`.
 
+## Performance
+
+- **The perf overlay** (View ▸ Performance overlay, Ctrl+Alt+F, pref
+  `showPerf`; `app/perf.ts`) is the first thing to open when something is
+  slow. The frame loop marks LAPS between its phases (`perf.lap('render')`),
+  so it says WHERE a frame went: per-phase averages and maxima over the last
+  second, the rAF-to-rAF interval against the loop's own CPU time (a large
+  gap is flagged — the time is going to the GPU, an event handler, layout or
+  a long task, not the loop), draw calls / triangles summed over EVERY pass
+  (`renderer.info.autoReset` is off and reset per frame, or only the last
+  pass would count), textures, geometries, programs, JS heap, long tasks, and
+  counters (`perf.count`) — UI rebuilds per second and their ms. When adding
+  a phase to the loop, give it a lap.
+- **Render resolution** (`settings.renderScale`, View menu): the GL buffer is
+  devicePixelRatio x scale and stretched to the canvas; the HUD stays at full
+  resolution. On retina, 100% is four pixels per point and the look's post
+  passes pay for all of them.
+- **A live camera is copied only when it has a NEW frame**
+  (`requestVideoFrameCallback` sets `fresh`). Copying every animation frame
+  was what took the app to 1-2 fps with a camera open: a 30 fps camera was
+  re-uploaded as a 720p texture 60x a second, and its frame counter ticked at
+  the display rate, so capture ran MediaPipe on every display frame of an
+  unchanged picture (measured 8.3 ms/frame for pose alone at 1280x720).
+- **Capture detects on a snapshot at most 640 wide, ONE detector per display
+  frame** (`MMCapture.round`): a new round starts only when the last is done,
+  on the newest frame, and pose / hands / face each take a frame of it. Back
+  to back they put ~30 ms into one frame; spread, the worst frame carries
+  one (~10-13 ms). The landmark models resize to 256 px internally, and
+  landmarks are normalised, so the smaller snapshot changes nothing
+  downstream. MediaPipe still runs on the main thread — moving it into a
+  worker is the next step (tasks-vision's loader uses importScripts, which a
+  Vite module worker does not have, so it needs a classic worker build).
+- Measured baselines (preview pane, retina): empty scene 1 ms/frame of loop;
+  demo gallery (three actors, ~60 objects) 2.6 ms; 24 MB scan + live plane
+  1.2 ms; all three landmark detectors on a camera 7 ms average.
+
 ## Gotchas (learned the hard way)
 
 - `THREE.ShapeUtils.triangulateShape` **mutates its input** (pops a
@@ -1334,6 +1370,14 @@ the browser console or automated evals:
   **In an eval, the Library's `listAssets` must be read through the DOM or
   the app** — `import('/src/io/assets.ts')` is a second module instance with
   its own empty cache (the general trap above).
+- **The TEST CAMERA and TEST CARD** (palette: "Add test camera", "Add test
+  card"; also in the Library's Camera menu) are first-class sources, not test
+  scaffolding: `liveSources.openTest()` is a GENERATED 1280x720 source at 30
+  fps (bars, a sweeping marker, timecode, frame count) that behaves exactly
+  like a webcam — tile, planes, capture, pause — with no device or
+  permission; `testCardDataUrl()` is a still 16:9 image (grid, bars, grey
+  ramp, a circle for aspect, a corner mark for orientation) added to the
+  Library as an image. Use them to verify camera work in the preview pane.
 - **A camera is a Library ASSET** (`io/livesources.ts`), not something the
   capture panel owns. `liveSources.open(deviceId?)` opens a webcam as a
   source keyed `cam:<deviceId>`; each source draws its video into its OWN

@@ -89,7 +89,8 @@ import {
   initAssets, listAssets, meshAssetPayload, onAssetsChanged, saveAsset, splatAssetPayload,
   streamAsset, updateAsset, ASSET_MIME, type TGAsset,
 } from '../io/assets';
-import { LIVE_PREFIX, liveSources } from '../io/livesources';
+import { LIVE_PREFIX, liveSources, testCardDataUrl } from '../io/livesources';
+import { perf, PerfOverlay } from './perf';
 
 /** A Library tile's picture of an image: the image itself, fitted into the
  *  tile's square over the tile's own dark ground. */
@@ -590,6 +591,9 @@ class App implements AppHandle {
     this.bindEvents(glCanvas);
     this.bindSidebarResize();
     this.resize();
+    perf.attach(this.glRenderer);
+    perf.enabled = !!this.ctx.settings.showPerf;
+    this.perfOverlay = new PerfOverlay(document.getElementById('viewport')!);
     requestAnimationFrame(() => this.loop());
   }
 
@@ -1704,6 +1708,19 @@ class App implements AppHandle {
       case 'viewAll': this.viewAll(); break;
       case 'viewSelected': this.viewSelected(); break;
       case 'quadView': this.toggleQuadView(); break;
+      case 'renderScale': {
+        // cycle 100 -> 75 -> 50 %
+        const steps = [1, 0.75, 0.5];
+        const cur = ctx.settings.renderScale ?? 1;
+        this.setRenderScale(steps[(steps.indexOf(cur) + 1) % steps.length] ?? 1);
+        break;
+      }
+      case 'perfOverlay':
+        ctx.settings.showPerf = !ctx.settings.showPerf;
+        perf.enabled = !!ctx.settings.showPerf;
+        this.savePrefs();
+        this.ui.refresh();
+        break;
       case 'cycleShading': this.cycleShading(1); break;
       case 'cycleShadingBack': this.cycleShading(-1); break;
       case 'parentSet': {
@@ -2374,6 +2391,8 @@ class App implements AppHandle {
     }
     const add = (id: string, title: string, run: (args?: string) => unknown, keywords = '') =>
       reg.register({ id, title, keywords, run });
+    add('addTestCamera', 'Add test camera (generated live stream)', () => this.openTestCamera(), 'library camera stream video test bars');
+    add('addTestCard', 'Add test card (still image) to the Library', () => this.addTestCard(), 'library image test card grid');
 
     for (const kind of ['PLANE', 'BOX', 'SPHERE', 'CYLINDER', 'PYRAMID',
       'TETRA', 'OCTA', 'DODECA', 'ICOSA', 'EMPTY'] as const) {
@@ -3259,6 +3278,33 @@ class App implements AppHandle {
     } catch (err) {
       this.setStatusHint(`Camera: ${err instanceof Error ? err.message : String(err)}`, 5000);
     }
+  }
+
+  /** The generated test camera, in the Library like any other camera. */
+  openTestCamera(): void {
+    const src = liveSources.openTest();
+    if (!streamAsset(src.key)) {
+      saveAsset(src.label, 'STREAM', JSON.stringify({ key: src.key, label: src.label, deviceId: '' }));
+    }
+    this.ui.refresh();
+  }
+
+  /** The test card: a still image in the Library, placed like any image. */
+  addTestCard(): void {
+    const url = testCardDataUrl();
+    const mesh = createMeshObject(0, 'PLANE', [0, 0, 0]);
+    mesh.name = 'Test Card';
+    mesh.texture = url;
+    mesh.unlit = true;
+    mesh.drawTarget = false;
+    mesh.opacity = 1;
+    mesh.scale = [16 / 9 * 0.5, 0.5, 1];
+    const img = new Image();
+    img.onload = () => {
+      saveAsset('Test Card', 'MESH', meshAssetPayload(mesh), imageThumb(img));
+      this.setStatusHint('Test card added to the Library');
+    };
+    img.src = url;
   }
 
   async cameraDevices(): Promise<{ id: string; label: string }[]> {
@@ -4785,8 +4831,16 @@ class App implements AppHandle {
     const vp = document.getElementById('viewport')!;
     const w = vp.clientWidth, h = vp.clientHeight;
     if (w === 0 || h === 0) return;
-    if (w === this.sized.w && h === this.sized.h && devicePixelRatio === this.sized.dpr) return;
-    this.sized = { w, h, dpr: devicePixelRatio };
+    // Render resolution: the GL buffer is drawn at devicePixelRatio x the
+    // render scale and stretched to the canvas. On a retina display at 100%
+    // that is four pixels per point, and every post pass (full-float edge
+    // prepass, bloom) pays for all of them — the one setting that trades
+    // sharpness for GPU time directly. The HUD stays at full resolution, so
+    // text and measurements stay crisp.
+    const r = devicePixelRatio * (this.ctx.settings.renderScale ?? 1);
+    if (w === this.sized.w && h === this.sized.h && r === this.sized.dpr) return;
+    this.sized = { w, h, dpr: r };
+    this.glRenderer.setPixelRatio(r);
     this.glRenderer.setSize(w, h, false);
     if (this.quadView) {
       this.paneRects = computePaneRects(w, h);
@@ -4802,9 +4856,9 @@ class App implements AppHandle {
       this.paneRects = null;
       this.nav.setAspect(w, h);
     }
-    this.gp.setSize(w * devicePixelRatio, h * devicePixelRatio);
-    this.fx.setSize(w * devicePixelRatio, h * devicePixelRatio);
-    this.post.setSize(w * devicePixelRatio, h * devicePixelRatio);
+    this.gp.setSize(w * r, h * r);
+    this.fx.setSize(w * r, h * r);
+    this.post.setSize(w * r, h * r);
     this.hud.width = w * devicePixelRatio;
     this.hud.height = h * devicePixelRatio;
     for (const entry of this.selHelpers.values()) entry.helper.material.resolution.set(w, h);
@@ -4839,6 +4893,7 @@ class App implements AppHandle {
     requestAnimationFrame(() => this.loop());
     const ctx = this.ctx;
     const now = performance.now();
+    perf.frameStart(now);
     const dt = Math.min(0.1, (now - this.lastTime) / 1000);
     this.lastTime = now;
     this.nav.update(dt);
@@ -4890,21 +4945,26 @@ class App implements AppHandle {
     // subscribed, replay CLIP streams, sample any active recording, re-emit
     // world landmarks, then GPU-sync the point sprites. Runs BEFORE
     // mediamime.update so re-emitted events reach rigs this frame.
+    perf.lap('nav');
     liveSources.tick();
     this.paintLivePreviews();
+    perf.lap('cameras');
     mmCapture.tick(ctx.scene);
+    perf.lap('capture');
     mmStreamEngine.sync(ctx.scene);
     updateClipStreams(ctx.scene, dt);
     clipRecorder.tick(ctx.scene);
     streamPen.tick(ctx);
     mmStreamEngine.emit(ctx.scene);
     this.mmPoints.sync(ctx.scene, this.glRenderer.domElement.height);
+    perf.lap('streams');
 
     // score engine: cursors/triggers/attachments run on their own clocks
     mediamime.setPrefix(ctx.scene.mediamime.prefix);
     mediamime.update(ctx.scene);
     this.score.update(ctx.scene, dt, now);
     this.syncScoreGlyphs();
+    perf.lap('score');
     if (this.sim.step(ctx.scene, dt)) ctx.requestRender(this.sim.lastLayerId ?? undefined);
     // Loose props: after the solver, so contact reads this frame's finished
     // pose — a foot's velocity is the kick, and it has to be the real one.
@@ -4927,10 +4987,12 @@ class App implements AppHandle {
       walkVolume.gather(ctx.scene).staticBoxes)) {
       this.meshes.sync(ctx.scene, this.nav.active);
     }
+    perf.lap('physics');
     this.splats.sync(ctx.scene);
     this.meshes.sync(ctx.scene, this.nav.active);
     this.settlePlacements();
     this.polys.sync(ctx.scene, this.nav.active);
+    perf.lap('sync objects');
     this.lights.helpersVisible = !this.presentation && !this.infoOverlayHidden;
     // selection tint only reads as selection in object mode, same gate the
     // Box3 outlines use (syncSelectionGlyphs)
@@ -4984,6 +5046,7 @@ class App implements AppHandle {
     this.actors.selectionColor =
       ctx.settings.mode === 'OBJECT' && !this.presentation ? this.highlightColor() : null;
     this.actors.sync(ctx.scene);
+    perf.lap('actors');
     this.lights.sync(ctx.scene);
     // Blender semantics: Solid/Wireframe are modelling views lit by a fixed
     // studio environment, so the scene's own lamps are held back until
@@ -4993,6 +5056,7 @@ class App implements AppHandle {
     materialManager.shading = ctx.settings.shading;
     this.world.update(this.scene3, ctx.scene, ctx.settings.shading, ctx.settings.upAxis === 'Z');
     this.paints.sync(ctx.scene, this.glRenderer.domElement.height);
+    perf.lap('world');
     ctx.pickableMeshes = [
       ...ctx.scene.meshes
         .map((m) => this.meshes.rootFor(m.id))
@@ -5031,6 +5095,7 @@ class App implements AppHandle {
     vrmManager.update(ctx.scene, dt, ctx.settings.upAxis === 'Z');
 
     tickSimStreams(ctx.scene, ctx.scene.frame);
+    perf.lap('constraints');
     this.widget.camera = this.nav.active; // ortho/persp swaps
     // quad view step 1: the widget is scene-graph-resident (renders into
     // every pane) and its own sizing/pointer math is bound to one camera +
@@ -5049,13 +5114,16 @@ class App implements AppHandle {
       this.ui.drawTimeline();
     }
 
+    perf.lap('misc');
     if (this.gp.needsRebuild) {
+      perf.count('GP rebuild');
       try {
         this.gp.update(ctx.scene, this.renderState());
       } catch (err) {
         console.error('GP rebuild failed:', err);
       }
     }
+    perf.lap('GP rebuild');
     if (ctx.scene.objects.length) this.lastPencil = activeObject(ctx.scene);
     this.cursorMarker.position.set(...ctx.scene.cursor);
     this.updateCursorMarker();
@@ -5085,7 +5153,9 @@ class App implements AppHandle {
       }
     });
 
+    perf.lap('helpers');
     this.syncSelectionGlyphs();
+    perf.lap('selection');
 
     if (this.quadView && this.paneRects) {
       this.renderQuadView(this.paneRects);
@@ -5105,6 +5175,7 @@ class App implements AppHandle {
         this.glRenderer.clear();
       }
       this.glRenderer.render(this.scene3, this.nav.active);
+      perf.lap('render');
       for (const job of fxJobs) {
         const ob = ctx.scene.objects[job.obIndex];
         this.fx.apply(this.glRenderer, (rt) => {
@@ -5124,18 +5195,35 @@ class App implements AppHandle {
         }, ob.effects);
         job.group.visible = true;
       }
+      perf.lap('object fx');
       if (styled) {
         this.post.present(this.glRenderer, this.scene3, this.nav.active, look, now / 1000);
         this.glRenderer.setRenderTarget(null);
       }
+      perf.lap('post');
       // AFTER the look: a selection rim is interface, and belongs over the
       // finished frame rather than inside the bloom or the paper wash
       this.silhouette.draw(this.glRenderer, this.scene3, this.nav.active,
         this.silhouetteGroups, ctx.settings.uiHighlightAlpha);
+      perf.lap('outline');
     }
 
     this.drawHud();
+    perf.lap('hud');
     this.updateStatus();
+    this.perfOverlay?.update(now);
+    perf.lap('status');
+    perf.frameEnd();
+  }
+
+  private perfOverlay: PerfOverlay | null = null;
+
+  setRenderScale(scale: number): void {
+    this.ctx.settings.renderScale = scale;
+    this.savePrefs();
+    this.resize();
+    this.setStatusHint(`Render resolution ${Math.round(scale * 100)}%`);
+    this.ui.refresh();
   }
 
   private targetImageCache = new Map<string, HTMLImageElement>();

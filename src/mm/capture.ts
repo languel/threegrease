@@ -42,6 +42,9 @@ type ImageDecoderCtor = new (init: { data: ArrayBuffer; type: string }) => {
 };
 const ImgDecoder = (globalThis as { ImageDecoder?: ImageDecoderCtor }).ImageDecoder;
 
+/** widest frame the landmark detectors are handed */
+const DETECT_W = 640;
+
 export type CaptureStatus = 'off' | 'starting' | 'on' | 'error';
 /** `live`: the key of a Library camera (io/livesources.ts) — capture reads
  *  that camera's frames rather than opening one of its own, so the same
@@ -86,6 +89,13 @@ export class MMCapture {
       el.style.cssText = 'width:100%;border-radius:4px;display:block;';
     }
   }
+
+  /** detectors still to run on the current snapshot (see tick) */
+  private round: ('pose' | 'hands' | 'face')[] = [];
+  private roundAspect = 1;
+  /** the downscaled copy detection runs on (see tick) */
+  private readonly detCanvas = document.createElement('canvas');
+  private detCtx: CanvasRenderingContext2D | null = null;
 
   /** a Library camera being read, when the source is one */
   private external: LiveSource | null = null;
@@ -259,6 +269,7 @@ export class MMCapture {
     this.video.removeAttribute('src');
     if (this.objectUrl) { URL.revokeObjectURL(this.objectUrl); this.objectUrl = null; }
     this.lastFrameKey = -1;
+    this.round = [];
     if (this.status !== 'error') this.setStatus('off');
   }
 
@@ -270,18 +281,43 @@ export class MMCapture {
     // keep working from whatever the latest frame is rather than being
     // skipped whenever two ticks land on one frame.
     this.tickDetect(scene);
-    const frameKey = this.external ? this.external.frame
-      : this.usingCanvas ? this.canvasFrame : this.video.currentTime;
-    if (frameKey === this.lastFrameKey) return;
-    this.lastFrameKey = frameKey;
-    const src = this.sourceEl;
-    const w = this.external ? this.external.canvas.width : this.usingCanvas ? this.canvas.width : this.video.videoWidth;
-    const h = this.external ? this.external.canvas.height : this.usingCanvas ? this.canvas.height : this.video.videoHeight;
-    if (!w || !h) return;
+    // A new detection ROUND starts only when the last one has finished: the
+    // newest frame is snapshotted and every enabled detector gets it, ONE
+    // PER DISPLAY FRAME. Each landmark model costs ~10 ms of main thread,
+    // so running pose, hands and face back to back put 30 ms into a single
+    // frame; spread out, no frame carries more than one. A round that is
+    // still going when the camera moves on simply finishes on its snapshot.
+    if (!this.round.length) {
+      const frameKey = this.external ? this.external.frame
+        : this.usingCanvas ? this.canvasFrame : this.video.currentTime;
+      if (frameKey === this.lastFrameKey) return;
+      this.lastFrameKey = frameKey;
+      const full = this.sourceEl;
+      const w = this.external ? this.external.canvas.width : this.usingCanvas ? this.canvas.width : this.video.videoWidth;
+      const h = this.external ? this.external.canvas.height : this.usingCanvas ? this.canvas.height : this.video.videoHeight;
+      if (!w || !h) return;
+      // Detect on a copy at most DETECT_W wide. The landmark models resize
+      // to 256 px internally anyway; what a full 720p frame costs is getting
+      // it to them. Landmarks are normalised (0..1), so the smaller picture
+      // changes nothing downstream.
+      const dw = Math.min(w, DETECT_W), dh = Math.round(dw * h / w);
+      if (this.detCanvas.width !== dw || this.detCanvas.height !== dh) {
+        this.detCanvas.width = dw; this.detCanvas.height = dh;
+      }
+      this.detCtx ??= this.detCanvas.getContext('2d');
+      this.detCtx?.drawImage(full, 0, 0, dw, dh);
+      this.roundAspect = w / h;
+      if (this.pose) this.round.push('pose');
+      if (this.hands) this.round.push('hands');
+      if (this.face) this.round.push('face');
+    }
+    const which = this.round.shift();
+    if (!which) return;
+    const src = this.detCanvas;
+    const aspect = this.roundAspect;
     const now = performance.now();
-    const aspect = w / h;
 
-    if (this.pose) {
+    if (which === 'pose' && this.pose) {
       const res = this.pose.detectForVideo(src, now) as {
         landmarks: { x: number; y: number; z: number; visibility?: number }[][];
       };
@@ -289,7 +325,7 @@ export class MMCapture {
       const target = scene.mmStreams.find((s) => s.source === 'CAMERA' && s.kind === 'POSE');
       if (lms && target) streamStore.push(target.id, this.pack(lms, aspect, null), lms.length);
     }
-    if (this.hands) {
+    if (which === 'hands' && this.hands) {
       const res = this.hands.detectForVideo(src, now) as {
         landmarks: { x: number; y: number; z: number }[][];
         handednesses: { categoryName: string; score: number }[][];
@@ -312,7 +348,7 @@ export class MMCapture {
         }
       }
     }
-    if (this.face) {
+    if (which === 'face' && this.face) {
       const res = this.face.detectForVideo(src, now) as {
         faceLandmarks: { x: number; y: number; z: number }[][];
       };

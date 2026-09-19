@@ -189,6 +189,10 @@ export interface Settings {
    *  so its depth/height reads clearly against the grid. See
    *  App.updateDepthHelper. */
   showDepthHelper: boolean;
+  /** the fps / frame-breakdown overlay (app/perf.ts) */
+  showPerf?: boolean;
+  /** GL buffer resolution relative to the display (1 = native, 0.5 = half) */
+  renderScale?: number;
   /** Blender-style magnet: one snap setting for transforms AND the 3D
    *  cursor (Shift+RMB drag). 'CANVAS' is a legacy alias for 'SURFACE'.
    *  strokeScope limits POINT snapping to selected strokes only.
@@ -218,7 +222,7 @@ export function snapIncrement(s: Settings): number {
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'showGrid', 'showActorOverlay', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
-  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'snap',
+  'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'showPerf', 'renderScale', 'snap',
   'shading', 'shapeSnap', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
 ] as const;
 

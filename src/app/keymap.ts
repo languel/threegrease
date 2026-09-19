@@ -84,6 +84,8 @@ export const ACTIONS: ActionDef[] = [
   { id: 'viewSelected', label: 'Frame selection', combo: 'shift+home', category: 'View' },
   { id: 'centerCursorViewAll', label: 'Center cursor & frame all', combo: 'shift+c', category: 'View' },
   { id: 'quadView', label: 'Toggle Quad View', combo: 'ctrl+alt+q', category: 'View' },
+  { id: 'renderScale', label: 'Render resolution (cycle 100 / 75 / 50 %)', combo: '', category: 'View' },
+  { id: 'perfOverlay', label: 'Performance overlay (fps, where the frame goes)', combo: 'ctrl+alt+f', category: 'View' },
   { id: 'cycleShading', label: 'Cycle viewport shading', combo: 'z', category: 'View' },
   { id: 'cycleShadingBack', label: 'Cycle viewport shading (back)', combo: 'shift+z', category: 'View' },
 ];
