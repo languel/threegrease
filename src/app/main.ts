@@ -4060,6 +4060,10 @@ class App implements AppHandle {
     if (ref.kind === 'GP') return this.gp.objectGroups[gpIndexOf(scene, ref.id)] ?? null;
     if (ref.kind === 'SPLAT') return this.splats.meshFor(ref.id);
     if (ref.kind === 'ACTOR') return this.actors.rootFor(ref.id);
+    // an editable mesh can be anything down to a single flat face, which an
+    // inverted hull cannot outline (it z-fights) — the render-based
+    // silhouette handles every shape, so these wear it instead of a box
+    if (ref.kind === 'POLY') return this.polys.rootFor(ref.id);
     if (ref.kind === 'PCLOUD') {
       return this.paints.group.children.find((c) => c.userData.pcloudId === ref.id) ?? null;
     }

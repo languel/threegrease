@@ -1056,7 +1056,9 @@ the browser console or automated evals:
   width drifts.
   **Everything drawable without a surface to fatten wears a SILHOUETTE**
   (`render/outline.ts`, `App.silhouetteRoot`): grease pencil, splats, paint
-  clouds, actors. The selected roots are rendered ALONE — isolated by
+  clouds, actors, and editable (poly) meshes — those can be anything down to
+  one flat face, which an inverted hull cannot outline, so they wore a box
+  until they joined this pass. The selected roots are rendered ALONE — isolated by
   visibility, the same lever the per-object FX pass uses — with their OWN
   materials into a mask, and a rim is drawn wherever a pixel outside the
   mask has a neighbour inside it (16 directions on two rings). Their own
