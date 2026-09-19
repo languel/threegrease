@@ -6,11 +6,14 @@
 // (f_dc_0 colour coefficients, scale_0, rot_0, opacity) on its vertices; a
 // mesh PLY has x/y/z and maybe colours, and a `face` element.
 
-export type DropKind = 'SPLAT' | 'MODEL' | 'IMAGE' | 'GP_JSON';
+/** MEDIA: a moving picture — a video, or a GIF (played frame by frame, so
+ *  an animated one moves and a still one is simply a one-frame loop). */
+export type DropKind = 'SPLAT' | 'MODEL' | 'IMAGE' | 'GP_JSON' | 'MEDIA';
 
 const SPLAT_EXT = ['spz', 'splat', 'ksplat', 'sog'];
 const MODEL_EXT = ['glb', 'gltf', 'obj', 'fbx', 'stl', 'vrm'];
-const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif'];
+const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'webp', 'avif'];
+const MEDIA_EXT = ['gif', 'mp4', 'webm', 'mov', 'm4v', 'ogv'];
 
 export function extOf(name: string): string {
   const i = name.lastIndexOf('.');
@@ -21,6 +24,7 @@ export async function classifyFile(file: File): Promise<DropKind | null> {
   const ext = extOf(file.name);
   if (SPLAT_EXT.includes(ext)) return 'SPLAT';
   if (MODEL_EXT.includes(ext)) return 'MODEL';
+  if (MEDIA_EXT.includes(ext) || file.type.startsWith('video/')) return 'MEDIA';
   if (IMAGE_EXT.includes(ext) || file.type.startsWith('image/')) return 'IMAGE';
   if (ext === 'json') return 'GP_JSON';
   if (ext === 'ply') return (await isSplatPly(file)) ? 'SPLAT' : 'MODEL';

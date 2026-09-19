@@ -133,6 +133,9 @@ interface Entry {
   edgeLines: THREE.LineSegments;
   /** line-segment index -> edge id */
   segEdgeIds: number[];
+  /** some edge borders no face (a chain or a wire): then the edges ARE the
+   *  drawing and are always shown */
+  looseEdges?: boolean;
   verts: THREE.InstancedMesh;
   /** instance index -> vertex id */
   instVertIds: number[];
@@ -274,6 +277,12 @@ export class PolyMeshManager {
     eg.setAttribute('position', new THREE.Float32BufferAttribute(epos, 3));
     eg.setAttribute('color', new THREE.Float32BufferAttribute(new Array(epos.length).fill(1), 3));
     entry.edgeLines.geometry = eg;
+    const inFace = new Set<string>();
+    for (const f of pm.faces) for (let i = 0; i < f.vertices.length; i++) {
+      const a = f.vertices[i], b = f.vertices[(i + 1) % f.vertices.length];
+      inFace.add(a < b ? `${a}:${b}` : `${b}:${a}`);
+    }
+    entry.looseEdges = pm.edges.some((e) => !inFace.has(e.v[0] < e.v[1] ? `${e.v[0]}:${e.v[1]}` : `${e.v[1]}:${e.v[0]}`));
     entry.edgeLines.visible = epos.length > 0;
 
     // vertex handles: instance ids (matrices/colors are per-frame)
@@ -290,6 +299,12 @@ export class PolyMeshManager {
 
     const isEdit = polyOverlay.editMeshId === pm.id;
     const hover = polyOverlay.hover?.meshId === pm.id ? polyOverlay.hover : null;
+    // The cyan edge overlay is an EDITING affordance: it used to be on for
+    // every mesh in every shading mode, so a finished box read as a
+    // wireframe diagram in Material and Rendered views. Only while selected
+    // or edited — unless the mesh has loose edges, which are its drawing.
+    entry.edgeLines.visible = entry.segEdgeIds.length > 0
+      && (isEdit || pm.select || !!entry.looseEdges);
 
     // face material — the shared datablock when assigned, else this mesh's
     // own legacy flattened fields (see render/materialmgr.ts)

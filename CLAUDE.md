@@ -1377,6 +1377,35 @@ the browser console or automated evals:
   **In an eval, the Library's `listAssets` must be read through the DOM or
   the app** — `import('/src/io/assets.ts')` is a second module instance with
   its own empty cache (the general trap above).
+- **Videos and GIFs are live SOURCES too** (`liveSources.openMedia`, key
+  `media:<store ref>`): mp4/webm/mov/m4v/ogv through a looping muted
+  <video> (rVFC-gated like a camera), GIFs decoded frame by frame with each
+  frame's own duration (WebCodecs ImageDecoder). They play by default, pause
+  and resume, texture objects and feed capture exactly like a camera — and
+  need no permission, so `textureFor` OPENS a media key on first use: a plane
+  saved with a video plays again after a reload untouched. `classifyFile`
+  calls them MEDIA (a GIF is always MEDIA: a still one is a one-frame loop).
+  Dropped on the Library they become STREAM assets with a first-frame thumb;
+  dropped on the viewport, a plane that takes the media's aspect once its
+  first frame arrives (`App.fitToMedia`).
+- **No prompt() / confirm() in the Library** — an embedded browser (the app's
+  own preview pane) can refuse them, and New folder, rename and remove all
+  silently did nothing there. Names are edited INLINE (`UI.inlineEdit`; the
+  panel's refresh waits while a `.lib-rename` field exists, and the field
+  removes itself before committing so the refresh it triggers is not
+  deferred forever); removal is immediate, with "Restore last removed" in
+  the ⋯ menu. A tile drag must allow 'copyMove': with only 'copy' allowed the
+  browser refuses every drop onto a folder (which accepts a 'move'), and a
+  synthetic-event test does not enforce that, so it passed while the real
+  gesture failed. Tiles multi-select (click, Shift/Cmd-click); a drag or a
+  removal acts on the whole selection when the tile is part of it.
+- **A poly mesh's cyan edge overlay shows only while it is selected or
+  edited** — it was on for every mesh in every shading mode, so a finished
+  box read as a wireframe diagram — unless the mesh has loose edges (a wire
+  or chain), which are its drawing.
+- Test media for this project lives OUTSIDE the repo (the user's
+  ~/Desktop/_tmpassets); copy what a test needs into `public/_tmp*`, which is
+  gitignored, and serve it from there.
 - **The TEST CAMERA and TEST CARD** (palette: "Add test camera", "Add test
   card"; also in the Library's Camera menu) are first-class sources, not test
   scaffolding: `liveSources.openTest()` is a GENERATED 1280x720 source at 30

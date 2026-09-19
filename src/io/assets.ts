@@ -80,6 +80,29 @@ export function updateAsset(id: number, patch: Partial<Omit<TGAsset, 'id'>>): vo
   notify();
 }
 
+/** Removed assets, for "Restore last removed" (session only). */
+let lastRemoved: TGAsset[] = [];
+
+export function removeAssets(ids: number[]): void {
+  const set = new Set(ids);
+  lastRemoved = cache.filter((a) => set.has(a.id));
+  cache = cache.filter((a) => !set.has(a.id));
+  for (const id of ids) void idb('assets', 'readwrite', (s) => s.delete(id));
+  notify();
+}
+
+export function canRestoreAssets(): boolean { return lastRemoved.length > 0; }
+
+export function restoreAssets(): void {
+  for (const a of lastRemoved) {
+    if (cache.some((c) => c.id === a.id)) continue;
+    cache = [...cache, a];
+    void idb('assets', 'readwrite', (s) => s.put(a));
+  }
+  lastRemoved = [];
+  notify();
+}
+
 export function deleteAsset(id: number): void {
   cache = cache.filter((a) => a.id !== id);
   void idb('assets', 'readwrite', (s) => s.delete(id));

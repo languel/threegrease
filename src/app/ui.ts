@@ -26,8 +26,8 @@ import { streamStore } from '../mm/streams';
 import { penLandmarkHint } from '../mm/pen';
 import { combinedBodyMapPicker, hasLandmarkMap, landmarkMapForKind, listRigLandmarks, multiLandmarkMapForKind, RIG_KIND_PATH, type RigMapKind } from './poseMap';
 import {
-  ASSET_MIME, addFolder, deleteAsset, deleteFolder, listAssets, listFolders, moveAsset, renameFolder,
-  updateAsset, type TGAsset,
+  ASSET_MIME, addFolder, canRestoreAssets, deleteFolder, listAssets, listFolders, moveAsset, removeAssets,
+  renameFolder, restoreAssets, updateAsset, type TGAsset,
 } from '../io/assets';
 import { liveSources } from '../io/livesources';
 import { perf } from './perf';
@@ -150,6 +150,7 @@ export interface AppHandle {
   openCamera(deviceId?: string): Promise<void>;
   cameraDevices(): Promise<{ id: string; label: string }[]>;
   openTestCamera(): void;
+  playMedia(key: string): Promise<void>;
   renderToLibrary(mode: 'VIEW' | 'SELECTION'): void;
   exportLibrary(): Promise<void>;
   importLibraryFrom(files: File[]): Promise<void>;
@@ -965,7 +966,8 @@ export class UI {
     // Anything that asks during a scrub is answered once, at the end.
     // Typing a value into one is the same hazard — the rebuild takes the
     // input away mid-word — so it waits too.
-    if (numDragActive || document.querySelector('.numdrag-input')) {
+    // (and the same for a name being typed into a Library tile or folder)
+    if (numDragActive || document.querySelector('.numdrag-input, .lib-rename')) {
       deferredRefresh = () => this.refresh();
       return;
     }
@@ -5242,68 +5244,139 @@ export class UI {
    * this browser's file store, so a library outlives the page.
    */
   /** One Library tile. */
-  private libTile(a: TGAsset): HTMLElement {
-    {
-      const stream = a.kind === 'STREAM' ? JSON.parse(a.payload) as { key: string; label: string; deviceId: string } : null;
-      const live = stream ? liveSources.get(stream.key) : undefined;
-      const open = !!live && (live.status === 'on' || live.status === 'paused' || live.status === 'starting');
-      const tile = el('div', {
-        class: `lib-tile${stream ? ' lib-stream' : ''}`,
-        title: stream && !open ? `${a.name} — double-click to open this camera`
-          : `${a.name} — drag into the viewport, or double-click to place at the 3D cursor (Plane and grid snap apply)`,
-      });
-      tile.draggable = true;
-      tile.ondragstart = (e) => {
-        e.dataTransfer?.setData(ASSET_MIME, String(a.id));
-        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
-      };
-      // DOUBLE-click places (a single click used to, and a stray one put
-      // things in the scene); a closed camera's double-click reopens it
-      tile.ondblclick = (e) => {
-        if ((e.target as HTMLElement).closest('.lib-name, .lib-tools')) return;
-        if (stream && !open) {
-          if (stream.key.startsWith('test:')) this.app.openTestCamera();
-          else void this.app.openCamera(stream.deviceId || undefined);
-        }
-        else this.app.addAssetToScene(a);
-      };
-      const pic = el('div', { class: 'lib-pic' });
-      if (stream) {
-        // a camera's tile IS the camera: a small canvas repainted from it
-        if (open) {
-          const c = el('canvas', { class: 'lib-live' }) as HTMLCanvasElement;
-          c.width = 160; c.height = 160;
-          c.dataset.live = stream.key;
-          pic.append(c);
-        }
-        pic.append(el('span', { class: 'lib-kind', text: live?.status === 'paused' ? 'paused'
-          : live?.status === 'on' ? 'live' : live?.status === 'starting' ? '…' : 'camera' }));
-      } else if (a.thumb) pic.style.backgroundImage = `url(${a.thumb})`;
-      else pic.append(el('span', { class: 'lib-kind', text: a.kind === 'SPLAT' ? 'scan' : a.kind === 'GP' ? 'drawing' : 'model' }));
-      const name = el('div', { class: 'lib-name', text: a.name });
-      name.ondblclick = (e) => {
-        e.stopPropagation();
-        const v = prompt('Rename', a.name);
-        if (v && v.trim()) updateAsset(a.id, { name: v.trim() });
-      };
-      const tools = el('div', { class: 'lib-tools' },
-        ...(stream && open ? [
-          btn(icon(live?.status === 'on' ? 'pause' : 'play', 12),
-            () => this.app.liveAction(stream.key, live?.status === 'on' ? 'pause' : 'resume'),
-            { cls: 'icon-btn', title: live?.status === 'on' ? 'Pause — the camera stops and everything showing it holds the last frame' : 'Resume the camera' }),
-        ] : []),
-        ...(!stream ? [btn(icon('camera', 12), () => this.app.refreshAssetThumb(a.id),
-          { cls: 'icon-btn', title: 'Re-take this picture from the selected object' })] : []),
-        btn(icon('xMark', 12), () => {
-          if (!confirm(`Remove "${a.name}" from the Library? Objects already placed stay.`)) return;
-          if (stream) this.app.liveAction(stream.key, 'close');
-          deleteAsset(a.id);
-        }, { cls: 'icon-btn', title: 'Remove from the Library' }),
-      );
-      for (const b of tools.querySelectorAll('button')) b.addEventListener('click', (e) => e.stopPropagation());
-      tile.append(pic, name, tools);
-      return tile;
+  /** Library tiles selected with click / Shift / Cmd (UI state only). */
+  private libSel = new Set<number>();
+  /** the folder being renamed inline, or the asset (`a:<id>`) */
+  private libRenaming: string | null = null;
+
+  /**
+   * Replace `node` with a text input editing `value`; Enter or leaving the
+   * field commits, Esc cancels. Used instead of prompt(), which an embedded
+   * browser (the app's own preview pane among them) can refuse outright —
+   * that is why New folder and rename did nothing there.
+   */
+  private inlineEdit(node: HTMLElement, value: string, commit: (v: string) => void): HTMLInputElement {
+    const input = el('input', { type: 'text', value, class: 'lib-rename' }) as HTMLInputElement;
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      this.libRenaming = null;
+      const v = input.value.trim();
+      // out of the page FIRST: refresh() waits while a .lib-rename exists
+      input.remove();
+      if (ok && v && v !== value) commit(v);
+      this.refresh();
+    };
+    input.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(true);
+      else if (e.key === 'Escape') finish(false);
+    };
+    input.onblur = () => finish(true);
+    input.onclick = (e) => e.stopPropagation();
+    input.ondblclick = (e) => e.stopPropagation();
+    node.replaceWith(input);
+    requestAnimationFrame(() => { input.focus(); input.select(); });
+    return input;
+  }
+
+  /** The ids a drag or a removal acts on: the whole selection when the tile
+   *  is part of it, else just that tile. */
+  private libTargets(a: TGAsset): number[] {
+    return this.libSel.has(a.id) && this.libSel.size > 1 ? [...this.libSel] : [a.id];
+  }
+
+  /** Remove assets from the Library — no confirm() (see inlineEdit): the ⋯
+   *  menu can bring the last removal back. */
+  private removeAssets(ids: number[]): void {
+    const all = listAssets();
+    for (const id of ids) {
+      const a = all.find((x) => x.id === id);
+      if (a?.kind === 'STREAM') {
+        const key = (JSON.parse(a.payload) as { key: string }).key;
+        if (!key.startsWith('media:')) this.app.liveAction(key, 'close');
+      }
     }
+    removeAssets(ids);
+    for (const id of ids) this.libSel.delete(id);
+  }
+
+  /** One Library tile. */
+  private libTile(a: TGAsset): HTMLElement {
+    const stream = a.kind === 'STREAM' ? JSON.parse(a.payload) as { key: string; label: string; deviceId: string; media?: boolean } : null;
+    const isMedia = !!stream?.key.startsWith('media:');
+    const live = stream ? liveSources.get(stream.key) : undefined;
+    const open = !!live && (live.status === 'on' || live.status === 'paused' || live.status === 'starting');
+    const tile = el('div', {
+      class: `lib-tile${stream ? ' lib-stream' : ''}${this.libSel.has(a.id) ? ' sel' : ''}`,
+      title: stream && !open && !isMedia ? `${a.name} — double-click to open this camera`
+        : `${a.name} — click to select (Shift/Cmd adds), drag into the viewport or onto a folder, double-click to place at the 3D cursor`,
+    });
+    tile.draggable = true;
+    tile.ondragstart = (e) => {
+      if (!e.dataTransfer) return;
+      e.dataTransfer.setData(ASSET_MIME, this.libTargets(a).join(','));
+      // copy into the scene, MOVE between folders: allowing only 'copy'
+      // made the browser refuse every drop onto a folder
+      e.dataTransfer.effectAllowed = 'copyMove';
+    };
+    tile.onclick = (e) => {
+      if ((e.target as HTMLElement).closest('.lib-tools, .lib-rename')) return;
+      if (e.shiftKey || e.metaKey || e.ctrlKey) {
+        if (this.libSel.has(a.id)) this.libSel.delete(a.id); else this.libSel.add(a.id);
+      } else {
+        this.libSel = new Set([a.id]);
+      }
+      this.refresh();
+    };
+    // DOUBLE-click places (a single click used to, and a stray one put
+    // things in the scene); a closed camera's double-click reopens it
+    tile.ondblclick = (e) => {
+      if ((e.target as HTMLElement).closest('.lib-name, .lib-tools, .lib-rename')) return;
+      if (stream && !open && !isMedia) {
+        if (stream.key.startsWith('test:')) this.app.openTestCamera();
+        else void this.app.openCamera(stream.deviceId || undefined);
+      } else this.app.addAssetToScene(a);
+    };
+    const pic = el('div', { class: 'lib-pic' });
+    if (a.thumb) pic.style.backgroundImage = `url(${a.thumb})`;
+    if (stream) {
+      // a live source's tile IS the source: a small canvas repainted from it
+      if (open) {
+        const c = el('canvas', { class: 'lib-live' }) as HTMLCanvasElement;
+        c.width = 160; c.height = 160;
+        c.dataset.live = stream.key;
+        pic.append(c);
+      }
+      pic.append(el('span', { class: 'lib-kind', text: live?.status === 'paused' ? 'paused'
+        : live?.status === 'on' ? (isMedia ? 'playing' : 'live') : live?.status === 'starting' ? '…'
+        : isMedia ? 'video' : 'camera' }));
+    } else if (!a.thumb) {
+      pic.append(el('span', { class: 'lib-kind', text: a.kind === 'SPLAT' ? 'scan' : a.kind === 'GP' ? 'drawing' : 'model' }));
+    }
+    const name = el('div', { class: 'lib-name', text: a.name, title: 'double-click to rename' });
+    name.ondblclick = (e) => {
+      e.stopPropagation();
+      this.libRenaming = `a:${a.id}`;
+      this.inlineEdit(name, a.name, (v) => updateAsset(a.id, { name: v }));
+    };
+    const playing = live?.status === 'on';
+    const tools = el('div', { class: 'lib-tools' },
+      ...(stream && (open || isMedia) ? [
+        btn(icon(playing ? 'pause' : 'play', 12), () => {
+          if (isMedia && !open) void this.app.playMedia(stream.key);
+          else this.app.liveAction(stream.key, playing ? 'pause' : 'resume');
+        }, { cls: 'icon-btn', title: playing ? 'Pause — everything showing it holds the current frame' : 'Play' }),
+      ] : []),
+      ...(!stream ? [btn(icon('camera', 12), () => this.app.refreshAssetThumb(a.id),
+        { cls: 'icon-btn', title: 'Re-take this picture from the selected object' })] : []),
+      btn(icon('xMark', 12), () => this.removeAssets(this.libTargets(a)),
+        { cls: 'icon-btn', title: 'Remove from the Library (the selected tiles, when this one is among them) — ⋯ ▸ Restore brings it back' }),
+    );
+    for (const b of tools.querySelectorAll('button')) b.addEventListener('click', (e) => e.stopPropagation());
+    tile.append(pic, name, tools);
+    return tile;
   }
 
   /** A drop target for Library tiles: dropping one files it under `folder`
@@ -5318,12 +5391,12 @@ export class UI {
     });
     node.addEventListener('dragleave', (e) => { if (!node.contains(e.relatedTarget as Node)) node.classList.remove('over'); });
     node.addEventListener('drop', (e) => {
-      const id = e.dataTransfer?.getData(ASSET_MIME);
+      const ids = e.dataTransfer?.getData(ASSET_MIME);
       node.classList.remove('over');
-      if (!id) return;
+      if (!ids) return;
       e.preventDefault();
       e.stopPropagation();
-      moveAsset(Number(id), folder);
+      for (const id of ids.split(',')) moveAsset(Number(id), folder);
     });
   }
 
@@ -5340,17 +5413,19 @@ export class UI {
         el('span', { class: 'grow', text: f }),
         el('span', { class: 'lib-count', text: String(items.length) }),
       );
-      const del = btn(icon('xMark', 11), () => {
-        if (confirm(`Remove the folder "${f}"? Its ${items.length} asset(s) stay in the Library, unfiled.`)) deleteFolder(f);
-      }, { cls: 'icon-btn', title: 'Remove the folder (its assets stay, unfiled)' });
+      const del = btn(icon('xMark', 11), () => deleteFolder(f),
+        { cls: 'icon-btn', title: 'Remove the folder (its assets stay, unfiled)' });
       del.addEventListener('click', (e) => e.stopPropagation());
       header.append(del);
       header.onclick = () => { writeUiFlag(`libFolder:${f}`, !open); this.refresh(); };
-      header.ondblclick = (e) => {
-        e.stopPropagation();
-        const v = prompt('Rename folder', f);
-        if (v && v.trim() && v.trim() !== f) renameFolder(f, v.trim());
+      const label = header.querySelector('.grow') as HTMLElement;
+      const startRename = () => {
+        this.libRenaming = `f:${f}`;
+        this.inlineEdit(label, f, (v) => renameFolder(f, v));
       };
+      header.ondblclick = (e) => { e.stopPropagation(); startRename(); };
+      // a folder just made opens straight into its name
+      if (this.libRenaming === `f:${f}`) requestAnimationFrame(startRename);
       this.folderDrop(header, f);
       sections.push(header);
       if (open) {
@@ -5407,7 +5482,17 @@ export class UI {
     const moreBtn: HTMLElement = btn(icon('dots', 14), () => {
       const r = moreBtn.getBoundingClientRect();
       this.openContextMenu(r.left, r.bottom + 2, [
-        { label: 'New folder…', do: () => { const v = prompt('Folder name'); if (v && v.trim()) addFolder(v.trim()); } },
+        { label: 'New folder', do: () => {
+          const taken = new Set(listFolders());
+          let n = 'New folder';
+          for (let i = 2; taken.has(n); i++) n = `New folder ${i}`;
+          this.libRenaming = `f:${n}`;
+          // anything selected goes straight into it
+          addFolder(n);
+          for (const id of this.libSel) moveAsset(id, n);
+        } },
+        ...(this.libSel.size ? [{ label: `Remove ${this.libSel.size} selected`, do: () => this.removeAssets([...this.libSel]) }] : []),
+        ...(canRestoreAssets() ? [{ label: 'Restore last removed', do: () => { restoreAssets(); } }] : []),
         { sep: true },
         { label: 'Export Library (zip)…', do: () => { void this.app.exportLibrary(); } },
         { label: 'Import Library from zip…', do: () => zipIn.click() },

@@ -90,7 +90,7 @@ import {
   streamAsset, updateAsset, ASSET_MIME, type TGAsset,
   exportLibrary as packLibrary, importLibrary, zipEntries,
 } from '../io/assets';
-import { LIVE_PREFIX, liveKeyOf, liveSources, testCardDataUrl } from '../io/livesources';
+import { LIVE_PREFIX, isMediaName, liveKeyOf, liveSources, testCardDataUrl } from '../io/livesources';
 import { perf, PerfOverlay } from './perf';
 
 function hasLight(o: THREE.Object3D): boolean {
@@ -106,6 +106,20 @@ function assetTexture(asset: TGAsset): string | null {
   if (asset.kind !== 'MESH') return null;
   const def = JSON.parse(asset.payload) as { kind?: string; texture?: string | null };
   return def.kind === 'PLANE' && def.texture ? def.texture : null;
+}
+
+/** A Library tile's picture of a canvas (a video's or GIF's first frame). */
+function canvasThumb(src: HTMLCanvasElement): string {
+  const S = 160;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#202024';
+  g.fillRect(0, 0, S, S);
+  const k = Math.min(S / Math.max(1, src.width), S / Math.max(1, src.height));
+  const w = src.width * k, h = src.height * k;
+  g.drawImage(src, (S - w) / 2, (S - h) / 2, w, h);
+  return c.toDataURL('image/jpeg', 0.85);
 }
 
 /** A Library tile's picture of an image: the image itself, fitted into the
@@ -342,6 +356,7 @@ class App implements AppHandle {
     bindHumanoid, poseHumanoid, vrmManager,
     /** the app's own three, so an eval never pulls a second copy in
      *  (importing 'three' makes vite re-optimize and silently reload) */
+    liveSources, mmCapture,
     THREE,
   };
   readonly paints = new PaintCloudManager();
@@ -1197,21 +1212,37 @@ class App implements AppHandle {
     vp.addEventListener('drop', (e) => {
       if (!e.dataTransfer) return;
       e.preventDefault();
-      const assetId = e.dataTransfer.getData(ASSET_MIME);
-      if (assetId) {
-        const asset = listAssets().find((a) => String(a.id) === assetId);
-        if (!asset) return;
+      const assetIds = e.dataTransfer.getData(ASSET_MIME);
+      if (assetIds) {
+        const ids = assetIds.split(',');
+        const assets = ids.map((id) => listAssets().find((a) => String(a.id) === id)).filter((a): a is TGAsset => !!a);
+        if (!assets.length) return;
         // an image or a camera dropped ON a selected object that takes a
         // texture textures it, instead of adding a picture beside it
-        const tex = assetTexture(asset);
+        const tex = assets.length === 1 ? assetTexture(assets[0]) : null;
         const onto = tex ? this.textureTargetAt(e.clientX, e.clientY) : null;
-        if (tex && onto) { this.applyTexture(onto, tex, asset.name); return; }
-        this.addAssetToScene(asset, this.dropTarget(e.clientX, e.clientY));
+        if (tex && onto) { this.applyTexture(onto, tex, assets[0].name); return; }
+        // several at once are spaced along the view's right-hand direction
+        const at = this.dropTarget(e.clientX, e.clientY);
+        const right = new THREE.Vector3().setFromMatrixColumn(this.nav.active.matrixWorld, 0);
+        assets.forEach((asset, i) => {
+          const p = new THREE.Vector3(...at.point).addScaledVector(right, i * 1.5);
+          this.addAssetToScene(asset, { ...at, point: [p.x, p.y, p.z] });
+        });
         return;
       }
       const files = [...e.dataTransfer.files];
-      const onto = files.length === 1 && files[0].type.startsWith('image/')
+      const one = files.length === 1 ? files[0] : null;
+      const moving = one && isMediaName(one.name);
+      const onto = one && (one.type.startsWith('image/') || moving)
         ? this.textureTargetAt(e.clientX, e.clientY) : null;
+      if (onto && moving) {
+        void putFile(one).then(async (src) => {
+          await liveSources.openMedia(src, one.name).catch(() => null);
+          this.applyTexture(onto, `${LIVE_PREFIX}media:${src}`, one.name);
+        });
+        return;
+      }
       if (onto) {
         const r = new FileReader();
         r.onload = () => this.applyTexture(onto, String(r.result), files[0].name);
@@ -2942,6 +2973,7 @@ class App implements AppHandle {
       mesh.scale = [aspect * 0.5, 0.5, 1];
       if (at) this.orientPanel(mesh, at);
       scene.meshes.push(mesh);
+      if (key.startsWith('media:')) this.fitToMedia(mesh, key.slice('media:'.length), label);
       this.meshes.sync(scene, this.nav.active);
     } else if (asset.kind === 'MESH') {
       const def = JSON.parse(asset.payload);
@@ -3168,6 +3200,18 @@ class App implements AppHandle {
         await this.importGPFile(file);
         const ob = scene.objects[scene.objects.length - 1];
         if (ob && at) ob.translation = [...point];
+      } else if (kind === 'MEDIA') {
+        const src = await putFile(file);
+        const mesh = createMeshObject(Date.now() % 1e9 + placed, 'PLANE', [...point] as Vec3);
+        mesh.name = file.name;
+        mesh.texture = `${LIVE_PREFIX}media:${src}`;
+        mesh.unlit = true;
+        mesh.drawTarget = false;
+        mesh.opacity = 1;
+        mesh.scale = [16 / 9 * 0.5, 0.5, 1];
+        this.orientPanel(mesh, { ...target, point });
+        scene.meshes.push(mesh);
+        this.fitToMedia(mesh, src, file.name);
       } else if (kind === 'IMAGE') {
         this.importImagePlane(file, { ...target, point });
       } else {
@@ -3358,6 +3402,18 @@ class App implements AppHandle {
     for (const file of files) {
       const kind = await classifyFile(file);
       if (!kind) { skipped.push(file.name); continue; }
+      if (kind === 'MEDIA') {
+        // a video or GIF is a STREAM asset: it plays, pauses, textures and
+        // feeds capture like a camera, but from a stored file
+        const src = await putFile(file);
+        const key = `media:${src}`;
+        const asset = saveAsset(file.name, 'STREAM', JSON.stringify({ key, label: file.name, deviceId: '', media: true }));
+        void liveSources.openMedia(src, file.name).then((ls) => {
+          updateAsset(asset.id, { thumb: canvasThumb(ls.canvas) });
+        }).catch((err) => this.setStatusHint(`${file.name}: ${err instanceof Error ? err.message : err}`, 5000));
+        added++;
+        continue;
+      }
       if (kind === 'IMAGE') {
         const dataUrl = await new Promise<string>((res, rej) => {
           const r = new FileReader();
@@ -3606,6 +3662,17 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** A plane showing a video or GIF takes the media's own aspect once its
+   *  first frame is known (placed at 16:9 until then), keeping its height. */
+  private fitToMedia(mesh: TGMesh, src: string, label: string): void {
+    void liveSources.openMedia(src, label).then((ls) => {
+      if (ls.canvas.width < 2) return;
+      const aspect = ls.canvas.width / ls.canvas.height;
+      mesh.scale = [mesh.scale[1] * aspect, mesh.scale[1], mesh.scale[2]];
+      this.meshes.sync(this.ctx.scene, this.nav.active);
+    }).catch((err) => this.setStatusHint(`${label}: ${err instanceof Error ? err.message : err}`, 5000));
+  }
+
   // ------------------------------------------------------- live cameras
 
   /** Open a camera (the default, or a device) and list it in the Library. */
@@ -3646,6 +3713,18 @@ class App implements AppHandle {
       this.setStatusHint('Test card added to the Library');
     };
     img.src = url;
+  }
+
+  /** Start a Library video/GIF playing (it opens on first play). */
+  async playMedia(key: string): Promise<void> {
+    const ls = liveSources.get(key);
+    try {
+      if (ls && ls.status !== 'closed') await liveSources.resume(key);
+      else await liveSources.openMedia(key.slice('media:'.length));
+    } catch (err) {
+      this.setStatusHint(`Could not play it: ${err instanceof Error ? err.message : err}`, 5000);
+    }
+    this.ui.refresh();
   }
 
   async cameraDevices(): Promise<{ id: string; label: string }[]> {

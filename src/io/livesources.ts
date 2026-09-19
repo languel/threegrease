@@ -37,6 +37,28 @@ export interface LiveSource {
   fresh?: boolean;
   /** a GENERATED source (the test camera): drawn here, no device at all */
   synthetic?: { next: number; t0: number };
+  /** a MEDIA file (video or animated GIF) playing as a source */
+  media?: {
+    src: string;
+    kind: 'VIDEO' | 'GIF';
+    /** GIF: decoder, frame count, next frame index and when it is due */
+    gif?: { dec: GifDecoder; count: number; index: number; due: number; busy: boolean };
+  };
+}
+
+// WebCodecs ImageDecoder (Chromium) — not in every TS dom lib yet
+type GifDecoder = {
+  tracks: { ready: Promise<unknown>; selectedTrack: { frameCount: number } | null };
+  decode(opts: { frameIndex: number }): Promise<{ image: VideoFrame }>;
+  close(): void;
+};
+type GifDecoderCtor = new (init: { data: ArrayBuffer; type: string }) => GifDecoder;
+
+/** Is this file a moving picture — a video, or a GIF (played frame by frame)? */
+export function isMediaName(name: string): 'VIDEO' | 'GIF' | null {
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
+  if (ext === 'gif') return 'GIF';
+  return ['mp4', 'webm', 'mov', 'm4v', 'ogv', 'ogg'].includes(ext) ? 'VIDEO' : null;
 }
 
 export const LIVE_PREFIX = 'live:';
@@ -80,8 +102,93 @@ class LiveSources {
     return s;
   }
 
-  /** The texture for a `live:` key (placeholder until the camera opens). */
-  textureFor(key: string): THREE.CanvasTexture { return this.ensure(key).texture; }
+  /** The texture for a `live:` key (placeholder until the source opens).
+   *  A MEDIA key needs no permission, so asking for its texture opens it —
+   *  which is how a plane saved with a video starts playing after a reload. */
+  textureFor(key: string): THREE.CanvasTexture {
+    const s = this.ensure(key);
+    if (s.status === 'closed' && key.startsWith('media:') && !this.opening.has(key)) {
+      void this.openMedia(key.slice('media:'.length)).catch(() => { /* file gone */ });
+    }
+    return s.texture;
+  }
+
+  private opening = new Set<string>();
+
+  /**
+   * Play a stored video or GIF as a source (`media:<store ref>`), looping,
+   * muted, playing by default. Resolves once the first frame is up.
+   */
+  async openMedia(src: string, label?: string): Promise<LiveSource> {
+    const key = `media:${src}`;
+    const name = label ?? decodeURIComponent(src.split('/').pop() ?? src);
+    const s = this.ensure(key, name);
+    s.label = name;
+    if (s.status === 'on' || s.status === 'paused') return s;
+    this.opening.add(key);
+    try {
+      const kind = isMediaName(name) ?? 'VIDEO';
+      const { resolveSrc, getBlob } = await import('./blobstore');
+      if (kind === 'GIF') {
+        const Ctor = (globalThis as { ImageDecoder?: GifDecoderCtor }).ImageDecoder;
+        if (!Ctor) throw new Error('animated GIFs need the ImageDecoder API (Chromium)');
+        const blob = await getBlob(src) ?? await (await fetch(await resolveSrc(src))).blob();
+        const dec = new Ctor({ data: await blob.arrayBuffer(), type: 'image/gif' });
+        await dec.tracks.ready;
+        s.media = { src, kind, gif: { dec, count: dec.tracks.selectedTrack?.frameCount ?? 1, index: 0, due: 0, busy: false } };
+        await this.gifFrame(s, performance.now());
+      } else {
+        const url = await resolveSrc(src);
+        const v = s.video ?? Object.assign(document.createElement('video'), { muted: true, playsInline: true, loop: true });
+        v.muted = true; v.loop = true; v.playsInline = true;
+        v.src = url;
+        s.video = v;
+        s.media = { src, kind };
+        this.watchFrames(s, true);
+        await v.play();
+        await new Promise<void>((res) => {
+          if (v.readyState >= 2) { res(); return; }
+          v.addEventListener('loadeddata', () => res(), { once: true });
+        });
+      }
+      s.status = 'on';
+      this.notify();
+      return s;
+    } catch (err) {
+      s.status = 'error';
+      s.error = err instanceof Error ? err.message : String(err);
+      this.notify();
+      throw err;
+    } finally {
+      this.opening.delete(key);
+    }
+  }
+
+  /** Decode and draw the GIF's next frame; schedules the one after by the
+   *  frame's own duration. */
+  private async gifFrame(s: LiveSource, now: number): Promise<void> {
+    const g = s.media?.gif;
+    if (!g || g.busy) return;
+    g.busy = true;
+    try {
+      const { image } = await g.dec.decode({ frameIndex: g.index });
+      const w = image.displayWidth, h = image.displayHeight;
+      if (s.canvas.width !== w || s.canvas.height !== h) {
+        s.canvas.width = w; s.canvas.height = h;
+        s.texture.dispose();
+      }
+      s.canvas.getContext('2d')!.drawImage(image, 0, 0);
+      g.due = now + Math.max(20, (image.duration ?? 100_000) / 1000);
+      image.close();
+      g.index = (g.index + 1) % Math.max(1, g.count);
+      s.texture.needsUpdate = true;
+      s.frame++;
+    } catch {
+      g.index = (g.index + 1) % Math.max(1, g.count);   // skip a bad frame
+    } finally {
+      g.busy = false;
+    }
+  }
 
   /**
    * Open a camera. No deviceId = the browser's default (which is also how
@@ -141,6 +248,7 @@ class LiveSources {
     const s = this.sources.get(key);
     if (!s || s.status !== 'on') return;
     if (s.synthetic) { s.status = 'paused'; this.notify(); return; }
+    if (s.media) { s.video?.pause(); s.status = 'paused'; this.notify(); return; }
     s.stream?.getTracks().forEach((t) => t.stop());
     s.stream = null;
     if (s.video) s.video.srcObject = null;
@@ -152,6 +260,11 @@ class LiveSources {
     const s = this.sources.get(key);
     if (!s || s.status === 'on') return;
     if (s.synthetic) { s.status = 'on'; this.notify(); return; }
+    if (s.media) {
+      if (s.status === 'closed') { await this.openMedia(s.media.src, s.label); return; }
+      if (s.video) { this.watchFrames(s, true); await s.video.play(); }
+      s.status = 'on'; this.notify(); return;
+    }
     await this.open(s.deviceId || undefined);
   }
 
@@ -161,7 +274,9 @@ class LiveSources {
     if (!s) return;
     s.stream?.getTracks().forEach((t) => t.stop());
     s.stream = null;
-    if (s.video) s.video.srcObject = null;
+    if (s.video) { s.video.pause(); s.video.srcObject = null; s.video.removeAttribute('src'); }
+    s.media?.gif?.dec.close();
+    if (s.media) s.media.gif = undefined;
     s.status = 'closed';
     this.notify();
   }
@@ -175,13 +290,13 @@ class LiveSources {
    * at the display rate, so capture ran its MediaPipe detectors on every
    * display frame of a picture that had not changed.
    */
-  private watchFrames(s: LiveSource): void {
+  private watchFrames(s: LiveSource, media = false): void {
     const v = s.video as HTMLVideoElement & {
       requestVideoFrameCallback?: (cb: () => void) => number;
     };
     if (!v.requestVideoFrameCallback) { s.fresh = true; return; }   // no rVFC: copy every tick
     const onFrame = () => {
-      if (s.video !== v || !s.stream) return;
+      if (s.video !== v || (!media && !s.stream) || s.status === 'closed') return;
       s.fresh = true;
       v.requestVideoFrameCallback!(onFrame);
     };
@@ -200,6 +315,10 @@ class LiveSources {
           s.texture.needsUpdate = true;
           s.frame++;
         }
+        continue;
+      }
+      if (s.media?.gif) {
+        if (s.status === 'on' && now >= s.media.gif.due) void this.gifFrame(s, now);
         continue;
       }
       if (s.status !== 'on' || !s.video || s.video.readyState < 2) continue;

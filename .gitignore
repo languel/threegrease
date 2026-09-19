@@ -4,3 +4,6 @@ dist
 
 # ONNX Runtime web assets, copied from node_modules by `npm run ort-assets`
 public/ort/
+
+# local test media (never tracked)
+public/_tmp*
