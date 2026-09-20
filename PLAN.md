@@ -156,6 +156,11 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)
+- [x] Transform ORIENTATION (global / local / normal / gimbal / view /
+      cursor / parent) and PIVOT (median / bounding box / cursor /
+      individual origins / active) as top-bar dropdowns, driving every
+      axis lock in both editors; N / Shift+N move along or across the
+      normal; Ctrl inverts the magnet in every drag
 - [x] Cameras are OBJECTS: outliner row, selection, transform widget,
       parenting and delete, with lens / focal length / clipping / keys in
       the properties panel

@@ -4,7 +4,8 @@ import { falloff } from '../core/mathutil';
 import { snapIncrement, type AppCtx } from './context';
 import { forEachEditableStroke, selectedPoints } from './select';
 import { nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, objectToScreen, objectToWorld, perpendicularFoot, pickCanvas, raycastFaceTriangle, raycastSurfaces, screenToWorld, worldToObject } from './projection';
-import { allRefs, worldMatrixOf } from './objects';
+import { allRefs, worldMatrixOf, type ObjRef } from './objects';
+import { basisFromNormal, constrainDelta, transformBasis, type Basis } from './orientation';
 
 type TransformKind = 'move' | 'rotate' | 'scale' | 'shear';
 type AxisLock = 'none' | 'x' | 'y' | 'z';
@@ -34,6 +35,21 @@ export class ModalTransform {
   private axis: AxisLock = 'none';
   /** Shift+axis: lock to the PLANE square to the axis instead of the axis */
   private axisPlane = false;
+  /**
+   * The basis a lock resolves in (tools/orientation.ts), frozen when the
+   * gesture starts. GLOBAL — the default — is the identity, so the plain
+   * world-axis behaviour this modal always had falls out unchanged.
+   */
+  private basis: Basis = new THREE.Matrix4();
+  /** N / Shift+N: along, or square to, the ELEMENT's own normal */
+  private normalLock: 'off' | 'axis' | 'plane' = 'off';
+  /** what is being edited, and the normal of what is selected on it —
+   *  supplied by the caller, which is the only one that knows (a mesh's
+   *  selected faces, a stroke's plane) */
+  editRef: ObjRef | null = null;
+  editNormal: THREE.Vector3 | null = null;
+  /** Ctrl held during the drag INVERTS the magnet, as everywhere else */
+  snapInvert = false;
   /**
    * The space the affected points live in, local -> world. Null means the
    * active GP object's (a stroke edit); a mesh edit hands in the mesh's own
@@ -78,6 +94,8 @@ export class ModalTransform {
     this.kind = kind;
     this.axis = 'none';
     this.axisPlane = false;
+    this.normalLock = 'off';
+    this.basis = transformBasis(ctx, this.editRef, this.editNormal);
     this.startPointer.set(pointer.x, pointer.y);
     const median: Vec3 = [0, 0, 0];
     for (const v of verts) { median[0] += v.co[0]; median[1] += v.co[1]; median[2] += v.co[2]; }
@@ -107,6 +125,8 @@ export class ModalTransform {
     this.canvases = [];
     this.kind = kind;
     this.axis = 'none';
+    this.normalLock = 'off';
+    this.basis = transformBasis(ctx, this.editRef, this.editNormal);
     this.startPointer.set(pointer.x, pointer.y);
     this.affected = [];
 
@@ -215,7 +235,7 @@ export class ModalTransform {
   /** Magnet snapping for point moves: adjusts the delta so the selection median lands on the target. */
   private snapDelta(ctx: AppCtx, delta: Vec3, pointer: THREE.Vector2): Vec3 {
     const snap = ctx.settings.snap;
-    if (!snap.enabled) return delta;
+    if (!this.snapOn(ctx)) return delta;
     const moved: Vec3 = [
       this.centerLocal[0] + delta[0], this.centerLocal[1] + delta[1], this.centerLocal[2] + delta[2],
     ];
@@ -284,25 +304,21 @@ export class ModalTransform {
       const w0 = screenToWorld(ctx, this.startPointer.x + rect.left, this.startPointer.y + rect.top);
       const w1 = screenToWorld(ctx, cur.x + rect.left, cur.y + rect.top);
       if (!w0 || !w1) return;
-      if (this.space && this.axis !== 'none') {
-        // a MESH locks to WORLD axes (Blender's default for G): its local
-        // ones are wherever its rotation put them — a stood-up cylinder's
-        // local Z points sideways
-        const keep = this.axis === 'x' ? 0 : this.axis === 'y' ? 1 : 2;
-        const dw = w1.clone().sub(w0);
-        for (let i = 0; i < 3; i++) if ((i === keep) === this.axisPlane) dw.setComponent(i, 0);
+      if (this.axis !== 'none') {
+        // A lock is applied in WORLD space, through the current basis
+        // (tools/orientation.ts): Global is the identity, so this is the
+        // world-axis masking a mesh edit always did; Local, Normal, View,
+        // Cursor and Parent are the same arithmetic in another frame, and
+        // N / Shift+N is the element's own normal. Constraining the world
+        // delta rather than the local one is what makes a stood-up
+        // cylinder's Z still mean Z.
+        const dw = constrainDelta(w1.clone().sub(w0), this.basis, this.axis, this.axisPlane);
         const c = this.toWorld(ctx, this.centerLocal);
-        const moved = this.toLocal(ctx, c.add(dw));
-        w1.copy(this.toWorld(ctx, moved));
-        w0.copy(this.toWorld(ctx, this.centerLocal));
+        w0.copy(c.clone());
+        w1.copy(c.add(dw));
       }
       const d0 = this.toLocal(ctx, w0), d1 = this.toLocal(ctx, w1);
       let delta: Vec3 = [d1[0] - d0[0], d1[1] - d0[1], d1[2] - d0[2]];
-      if (this.axis !== 'none' && !this.space) {
-        const keep = this.axis === 'x' ? 0 : this.axis === 'y' ? 1 : 2;
-        // an axis lock keeps that component; a plane lock drops it
-        delta = delta.map((v, i) => ((i === keep) !== this.axisPlane ? v : 0)) as Vec3;
-      }
       delta = this.snapDelta(ctx, delta, cur);
       for (const a of this.affected) {
         a.p.co = [a.orig[0] + delta[0] * a.weight, a.orig[1] + delta[1] * a.weight, a.orig[2] + delta[2] * a.weight];
@@ -355,10 +371,49 @@ export class ModalTransform {
    *  key again frees it. */
   setAxis(axis: AxisLock, ctx: AppCtx, pointer: { x: number; y: number }, plane = false): void {
     if (!this.active) return;
+    if (this.normalLock !== 'off') {
+      // an axis key leaves the normal lock — they are the same slot
+      this.normalLock = 'off';
+      this.basis = transformBasis(ctx, this.editRef, this.editNormal);
+    }
     const same = this.axis === axis && this.axisPlane === plane;
     this.axis = same ? 'none' : axis;
     this.axisPlane = same ? false : plane;
     this.update(ctx, pointer);
+  }
+
+  /** N / Shift+N: along the selected element's own NORMAL, or in the plane
+   *  square to it. The same key again frees it. Pulling a face straight out
+   *  of a surface is the move an axis lock cannot name once the surface is
+   *  turned — and it is most of what blocking out a room consists of. */
+  setNormal(ctx: AppCtx, pointer: { x: number; y: number }, plane = false): void {
+    if (!this.active) return;
+    const want = plane ? 'plane' : 'axis';
+    if (this.normalLock === want) {
+      this.normalLock = 'off';
+      this.axis = 'none';
+      this.axisPlane = false;
+      this.basis = transformBasis(ctx, this.editRef, this.editNormal);
+    } else {
+      this.normalLock = want;
+      const n = this.editNormal?.clone()
+        // no element normal (a stroke selection): the space's own +Z, which
+        // for a mesh is its local up and for a GP object its drawing plane
+        ?? (this.space
+          ? new THREE.Vector3(0, 0, 1).applyMatrix4(new THREE.Matrix4().extractRotation(this.space))
+          : ctx.camera.getWorldDirection(new THREE.Vector3()).negate());
+      this.basis = basisFromNormal(n);
+      this.axis = 'z';
+      this.axisPlane = plane;
+    }
+    this.update(ctx, pointer);
+  }
+
+  /** Is the magnet on for this gesture? Ctrl inverts it, the way it already
+   *  does in the object modal — the same key doing the same thing in the
+   *  other editor. */
+  private snapOn(ctx: AppCtx): boolean {
+    return ctx.settings.snap.enabled !== this.snapInvert;
   }
 
   adjustRadius(ctx: AppCtx, delta: number, pointer: { x: number; y: number }): void {

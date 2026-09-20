@@ -116,6 +116,22 @@ const PATHS: Record<string, string> = {
   proportional: 'M3.5 12a8.5 8.5 0 1 0 17.0 0a8.5 8.5 0 1 0 -17.0 0M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2',
   multiframe: 'M8 4h12v12h-4M4 8h12v12H4Z',
   // Transform header: one glyph per Placement / Plane / Guide / Snap choice.
+  // TRANSFORM ORIENTATION (Blender's header): each says what "X, Y, Z"
+  // currently means — a world tripod, an object's own, a surface normal,
+  // the screen, the cursor, the parent.
+  orientGlobal: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0 -18M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18',
+  orientLocal: 'M12 13V5M12 13l-6 3.5M12 13l6 3.5M12 5l-2.2 2.4M12 5l2.2 2.4M6 16.5l.3-3.2M6 16.5l3-1M18 16.5l-.3-3.2M18 16.5l-3-1',
+  orientNormal: 'M3 18l7-5h11l-7 5ZM12 15.5V4M9.5 6.5 12 4l2.5 2.5',
+  orientGimbal: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0 -18M4.5 12a7.5 4 0 1 0 15 0a7.5 4 0 1 0 -15 0M12 4.5a4 7.5 0 1 0 0 15a4 7.5 0 1 0 0 -15',
+  orientView: 'M5 4v14h14M5 18l5-5M5 18 20 6',
+  orientCursor: 'M6 12a6 6 0 1 0 12 0a6 6 0 1 0 -12 0M12 2v4M12 18v4M2 12h4M18 12h4',
+  orientParent: 'M12 3v5M12 8 6 13M12 8l6 5M4 15h4v5H4ZM16 15h4v5h-4ZM10 15h4v5h-4Z',
+  // TRANSFORM PIVOT: the point a rotation or scale happens about.
+  pivotMedian: 'M8.5 8.5a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0M8.5 15.5a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0M10.6 12a1.4 1.4 0 1 0 2.8 0a1.4 1.4 0 1 0 -2.8 0',
+  pivotBBox: 'M4 4h4M16 4h4M4 20h4M16 20h4M4 4v4M20 4v4M4 16v4M20 16v4M10.6 12a1.4 1.4 0 1 0 2.8 0a1.4 1.4 0 1 0 -2.8 0',
+  pivotCursor: 'M6 12a6 6 0 1 0 12 0a6 6 0 1 0 -12 0M12 2v4M12 18v4M2 12h4M18 12h4',
+  pivotIndividual: 'M3 8a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M15 8a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M9 17a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M5.4 8a.6.6 0 1 0 1.2 0a.6.6 0 1 0 -1.2 0M17.4 8a.6.6 0 1 0 1.2 0a.6.6 0 1 0 -1.2 0M11.4 17a.6.6 0 1 0 1.2 0a.6.6 0 1 0 -1.2 0',
+  pivotActive: 'M4.5 12a7.5 7.5 0 1 0 15 0a7.5 7.5 0 1 0 -15 0M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M10.8 12a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0 -2.4 0',
   placeOrigin: 'M9.8 12a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0 -4.4 0M12 3v5.5M12 15.5V21M3 12h5.5M15.5 12H21',
   placeCursor: 'M6 12a6 6 0 1 0 12 0a6 6 0 1 0 -12 0M12 2v4M12 18v4M2 12h4M18 12h4',
   placeSurface: 'M2 17l6-6h14l-6 6ZM10.5 14a1.5 1.5 0 1 0 3.0 0a1.5 1.5 0 1 0 -3.0 0',

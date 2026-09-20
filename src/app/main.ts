@@ -568,6 +568,10 @@ class App implements AppHandle {
     };
     this.objModal.onDelta = (deltaM) =>
       this.applyWorldDelta(this.objModal.refs, this.objModal.base, deltaM);
+    // Pivot: Individual Origins — one delta per object, about its own origin
+    this.objModal.onDeltaEach = (per) =>
+      this.applyWorldDelta(this.objModal.refs, this.objModal.base, per);
+    this.objModal.boundsOf = (ref) => this.groupBounds(ref);
     this.axes = this.makeAxes();
     this.scene3.add(this.axes);
     this.applyUpAxis(true);
@@ -795,6 +799,28 @@ class App implements AppHandle {
     const sel = pm.vertices.filter((v) => v.select);
     const others = pm.vertices.filter((v) => !v.select);
     const matrix = worldMatrixOf(this.ctx.scene, { kind: 'POLY', id: pm.id });
+    // what N / Shift+N and Orientation: Normal mean here — the average
+    // normal of the SELECTED faces, in world space (Newell's method, so a
+    // slightly non-planar n-gon still answers sensibly). With nothing but
+    // vertices selected there is no element normal and the modal falls back
+    // to the mesh's own up.
+    const normal = new THREE.Vector3();
+    const rot = new THREE.Matrix4().extractRotation(matrix);
+    for (const f of pm.faces) {
+      if (!f.select) continue;
+      const n = new THREE.Vector3();
+      for (let i = 0; i < f.vertices.length; i++) {
+        const a = pm.vertices.find((v) => v.id === f.vertices[i]);
+        const b = pm.vertices.find((v) => v.id === f.vertices[(i + 1) % f.vertices.length]);
+        if (!a || !b) continue;
+        n.x += (a.co[1] - b.co[1]) * (a.co[2] + b.co[2]);
+        n.y += (a.co[2] - b.co[2]) * (a.co[0] + b.co[0]);
+        n.z += (a.co[0] - b.co[0]) * (a.co[1] + b.co[1]);
+      }
+      normal.add(n.normalize());
+    }
+    this.modal.editRef = { kind: 'POLY', id: pm.id };
+    this.modal.editNormal = normal.lengthSq() ? normal.applyMatrix4(rot).normalize() : null;
     return this.modal.beginMesh(this.ctx, kind, this.tools.lastPointer, sel, others, matrix,
       () => touchPolyMesh(pm), undo);
   }
@@ -1376,6 +1402,7 @@ class App implements AppHandle {
     });
 
     canvas.addEventListener('pointermove', (e) => {
+      this.modKeys = { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey, alt: e.altKey };
       const te = this.toolEvent(e);
       // brush circles are drawn through the pointer's pane (paneHud), so the
       // position they read must be relative to that pane as well
@@ -1407,7 +1434,13 @@ class App implements AppHandle {
         this.withPane(this.pointerPane, () => this.objModal.update(this.ctx, this.toolEvent(e), { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey }));
         return;
       }
-      if (this.modal.active) { this.withPane(this.pointerPane, () => this.modal.update(this.ctx, this.toolEvent(e))); return; }
+      if (this.modal.active) {
+        // Ctrl inverts the magnet for the length of the gesture, the same
+        // key it already was in the object modal
+        this.modal.snapInvert = e.ctrlKey || e.metaKey;
+        this.withPane(this.pointerPane, () => this.modal.update(this.ctx, this.toolEvent(e)));
+        return;
+      }
       // coalesced events give smoother strokes
       const coalesced = e.getCoalescedEvents?.();
       const events = coalesced && coalesced.length ? coalesced : [e];
@@ -1611,6 +1644,7 @@ class App implements AppHandle {
       else if (key === 'x' || key === 'X') this.withPane(this.pointerPane, () => om.setAxis(ctx, 'x', e.shiftKey));
       else if (key === 'y' || key === 'Y') this.withPane(this.pointerPane, () => om.setAxis(ctx, 'y', e.shiftKey));
       else if (key === 'z' || key === 'Z') this.withPane(this.pointerPane, () => om.setAxis(ctx, 'z', e.shiftKey));
+      else if (key === 'n' || key === 'N') this.withPane(this.pointerPane, () => om.setNormal(ctx, e.shiftKey));
       else om.handleNumeric(ctx, key);
       e.preventDefault();
       return;
@@ -1643,6 +1677,7 @@ class App implements AppHandle {
       else if (key === 'x' || key === 'X') this.withPane(this.pointerPane, () => this.modal.setAxis('x', ctx, this.tools.lastPointer, e.shiftKey));
       else if (key === 'y' || key === 'Y') this.withPane(this.pointerPane, () => this.modal.setAxis('y', ctx, this.tools.lastPointer, e.shiftKey));
       else if (key === 'z' || key === 'Z') this.withPane(this.pointerPane, () => this.modal.setAxis('z', ctx, this.tools.lastPointer, e.shiftKey));
+      else if (key === 'n' || key === 'N') this.withPane(this.pointerPane, () => this.modal.setNormal(ctx, this.tools.lastPointer, e.shiftKey));
       e.preventDefault();
       return;
     }
@@ -1731,21 +1766,42 @@ class App implements AppHandle {
         this.withPane(this.pointerPane, () => {
           if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'move', this.tools.lastPointer);
           else if (this.meshEditing()) this.beginMeshTransform('move');
-          else if (this.editLike()) this.modal.begin(ctx, 'move', this.tools.lastPointer);
+          else if (this.editLike()) {
+            // a stroke edit belongs to the active GP object: that is what
+            // Orientation: Local / Parent and the normal fallback read
+            const ob = ctx.scene.objects[ctx.scene.activeObject];
+            this.modal.editRef = ob ? { kind: 'GP' as const, id: ob.id } : null;
+            this.modal.editNormal = null;
+            this.modal.begin(ctx, 'move', this.tools.lastPointer);
+          }
         });
         break;
       case 'rotate':
         this.withPane(this.pointerPane, () => {
           if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'rotate', this.tools.lastPointer);
           else if (this.meshEditing()) this.beginMeshTransform('rotate');
-          else if (this.editLike()) this.modal.begin(ctx, 'rotate', this.tools.lastPointer);
+          else if (this.editLike()) {
+            // a stroke edit belongs to the active GP object: that is what
+            // Orientation: Local / Parent and the normal fallback read
+            const ob = ctx.scene.objects[ctx.scene.activeObject];
+            this.modal.editRef = ob ? { kind: 'GP' as const, id: ob.id } : null;
+            this.modal.editNormal = null;
+            this.modal.begin(ctx, 'rotate', this.tools.lastPointer);
+          }
         });
         break;
       case 'scale':
         this.withPane(this.pointerPane, () => {
           if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'scale', this.tools.lastPointer);
           else if (this.meshEditing()) this.beginMeshTransform('scale');
-          else if (this.editLike()) this.modal.begin(ctx, 'scale', this.tools.lastPointer);
+          else if (this.editLike()) {
+            // a stroke edit belongs to the active GP object: that is what
+            // Orientation: Local / Parent and the normal fallback read
+            const ob = ctx.scene.objects[ctx.scene.activeObject];
+            this.modal.editRef = ob ? { kind: 'GP' as const, id: ob.id } : null;
+            this.modal.editNormal = null;
+            this.modal.begin(ctx, 'scale', this.tools.lastPointer);
+          }
         });
         break;
       case 'selectAll': if (this.editLike()) { selectAll(ctx, 'all'); this.gp.markDirty(); } break;
@@ -2470,6 +2526,11 @@ class App implements AppHandle {
   }
   get widgetMode(): string { return this.widget?.mode ?? 'translate'; }
 
+  /** Modifier keys as of the last pointer/key event — the widget drag is
+   *  driven by TransformControls, which does not hand us the event, so the
+   *  Ctrl-inverts-the-magnet rule needs the state kept alongside. */
+  modKeys = { ctrl: false, shift: false, alt: false };
+
   private beginWidgetDrag(): void {
     const refs = listSelected(this.ctx.scene);
     if (!refs.length) return;
@@ -2492,7 +2553,9 @@ class App implements AppHandle {
    *  transform uses, so one magnet setting works in both modes. */
   private snapWidgetPosition(): void {
     const snap = this.ctx.settings.snap;
-    if (!snap.enabled || this.widget.mode !== 'translate') return;
+    // Ctrl held during the drag INVERTS the magnet, as it does in both
+    // modals — the widget was the one place the key did nothing
+    if (snap.enabled === this.modKeys.ctrl || this.widget.mode !== 'translate') return;
     const p = this.widgetProxy.position;
     if (snap.mode === 'GRID') {
       const g = snapIncrement(this.ctx.settings);
@@ -2549,13 +2612,16 @@ class App implements AppHandle {
    * both get parenting and Follow-Path leashing (drag-as-phase-edit).
    */
   private applyWorldDelta(
-    refs: ObjRef[], baseTransforms: ObjTransform[], deltaM: THREE.Matrix4,
+    refs: ObjRef[], baseTransforms: ObjTransform[],
+    delta: THREE.Matrix4 | ((ref: ObjRef, i: number) => THREE.Matrix4),
     sDelta = new THREE.Vector3(1, 1, 1),
   ): void {
     const scene = this.ctx.scene;
     refs.forEach((ref, i) => {
       const t0 = baseTransforms[i];
       if (!t0) return;
+      // one shared delta, or one per object (Pivot: Individual Origins)
+      const deltaM = typeof delta === 'function' ? delta(ref, i) : delta;
       // world' = deltaM * parentWorld * local0 ; local' = parentWorld^-1 * world'
       const parentM = parentWorldMatrixOf(scene, ref);
       const local0 = new THREE.Matrix4().compose(
@@ -6293,13 +6359,13 @@ class App implements AppHandle {
     const hints: Record<string, string> = {
       OBJECT: 'LMB select (Shift extends) · widget or G/R/S mode · X delete · Add… for primitives/models · Shift+RMB drag cursor · RMB menu',
       DRAW: 'LMB draw · MMB orbit · RMB pan · Shift+RMB drag cursor · Tab edit mode',
-      EDIT: 'LMB select (drag box, Ctrl lasso) · G/R/S transform · X delete · Shift+D dup · A all',
+      EDIT: 'LMB select (drag box, Ctrl lasso) · G/R/S transform (X/Y/Z axis, N normal, Ctrl inverts snap) · X delete · Shift+D dup · A all',
       SCULPT: 'LMB sculpt · Ctrl inverts brush',
       VERTEX: 'LMB paint vertex color',
       WEIGHT: 'LMB paint weight · Ctrl erases',
     };
     status.textContent = this.objModal.active
-      ? 'LMB/Enter confirm · RMB/Esc cancel · X/Y/Z axis (Shift+axis = plane, again clears) · G/R/S switch · RR trackball · type a number for exact · Shift precision · Ctrl inverts snap'
+      ? 'LMB/Enter confirm · RMB/Esc cancel · X/Y/Z axis (Shift+axis = plane, again clears) · N along normal (Shift+N across it) · G/R/S switch · RR trackball · type a number for exact · Shift precision · Ctrl inverts snap'
       : `${s.mode} — ${s.activeTool} · frame ${this.ctx.scene.frame} · ${hints[s.mode]}`;
   }
 }

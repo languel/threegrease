@@ -111,6 +111,19 @@ export interface Settings {
    * optical effect worth having, just not the default.
    */
   shapeSnap: 'ENDS' | 'EVERY';
+  /**
+   * Blender's two transform header settings, which decide what a transform
+   * MEANS rather than where a point lands (that is the Placement cluster).
+   *
+   * ORIENTATION is the basis an axis lock resolves in: GLOBAL is the world,
+   * LOCAL the object's own rotation, NORMAL the surface/element being
+   * dragged, VIEW the screen, CURSOR the 3D cursor's, PARENT the parent's.
+   * GIMBAL is Blender's euler-axes basis; it is listed so the menu matches,
+   * and falls back to LOCAL for anything whose rotation is not eulers.
+   * PIVOT is the point a rotation or scale happens about.
+   */
+  transformOrientation: TransformOrientation;
+  transformPivot: TransformPivot;
   guide: { type: GuideType; angle: number; spacing: number };
   selectMode: 'POINT' | 'STROKE';
   /** Edit mode on a mesh: which element a click selects (Blender 1/2/3) */
@@ -221,11 +234,14 @@ export function snapIncrement(s: Settings): number {
 
 // ---- preference persistence (localStorage) --------------------------------
 
+export type TransformOrientation = 'GLOBAL' | 'LOCAL' | 'NORMAL' | 'GIMBAL' | 'VIEW' | 'CURSOR' | 'PARENT';
+export type TransformPivot = 'MEDIAN' | 'BOUNDING_BOX' | 'CURSOR' | 'INDIVIDUAL' | 'ACTIVE';
+
 const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'showGrid', 'showActorOverlay', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'showPerf', 'renderScale', 'polygonSides', 'snap',
-  'shading', 'shapeSnap', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
+  'shading', 'shapeSnap', 'transformOrientation', 'transformPivot', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -322,6 +338,8 @@ export function defaultSettings(): Settings {
     placementLock: false,
     placementSmooth: false,
     shapeSnap: 'ENDS',
+    transformOrientation: 'GLOBAL',
+    transformPivot: 'MEDIAN',
     guide: { type: 'NONE', angle: 0, spacing: 40 },
     selectMode: 'POINT',
     meshSelectMode: 'VERTEX',

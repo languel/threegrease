@@ -5,6 +5,15 @@
 // digits type an exact value. Snapping follows the global magnet and
 // holding Ctrl INVERTS it (off->on, on->off), like Blender.
 //
+// An axis lock resolves in the current TRANSFORM ORIENTATION (tools/
+// orientation.ts): Global, Local, Normal, View, Cursor or Parent. N locks to
+// the dragged object's own NORMAL and Shift+N to the plane square to it —
+// the one direction a wall, a panel or a projection screen is usually moved
+// along, and the one basis no world axis can name once it is turned. The
+// pivot a rotation or scale happens about is the other header setting, and
+// INDIVIDUAL means there is no single one: the modal then hands the App a
+// delta PER OBJECT, each about its own origin.
+//
 // The modal only computes a world-space delta matrix; the App applies it
 // to every selected object through parent inverses (same path as the
 // gizmo widget), so parenting/Follow-Path leashing behave identically.
@@ -12,16 +21,11 @@ import * as THREE from 'three';
 import { snapIncrement, type AppCtx } from './context';
 import { getObjectTransform, listSelected, selectionPivot, setObjectTransform, type ObjRef, type ObjTransform } from './objects';
 import { nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, perpendicularFoot, raycastFaceTriangle, raycastSurfaces } from './projection';
+import { axisVector, basisFromNormal, originOf, transformBasis, transformPivotPoint, type Basis } from './orientation';
 import { allRefs, worldMatrixOf } from './objects';
 
 export type ObjModalKind = 'move' | 'rotate' | 'scale';
 type AxisLock = 'none' | 'x' | 'y' | 'z';
-
-const AXES: Record<Exclude<AxisLock, 'none'>, THREE.Vector3> = {
-  x: new THREE.Vector3(1, 0, 0),
-  y: new THREE.Vector3(0, 1, 0),
-  z: new THREE.Vector3(0, 0, 1),
-};
 
 export interface ObjModalMods { ctrl: boolean; shift: boolean }
 
@@ -46,24 +50,43 @@ export class ObjectModalTransform {
   trackball = false;
   numeric = '';
 
+  /** N / Shift+N: lock along, or square to, the object's own normal */
+  normalLock: 'off' | 'axis' | 'plane' = 'off';
   refs: ObjRef[] = [];
   base: ObjTransform[] = [];
+  /** the basis every lock resolves in, frozen for the gesture (Blender
+   *  captures the orientation when the transform starts, so switching the
+   *  header mid-drag does not swing what is already moving) */
+  private basis: Basis = new THREE.Matrix4();
+  /** the ACTIVE object (Blender's last-picked) and object bounds, supplied
+   *  by the App — they decide the LOCAL basis and the two pivots that are
+   *  not the median */
+  activeRef: ObjRef | null = null;
+  boundsOf: ((ref: ObjRef) => THREE.Box3 | null) | null = null;
   private pivot = new THREE.Vector3();
   private pivotScreen = new THREE.Vector2();
   private startPointer = new THREE.Vector2();
   private lastPointer = new THREE.Vector2();
   private startWorld = new THREE.Vector3();   // view-plane hit under the start pointer
   private trackQ = new THREE.Quaternion();    // accumulated trackball rotation
+  private individual = false;
   private mods: ObjModalMods = { ctrl: false, shift: false };
   /** last delta actually applied — for the HUD overlay */
   info = '';
 
   /** Called by the App with the computed world-space delta matrix. */
   onDelta: ((deltaM: THREE.Matrix4) => void) | null = null;
+  /** Pivot: Individual Origins — one delta PER object, about its own origin. */
+  onDeltaEach: ((per: (ref: ObjRef) => THREE.Matrix4) => void) | null = null;
 
   begin(ctx: AppCtx, kind: ObjModalKind, pointer: { x: number; y: number }): boolean {
     const refs = listSelected(ctx.scene);
-    const pivot = selectionPivot(ctx.scene);
+    // INDIVIDUAL has no single pivot — each object turns about its own — so
+    // the gesture still needs A point to measure the pointer against, and
+    // the median is the honest one to use for that
+    this.individual = ctx.settings.transformPivot === 'INDIVIDUAL';
+    const pivot = transformPivotPoint(ctx, refs, this.activeRef, this.boundsOf ?? undefined)
+      ?? selectionPivot(ctx.scene);
     if (!refs.length || !pivot) return false;
     ctx.pushUndo();
     this.refs = refs;
@@ -74,7 +97,9 @@ export class ObjectModalTransform {
     this.planeLock = false;
     this.trackball = false;
     this.numeric = '';
+    this.normalLock = 'off';
     this.trackQ.identity();
+    this.basis = transformBasis(ctx, this.activeRef ?? refs[0]);
     this.startPointer.set(pointer.x, pointer.y);
     this.lastPointer.copy(this.startPointer);
     this.pivotScreen.copy(this.worldToScreen(ctx, this.pivot));
@@ -106,7 +131,47 @@ export class ObjectModalTransform {
     this.apply(ctx);
   }
 
+  /** The world direction a lock means — the basis's column, not the world
+   *  axis. With GLOBAL (the default) the two are the same, which is why the
+   *  old behaviour falls out of this unchanged. */
+  private dir(axis: Exclude<AxisLock, 'none'>): THREE.Vector3 {
+    return axisVector(this.basis, axis);
+  }
+
+  /** N (along the object's own normal) / Shift+N (the plane square to it).
+   *  The same key again frees it. A drag is re-anchored through the new
+   *  constraint, exactly as an axis lock is. */
+  setNormal(ctx: AppCtx, plane: boolean): void {
+    const want = plane ? 'plane' : 'axis';
+    if (this.normalLock === want) {
+      this.normalLock = 'off';
+      this.axis = 'none';
+      this.planeLock = false;
+      this.basis = transformBasis(ctx, this.activeRef ?? this.refs[0]);
+    } else {
+      this.normalLock = want;
+      // the normal is the object's own +Z: a plane, a panel, a projection
+      // screen and an imported picture all face that way, and for anything
+      // solid it is simply its local up
+      const ref = this.activeRef ?? this.refs[0];
+      const n = ref
+        ? new THREE.Vector3(0, 0, 1).applyMatrix4(
+          new THREE.Matrix4().extractRotation(worldMatrixOf(ctx.scene, ref)))
+        : new THREE.Vector3(0, 0, 1);
+      this.basis = basisFromNormal(n);
+      this.axis = 'z';
+      this.planeLock = plane;
+    }
+    this.startWorld.copy(this.projectedHit(ctx, this.startPointer.x, this.startPointer.y) ?? this.pivot);
+    this.apply(ctx);
+  }
+
   setAxis(ctx: AppCtx, axis: Exclude<AxisLock, 'none'>, plane: boolean): void {
+    // an axis key leaves the normal lock: they are the same slot
+    if (this.normalLock !== 'off') {
+      this.normalLock = 'off';
+      this.basis = transformBasis(ctx, this.activeRef ?? this.refs[0]);
+    }
     if (this.axis === axis && this.planeLock === plane) {
       this.axis = 'none'; // same key again clears the lock
       this.planeLock = false;
@@ -170,11 +235,18 @@ export class ObjectModalTransform {
     const typed = this.numeric !== '' && this.numeric !== '-' ? Number(this.numeric) : null;
     const P = this.pivot;
     let deltaM: THREE.Matrix4;
+    // the part of a rotate/scale that does not depend on WHERE it happens —
+    // kept so INDIVIDUAL can re-hang the same turn on each object's own
+    // origin instead of one shared pivot
+    let core: THREE.Matrix4 | null = null;
+    const about = (m: THREE.Matrix4, p: THREE.Vector3) => new THREE.Matrix4()
+      .makeTranslation(p.x, p.y, p.z).multiply(m)
+      .multiply(new THREE.Matrix4().makeTranslation(-p.x, -p.y, -p.z));
 
     if (this.kind === 'move') {
       let d = new THREE.Vector3();
       if (typed !== null && this.axis !== 'none' && !this.planeLock) {
-        d.copy(AXES[this.axis]).multiplyScalar(typed);
+        d.copy(this.dir(this.axis)).multiplyScalar(typed);
       } else {
         const hit = this.projectedHit(ctx, this.lastPointer.x, this.lastPointer.y);
         if (hit) d.copy(hit).sub(this.startWorld);
@@ -200,15 +272,13 @@ export class ObjectModalTransform {
           if (snapOn) angle = Math.round(angle / (Math.PI / 36)) * (Math.PI / 36); // 5°
         }
         const axis = this.axis !== 'none'
-          ? AXES[this.axis].clone()
+          ? this.dir(this.axis)
           : ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
         q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
         this.info = `Rot: ${THREE.MathUtils.radToDeg(angle).toFixed(1)}°${this.axis !== 'none' ? ` along ${this.axis.toUpperCase()}` : ''}`;
       }
-      deltaM = new THREE.Matrix4()
-        .makeTranslation(P.x, P.y, P.z)
-        .multiply(new THREE.Matrix4().makeRotationFromQuaternion(q))
-        .multiply(new THREE.Matrix4().makeTranslation(-P.x, -P.y, -P.z));
+      core = new THREE.Matrix4().makeRotationFromQuaternion(q);
+      deltaM = about(core, P);
     } else {
       let f: number;
       if (typed !== null) {
@@ -224,16 +294,32 @@ export class ObjectModalTransform {
       else if (this.planeLock) { s.setScalar(f); s[this.axis] = 1; }
       else s[this.axis] = f;
       this.info = `Scale: ${s.x.toFixed(2)} ${s.y.toFixed(2)} ${s.z.toFixed(2)}`;
-      deltaM = new THREE.Matrix4()
-        .makeTranslation(P.x, P.y, P.z)
-        .multiply(new THREE.Matrix4().makeScale(Math.max(1e-4, Math.abs(s.x)) * Math.sign(s.x || 1),
-          Math.max(1e-4, Math.abs(s.y)) * Math.sign(s.y || 1),
-          Math.max(1e-4, Math.abs(s.z)) * Math.sign(s.z || 1)))
-        .multiply(new THREE.Matrix4().makeTranslation(-P.x, -P.y, -P.z));
+      // scaling along a LOCAL or NORMAL axis is a scale in that basis, which
+      // in world terms is B·S·B⁻¹ — not a world-axis scale. With the
+      // identity basis the two are the same expression.
+      const S = new THREE.Matrix4().makeScale(
+        Math.max(1e-4, Math.abs(s.x)) * Math.sign(s.x || 1),
+        Math.max(1e-4, Math.abs(s.y)) * Math.sign(s.y || 1),
+        Math.max(1e-4, Math.abs(s.z)) * Math.sign(s.z || 1));
+      core = this.basis.clone().multiply(S).multiply(this.basis.clone().invert());
+      deltaM = about(core, P);
+    }
+    if (this.normalLock !== 'off') {
+      this.info += this.normalLock === 'plane' ? '  ⟂ normal' : '  along normal';
+    } else if (this.axis !== 'none' && ctx.settings.transformOrientation !== 'GLOBAL') {
+      this.info += `  (${ctx.settings.transformOrientation.toLowerCase()})`;
     }
     if (this.numeric) this.info += `  [${this.numeric}]`;
     if (snapOn) this.info += '  🧲';
-    this.onDelta?.(deltaM);
+    // INDIVIDUAL origins: the same turn, hung on each object's own origin.
+    // A move is the same delta wherever it is measured from, so it needs no
+    // special case.
+    if (this.individual && core && this.onDeltaEach) {
+      const c = core;
+      this.onDeltaEach((ref) => about(c, originOf(ctx.scene, ref)));
+    } else {
+      this.onDelta?.(deltaM);
+    }
   }
 
   /** Magnet for moves: snap the moved pivot per the global snap mode. */
@@ -333,7 +419,7 @@ export class ObjectModalTransform {
    *  the axis (which drifts: the view plane and the constraint plane only
    *  coincide when looking straight down the locked axis). */
   private axisPlaneHit(ctx: AppCtx, axis: Exclude<AxisLock, 'none'>, x: number, y: number): THREE.Vector3 | null {
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(AXES[axis], this.pivot);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(this.dir(axis), this.pivot);
     const out = new THREE.Vector3();
     return this.pointerRay(ctx, x, y).intersectPlane(plane, out) ? out : null;
   }
@@ -345,7 +431,7 @@ export class ObjectModalTransform {
   private axisLineHit(ctx: AppCtx, axis: Exclude<AxisLock, 'none'>, x: number, y: number): THREE.Vector3 {
     const ray = this.pointerRay(ctx, x, y);
     const D = ray.direction, O = ray.origin;
-    const L = AXES[axis];
+    const L = this.dir(axis);
     const r = new THREE.Vector3().subVectors(O, this.pivot);
     const a = D.dot(D), b = D.dot(L), c = L.dot(L), d = D.dot(r), e = L.dot(r);
     const denom = a * c - b * b;

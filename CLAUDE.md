@@ -562,6 +562,59 @@ the browser console or automated evals:
   through its own list; a TRIGGER's position field is `position`, not
   `translation`.
 
+- **A transform has a FRAME and a PIVOT, and they are settings**
+  (`settings.transformOrientation` / `transformPivot`, the maths in
+  `tools/orientation.ts`, the two icon dropdowns to the LEFT of the
+  placement cluster). They are a step earlier in the same sentence the
+  placement cluster finishes: these decide the frame a transform is
+  expressed in, the placement decides where the result lands.
+  - ONE representation: a world-space orthonormal BASIS (Global, Local,
+    Normal, Gimbal, View, Cursor, Parent), and `constrainDelta` projects the
+    world delta into it, keeps what the lock allows and brings it back.
+    GLOBAL is the IDENTITY, so the plain world-axis masking both modals used
+    to do by hand falls out of the general case unchanged — which is what
+    makes this safe to put under every existing gesture.
+  - Both modals read this file (`objectmodal.ts` for objects,
+    `transform.ts` for stroke points and mesh vertices), so the two editors
+    cannot drift into meaning different things by "X".
+  - The basis is FROZEN when the gesture starts, as Blender does: changing
+    the header mid-drag must not swing what is already moving.
+  - Scaling along a LOCAL or NORMAL axis is `B·S·B⁻¹` about the pivot, not a
+    world-axis scale — the world-axis form shears the object as soon as the
+    basis is turned.
+  - GIMBAL is an ALIAS for Local, on purpose: our rotations are stored as
+    XYZ eulers, whose first axis IS the local X. Listing it keeps the menu
+    Blender's without pretending to a decomposition we do not have. CURSOR
+    is the world's basis AT the cursor for the same kind of reason —
+    `scene.cursor` is a Vec3 and carries no rotation to orient by — and it
+    still differs from Global as a PIVOT, which is the half people reach for.
+  - PIVOT: Median (the average of the origins, what the app always did),
+    Bounding Box (the centre of everything the selection spans — a different
+    point whenever the selection is lopsided, verified: 2.5 against the
+    median's 3.0 with one box scaled x3), Cursor, Active, and INDIVIDUAL,
+    which has no single point at all. For that one the modal hands the App a
+    delta PER OBJECT (`onDeltaEach`, `applyWorldDelta` takes a factory), each
+    about its own origin: verified as four boxes turning in place, positions
+    unchanged and every rotation 90 degrees.
+- **N moves along the NORMAL, Shift+N across it** (`setNormal` on both
+  modals). It is the move no axis lock can name once a surface is turned,
+  and pulling a wall straight out of itself is most of what blocking out a
+  room consists of. In OBJECT mode the normal is the object's own +Z — a
+  plane, a panel, a projection screen and a dropped picture all face that
+  way; in mesh EDIT it is the average normal of the SELECTED FACES, by
+  Newell's method so a slightly non-planar n-gon still answers, and with
+  only vertices selected it falls back to the mesh's own up. N and the axis
+  keys share one slot, so either clears the other. Verified on a panel
+  turned 45 degrees: along-normal motion came out exactly parallel to the
+  normal, Shift+N exactly perpendicular (dot product 0), and a box face
+  extruded with N moved purely along its own local X with y and z at zero.
+- **Ctrl inverts the magnet in EVERY drag, not just the object modal.** It
+  already did there; the stroke/mesh modal (`ModalTransform.snapInvert`) and
+  the transform WIDGET (`App.modKeys`, since TransformControls never hands
+  us the event) were the two places the same key did nothing. Verified with
+  the magnet off: a free drag landed at 2.506 and the same drag with Ctrl at
+  exactly 2.500.
+
 - **The outliner has keyboard focus when the last pointerdown was in it**
   (`App.outlinerFocused`; rows are divs rebuilt on every refresh, so DOM
   focus cannot say). X, Delete and Cmd+Backspace then delete the SELECTED

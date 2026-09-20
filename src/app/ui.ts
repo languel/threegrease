@@ -1,4 +1,4 @@
-import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget, type NearestTarget } from '../tools/context';
+import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget, type NearestTarget, type TransformOrientation, type TransformPivot } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { TGLight, TGLens, GPCamera, GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
 import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
@@ -1274,6 +1274,45 @@ export class UI {
    * (Lock, Smooth, Offset, Target, shape snapping) are a section at the foot
    * of the Placement menu.
    */
+  /**
+   * Blender's transform header pair: WHAT an axis means, and WHERE a
+   * rotation or scale happens. They sit to the LEFT of the placement
+   * cluster because they are a step earlier in the same sentence — these
+   * decide the frame a transform is expressed in, the placement cluster
+   * decides where the result lands.
+   */
+  private transformCluster(): Node[] {
+    const s = this.app.ctx.settings;
+    return [
+      this.iconMenu('orient', 'Transform Orientation', s.transformOrientation,
+        this.orientationChoices(), (v) => { s.transformOrientation = v; this.app.savePrefs(); }),
+      this.iconMenu('pivot', 'Transform Pivot Point', s.transformPivot,
+        this.pivotChoices(), (v) => { s.transformPivot = v; this.app.savePrefs(); }),
+    ];
+  }
+
+  private orientationChoices(): [TransformOrientation, IconName, string, string][] {
+    return [
+      ['GLOBAL', 'orientGlobal', 'Global', 'the world\u2019s axes'],
+      ['LOCAL', 'orientLocal', 'Local', 'the object\u2019s own axes, wherever its rotation put them'],
+      ['NORMAL', 'orientNormal', 'Normal', 'the selected face or element\u2019s own normal (N during a drag)'],
+      ['GIMBAL', 'orientGimbal', 'Gimbal', 'the euler axes \u2014 the same as Local for our XYZ rotations'],
+      ['VIEW', 'orientView', 'View', 'the screen: X right, Y up, Z toward you'],
+      ['CURSOR', 'orientCursor', 'Cursor', 'the world\u2019s axes at the 3D cursor (it carries no rotation of its own)'],
+      ['PARENT', 'orientParent', 'Parent', 'the parent object\u2019s axes'],
+    ];
+  }
+
+  private pivotChoices(): [TransformPivot, IconName, string, string][] {
+    return [
+      ['MEDIAN', 'pivotMedian', 'Median Point', 'the average of the selected objects\u2019 origins'],
+      ['BOUNDING_BOX', 'pivotBBox', 'Bounding Box Center', 'the centre of everything the selection spans'],
+      ['CURSOR', 'pivotCursor', '3D Cursor', 'turn and scale about the 3D cursor'],
+      ['INDIVIDUAL', 'pivotIndividual', 'Individual Origins', 'each object turns about its own origin'],
+      ['ACTIVE', 'pivotActive', 'Active Element', 'about the last object you picked'],
+    ];
+  }
+
   private placementCluster(): Node[] {
     const s = this.app.ctx.settings;
     const tuned = s.placementLock || s.placementSmooth || s.surfaceOffset !== 0
@@ -1537,7 +1576,8 @@ export class UI {
     bar.append(el('div', { class: 'grow' }));
     const centre = el('div', { class: 'tb-centre' });
     if (s.mode === 'OBJECT' || s.mode === 'DRAW' || s.mode === 'EDIT') {
-      centre.append(...this.placementCluster(), el('div', { class: 'sep' }));
+      centre.append(...this.transformCluster(), el('div', { class: 'sep' }),
+        ...this.placementCluster(), el('div', { class: 'sep' }));
     }
     bar.append(centre);
     // Global Snap cluster (Blender parity): ONE magnet setting drives
