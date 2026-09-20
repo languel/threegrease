@@ -624,6 +624,7 @@ class App implements AppHandle {
           this.meshes.sync(this.ctx.scene, this.nav.active);
           this.polys.sync(this.ctx.scene, this.nav.active);
         },
+        drafting: (ref) => { this.draftRef = ref; },
         finished: (made) => {
           if (!made) { this.refreshWidget(); return; }
           deselectAllObjects(this.ctx.scene);
@@ -5651,6 +5652,21 @@ class App implements AppHandle {
     if (ref.kind === 'GP') return this.gp.objectGroups[gpIndexOf(scene, ref.id)] ?? null;
     if (ref.kind === 'SPLAT') return this.splats.meshFor(ref.id);
     if (ref.kind === 'ACTOR') return this.actors.rootFor(ref.id);
+    // MESHES TOO. They used to wear the inverted hull, which rides the
+    // object and is cheap — but it is drawn IN the scene, so against a room
+    // scan the rim is cut by whatever stands in front of the object, and a
+    // box being placed on a scanned floor is half outlined. The render
+    // silhouette draws the object ALONE into a mask, so the rim is the
+    // whole shape whatever is in front of it, and one thing marks a
+    // selection everywhere: a mesh, a drawing, a scan and a character all
+    // look selected the same way. The hull stays for HOVER, where it costs
+    // nothing and is never occluded for long.
+    if (ref.kind === 'MESH') {
+      const m = scene.meshes.find((x) => x.id === ref.id);
+      // an EMPTY has no surface to take a silhouette of — it keeps its
+      // line glyph
+      return m && m.kind !== 'EMPTY' ? this.meshes.rootFor(ref.id) : null;
+    }
     // an editable mesh can be anything down to a single flat face, which an
     // inverted hull cannot outline (it z-fights) — the render-based
     // silhouette handles every shape, so these wear it instead of a box
@@ -5778,6 +5794,9 @@ class App implements AppHandle {
   }
 
   /**
+   * THE TWO MARKS THAT ARE NOT A SELECTION: what a drag would drop onto,
+   * and what a draw gesture is making.
+   *
    * WHAT WOULD TAKE THIS, if I let go here.
    *
    * Dropping media used to be a guess: the same gesture either textured
@@ -5796,7 +5815,21 @@ class App implements AppHandle {
    */
   dropHighlight: ObjRef | null = null;
 
-  private syncDropHighlight(): void {
+  /** What a draw-object gesture is making at this moment (ObjectDrawHost). */
+  private draftRef: ObjRef | null = null;
+
+  private syncTransientHighlights(): void {
+    // the object being DRAWN is marked the way a selection is — it is not
+    // selected yet (that happens when the gesture finishes), but it is the
+    // only thing on screen that matters while the drag is running
+    const draft = this.draftRef;
+    if (draft) {
+      const root = this.silhouetteRoot(draft) ?? this.objectRoot(draft);
+      if (root && root.visible) {
+        this.silhouetteGroups = [...this.silhouetteGroups,
+          { roots: [root], color: this.highlightColor(true), boxes: undefined }];
+      }
+    }
     const ref = this.dropHighlight;
     this.lights.hoverId = ref?.kind === 'LIGHT' ? ref.id : null;
     if (!ref) return;
@@ -5843,18 +5876,10 @@ class App implements AppHandle {
     // it rolls — which, now that props tumble, is most of them. Everything
     // with no surface to outline (an EMPTY, a GP object, a splat) keeps the
     // box, where a box is genuinely what there is to show.
+    // The selection HULL is retired: meshes take the render silhouette with
+    // everything else (see silhouetteRoot). The map is cleared rather than
+    // deleted so a stale hull from the previous frame cannot sit lit up.
     const hulls = new Map<number, string>();
-    for (const ref of refs) {
-      if (ref.kind !== 'MESH') continue;
-      const md = scene.meshes.find((m) => m.id === ref.id);
-      // EMPTY has no surface, and a PLANE has no THICKNESS: an inverted hull
-      // of a flat quad is coincident with the quad, so it z-fights instead of
-      // making a rim. A flat thing's edge loop is already its silhouette, so
-      // those keep the line outline (meshEdgePositions handles PLANE).
-      if (!md || md.kind === 'EMPTY' || md.kind === 'PLANE') continue;
-      const isActive = !!activeRef && activeRef.kind === 'MESH' && activeRef.id === ref.id;
-      hulls.set(ref.id, `#${this.highlightColor(isActive).getHexString()}`);
-    }
     this.meshes.setSelectionOutlines(hulls);
 
     // Everything that can be DRAWN but has no surface to fatten wears a
@@ -6542,7 +6567,7 @@ class App implements AppHandle {
 
     perf.lap('helpers');
     this.syncSelectionGlyphs();
-    this.syncDropHighlight();
+    this.syncTransientHighlights();
     // the aim handle sits where the beam LANDS, so it is measured against
     // what the beam hits — only for the selected spots, since that is the
     // only time it is drawn (a raycast per selected projector per frame)

@@ -47,6 +47,17 @@ export interface ObjectDrawHost {
   addPoly(p: TGPolyMesh): TGPolyMesh;
   /** geometry changed mid-drag: re-sync the renderers */
   changed(): void;
+  /**
+   * What is being made RIGHT NOW, or null when the gesture ends.
+   *
+   * The thing you are dragging out is the one thing on screen that has to
+   * be readable, and on a scanned floor it is a pale box against a pale
+   * floor. The App marks it with the same silhouette a selection wears —
+   * which is drawn from the object rendered ALONE, so the rim shows
+   * through whatever stands in front of it and you can place a plinth
+   * behind an existing one and still see its shape.
+   */
+  drafting(ref: { kind: 'MESH' | 'POLY'; id: number } | null): void;
   /** finished (or cancelled with `null`): select it, refresh, one undo step */
   finished(made: { kind: 'MESH' | 'POLY'; id: number } | null): void;
 }
@@ -121,6 +132,7 @@ export class ObjectDrawTool implements Tool {
       d.mesh = this.host?.addMesh(this.makeMesh(origin, axes)) ?? null;
     }
     this.draft = d;
+    this.host?.drafting(d.poly ? { kind: 'POLY', id: d.poly.id } : d.mesh ? { kind: 'MESH', id: d.mesh.id } : null);
   }
 
   onMove(ctx: AppCtx, e: ToolEvent): void {
@@ -297,6 +309,7 @@ export class ObjectDrawTool implements Tool {
   private finish(ctx: AppCtx): void {
     const d = this.draft;
     this.draft = null;
+    this.host?.drafting(null);
     setStrokeExclusion(null);
     if (!d) return;
     this.host?.finished(d.poly ? { kind: 'POLY', id: d.poly.id } : d.mesh ? { kind: 'MESH', id: d.mesh.id } : null);
@@ -306,6 +319,7 @@ export class ObjectDrawTool implements Tool {
   private cancel(ctx: AppCtx): void {
     const d = this.draft;
     this.draft = null;
+    this.host?.drafting(null);
     setStrokeExclusion(null);
     if (!d) return;
     if (d.mesh) ctx.scene.meshes = ctx.scene.meshes.filter((m) => m.id !== d.mesh!.id);

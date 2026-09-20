@@ -1307,10 +1307,24 @@ the browser console or automated evals:
   means the whole frame, and a splat uses Spark's FULL extent
   (`splatReach`, gaussians included) rather than the centres-only box the
   Dimensions readout wants.
-  In the end the 2D marker went away entirely: the inverted hull is now the
-  ONE outline in the app — `MeshManager.setHover` for what is under the
-  cursor and `setSelectionOutlines` for what is selected, any colour, and the
-  hover wins where they overlap. Selection used to be a world-axis-aligned
+  THE SELECTION HULL IS RETIRED: a mesh wears the render SILHOUETTE with
+  everything else now. The hull is drawn IN the scene, so against a room
+  scan its rim is cut by whatever stands in front — a box being placed on a
+  scanned floor came out half outlined — while the silhouette renders the
+  object ALONE into a mask and shows the whole shape through anything. It
+  also means one mark reads as "selected" everywhere: a mesh, a drawing, a
+  scan and a character all look the same. The hull stays for HOVER
+  (`MeshManager.setHover`), where it costs nothing and is never occluded for
+  long, and an EMPTY keeps its line glyph since it has no surface at all.
+  THE OBJECT BEING DRAWN wears it too, before it is selected
+  (`ObjectDrawHost.drafting` -> `App.draftRef`, applied in
+  `syncTransientHighlights`): the thing you are dragging out is the one
+  thing on screen that has to be readable, and on a scanned floor it is a
+  pale box against a pale floor. Because the rim comes from the object
+  rendered alone, you can drag a plinth out behind an existing one and
+  still see its shape.
+  The inverted hull's own history is worth keeping, since the reasons still
+  apply to the hover: Selection used to be a world-axis-aligned
   Box3, which is a lie about most shapes and became a visible one when props
   started to tumble: a rotated dodecahedron wore a loose cage that grew and
   shrank as it rolled. Two kinds still keep the line outline, and should:
