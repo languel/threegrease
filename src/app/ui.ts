@@ -30,7 +30,9 @@ import {
   ASSET_MIME, addFolder, assetTexture, canRestoreAssets, deleteFolder, listAssets, listFolders, moveAsset, removeAssets,
   renameFolder, restoreAssets, updateAsset, type TGAsset,
 } from '../io/assets';
-import { liveSources } from '../io/livesources';
+import { isMediaName, liveKeyOf, liveSources, LIVE_PREFIX } from '../io/livesources';
+import { instanceMediaSrc } from '../render/meshes';
+import { putFile } from '../io/blobstore';
 import { effectiveFov, isCurved, LENS_PRESETS, LENS_TYPES, polyOf } from '../render/lens';
 import { perf } from './perf';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
@@ -3865,25 +3867,68 @@ export class UI {
   }
 
   /** One texture slot row: image name, load/replace, clear, factor. */
+  /**
+   * PICK A PICTURE — from the Library first, a file second.
+   *
+   * Every texture slot used to open a file dialog, which is the wrong way
+   * round once there is a Library: the picture you want is nearly always
+   * one you have already brought in (and a file dialog cannot offer a
+   * CAMERA or a video at all). So the menu lists what is in the Library,
+   * with "From a file…" at the end — and that path adds it to the Library
+   * too, so the second use of a picture is a click.
+   *
+   * `onPick` is handed a src the rest of the app understands: a data URL, a
+   * `store:` reference, or `live:<key>` for a camera, video or GIF.
+   */
+  private pickPicture(anchor: HTMLElement, onPick: (src: string, name: string) => void): void {
+    const r = anchor.getBoundingClientRect();
+    const usable = listAssets().filter((a) => !!assetTexture(a));
+    this.openContextMenu(r.left, r.bottom + 2, [
+      { header: usable.length ? 'From the Library' : 'The Library has no pictures yet' },
+      ...usable.map((a) => ({
+        label: a.name,
+        do: () => onPick(assetTexture(a)!, a.name),
+      })),
+      ...(usable.length ? [{ sep: true as const }] : []),
+      {
+        label: 'From a file\u2026',
+        do: () => this.filePick('image/*,video/*', (f) => {
+          // it goes to the Library on the way past, so picking it again
+          // never needs the file dialog
+          void this.app.importToLibrary([f]);
+          const moving = isMediaName(f.name);
+          if (moving) {
+            void putFile(f).then(async (src: string) => {
+              await liveSources.openMedia(src, f.name).catch(() => null);
+              onPick(`${LIVE_PREFIX}media:${src}`, f.name);
+            });
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => onPick(String(reader.result), f.name);
+          reader.readAsDataURL(f);
+        }),
+      },
+    ]);
+  }
+
   private slotRow(target: MaterialTarget, name: TextureSlotName, label: string): HTMLElement {
     const { ctx } = this.app;
     const mat = materialById(ctx.scene, target.materialId);
     const slot = mat?.slots[name];
     const img = slot ? imageById(ctx.scene, slot.imageId) : undefined;
-    const load = () => this.filePick('image/*', (f) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const m = this.ensureMaterial(target);
-        const image = createImage(f.name || `Image ${ctx.scene.images.length + 1}`, String(reader.result));
-        ctx.scene.images.push(image);
-        m.slots[name] = {
-          imageId: image.id, offset: [0, 0], scale: [1, 1], rotation: 0, factor: 1, enabled: true,
-        };
-        ctx.requestRender();
-        this.refresh();
+    const use = (src: string, imgName: string) => {
+      const m = this.ensureMaterial(target);
+      const image = createImage(imgName || `Image ${ctx.scene.images.length + 1}`, src);
+      ctx.scene.images.push(image);
+      m.slots[name] = {
+        imageId: image.id, offset: [0, 0], scale: [1, 1], rotation: 0, factor: 1, enabled: true,
       };
-      reader.readAsDataURL(f);
-    });
+      ctx.requestRender();
+      this.refresh();
+    };
+    const loadBtn: HTMLElement = btn(icon('photo'), () => this.pickPicture(loadBtn, use),
+      { cls: 'icon-btn', title: img ? 'Replace picture — from the Library or a file' : 'Pick a picture — from the Library or a file' });
     return el('div', { class: 'row' },
       el('span', { class: 'grow', text: `${label}${img ? `: ${img.name}` : ''}` }),
       ...(slot ? [
@@ -3898,7 +3943,7 @@ export class UI {
           ctx.requestRender();
         }, { def: 1, title: 'blend against the flat value' }),
       ] : []),
-      btn(icon('photo'), load, { cls: 'icon-btn', title: img ? 'Replace image…' : 'Load image…' }),
+      loadBtn,
       ...(slot ? [btn(icon('xMark'), () => {
         const m = this.ensureMaterial(target);
         delete m.slots[name];
@@ -4082,6 +4127,7 @@ export class UI {
         + 'negative for depth'),
         checkbox('Draw target', m.drawTarget, (v) => { m.drawTarget = v; }),
         ...this.physicsRows(m),
+        ...this.mediaInstanceRows(m),
         ...(m.kind === 'EMPTY' ? []                 // no surface to display
           : m.kind === 'MODEL' ? this.importDisplayRows(m)
           : this.materialEditor(ref)),
@@ -5241,6 +5287,38 @@ export class UI {
     // read as one vector rather than three boxes that happen to be adjacent
     return fieldRow(label, get().map((component, i) =>
       numField('', component, (v) => set(i, v), step, angle ? { angle: true } : {})));
+  }
+
+  /**
+   * PLAY / PAUSE / SPEED for THIS object's video or GIF.
+   *
+   * The Library's copy of a source and an object showing it are different
+   * things: the tile is a picture of what the file is, and every plane in
+   * the room is its own screen. They used to be one player, so pausing a
+   * tile stopped every plane showing it and a scene of six videos could
+   * only ever be all-playing or all-stopped. An object's media now plays
+   * under its own key (`instanceMediaSrc`), which is also what makes the
+   * position, the rate and the paused state its own.
+   */
+  private mediaInstanceRows(m: TGMesh): Node[] {
+    const key = liveKeyOf(instanceMediaSrc(m.texture, m.id) ?? '');
+    if (!key || !key.startsWith('media:')) return [];
+    const src = liveSources.get(key);
+    const playing = src?.status === 'on';
+    const rate = liveSources.rateOf(key);
+    return [
+      el('div', { class: 'menu-header', text: 'Playback' }),
+      el('div', { class: 'row' },
+        btn(iconLabel(playing ? 'pause' : 'play', playing ? 'Pause' : 'Play'), () => {
+          if (playing) liveSources.pause(key);
+          else void liveSources.resume(key).then(() => this.refresh());
+          this.refresh();
+        }, { active: playing, title: 'this object only — other objects showing the same file keep playing' }),
+        tip(numField('Speed', rate, (v) => { liveSources.setRate(key, v); }, 0.05,
+          { min: 0.05, max: 8, def: 1 }),
+        'a video\u2019s own playback rate; a GIF\u2019s frame clock is ours, so this divides each frame\u2019s duration'),
+      ),
+    ];
   }
 
   /**

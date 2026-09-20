@@ -1606,6 +1606,26 @@ the browser console or automated evals:
   Dropped on the Library they become STREAM assets with a first-frame thumb;
   dropped on the viewport, a plane that takes the media's aspect once its
   first frame arrives (`App.fitToMedia`).
+- **A PLACED VIDEO IS ITS OWN PLAYER** (`instanceMediaSrc` in
+  `render/meshes.ts`, `UI.mediaInstanceRows`). A camera is one device and
+  everything showing it shares the frame; a VIDEO or GIF is not — two
+  planes showing the same file are two screens in a room, and one of them
+  held on a frame while the other runs is the normal case, not an exotic
+  one. An object's media texture is therefore tagged with the object's own
+  id (`live:media:<ref>#<id>`) and gets its own player, position, rate and
+  paused state; the panel carries Play/Pause and Speed for THAT object.
+  Verified with two planes on one file: pausing one froze it at 0 frames
+  while the other kept advancing at 0.25x.
+  THE LIBRARY'S OWN COPY RESTS: a tile is a picture of what the file is,
+  not a screen, and twenty tiles decoding at once cost the frame budget of
+  the scene you are working in. Speed for a GIF divides each frame's stated
+  duration, since its clock is ours; for a video it is `playbackRate`.
+- **A texture slot picks from the LIBRARY first, a file second**
+  (`UI.pickPicture`). Every slot used to open a file dialog, which is the
+  wrong way round once a Library exists — the picture is nearly always one
+  you have already brought in, and a file dialog cannot offer a CAMERA or a
+  video at all. "From a file…" is still there and adds what it picks to the
+  Library on the way past, so the second use of a picture is a click.
 - **No prompt() / confirm() in the Library** — an embedded browser (the app's
   own preview pane) can refuse them, and New folder, rename and remove all
   silently did nothing there. Names are edited INLINE (`UI.inlineEdit`; the

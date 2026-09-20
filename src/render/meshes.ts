@@ -2,6 +2,7 @@
 // models, mirroring scene.meshes — reference geometry or Surface-placement
 // draw targets. Same lifecycle pattern as SplatManager.
 import * as THREE from 'three';
+import { liveKeyOf, LIVE_PREFIX } from '../io/livesources';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
@@ -424,7 +425,8 @@ export class MeshManager {
         // shared material datablock, falling back to this object's own
         // legacy flattened fields when it has no materialId yet
         materialManager.apply(mat, scene, data.materialId, {
-          color: data.color, opacity: data.opacity, texture: data.texture,
+          color: data.color, opacity: data.opacity,
+          texture: instanceMediaSrc(data.texture, data.id),
           unlit: data.unlit, doubleSided: data.doubleSided, wireframe: data.wireframe,
         }, !!live);
       } else {
@@ -592,6 +594,24 @@ export class MeshManager {
 export function standUpRotation(kind: TGMesh['kind'], zUp: boolean): Vec3 {
   const yUpAxis = kind === 'CYLINDER' || kind === 'PYRAMID' || kind === 'SPHERE';
   return zUp && yUpAxis ? [Math.PI / 2, 0, 0] : [0, 0, 0];
+}
+
+/**
+ * THE KEY THIS OBJECT'S MEDIA PLAYS UNDER.
+ *
+ * A camera is one device and everything showing it shares the frame. A
+ * VIDEO or GIF is not: two planes showing the same file are two things in
+ * the room, and one of them paused on a frame while the other runs is the
+ * normal case. So an object's media texture is tagged with the object's own
+ * id — `live:media:<ref>#<id>` — and gets its own player, its own position,
+ * its own rate and its own paused state. Cameras and still images are
+ * returned untouched.
+ */
+export function instanceMediaSrc(src: string | null | undefined, objectId: number): string | null {
+  if (!src) return null;
+  const key = liveKeyOf(src);
+  if (!key || !key.startsWith('media:') || key.includes('#')) return src;
+  return `${LIVE_PREFIX}${key}#${objectId}`;
 }
 
 export function createMeshObject(

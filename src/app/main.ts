@@ -3797,6 +3797,12 @@ class App implements AppHandle {
         const asset = saveAsset(file.name, 'STREAM', JSON.stringify({ key, label: file.name, deviceId: '', media: true }));
         void liveSources.openMedia(src, file.name).then((ls) => {
           updateAsset(asset.id, { thumb: canvasThumb(ls.canvas) });
+          // THE LIBRARY'S OWN COPY RESTS. A tile is a picture of what the
+          // file is, not a screen: a library of twenty videos all decoding
+          // at once costs the frame budget of the scene you are actually
+          // working in. Each object showing the file has its own player
+          // (`instanceMediaSrc`) and plays on its own.
+          liveSources.pause(ls.key);
         }).catch((err) => this.setStatusHint(`${file.name}: ${err instanceof Error ? err.message : err}`, 5000));
         added++;
         continue;

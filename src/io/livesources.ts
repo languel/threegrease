@@ -35,6 +35,8 @@ export interface LiveSource {
   stream: MediaStream | null;
   /** the camera delivered a frame since the last copy (see tick) */
   fresh?: boolean;
+  /** playback speed for a MEDIA source; 1 is the file's own */
+  rate?: number;
   /** a GENERATED source (the test camera): drawn here, no device at all */
   synthetic?: { next: number; t0: number };
   /** a MEDIA file (video or animated GIF) playing as a source */
@@ -55,6 +57,20 @@ type GifDecoder = {
 type GifDecoderCtor = new (init: { data: ArrayBuffer; type: string }) => GifDecoder;
 
 /** Is this file a moving picture — a video, or a GIF (played frame by frame)? */
+/** `media:<ref>#<instance>` -> `<ref>`: the stored file a media key names,
+ *  with any per-instance tag taken off. */
+export function mediaRefOf(key: string): string {
+  const ref = key.startsWith('media:') ? key.slice('media:'.length) : key;
+  const hash = ref.lastIndexOf('#');
+  return hash > 0 ? ref.slice(0, hash) : ref;
+}
+
+/** The instance tag on a media key, or null for the shared source. */
+export function instanceOf(key: string): string | null {
+  const hash = key.lastIndexOf('#');
+  return hash > 0 ? key.slice(hash + 1) : null;
+}
+
 export function isMediaName(name: string): 'VIDEO' | 'GIF' | null {
   const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
   if (ext === 'gif') return 'GIF';
@@ -108,7 +124,7 @@ class LiveSources {
   textureFor(key: string): THREE.CanvasTexture {
     const s = this.ensure(key);
     if (s.status === 'closed' && key.startsWith('media:') && !this.opening.has(key)) {
-      void this.openMedia(key.slice('media:'.length)).catch(() => { /* file gone */ });
+      void this.openMedia(mediaRefOf(key), undefined, instanceOf(key)).catch(() => { /* file gone */ });
     }
     return s.texture;
   }
@@ -119,8 +135,16 @@ class LiveSources {
    * Play a stored video or GIF as a source (`media:<store ref>`), looping,
    * muted, playing by default. Resolves once the first frame is up.
    */
-  async openMedia(src: string, label?: string): Promise<LiveSource> {
-    const key = `media:${src}`;
+  async openMedia(src: string, label?: string, instance?: string | null): Promise<LiveSource> {
+    // PER-INSTANCE PLAYERS. A camera is one device and everything that
+    // shows it shares the frame; a VIDEO is not — two planes showing the
+    // same file are two things in the room, and wanting one paused on a
+    // frame while the other runs is the normal case, not an exotic one. So
+    // a media key may carry an instance tag (`media:<ref>#<id>`), and each
+    // tag gets its own player with its own position, rate and paused state.
+    // Without a tag it is the shared one, which is what the Library tile
+    // and the capture panel use.
+    const key = instance ? `media:${src}#${instance}` : `media:${src}`;
     const name = label ?? decodeURIComponent(src.split('/').pop() ?? src);
     const s = this.ensure(key, name);
     s.label = name;
@@ -178,7 +202,8 @@ class LiveSources {
         s.texture.dispose();
       }
       s.canvas.getContext('2d')!.drawImage(image, 0, 0);
-      g.due = now + Math.max(20, (image.duration ?? 100_000) / 1000);
+      // a GIF's clock is ours, so speed is a divisor on the frame duration
+      g.due = now + Math.max(20, (image.duration ?? 100_000) / 1000) / Math.max(0.05, s.rate ?? 1);
       image.close();
       g.index = (g.index + 1) % Math.max(1, g.count);
       s.texture.needsUpdate = true;
@@ -261,12 +286,26 @@ class LiveSources {
     if (!s || s.status === 'on') return;
     if (s.synthetic) { s.status = 'on'; this.notify(); return; }
     if (s.media) {
-      if (s.status === 'closed') { await this.openMedia(s.media.src, s.label); return; }
+      if (s.status === 'closed') { await this.openMedia(s.media.src, s.label, instanceOf(key)); return; }
       if (s.video) { this.watchFrames(s, true); await s.video.play(); }
       s.status = 'on'; this.notify(); return;
     }
     await this.open(s.deviceId || undefined);
   }
+
+  /**
+   * How fast a media source plays. A video's own `playbackRate`; a GIF's
+   * frame clock is ours, so it is a divisor on each frame's duration.
+   * Cameras ignore it — a camera has one speed.
+   */
+  setRate(key: string, rate: number): void {
+    const s = this.sources.get(key);
+    if (!s?.media) return;
+    s.rate = Math.max(0.05, Math.min(8, rate));
+    if (s.video) s.video.playbackRate = s.rate;
+  }
+
+  rateOf(key: string): number { return this.sources.get(key)?.rate ?? 1; }
 
   /** Stop and forget the stream; anything showing it keeps its last frame. */
   close(key: string): void {
