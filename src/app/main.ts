@@ -166,7 +166,7 @@ import { createPolyMesh, smoothPolyMesh, subdividePolyMesh } from '../core/polym
 import type { UnwrapMode } from '../core/uvunwrap';
 import { unwrap } from '../core/uvunwrap';
 import { PolyMeshManager } from '../render/polymesh';
-import { LightManager } from '../render/lights';
+import { defaultCorners, LightManager } from '../render/lights';
 import { ActorManager } from '../render/actors';
 import { ActorPoseTool } from '../tools/actorpose';
 import { snapToLattice, snapWorldPoint } from '../tools/snapping';
@@ -505,6 +505,8 @@ class App implements AppHandle {
     // look must not ink them, and the dot in particular is a point sprite
     markOverlay(this.selGlyphs);
     this.scene3.add(this.selGlyphs);
+    markOverlay(this.keystoneRings);
+    this.scene3.add(this.keystoneRings);
     // a ground plane for SURFACE placement demos
     this.scene3.add(this.canvasGroup);
     this.scene3.add(this.scoreGroup);
@@ -1361,6 +1363,17 @@ class App implements AppHandle {
       // the aim handle is grabbed before anything else can claim the click:
       // it sits ON a wall, and the wall would otherwise be picked instead
       if (e.button === 0 && !this.nav.flying) {
+        // a picture CORNER is tested before the aim ring: both sit on the
+        // same wall, and the corners are the finer control of the two
+        const key = this.keystoneHandleAt(e.clientX, e.clientY);
+        if (key) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          this.ctx.pushUndo();
+          this.keystoneDrag = key;
+          this.capture(e);
+          return;
+        }
         const grab = this.aimHandleAt(e.clientX, e.clientY);
         if (grab) {
           e.stopImmediatePropagation();
@@ -1458,6 +1471,11 @@ class App implements AppHandle {
         this.navDrag.x = te.x; this.navDrag.y = te.y;
         return;
       }
+      if (this.keystoneDrag) {
+        const k = this.keystoneDrag;
+        this.setKeystoneCorner(k.id, k.corner, e.clientX, e.clientY, k.distance);
+        return;
+      }
       if (this.aimDrag) {
         const at = this.aimPointAt(e.clientX, e.clientY, this.aimDrag.distance);
         if (at) { this.aimLightAt(this.aimDrag.id, at); this.ui.refresh(); }
@@ -1494,6 +1512,7 @@ class App implements AppHandle {
 
     canvas.addEventListener('pointerleave', () => { this.hoverPane = null; });
     canvas.addEventListener('pointerup', (e) => {
+      if (this.keystoneDrag) { this.keystoneDrag = null; this.ui.refresh(); return; }
       if (this.aimDrag) { this.aimDrag = null; this.ui.refresh(); return; }
       if (e.button === 2) {
         if (this.cursorDrag) { this.cursorDrag = false; return; }
@@ -4892,14 +4911,8 @@ class App implements AppHandle {
     l.castShadow = true;
     l.projection = { src: null, mode: 'PROJECT', aspect: 16 / 9, fit: 'CONTAIN', gain: 1 };
     // point it at the world origin, which is where a scene is usually built
-    const from = new THREE.Vector3(...l.translation);
-    const look = new THREE.Object3D();
-    look.position.copy(from);
-    look.lookAt(0, 0, 0);
-    // a light's beam runs down its own -Z, like a camera's view, so lookAt
-    // (which points +Z for non-cameras) has to be turned around
-    look.rotateY(Math.PI);
-    const e = new THREE.Euler().setFromQuaternion(look.quaternion);
+    const q = this.aimRotation(new THREE.Vector3(...l.translation), new THREE.Vector3(0, 0, 0));
+    const e = new THREE.Euler().setFromQuaternion(q);
     l.rotation = [e.x, e.y, e.z];
     scene.lights.push(l);
     this.placeNew({ kind: 'LIGHT', id: l.id });
@@ -5020,6 +5033,32 @@ class App implements AppHandle {
    *  that is not a camera) has to be turned around — the same correction
    *  `addProjector` makes, and the reason a hand-built basis gets a lamp
    *  pointing at the wall behind it. */
+  /**
+   * The world rotation that points a LAMP from `from` at `target`.
+   *
+   * Two traps, and both of them read as "the picture comes out sideways"
+   * rather than as a wrong rotation:
+   *   - a lamp's beam runs down its own -Z, like a camera's view, but
+   *     `lookAt` points +Z for anything that is not a camera, so the result
+   *     has to be turned around;
+   *   - `lookAt` resolves the ROLL against the object's `up`, which three
+   *     defaults to +Y. In a Z-up scene a projector aimed across the room
+   *     is looking almost exactly along that default up, which leaves the
+   *     roll arbitrary — in practice 90 degrees out, so a landscape picture
+   *     lands on its side. The up reference has to be the SCENE's.
+   * `addProjector` used to build this inline without the second half, which
+   *  is why a new projector threw its picture rotated a quarter turn.
+   */
+  private aimRotation(from: THREE.Vector3, target: THREE.Vector3): THREE.Quaternion {
+    const look = new THREE.Object3D();
+    look.up.set(0, 0, 1);
+    if (this.ctx.settings.upAxis !== 'Z') look.up.set(0, 1, 0);
+    look.position.copy(from);
+    look.lookAt(target);
+    look.rotateY(Math.PI);
+    return look.quaternion.clone();
+  }
+
   aimLightAt(id: number, at: THREE.Vector3 | Vec3): void {
     const l = this.ctx.scene.lights.find((x) => x.id === id);
     const root = this.lights.rootFor(id);
@@ -5028,11 +5067,7 @@ class App implements AppHandle {
     // first-class way to say where to aim
     const target = Array.isArray(at) ? new THREE.Vector3(...at) : at;
     const from = new THREE.Vector3().setFromMatrixPosition(root.matrixWorld);
-    const look = new THREE.Object3D();
-    look.up.copy(this.ctx.settings.upAxis === 'Z' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0));
-    look.position.copy(from);
-    look.lookAt(target);
-    look.rotateY(Math.PI);
+    const look = { quaternion: this.aimRotation(from, target) };
     // the rotation is stored in the light's PARENT space, like every other
     // object's — a projector filed under a group must still aim where you
     // point it
@@ -5041,6 +5076,137 @@ class App implements AppHandle {
       .multiply(new THREE.Matrix4().makeRotationFromQuaternion(look.quaternion));
     const e = new THREE.Euler().setFromRotationMatrix(local);
     l.rotation = [e.x, e.y, e.z];
+  }
+
+  /**
+   * KEYSTONE HANDLES: the four corners of the thrown picture, ON the
+   * surface it lands on, draggable to wherever the picture should actually
+   * meet the world.
+   *
+   * A corner is stored as (u, v) in the beam's own square frustum, so it
+   * survives moving and re-aiming the projector: the picture keeps the
+   * shape you pulled it into and lands wherever the beam now points. The
+   * world position of a corner is therefore derived, never stored — cast
+   * the beam's own ray for that (u, v) and see what it hits.
+   */
+  private keystoneDrag: { id: number; corner: number; distance: number } | null = null;
+  private keystoneRings = new THREE.Group();
+
+  /** The ray leaving the projector for a point in its frustum square. A
+   *  spot's shadow camera is a square perspective with fov = 2 x cone
+   *  angle, which is the frustum three maps the picture over. */
+  private beamRay(l: TGLight, root: THREE.Object3D, u: number, v: number): THREE.Ray {
+    const t = Math.tan(l.angle ?? Math.PI / 6);
+    const dir = new THREE.Vector3((u * 2 - 1) * t, (v * 2 - 1) * t, -1)
+      .transformDirection(root.matrixWorld).normalize();
+    return new THREE.Ray(new THREE.Vector3().setFromMatrixPosition(root.matrixWorld), dir);
+  }
+
+  /** Where each corner of the picture lands, in world space. */
+  private keystoneCorners(l: TGLight): { at: THREE.Vector3; distance: number }[] {
+    const root = this.lights.rootFor(l.id);
+    if (!root || l.kind !== 'SPOT' || !l.projection?.src) return [];
+    root.updateMatrixWorld(true);
+    const uv = l.projection.corners && l.projection.corners.length === 4
+      ? l.projection.corners
+      : defaultCorners(isCurved(l.projection.lens) ? 0 : l.projection.aspect ?? 0);
+    const fallback = this.projectorThrow(l.id)?.distance ?? 4;
+    return uv.map(([u, v]: [number, number]) => {
+      const ray = this.beamRay(l, root, u, v);
+      const ray3 = new THREE.Raycaster(ray.origin, ray.direction);
+      const hit = ray3.intersectObjects([...this.ctx.pickableMeshes, ...this.ctx.surfaces], true)
+        .find((h) => h.object.visible && !h.object.userData.overlay);
+      const distance = hit?.distance ?? fallback;
+      return { at: ray.at(distance, new THREE.Vector3()), distance };
+    });
+  }
+
+  /** Rings at those corners, in a world overlay — they sit at four
+   *  different distances (a keystoned picture is not flat to the beam), so
+   *  they cannot ride the light's own transform like the aim handle. */
+  private syncKeystoneRings(): void {
+    const show: { at: THREE.Vector3; distance: number }[] = [];
+    if (this.ctx.settings.mode === 'OBJECT' && !this.presentation) {
+      for (const l of this.ctx.scene.lights) {
+        if (l.kind === 'SPOT' && l.select && l.projection?.src) show.push(...this.keystoneCorners(l));
+      }
+    }
+    while (this.keystoneRings.children.length < show.length) {
+      const pts: THREE.Vector3[] = [];
+      const R = 0.5;
+      for (let i = 0; i < 16; i++) {
+        const a0 = (i / 16) * Math.PI * 2, a1 = ((i + 1) / 16) * Math.PI * 2;
+        pts.push(new THREE.Vector3(Math.cos(a0) * R, Math.sin(a0) * R, 0),
+          new THREE.Vector3(Math.cos(a1) * R, Math.sin(a1) * R, 0));
+      }
+      pts.push(new THREE.Vector3(-R, 0, 0), new THREE.Vector3(R, 0, 0));
+      pts.push(new THREE.Vector3(0, -R, 0), new THREE.Vector3(0, R, 0));
+      const ring = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0xffc24a, depthTest: false, transparent: true, opacity: 0.95 }));
+      ring.renderOrder = 999;
+      this.keystoneRings.add(ring);
+    }
+    this.keystoneRings.children.forEach((ring, i) => {
+      const c = show[i];
+      ring.visible = !!c;
+      if (!c) return;
+      ring.position.copy(c.at);
+      // face the viewer, and hold one apparent size whatever the throw is
+      ring.quaternion.copy(this.nav.active.quaternion);
+      ring.scale.setScalar(Math.max(0.05, c.at.distanceTo(this.nav.active.position) * 0.03));
+    });
+  }
+
+  private keystoneHandleAt(clientX: number, clientY: number): { id: number; corner: number; distance: number } | null {
+    if (this.ctx.settings.mode !== 'OBJECT') return null;
+    const pane = this.paneAt(clientX, clientY);
+    return this.withPane(pane, () => {
+      const r = this.ctx.canvas.getBoundingClientRect();
+      const px = clientX - r.left, py = clientY - r.top;
+      for (const l of this.ctx.scene.lights) {
+        if (l.kind !== 'SPOT' || !l.select || !l.projection?.src) continue;
+        const corners = this.keystoneCorners(l);
+        for (let i = 0; i < corners.length; i++) {
+          const p = corners[i].at.clone().project(this.ctx.camera);
+          if (p.z > 1) continue;
+          const sx = (p.x * 0.5 + 0.5) * r.width, sy = (-p.y * 0.5 + 0.5) * r.height;
+          if (Math.hypot(sx - px, sy - py) < 22) {
+            return { id: l.id, corner: i, distance: corners[i].distance };
+          }
+        }
+      }
+      return null;
+    });
+  }
+
+  /** Drag: the world point under the pointer, back into the beam's square. */
+  private setKeystoneCorner(id: number, corner: number, clientX: number, clientY: number, distance: number): void {
+    const l = this.ctx.scene.lights.find((x) => x.id === id);
+    const root = this.lights.rootFor(id);
+    const three = this.lights.lightFor(id) as THREE.SpotLight | null;
+    if (!l?.projection || !root || !three) return;
+    const at = this.aimPointAt(clientX, clientY, distance);
+    if (!at) return;
+    three.shadow.updateMatrices(three);
+    const uv = at.clone().applyMatrix4(three.shadow.matrix);
+    const corners = l.projection.corners && l.projection.corners.length === 4
+      ? l.projection.corners
+      : defaultCorners(isCurved(l.projection.lens) ? 0 : l.projection.aspect ?? 0);
+    l.projection.corners = corners;
+    // a corner outside the beam's square is outside the picture's canvas
+    // and simply could not be painted, so it stops at the edge
+    corners[corner] = [
+      Math.min(0.999, Math.max(0.001, uv.x)), Math.min(0.999, Math.max(0.001, uv.y))];
+  }
+
+  /** Put the picture back to the plain rectangle. */
+  resetKeystone(id: number): void {
+    const l = this.ctx.scene.lights.find((x) => x.id === id);
+    if (!l?.projection) return;
+    this.ctx.pushUndo();
+    l.projection.corners = undefined;
+    this.ui.refresh();
   }
 
   /** Is the pointer on a selected projector's aim handle? */
@@ -6246,6 +6412,7 @@ class App implements AppHandle {
     // the aim handle sits where the beam LANDS, so it is measured against
     // what the beam hits — only for the selected spots, since that is the
     // only time it is drawn (a raycast per selected projector per frame)
+    this.syncKeystoneRings();
     this.lights.aimDistance.clear();
     for (const l of ctx.scene.lights) {
       if (l.kind !== 'SPOT' || !l.select) continue;

@@ -679,6 +679,23 @@ export interface TGProjection {
    * the seam disappears instead of doubling in brightness.
    */
   blend?: { left?: number; right?: number; top?: number; bottom?: number; gamma?: number };
+  /**
+   * KEYSTONE — the four corners of the thrown picture, as (u, v) in the
+   * beam's own square frustum, in the order top-left, top-right,
+   * bottom-right, bottom-left. Absent = the plain rectangle `aspect`
+   * describes.
+   *
+   * This is the one control a real projector always has and a rectangle
+   * never can: a projector is hardly ever square to the surface it throws
+   * at (it hangs above the screen, it sits off to one side, it shares a
+   * wall with another one), and the picture lands as a trapezium. Pulling
+   * the corners back to the physical ones — the edges of the screen, the
+   * corners of the doorway, the join with the next projector — is what
+   * makes projection mapping work, and it is done by eye against the real
+   * surface, which is why the handles are dragged in the viewport rather
+   * than typed.
+   */
+  corners?: [number, number][];
   /** MASK: a picture whose brightness multiplies the projection — black
    *  hides, white shows. What keeps a projection off the ceiling, inside a
    *  shape, or away from a doorway. */

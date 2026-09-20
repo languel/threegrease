@@ -156,6 +156,9 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)
+- [x] Projector KEYSTONE: drag the four corners of the thrown picture onto
+      the real corners of what it is aimed at (projection mapping), and aim
+      a projector by dragging the spot it makes
 - [x] Transform ORIENTATION (global / local / normal / gimbal / view /
       cursor / parent) and PIVOT (median / bounding box / cursor /
       individual origins / active) as top-bar dropdowns, driving every

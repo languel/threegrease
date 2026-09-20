@@ -91,6 +91,8 @@ export interface AppHandle {
   /** point a light's beam at a world position (the exact form of dragging
    *  the aim ring the beam draws on whatever it is lighting) */
   aimLightAt(lightId: number, point: [number, number, number]): void;
+  /** drop a projector's keystone corners back to the plain rectangle */
+  resetKeystone(lightId: number): void;
   projectFile(lightId: number, file: File): Promise<void>;
   setRenderScale(scale: number): void;
   gpSeparate(how: 'SELECTION' | 'MATERIAL' | 'LOOSE'): number;
@@ -1968,6 +1970,15 @@ export class UI {
       }), 'A dome or fisheye projector: the picture is thrown by the lens model rather than through a frustum. '
         + 'It needs Flat projection (a lit spot is a frustum in three.js), and nothing blocks its beam.')),
       ...this.lensRows(() => p.lens, (nl) => set({ lens: nl })),
+      el('div', { class: 'row' },
+        el('span', { class: 'grow', text: p.corners ? 'Keystone: corners moved' : 'Keystone: square' }),
+        ...(p.corners ? [tip(btn('Reset', () => this.app.resetKeystone(l.id)),
+          'back to the plain rectangle')] : []),
+      ),
+      tip(el('div', { class: 'row', text: 'Select the projector and drag the four ring handles on the picture.' }),
+        'A projector is hardly ever square to what it throws at, so the picture lands as a trapezium — '
+        + 'pull each corner onto the real corner of the screen, the doorway or the next projector\u2019s edge. '
+        + 'The corners are kept in the beam\u2019s own frame, so the shape survives moving and re-aiming it.'),
       ...this.projectorMaskRows(l, set),
       ...this.projectorBlendRows(l, set),
       el('div', { class: 'row' },

@@ -1691,6 +1691,49 @@ the browser console or automated evals:
     - MAX_FLAT is 4 (a sampler array cannot be indexed dynamically, so the
       loop is unrolled); patched materials cover meshes and poly meshes —
       grease pencil, splats and actors do not receive flat projections yet.
+  - **WHICH WAY UP THE PICTURE LANDS is the SHADOW CAMERA's business, not
+    the light's rotation.** Both paths sample through `light.shadow.matrix`
+    — three's own spot map does, and so does the flat projector — and that
+    matrix comes from a lookAt whose ROLL is resolved against
+    `shadow.camera.up`, which three leaves at world +Y. In a Z-up scene that
+    is sideways, so every projector threw its picture a quarter-turn over.
+    Measured on the shadow matrix before the fix: moving UP in the world
+    raised its u and moving RIGHT lowered its v. `LightManager.apply` points
+    that up at the LAMP's own +Y instead, so the picture follows the
+    projector's roll the way a real one does — and it is what makes
+    `projection.rotation` and the beam glyph's up arrow agree with what
+    lands on the wall.
+    The same trap in the other direction is `App.aimRotation` (shared by
+    `addProjector` and `aimLightAt`): `lookAt` resolves ITS roll against the
+    object's `up`, which defaults to +Y, and a projector aimed across a Z-up
+    room looks almost exactly along that — leaving the roll arbitrary. The
+    up reference has to be the SCENE's. A new projector used to be built
+    inline without that and came out rolled.
+  - **KEYSTONE: the four corners of the picture are draggable**
+    (`TGProjection.corners`, `drawQuad` in lights.ts, the handles in
+    `App.keystoneCorners` / `setKeystoneCorner`). A projector is hardly ever
+    square to what it throws at — it hangs above the screen, it sits off to
+    one side, it shares a wall with another one — so the picture lands as a
+    trapezium, and pulling each corner onto the real corner of the screen,
+    the doorway or the next projector's edge is what projection mapping IS.
+    - A corner is stored as (u, v) in the BEAM's own square frustum, so the
+      shape survives moving and re-aiming the projector (verified); its
+      world position is derived by casting the beam's own ray for that
+      (u, v), never stored.
+    - Canvas 2D has no projective transform — `setTransform` is affine, and
+      an affine map cannot turn a rectangle into a trapezium — so the image
+      is subdivided 16x16 and each cell drawn affinely through the true
+      HOMOGRAPHY's corner points. A bilinear blend of the four corners is
+      the obvious cheap version and is the wrong map: it bends straight
+      lines, and the whole point is that the picture's edges land straight
+      on the edges of the thing being projected at. Cells are drawn with a
+      hair of overlap and clipped to their own triangle, or the seams show.
+    - It is painted INTO the same canvas inside the same clip, so Rotate,
+      Mirror, the mask and the edge blend all compose with it and both the
+      lit and flat paths see one picture.
+    - The beam glyph draws the KEYSTONED quad, not the rectangle it would
+      have been — a wireframe still showing a rectangle after the corners
+      were pulled is a drawing of a projector nobody has.
   - **Edge blend and mask are painted into the projector's canvas**, not into
     a shader, so BOTH paths (the lamp's own map and the flat projector) read
     one picture and cannot disagree. The mask multiplies (black hides, white

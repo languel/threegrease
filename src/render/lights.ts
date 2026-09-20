@@ -114,10 +114,24 @@ function makeHelper(kind: TGLight['kind'], color: THREE.ColorRepresentation): TH
  * symmetric about both axes) cannot show it: a frame hung upside down or
  * quarter-turned looks exactly like a correct one until you light it.
  */
-function beamLines(angle: number, aspect: number, length: number, up?: [number, number] | null): THREE.BufferGeometry {
+function beamLines(
+  angle: number, aspect: number, length: number, up?: [number, number] | null,
+  corners?: [number, number][] | null,
+): THREE.BufferGeometry {
   const pts: number[] = [];
   const r = Math.tan(angle) * length;
-  if (aspect > 0) {
+  if (corners && corners.length === 4) {
+    // KEYSTONE: the glyph draws the quad the picture is actually thrown
+    // into, not the rectangle it would have been. A wireframe that still
+    // showed a rectangle after the corners were pulled would be a drawing
+    // of a projector nobody has.
+    const q = corners.map(([u, v]) => [(u * 2 - 1) * r, (v * 2 - 1) * r] as [number, number]);
+    for (let i = 0; i < 4; i++) {
+      const a = q[i], b = q[(i + 1) % 4];
+      pts.push(a[0], a[1], -length, b[0], b[1], -length);
+      pts.push(0, 0, 0, a[0], a[1], -length);
+    }
+  } else if (aspect > 0) {
     const w = r * aspect / Math.hypot(1, aspect), h = r / Math.hypot(1, aspect);
     const corners: [number, number][] = [[-w, -h], [w, -h], [w, h], [-w, h]];
     for (let i = 0; i < 4; i++) {
@@ -312,6 +326,22 @@ export class LightManager {
     if (light instanceof THREE.SpotLight) {
       light.angle = data.angle ?? Math.PI / 6;
       light.penumbra = data.penumbra ?? 0.2;
+      // WHICH WAY UP THE PICTURE LANDS is decided by the SHADOW CAMERA, not
+      // by the light's own rotation. Both paths sample through
+      // `light.shadow.matrix` — three's spot map does, and so does the flat
+      // projector — and that matrix is built by a lookAt whose roll is
+      // resolved against `shadow.camera.up`, which three leaves at world
+      // +Y. In a Z-up scene that is sideways, so a projector threw its
+      // picture a quarter-turn over: measured, moving UP in the world
+      // raised the matrix's u and moving RIGHT lowered its v.
+      // Pointing that up at the LAMP's own +Y makes the picture follow the
+      // projector's own roll, which is what a real one does — and it is
+      // what makes `projection.rotation` and the beam glyph's up arrow
+      // agree with what lands on the wall.
+      if (light.shadow) {
+        light.shadow.camera.up.set(0, 1, 0)
+          .applyMatrix4(new THREE.Matrix4().extractRotation(root.matrix)).normalize();
+      }
       this.applyProjection(entry, light, data);
     }
     // AmbientLight has no shadow at all
@@ -370,6 +400,7 @@ export class LightManager {
     const key = `${src}|${proj!.mode ?? 'PROJECT'}|${proj!.aspect ?? 0}|${proj!.fit ?? 'CONTAIN'}`
       + `|${proj!.rotation ?? 0}|${proj!.flip ? 1 : 0}|${proj!.gain ?? 1}|${proj!.flat ? 1 : 0}`
       + `|${proj!.maskSrc ?? ''}|${proj!.maskInvert ? 1 : 0}|${proj!.lens?.type ?? ''}`
+      + `|${proj!.corners ? proj!.corners.map((c) => c.map((n) => n.toFixed(4)).join()).join(';') : ''}`
       + `|${b ? [b.left, b.right, b.top, b.bottom, b.gamma].join(',') : ''}`;
     const frame = ls?.frame ?? 0;
     if (key !== p.key || frame !== p.frame) {
@@ -414,13 +445,15 @@ export class LightManager {
     const proj = data.projection;
     const rot = proj?.rotation ?? 0;
     const up: [number, number] | null = proj?.src ? [Math.sin(rot), Math.cos(rot)] : null;
-    const key = `${angle.toFixed(4)}|${aspect}|${up ? `${up[0].toFixed(3)},${up[1].toFixed(3)}` : '-'}`;
+    const corners = !isCurved(proj?.lens) && proj?.src && proj.corners?.length === 4 ? proj.corners : null;
+    const key = `${angle.toFixed(4)}|${aspect}|${up ? `${up[0].toFixed(3)},${up[1].toFixed(3)}` : '-'}`
+      + `|${corners ? corners.map((c) => c.map((n) => n.toFixed(3)).join()).join(';') : ''}`;
     if (entry.beamKey === key) return;
     entry.beamKey = key;
     const lines = entry.helper.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
     if (!lines) return;
     lines.geometry.dispose();
-    lines.geometry = beamLines(angle, aspect, 0.9, up);
+    lines.geometry = beamLines(angle, aspect, 0.9, up, corners);
   }
 
   /** The three.js light for a scene light (flat projectors need its own
@@ -461,6 +494,100 @@ export class LightManager {
  * rectangle rather than three's circular spot. A GOBO is greyscaled, since
  * what a gobo carries is a shape, and the light's own colour tints it.
  */
+/**
+ * KEYSTONE. Draw `picture` into an arbitrary QUAD (canvas pixels, in the
+ * corner order TL, TR, BR, BL) instead of a rectangle.
+ *
+ * Canvas 2D has no projective transform — `setTransform` is affine, and an
+ * affine map cannot turn a rectangle into a trapezium. So the image is
+ * subdivided and each cell drawn affinely through the true homography's
+ * corner points: the mapping is exact AT every grid vertex and the error in
+ * between falls off with the cell size. A bilinear blend of the four
+ * corners (the obvious cheap version) is NOT the same mapping — it bends
+ * straight lines, and the whole point of keystone is that the edges of the
+ * picture land straight on the edges of the thing you are projecting at.
+ *
+ * The grid is 16x16: at 1024px that is 64px cells, where the residual is
+ * well under a pixel even at extreme corner pulls.
+ */
+function drawQuad(
+  g: CanvasRenderingContext2D, picture: CanvasImageSource,
+  quad: [number, number][], src: { x: number; y: number; w: number; h: number },
+  toSource: (u: number, v: number) => [number, number],
+  N = 16,
+): void {
+  // the unit square -> quad homography, as a 3x3 acting on (u, v, 1)
+  const [p0, p1, p2, p3] = quad;             // TL, TR, BR, BL
+  const dx1 = p1[0] - p2[0], dy1 = p1[1] - p2[1];
+  const dx2 = p3[0] - p2[0], dy2 = p3[1] - p2[1];
+  const sx = p0[0] - p1[0] + p2[0] - p3[0];
+  const sy = p0[1] - p1[1] + p2[1] - p3[1];
+  let g0: number, g1: number;
+  const den = dx1 * dy2 - dx2 * dy1;
+  if (Math.abs(den) < 1e-9) { g0 = 0; g1 = 0; } else {
+    g0 = (sx * dy2 - dx2 * sy) / den;
+    g1 = (dx1 * sy - sx * dy1) / den;
+  }
+  const a = p1[0] - p0[0] + g0 * p1[0], b = p3[0] - p0[0] + g1 * p3[0], c = p0[0];
+  const d = p1[1] - p0[1] + g0 * p1[1], e = p3[1] - p0[1] + g1 * p3[1], f = p0[1];
+  const at = (u: number, v: number): [number, number] => {
+    const w = g0 * u + g1 * v + 1;
+    return [(a * u + b * v + c) / w, (d * u + e * v + f) / w];
+  };
+  // one triangle at a time: an affine map is determined by three points,
+  // and three points of the homography are exact
+  const tri = (
+    s0: [number, number], s1: [number, number], s2: [number, number],
+    d0: [number, number], d1: [number, number], d2: [number, number],
+  ): void => {
+    const denom = (s1[0] - s0[0]) * (s2[1] - s0[1]) - (s2[0] - s0[0]) * (s1[1] - s0[1]);
+    if (Math.abs(denom) < 1e-9) return;
+    const m11 = ((d1[0] - d0[0]) * (s2[1] - s0[1]) - (d2[0] - d0[0]) * (s1[1] - s0[1])) / denom;
+    const m12 = ((d1[1] - d0[1]) * (s2[1] - s0[1]) - (d2[1] - d0[1]) * (s1[1] - s0[1])) / denom;
+    const m21 = ((d2[0] - d0[0]) * (s1[0] - s0[0]) - (d1[0] - d0[0]) * (s2[0] - s0[0])) / denom;
+    const m22 = ((d2[1] - d0[1]) * (s1[0] - s0[0]) - (d1[1] - d0[1]) * (s2[0] - s0[0])) / denom;
+    g.save();
+    g.beginPath();
+    g.moveTo(d0[0], d0[1]); g.lineTo(d1[0], d1[1]); g.lineTo(d2[0], d2[1]);
+    g.closePath();
+    // the seams between cells are hairline gaps without this: each triangle
+    // is clipped to itself, and adjacent clips do not quite meet
+    g.clip();
+    g.transform(m11, m12, m21, m22,
+      d0[0] - m11 * s0[0] - m21 * s0[1], d0[1] - m12 * s0[0] - m22 * s0[1]);
+    g.drawImage(picture, 0, 0, src.w, src.h, src.x, src.y, src.w, src.h);
+    g.restore();
+  };
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const u0 = i / N, u1 = (i + 1) / N, v0 = j / N, v1 = (j + 1) / N;
+      // a hair of overlap, so neighbouring cells cannot leave a seam
+      const D = (u: number, v: number): [number, number] => {
+        const eu = u === u1 ? Math.min(1, u + 0.35 / N) : u;
+        const ev = v === v1 ? Math.min(1, v + 0.35 / N) : v;
+        return at(eu, ev);
+      };
+      const s00 = toSource(u0, v0), s10 = toSource(u1, v0);
+      const s11 = toSource(u1, v1), s01 = toSource(u0, v1);
+      const d00 = D(u0, v0), d10 = D(u1, v0), d11 = D(u1, v1), d01 = D(u0, v1);
+      tri(s00, s10, s11, d00, d10, d11);
+      tri(s00, s11, s01, d00, d11, d01);
+    }
+  }
+}
+
+/** The four corners of the picture in the beam's square, as (u, v) with
+ *  v UP — the default rectangle `aspect` describes, in the order this file
+ *  and `TGProjection.corners` use: TL, TR, BR, BL. */
+export function defaultCorners(aspect: number): [number, number][] {
+  const hw = (aspect ? aspect / Math.hypot(1, aspect) : 1) / 2;
+  const hh = (aspect ? 1 / Math.hypot(1, aspect) : 1) / 2;
+  return [
+    [0.5 - hw, 0.5 + hh], [0.5 + hw, 0.5 + hh],
+    [0.5 + hw, 0.5 - hh], [0.5 - hw, 0.5 - hh],
+  ];
+}
+
 function paintProjection(
   canvas: HTMLCanvasElement, picture: CanvasImageSource, proj: TGProjection,
   mask: CanvasImageSource | null = null,
@@ -502,7 +629,34 @@ function paintProjection(
   g.beginPath();
   g.rect(-rw / 2, -rh / 2, rw, rh);
   g.clip();
-  g.drawImage(picture, -dw / 2, -dh / 2, dw, dh);
+  const corners = proj.corners && proj.corners.length === 4 ? proj.corners : null;
+  if (corners) {
+    // KEYSTONE: the picture goes into the corner quad instead of the
+    // rectangle. Still inside the same transform, so Rotate and Mirror
+    // compose with it, and inside the same clip, so the mask and the edge
+    // blend below act on exactly what was drawn.
+    const quad = corners.map(([u, v]) =>
+      // uv has v UP; the canvas has y DOWN, and this transform has already
+      // moved the origin to the middle
+      [u * S - S / 2, (1 - v) * S - S / 2] as [number, number]);
+    // CONTAIN letterboxes inside the quad, COVER fills it — the same choice
+    // the rectangle offers, but expressed in the SOURCE, since the
+    // destination is no longer a rectangle to letterbox inside of. The
+    // sampled source rect grows past the image for CONTAIN (what falls
+    // outside it simply draws nothing, which is the letterbox) and shrinks
+    // inside it for COVER (which is the crop).
+    const qa = Math.hypot(quad[1][0] - quad[0][0], quad[1][1] - quad[0][1])
+      / Math.max(1e-6, Math.hypot(quad[3][0] - quad[0][0], quad[3][1] - quad[0][1]));
+    const sa = sw / sh;
+    const wide = sa > qa;                       // the picture is wider than the quad
+    const contain = proj.fit !== 'COVER';
+    const ew = sw * (contain ? (wide ? 1 : qa / sa) : (wide ? qa / sa : 1));
+    const eh = sh * (contain ? (wide ? sa / qa : 1) : (wide ? 1 : sa / qa));
+    drawQuad(g, picture, quad, { x: 0, y: 0, w: sw, h: sh },
+      (u, v) => [sw / 2 + (u - 0.5) * ew, sh / 2 + (v - 0.5) * eh]);
+  } else {
+    g.drawImage(picture, -dw / 2, -dh / 2, dw, dh);
+  }
   // MASK and EDGE BLEND multiply what was just drawn, inside the same clip:
   // black hides, white shows. Both belong here rather than in a shader
   // because the picture is painted once and BOTH paths — the light's own map
