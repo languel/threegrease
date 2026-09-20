@@ -28,8 +28,11 @@ interface Entry {
   helper: THREE.Object3D;
   kind: TGLight['kind'];
   shadowMapSize: number;
-  /** SPOT only: the draggable aim target out along the beam */
+  /** SPOT only: the draggable aim target out along the beam, and the cone
+   *  and blend rings at the distance it reaches */
   aim?: THREE.Object3D;
+  cone?: THREE.Object3D;
+  blend?: THREE.Object3D;
   /** the projected picture: its canvas, the texture over it, and what was
    *  last painted there (so a still image is painted once) */
   proj?: {
@@ -221,6 +224,12 @@ export class LightManager {
   /** the light a media drag is hovering: its glyph is all a lamp has to
    *  light up with, so the beam says "drop it here and I will throw it" */
   hoverId: number | null = null;
+  /** The view's rotation, set by the App each frame. A POINT light has no
+   *  orientation of its own, so its reach ring has no plane to lie in that
+   *  is not arbitrary — drawn in the lamp's own XY it is edge-on from a
+   *  level view, which is most of them, and both unreadable and ungrabbable.
+   *  It faces the camera instead, like Blender's. */
+  viewQuat: THREE.Quaternion | null = null;
   private tint = new THREE.Color();
 
   sync(scene: GPScene): void {
@@ -272,6 +281,7 @@ export class LightManager {
    */
   private makeAimHandle(): THREE.Object3D {
     const g = new THREE.Group();
+    // painted from `selectionColor` in apply(), like the glyph itself
     const mat = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.9 });
     const pts: number[] = [];
     const R = 0.16;
@@ -284,6 +294,47 @@ export class LightManager {
     const ring = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(
       Array.from({ length: pts.length / 3 }, (_, i) => new THREE.Vector3(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]))), mat);
     g.add(ring);
+    g.renderOrder = 999;
+    return g;
+  }
+
+  /**
+   * THE CONE AND BLEND RINGS, Blender's light gizmo: the beam's rim at the
+   * distance it reaches, and inside it the ring where the soft edge begins.
+   * Dragging either is how a spot is shaped in a room — a cone angle typed
+   * into a field is a number you then have to go and look at, while the
+   * ring IS the edge of the light on the wall.
+   *
+   * Both are drawn in the light's own space at the aim distance, so they
+   * ride the lamp; the handle dot sits on the ring at a fixed clock
+   * position (3 o'clock for the cone, 12 for the blend) so the two are
+   * never on top of each other.
+   */
+  private makeRing(dot: [number, number]): THREE.Object3D {
+    const g = new THREE.Group();
+    const mat = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.75 });
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i < 48; i++) {
+      const a0 = (i / 48) * Math.PI * 2, a1 = ((i + 1) / 48) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a0), Math.sin(a0), 0),
+        new THREE.Vector3(Math.cos(a1), Math.sin(a1), 0));
+    }
+    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    // the grab point, a small square on the ring
+    // built around ITS OWN origin and then positioned on the ring: scaling
+    // it to hold a constant size must not drag it toward the centre, which
+    // is exactly what happens if its vertices carry the offset
+    const d = 1;
+    const q: THREE.Vector3[] = [];
+    const corner = [[-d, -d], [d, -d], [d, d], [-d, d]] as const;
+    for (let i = 0; i < 4; i++) {
+      const a = corner[i], b = corner[(i + 1) % 4];
+      q.push(new THREE.Vector3(a[0], a[1], 0), new THREE.Vector3(b[0], b[1], 0));
+    }
+    const handle = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(q), mat.clone());
+    handle.position.set(dot[0], dot[1], 0);
+    handle.userData.ringHandle = true;
+    g.add(handle);
     g.renderOrder = 999;
     return g;
   }
@@ -303,14 +354,63 @@ export class LightManager {
     light.intensity = data.intensity;
     light.visible = this.lightsEnabled;
     helper.visible = this.helpersVisible;
+    if (data.kind === 'POINT') {
+      // a point light's REACH: the distance past which it contributes
+      // nothing. Drawn as a ring you can pull rather than left as a number,
+      // for the same reason as the spot's cone — it is a size in the room.
+      if (!entry.cone) { entry.cone = this.makeRing([1, 0]); entry.root.add(entry.cone); }
+      const reach = data.distance ?? 0;
+      entry.cone.visible = this.helpersVisible && !!data.select && reach > 1e-3;
+      entry.cone.position.set(0, 0, 0);
+      entry.cone.scale.setScalar(Math.max(1e-3, reach));
+      if (this.viewQuat) {
+        // face the camera, expressed in the lamp's own space (it may be
+        // parented to something turned)
+        const inv = new THREE.Quaternion().setFromRotationMatrix(
+          new THREE.Matrix4().extractRotation(root.matrix)).invert();
+        entry.cone.quaternion.copy(inv.multiply(this.viewQuat));
+      }
+      entry.cone.traverse((o) => {
+        const m = (o as THREE.Line).material as THREE.LineBasicMaterial | undefined;
+        if (m?.color) m.color.copy(this.tint);
+        if (o.userData.ringHandle) o.scale.setScalar(Math.max(0.06, reach * 0.05) / Math.max(1e-3, reach));
+      });
+    }
     if (data.kind === 'SPOT') {
       if (!entry.aim) { entry.aim = this.makeAimHandle(); entry.root.add(entry.aim); }
+      if (!entry.cone) {
+        entry.cone = this.makeRing([1, 0]);        // 3 o'clock
+        entry.blend = this.makeRing([0, 1]);       // 12 o'clock
+        entry.root.add(entry.cone, entry.blend);
+      }
       const d = this.aimDistance.get(data.id) ?? 4;
       entry.aim.visible = this.helpersVisible && !!data.select;
+      // the aim target belongs to the gizmo: same colour as the rest of it
+      entry.aim.traverse((o) => {
+        const m = (o as THREE.Line).material as THREE.LineBasicMaterial | undefined;
+        if (m?.color) m.color.copy(this.tint);
+      });
       entry.aim.position.set(0, 0, -d);
       // the ring keeps a constant apparent size relative to the throw, so
       // it is grabbable whether the wall is 1 m or 20 m away
       entry.aim.scale.setScalar(Math.max(0.35, d * 0.25));
+      const rim = Math.tan(data.angle ?? Math.PI / 6) * d;
+      const show = this.helpersVisible && !!data.select;
+      for (const [ring, radius] of [
+        [entry.cone!, rim],
+        [entry.blend!, rim * (1 - (data.penumbra ?? 0.2))],
+      ] as const) {
+        ring.visible = show && radius > 1e-3;
+        ring.position.set(0, 0, -d);
+        ring.scale.setScalar(radius);
+        ring.traverse((o) => {
+          const m = (o as THREE.Line).material as THREE.LineBasicMaterial | undefined;
+          if (m?.color) m.color.copy(this.tint);
+          // the ring scales with the beam, so the handle square would grow
+          // with it — undo that, and it stays the same size to grab
+          if (o.userData.ringHandle) o.scale.setScalar(Math.max(0.25, d * 0.05) / Math.max(1e-3, radius));
+        });
+      }
     }
     if ((data.select || this.hoverId === data.id) && this.selectionColor) this.tint.copy(this.selectionColor);
     else this.tint.setRGB(...data.color);

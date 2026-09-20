@@ -127,6 +127,49 @@ Key invariants:
   Snap pie's centre toggles the magnet and picking a target turns it on.
   `comboFromEvent` recovers these keys from `e.code` — under Option a Mac
   reports `≤ ≥ ÷ æ` as `e.key`.
+- **ANGLE FIELDS SHOW DEGREES; the data stays radians** (`core/angleinput.ts`,
+  `settings.angleUnit`, `NumOpts.angle`). The G/R/S overlay always said
+  "Rot: 30.0°" while the field under it said 0.524 — one of the two was
+  lying about what the app works in, and it was the field. A field marked
+  `angle: true` takes and returns RADIANS (so callers and the scene are
+  unchanged) and works internally in the display unit, which is what makes
+  scrubbing, the arrows, min/max and the reset value all land in whole
+  degrees. The step is the display unit's own — a radian step shown in
+  degrees scrubs at 57 degrees a pixel.
+  Typing carries its own unit, so the setting only decides what a BARE
+  number means: `30deg`, `0.5rad`, `pi/2`, `0.5 pi`, `2pi`, `-2*pi/3`.
+  Three things it has to get right:
+  - PI IS A RADIAN UNIT. `pi/2` read as 1.57 DEGREES because the panel
+    happens to be in degrees is the most confusing answer available.
+  - NO LEADING `\b` in the unit patterns: there is no word boundary between
+    a digit and a letter, so `45deg` and `2pi` — which is how they are
+    actually typed — matched nothing and the unit was silently ignored.
+  - The evaluator is a small recursive-descent parser, NOT `eval` or `new
+    Function`. A number field is somewhere a pasted string lands, and an app
+    that evaluates arbitrary JavaScript there has handed the page over.
+    Implicit multiplication is allowed ONLY against pi, or "1 5" would
+    quietly mean 5.
+- **The light GIZMO is draggable, Blender-style** (`App.lightHandlePoints` /
+  `dragLightHandle`, rings in `LightManager.makeRing`): a spot's cone rim
+  and the ring inside it where the soft edge begins, and a point light's
+  reach. A cone angle typed into a field is a number you then have to go and
+  look at; the ring IS the edge of the light on the wall. Everything is
+  measured in the beam's own frame — the pointer ray is met with the PLANE
+  the rings lie in, and the radius there says what the angle or the blend
+  must be.
+  A POINT light has no orientation, so its reach ring has no plane of its
+  own that is not arbitrary: drawn in the lamp's own XY it is edge-on from
+  any level view (which is most of them), where the ray never meets the
+  plane and the drag silently does nothing. It faces the CAMERA instead
+  (`LightManager.viewQuat`), and the drag uses the view plane to match.
+  The ring is scaled to the beam, so its grab square is scaled back by the
+  same factor to hold one size — and the square is built around its OWN
+  origin and then positioned, because scaling geometry that carries the
+  offset drags the handle toward the centre instead.
+  All of these handles are grabbed in the CAPTURE phase and in order —
+  keystone corner, then cone/blend, then the aim ring — since they sit on
+  the same wall as each other and as the object picking underneath.
+
 - **A checkbox's NAME goes in the label column and the box in the value
   column**, like every other row. It used to carry its own text, which put it
   the other way round — box first, name second, both adrift in the value
@@ -1659,6 +1702,9 @@ the browser console or automated evals:
     5.06 × 2.85 m") — the number an installation is planned around, and one
     a cone cannot show. Dropping a picture on a selected spot light sets its
     projection (and takes the picture's own aspect).
+  - The aim ring, the cone and blend rings and the keystone corners all wear
+    the light's SELECTION colour: they are parts of one gizmo, and a second
+    accent would read as a different kind of thing.
   - Lamps only light the scene in RENDERED shading, so the panel says so and
     offers the switch — otherwise a working projector reads as a broken one.
     That rule is about the LIGHT, not the glyph: hiding the whole group

@@ -4,6 +4,7 @@ import { defaultStyle } from '../core/brushes';
 import type { History } from '../core/history';
 import type { EditorMode, GPSceneRenderer } from '../render/GPSceneRenderer';
 import type { ObjRef } from './objects';
+import type { AngleUnit } from '../core/angleinput';
 
 /** SURFACE_PERP = "Surface ⊥": the stroke/quilt STARTS on the surface
  *  under the first point, then grows on the plane that stands
@@ -122,6 +123,10 @@ export interface Settings {
    * and falls back to LOCAL for anything whose rotation is not eulers.
    * PIVOT is the point a rotation or scale happens about.
    */
+  /** What angle FIELDS show and read (rotations are always stored in
+   *  radians). Typing carries its own unit either way — `30deg`, `pi/2`,
+   *  `0.5rad` — so this only decides what a bare number means. */
+  angleUnit: AngleUnit;
   transformOrientation: TransformOrientation;
   transformPivot: TransformPivot;
   guide: { type: GuideType; angle: number; spacing: number };
@@ -234,6 +239,8 @@ export function snapIncrement(s: Settings): number {
 
 // ---- preference persistence (localStorage) --------------------------------
 
+export type { AngleUnit };
+
 export type TransformOrientation = 'GLOBAL' | 'LOCAL' | 'NORMAL' | 'GIMBAL' | 'VIEW' | 'CURSOR' | 'PARENT';
 export type TransformPivot = 'MEDIAN' | 'BOUNDING_BOX' | 'CURSOR' | 'INDIVIDUAL' | 'ACTIVE';
 
@@ -241,7 +248,7 @@ const PREFS_KEY = 'threegrease.prefs';
 const PREF_FIELDS = [
   'emulateNumpad', 'emulate3Button', 'showGrid', 'showActorOverlay', 'gridStep', 'gridSubdivisions', 'gridSubdivStyle', 'showGizmo',
   'trackpadNav', 'invertTrackpadOrbit', 'upAxis', 'showAxes', 'gpCastShadows', 'showPlaneHelper', 'showDepthHelper', 'showPerf', 'renderScale', 'polygonSides', 'snap',
-  'shading', 'shapeSnap', 'transformOrientation', 'transformPivot', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
+  'shading', 'shapeSnap', 'transformOrientation', 'transformPivot', 'angleUnit', 'lengthUnit', 'uiAccent', 'uiAccentAlpha', 'uiHighlight', 'uiHighlightAlpha', 'uiHighlightActive', 'gridColor',
 ] as const;
 
 export function loadPrefs(s: Settings): void {
@@ -338,6 +345,7 @@ export function defaultSettings(): Settings {
     placementLock: false,
     placementSmooth: false,
     shapeSnap: 'ENDS',
+    angleUnit: 'DEG',
     transformOrientation: 'GLOBAL',
     transformPivot: 'MEDIAN',
     guide: { type: 'NONE', angle: 0, spacing: 40 },

@@ -1374,6 +1374,15 @@ class App implements AppHandle {
           this.capture(e);
           return;
         }
+        const ring = this.lightHandleAt(e.clientX, e.clientY);
+        if (ring) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          this.ctx.pushUndo();
+          this.lightHandleDrag = ring;
+          this.capture(e);
+          return;
+        }
         const grab = this.aimHandleAt(e.clientX, e.clientY);
         if (grab) {
           e.stopImmediatePropagation();
@@ -1471,6 +1480,11 @@ class App implements AppHandle {
         this.navDrag.x = te.x; this.navDrag.y = te.y;
         return;
       }
+      if (this.lightHandleDrag) {
+        this.dragLightHandle(e.clientX, e.clientY);
+        this.ui.refresh();
+        return;
+      }
       if (this.keystoneDrag) {
         const k = this.keystoneDrag;
         this.setKeystoneCorner(k.id, k.corner, e.clientX, e.clientY, k.distance);
@@ -1512,6 +1526,7 @@ class App implements AppHandle {
 
     canvas.addEventListener('pointerleave', () => { this.hoverPane = null; });
     canvas.addEventListener('pointerup', (e) => {
+      if (this.lightHandleDrag) { this.lightHandleDrag = null; this.ui.refresh(); return; }
       if (this.keystoneDrag) { this.keystoneDrag = null; this.ui.refresh(); return; }
       if (this.aimDrag) { this.aimDrag = null; this.ui.refresh(); return; }
       if (e.button === 2) {
@@ -5061,12 +5076,18 @@ class App implements AppHandle {
 
   aimLightAt(id: number, at: THREE.Vector3 | Vec3): void {
     const l = this.ctx.scene.lights.find((x) => x.id === id);
-    const root = this.lights.rootFor(id);
-    if (!l || !root) return;
+    if (!l) return;
     // the UI is DOM-only and holds no three.js, so a plain [x, y, z] is a
     // first-class way to say where to aim
     const target = Array.isArray(at) ? new THREE.Vector3(...at) : at;
-    const from = new THREE.Vector3().setFromMatrixPosition(root.matrixWorld);
+    // A LIGHT ADDED THIS TICK HAS NO RENDER ROOT YET (the manager syncs on
+    // the next frame), and reading its position from one that is not there
+    // made aiming a just-added projector silently do nothing. The data
+    // knows where it is; the root is only needed to account for a parent.
+    const root = this.lights.rootFor(id);
+    const from = root
+      ? new THREE.Vector3().setFromMatrixPosition(root.matrixWorld)
+      : new THREE.Vector3().setFromMatrixPosition(worldMatrixOf(this.ctx.scene, { kind: 'LIGHT', id }));
     const look = { quaternion: this.aimRotation(from, target) };
     // the rotation is stored in the light's PARENT space, like every other
     // object's — a projector filed under a group must still aim where you
@@ -5143,14 +5164,19 @@ class App implements AppHandle {
       pts.push(new THREE.Vector3(0, -R, 0), new THREE.Vector3(0, R, 0));
       const ring = new THREE.LineSegments(
         new THREE.BufferGeometry().setFromPoints(pts),
-        new THREE.LineBasicMaterial({ color: 0xffc24a, depthTest: false, transparent: true, opacity: 0.95 }));
+        new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.95 }));
       ring.renderOrder = 999;
       this.keystoneRings.add(ring);
     }
+    // the handles are part of the light gizmo, so they wear the same colour
+    // the glyph turns when it is selected — a second accent would read as a
+    // different kind of thing
+    const tint = this.highlightColor(true);
     this.keystoneRings.children.forEach((ring, i) => {
       const c = show[i];
       ring.visible = !!c;
       if (!c) return;
+      ((ring as THREE.LineSegments).material as THREE.LineBasicMaterial).color.copy(tint);
       ring.position.copy(c.at);
       // face the viewer, and hold one apparent size whatever the throw is
       ring.quaternion.copy(this.nav.active.quaternion);
@@ -5207,6 +5233,108 @@ class App implements AppHandle {
     this.ctx.pushUndo();
     l.projection.corners = undefined;
     this.ui.refresh();
+  }
+
+  /**
+   * THE LIGHT GIZMO's own handles, Blender's: the beam's rim (the cone
+   * angle), the ring inside it where the soft edge begins (the penumbra),
+   * and a point light's reach. A cone angle typed into a field is a number
+   * you then have to go and look at; the ring IS the edge of the light on
+   * the wall, so it is shaped where it is seen.
+   */
+  private lightHandleDrag: { id: number; what: 'CONE' | 'BLEND' | 'DIST' } | null = null;
+
+  /** World positions of the two ring handles for a spot, and of a point
+   *  light's reach handle — the same places `LightManager` draws them. */
+  private lightHandlePoints(l: TGLight): { what: 'CONE' | 'BLEND' | 'DIST'; at: THREE.Vector3 }[] {
+    const root = this.lights.rootFor(l.id);
+    if (!root) return [];
+    root.updateMatrixWorld(true);
+    if (l.kind === 'SPOT') {
+      const d = this.lights.aimDistance.get(l.id) ?? this.projectorThrow(l.id)?.distance ?? 4;
+      const rim = Math.tan(l.angle ?? Math.PI / 6) * d;
+      const blend = rim * (1 - (l.penumbra ?? 0.2));
+      return [
+        { what: 'CONE', at: new THREE.Vector3(rim, 0, -d).applyMatrix4(root.matrixWorld) },
+        { what: 'BLEND', at: new THREE.Vector3(0, blend, -d).applyMatrix4(root.matrixWorld) },
+      ];
+    }
+    if (l.kind === 'POINT' && (l.distance ?? 0) > 0) {
+      // the reach ring faces the camera, so its 3 o'clock is the view's own
+      // right — the same place the manager draws the handle
+      const right = new THREE.Vector3().setFromMatrixColumn(this.nav.active.matrixWorld, 0);
+      return [{
+        what: 'DIST',
+        at: new THREE.Vector3().setFromMatrixPosition(root.matrixWorld)
+          .addScaledVector(right, l.distance ?? 0),
+      }];
+    }
+    return [];
+  }
+
+  private lightHandleAt(clientX: number, clientY: number): { id: number; what: 'CONE' | 'BLEND' | 'DIST' } | null {
+    if (this.ctx.settings.mode !== 'OBJECT') return null;
+    const pane = this.paneAt(clientX, clientY);
+    return this.withPane(pane, () => {
+      const r = this.ctx.canvas.getBoundingClientRect();
+      const px = clientX - r.left, py = clientY - r.top;
+      for (const l of this.ctx.scene.lights) {
+        if (!l.select || l.visible === false) continue;
+        for (const h of this.lightHandlePoints(l)) {
+          const p = h.at.clone().project(this.ctx.camera);
+          if (p.z > 1) continue;
+          const sx = (p.x * 0.5 + 0.5) * r.width, sy = (-p.y * 0.5 + 0.5) * r.height;
+          if (Math.hypot(sx - px, sy - py) < 18) return { id: l.id, what: h.what };
+        }
+      }
+      return null;
+    });
+  }
+
+  /** Drag one of them. Everything is measured in the beam's own frame: the
+   *  pointer ray is met with the PLANE the rings live in, and the radius
+   *  there says what the angle or the blend must be. */
+  private dragLightHandle(clientX: number, clientY: number): void {
+    const g = this.lightHandleDrag;
+    if (!g) return;
+    const l = this.ctx.scene.lights.find((x) => x.id === g.id);
+    const root = this.lights.rootFor(g.id);
+    if (!l || !root) return;
+    root.updateMatrixWorld(true);
+    const pane = this.paneAt(clientX, clientY);
+    this.withPane(pane, () => {
+      const r = this.ctx.canvas.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(ndc, this.ctx.camera);
+      const origin = new THREE.Vector3().setFromMatrixPosition(root.matrixWorld);
+      if (g.what === 'DIST') {
+        // the ring faces the camera, so the pointer is met with the VIEW
+        // plane through the lamp — a plane in the lamp's own axes is
+        // arbitrary for a point light and goes edge-on from a level view,
+        // where the ray never meets it and the drag silently does nothing
+        const n = this.ctx.camera.getWorldDirection(new THREE.Vector3()).negate();
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, origin);
+        const hit = ray.ray.intersectPlane(plane, new THREE.Vector3());
+        if (hit) l.distance = Math.max(0.01, hit.distanceTo(origin));
+        return;
+      }
+      const axis = new THREE.Vector3(0, 0, -1).transformDirection(root.matrixWorld).normalize();
+      const d = this.lights.aimDistance.get(l.id) ?? this.projectorThrow(l.id)?.distance ?? 4;
+      const centre = origin.clone().addScaledVector(axis, d);
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(axis, centre);
+      const hit = ray.ray.intersectPlane(plane, new THREE.Vector3());
+      if (!hit) return;
+      const radius = hit.distanceTo(centre);
+      if (g.what === 'CONE') {
+        // the rim passes through the pointer: that IS the cone angle
+        l.angle = Math.min(Math.PI / 2 - 0.01, Math.max(0.02, Math.atan2(radius, d)));
+      } else {
+        const rim = Math.tan(l.angle ?? Math.PI / 6) * d;
+        l.penumbra = Math.min(1, Math.max(0, 1 - radius / Math.max(1e-6, rim)));
+      }
+    });
   }
 
   /** Is the pointer on a selected projector's aim handle? */
@@ -6413,6 +6541,7 @@ class App implements AppHandle {
     // what the beam hits — only for the selected spots, since that is the
     // only time it is drawn (a raycast per selected projector per frame)
     this.syncKeystoneRings();
+    this.lights.viewQuat = this.nav.active.quaternion;
     this.lights.aimDistance.clear();
     for (const l of ctx.scene.lights) {
       if (l.kind !== 'SPOT' || !l.select) continue;

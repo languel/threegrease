@@ -1,3 +1,4 @@
+import { angleSuffix, evaluate, formatAngle, parseAngle, type AngleUnit } from '../core/angleinput';
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget, type NearestTarget, type TransformOrientation, type TransformPivot } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { TGLight, TGLens, GPCamera, GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
@@ -262,6 +263,14 @@ function btn(label: string | Node, onclick: () => void, opts: { active?: boolean
 
 interface NumOpts {
   step?: number;
+  /**
+   * The field holds an ANGLE IN RADIANS but shows (and reads) whatever
+   * `settings.angleUnit` says — degrees by default. `value`, `min`, `max`
+   * and `def` are all given in radians, like the data; the step is the
+   * display unit's own (1 degree, or 0.01 rad), because a radian step
+   * converted to degrees scrubs at 57 degrees a pixel.
+   */
+  angle?: boolean;
   min?: number;
   max?: number;
   /** reset target for Backspace-on-hover and the context menu */
@@ -272,6 +281,11 @@ interface NumOpts {
   route?: string;
   title?: string;
 }
+
+/** The unit angle fields display in. Module-level because `dragNumber` is
+ *  a free function with no `ctx`; `UI.refresh` sets it from the settings
+ *  before building anything. */
+let angleUnit: AngleUnit = 'DEG';
 
 /** reset action of the widget currently under the pointer (Backspace) */
 let hoveredNumReset: (() => void) | null = null;
@@ -328,11 +342,21 @@ function popupMenu(x: number, y: number, items: { label: string; hint?: string; 
 let numAddRouteHook: ((target: string) => void) | null = null;
 
 function dragNumber(label: string, value: number, onChange: (v: number) => void, opts: NumOpts = {}): HTMLElement {
-  const step = opts.step ?? 0.1;
+  // An ANGLE field works in RADIANS on the outside (the value in, the value
+  // out) and in the display unit on the inside, so everything below —
+  // scrubbing, arrows, clamping, the reset value — happens in the unit the
+  // number on screen is written in.
+  const ang = !!opts.angle;
+  const K = ang && angleUnit === 'DEG' ? 180 / Math.PI : 1;
+  const step = ang ? (angleUnit === 'DEG' ? 1 : 0.01) : opts.step ?? 0.1;
   const decimals = Math.min(4, Math.max(0, Math.ceil(-Math.log10(step) - 1e-9)));
-  const clamp = (v: number) => Math.min(opts.max ?? Infinity, Math.max(opts.min ?? -Infinity, v));
-  const fmt = (v: number) => v.toFixed(decimals);
-  let cur = clamp(value);
+  const clamp = (v: number) => Math.min(
+    opts.max !== undefined ? opts.max * K : Infinity,
+    Math.max(opts.min !== undefined ? opts.min * K : -Infinity, v));
+  const fmt = (v: number) => (ang
+    ? formatAngle(v / K, angleUnit) + angleSuffix(angleUnit)
+    : v.toFixed(decimals));
+  let cur = clamp(value * K);
 
   const hasFill = !!opts.fill && opts.min !== undefined && opts.max !== undefined;
   // outer row: label OUTSIDE the box (right-justified, immediately left of
@@ -360,19 +384,27 @@ function dragNumber(label: string, value: number, onChange: (v: number) => void,
     cur = clamp(Math.round(v * 1e6) / 1e6);
     valEl.textContent = fmt(cur);
     syncFill();
-    onChange(cur);
+    onChange(ang ? cur / K : cur);
   };
 
   // -- type-in editing --
   const beginEdit = () => {
     if (wrap.querySelector('.numdrag-input')) return;
     wrap.classList.add('editing');
-    const input = el('input', { type: 'text', class: 'numdrag-input', value: String(cur) }) as HTMLInputElement;
+    const input = el('input', {
+      type: 'text', class: 'numdrag-input',
+      // the box shows its unit, but the FIELD you type into should not make
+      // you delete a degree sign before you can edit the number
+      value: ang ? formatAngle(cur / K, angleUnit) : String(cur),
+    }) as HTMLInputElement;
     let cancelled = false;
     input.onblur = () => {
       if (!cancelled) {
-        const v = parseFloat(input.value);
-        if (Number.isFinite(v)) set(v);
+        // an angle takes `pi/2`, `30deg`, `0.5 pi` and plain arithmetic;
+        // anything else takes a plain number, but still through the
+        // evaluator, so "2*3" works in a size field too
+        const v = ang ? parseAngle(input.value, angleUnit) : evaluate(input.value);
+        if (v !== null && Number.isFinite(v)) set(ang ? v * K : v);
       }
       input.remove();
       wrap.classList.remove('editing');
@@ -1013,6 +1045,7 @@ export class UI {
   }
 
   private refreshNow(): void {
+    angleUnit = this.app.ctx.settings.angleUnit ?? 'DEG';
     this.buildMenubar();
     this.buildTopbar();
     this.buildToolbar();
@@ -1956,7 +1989,9 @@ export class UI {
         + 'room, and how you want to see media while placing it. It shows in every shading mode, and is '
         + 'blocked by objects only when the light casts shadows.'),
       fieldRow('Brightness', slider('', p.gain ?? 1, 0, 2, 0.05, (v) => { set({ gain: v }); }, { def: 1 })),
-      fieldRow('Rotate', slider('', p.rotation ?? 0, -Math.PI, Math.PI, 0.01, (v) => { set({ rotation: v }); }, { def: 0 })),
+      fieldRow('Rotate', numField('', p.rotation ?? 0, (v) => { set({ rotation: v }); }, 0.01,
+        { angle: true, min: -Math.PI, max: Math.PI, def: 0,
+          title: 'spin the picture in the beam — 90 turns a landscape source onto its side' })),
       checkbox('Mirror', !!p.flip, (v) => set({ flip: v }), 'rear projection'),
       fieldRow('Lens', tip(selectField('', p.lens?.type ?? 'PERSPECTIVE', LENS_TYPES, (v) => {
         const next = v === 'PERSPECTIVE' ? undefined
@@ -3618,7 +3653,6 @@ export class UI {
       extras: [
         btn(icon('eye'), () => { scene.activeCamera = i; this.app.lookThroughCamera(); },
           { cls: 'icon-btn', active: i === scene.activeCamera && this.app.cameraViewOn(), title: 'Look through this camera' }),
-        el('span', { text: `${c.fov.toFixed(0)}°`, title: 'field of view' }),
         ...viewLockBtns(
           { kind: 'CAMERA', id: c.id },
           false, () => { /* a camera is always drawn: its frustum is its body */ },
@@ -4002,7 +4036,7 @@ export class UI {
       rows.push(
         el('div', { class: 'row', text: `Editing sets that value on all ${refs.length} selected` }),
         this.vecRow('Loc', () => t.translation.map((v) => +v.toFixed(3)), (i, v) => setAxis('translation', i, v)),
-        this.vecRow('Rot', () => t.rotation.map((v) => +v.toFixed(3)), (i, v) => setAxis('rotation', i, v)),
+        this.vecRow('Rot', () => t.rotation, (i, v) => setAxis('rotation', i, v), 0.1, true),
         this.vecRow('Scale', () => t.scale.map((v) => +v.toFixed(3)), (i, v) => setAxis('scale', i, v)),
       );
     }
@@ -4028,7 +4062,7 @@ export class UI {
       };
       rows.push(
         this.vecRow('Loc', () => t.translation.map((v) => +v.toFixed(3)), (i, v) => { t.translation[i] = v; write(); }),
-        this.vecRow('Rot', () => t.rotation.map((v) => +v.toFixed(3)), (i, v) => { t.rotation[i] = v; write(); }),
+        this.vecRow('Rot', () => t.rotation, (i, v) => { t.rotation[i] = v; write(); }, 0.1, true),
       );
       // a camera has no size: its scale row reported a unit it would not
       // accept, which is a control that does nothing
@@ -4099,7 +4133,9 @@ export class UI {
           fieldRow('Decay', slider('', l.decay ?? 2, 0, 4, 0.05, (v) => { l.decay = v; }, { def: 2 })),
         ] : []),
         ...(spot ? [
-          fieldRow('Cone', slider('', l.angle ?? Math.PI / 6, 0.05, Math.PI / 2, 0.01, (v) => { l.angle = v; }, { def: Math.PI / 6 })),
+          fieldRow('Cone', numField('', l.angle ?? Math.PI / 6, (v) => { l.angle = v; ctx.requestRender(); }, 0.01,
+            { angle: true, min: 0.02, max: Math.PI / 2 - 0.01, def: Math.PI / 6,
+              title: 'half the beam\u2019s opening — drag the cone handle in the viewport, or type an angle' })),
           fieldRow('Penumbra', slider('', l.penumbra ?? 0.2, 0, 1, 0.01, (v) => { l.penumbra = v; }, { def: 0.2 })),
           ...this.projectionRows(l),
         ] : []),
@@ -5199,10 +5235,12 @@ export class UI {
 
   private vecRow(
     label: string, get: () => number[], set: (i: number, v: number) => void, step = 0.1,
+    angle = false,
   ): HTMLElement {
     // one parameter, three sub-fields — a connected .field-group, so X/Y/Z
     // read as one vector rather than three boxes that happen to be adjacent
-    return fieldRow(label, get().map((component, i) => numField('', component, (v) => set(i, v), step)));
+    return fieldRow(label, get().map((component, i) =>
+      numField('', component, (v) => set(i, v), step, angle ? { angle: true } : {})));
   }
 
   /** Read-only bounding-box size line (Blender's Item panel "Dimensions"),
@@ -5266,7 +5304,7 @@ export class UI {
         if (t) {
           rows.push(
             this.vecRow('Loc', () => t.translation.map((v) => +v.toFixed(3)), (i, v) => { t.translation[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }),
-            this.vecRow('Rot', () => t.rotation.map((v) => +v.toFixed(3)), (i, v) => { t.rotation[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }),
+            this.vecRow('Rot', () => t.rotation, (i, v) => { t.rotation[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }, 0.1, true),
             this.vecRow('Scale', () => t.scale.map((v) => +v.toFixed(3)), (i, v) => { t.scale[i] = v; setObjectTransform(ctx.scene, activeRef, t); ctx.requestRender(); }, 0.05),
           );
         }
@@ -5281,7 +5319,7 @@ export class UI {
       const extents = this.extentsRow(ref);
       sections.push(panel(`Object: ${ob.name}`,
         this.vecRow('Loc', () => ob.translation.map((v) => +v.toFixed(3)), (i, v) => { ob.translation[i] = v; ctx.requestRender(); }),
-        this.vecRow('Rot', () => ob.rotation.map((v) => +v.toFixed(3)), (i, v) => { ob.rotation[i] = v; ctx.requestRender(); }),
+        this.vecRow('Rot', () => ob.rotation, (i, v) => { ob.rotation[i] = v; ctx.requestRender(); }, 0.1, true),
         this.vecRow('Scale', () => ob.scale.map((v) => +v.toFixed(3)), (i, v) => { ob.scale[i] = v; ctx.requestRender(); }, 0.05),
         ...(extents ? [extents] : []),
       ));
@@ -5294,7 +5332,7 @@ export class UI {
     ));
     sections.push(panel(`Camera: ${cam.name}`,
       this.vecRow('Loc', () => cam.translation.map((v) => +v.toFixed(3)), (i, v) => { cam.translation[i] = v; ctx.requestRender(); }),
-      this.vecRow('Rot', () => cam.rotation.map((v) => +v.toFixed(3)), (i, v) => { cam.rotation[i] = v; ctx.requestRender(); }),
+      this.vecRow('Rot', () => cam.rotation, (i, v) => { cam.rotation[i] = v; ctx.requestRender(); }, 0.1, true),
       numField('FOV', +cam.fov.toFixed(1), (v) => { cam.fov = Math.min(140, Math.max(5, v)); ctx.requestRender(); }, 1, { def: 50, min: 5, max: 140, route: 'camera.0.fov' }),
     ));
 
@@ -5514,6 +5552,13 @@ export class UI {
         ], (v) => { s.upAxis = v as 'Z' | 'Y'; this.app.applyUpAxis(true); }),
         checkbox('Show axes', s.showAxes, (v) => this.app.setShowAxes(v)),
       ),
+      tip(el('div', { class: 'row' },
+        selectField('Angles', s.angleUnit ?? 'DEG', [
+          ['DEG', 'Degrees'], ['RAD', 'Radians'],
+        ], (v) => { s.angleUnit = v as AngleUnit; save(); this.refresh(); this.buildTopbar(); })),
+      'What a rotation field shows, and what a bare number typed into one means — '
+        + 'rotations are stored in radians either way. A typed angle can always carry its own '
+        + 'unit: 30deg, 0.5rad, pi/2, 0.5 pi, or arithmetic like -2*pi/3.'),
       el('div', { class: 'row' },
         checkbox('Trackpad navigation', s.trackpadNav, (v) => this.app.setTrackpadNav(v),
           'two-finger orbit, Shift pan, Ctrl zoom'),
