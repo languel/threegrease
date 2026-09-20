@@ -167,7 +167,7 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
-export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE'; id: number }
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE' | 'CAMERA'; id: number }
 
 // ---- object constraints (Blender-style stack, evaluated every frame) ----
 
@@ -292,6 +292,11 @@ export interface TGLens {
 
 /** A scene camera: transformable, keyframable, viewable (numpad 0). */
 export interface GPCamera {
+  /** Cameras used to be an INDEX in `scene.cameras` and nothing else — no
+   *  outliner row, no selection, no widget. They are objects now (ObjKind
+   *  'CAMERA'), so they carry an id like everything else; serialize.ts
+   *  assigns one to any scene saved before this. */
+  id: number;
   name: string;
   translation: Vec3;
   rotation: Vec3;
@@ -300,6 +305,10 @@ export interface GPCamera {
   /** a curved lens: fisheye, equirectangular, cylindrical, mirror ball.
    *  Absent = the ordinary pinhole the `fov` above describes. */
   lens?: TGLens;
+  select?: boolean;
+  lock?: boolean;
+  parent?: ParentRef | null;
+  constraints?: TGConstraint[];
   /** wire-art target drawing for this viewpoint (dataURL), P6 */
   target?: string;
   targetOpacity?: number;  // assist overlay opacity in camera view

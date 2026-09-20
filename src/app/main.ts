@@ -2024,6 +2024,15 @@ class App implements AppHandle {
     }
     cams.forEach((cam, i) => {
       const helper = this.camHelper.children[i];
+      // A camera is a WIRE helper, so it cannot wear the inverted-hull
+      // outline every solid object gets — the whole shape is the outline.
+      // It says it is selected by going the selection colour instead.
+      const line = helper.children[0] as THREE.LineSegments;
+      const mat = line.material as THREE.LineBasicMaterial;
+      const sel = !!cam.select;
+      mat.color.setHex(sel ? 0xff9b3c : i === this.ctx.scene.activeCamera ? 0xd8a03c : 0x8a7346);
+      mat.opacity = sel || i === this.ctx.scene.activeCamera ? 1 : 0.6;
+      mat.transparent = !(sel || i === this.ctx.scene.activeCamera);
       const pose = evalCamera(cam, this.ctx.scene.frame);
       helper.position.copy(pose.position);
       helper.quaternion.copy(pose.quaternion);
@@ -2148,6 +2157,17 @@ class App implements AppHandle {
   }
 
   /** New camera captures the current viewport pose. */
+  /** Look through the active camera (and switch to it if we were not). */
+  lookThroughCamera(): void {
+    if (!this.cameraView) this.toggleCameraView();
+    else this.applyCameraPose();
+    this.ui.refreshTimelineControls();
+    this.ui.refresh();
+  }
+
+  /** the timeline's camera row (the UI owns it; the outliner asks for it) */
+  refreshTimelineControls(): void { this.ui.refreshTimelineControls(); }
+
   addCamera(): void {
     const s = this.ctx.scene;
     this.ctx.pushUndo();
@@ -2158,7 +2178,16 @@ class App implements AppHandle {
     cam.fov = this.cameraView ? this.camera.fov : 50;
     s.cameras.push(cam);
     s.activeCamera = s.cameras.length - 1;
+    // a camera is an object now, so adding one leaves it SELECTED — the
+    // outliner row lights up and the widget is already on it, which is how
+    // you find out where the thing you just added went
+    deselectAllObjects(s);
+    const ref: ObjRef = { kind: 'CAMERA', id: cam.id };
+    setObjectSelected(s, ref, true);
+    this.setLastPicked(ref);
+    this.refreshWidget();
     this.ui.refreshTimelineControls();
+    this.ui.refresh();
   }
 
   removeCamera(): void {
@@ -4982,6 +5011,8 @@ class App implements AppHandle {
       ref.kind === 'TRIGGER' ? this.scoreGroup.children.find((c) => c.userData.triggerId === ref.id) ?? null :
       ref.kind === 'STREAM' ? this.mmPoints.objectFor(ref.id) :
       ref.kind === 'POLY' ? this.polys.rootFor(ref.id) :
+      ref.kind === 'CAMERA' ? this.camHelper.children[scene.cameras.findIndex((c) => c.id === ref.id)] ?? null :
+      ref.kind === 'LIGHT' ? this.lights.rootFor(ref.id) :
       null;
   }
 

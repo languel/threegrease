@@ -524,6 +524,22 @@ the browser console or automated evals:
   triangle under the pointer), Edge (poly edge, anywhere along a stroke, the
   nearest side of that triangle), Face (poly face, mesh surface). Mesh
   "edges" are the renderer's triangles, so a box face's diagonal counts.
+- **A CAMERA is an object** (`ObjKind` `'CAMERA'`), not just an entry in
+  `scene.cameras`. It gained an `id` (serialize.ts assigns them to old
+  scenes and rewrites `score.attachments` from index to id), plus
+  `select`/`lock`/`parent`/`constraints`, so the outliner row, selection,
+  the transform widget, G/R/S, parenting, grouping and delete all come from
+  the same machinery every other kind uses — `getObjectTransform` reports
+  unit scale (a camera has none) and `deleteObject` refuses the LAST camera.
+  Two things a camera cannot share: it is drawn as a WIRE frustum, so there
+  is no surface to fatten into an inverted hull — it says it is selected by
+  going the selection colour (`syncCameraHelpers`); and it has nothing to
+  raycast, so `ObjectSelectTool.pick` tests screen distance to where it
+  stands, the way the score glyphs are picked. Lights were in exactly the
+  same position and are picked the same way now. Adding one leaves it
+  SELECTED with the widget on it, because a camera added "at the current
+  view" is otherwise invisible — it is exactly where your eye is.
+
 - **The outliner has keyboard focus when the last pointerdown was in it**
   (`App.outlinerFocused`; rows are divs rebuilt on every refresh, so DOM
   focus cannot say). X, Delete and Cmd+Backspace then delete the SELECTED

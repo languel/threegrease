@@ -41,6 +41,16 @@ export function deserializeScene(json: string): GPScene {
   const legacy = (scene as unknown as { camera?: import('../core/types').GPCamera }).camera;
   scene.cameras ??= legacy ? [{ ...createDefaultCamera(), ...legacy, name: 'Camera 1' }] : [createDefaultCamera()];
   scene.activeCamera ??= 0;
+  // cameras became OBJECTS (an outliner row, selection, the widget), which
+  // means they carry an id like everything else; a scene saved before that
+  // has none, and score attachments referred to them BY INDEX
+  const camsNeedIds = scene.cameras.some((c) => c.id === undefined);
+  if (camsNeedIds) {
+    scene.cameras.forEach((c, i) => { c.id ??= genId(); void i; });
+    for (const at of scene.score?.attachments ?? []) {
+      if (at.target.kind === 'CAMERA') at.target = { kind: 'CAMERA', id: scene.cameras[at.target.id]?.id ?? scene.cameras[0].id };
+    }
+  }
   scene.io ??= { wsUrl: '', midiInId: null, midiOutId: null };
   scene.score ??= { cursors: [], triggers: [], attachments: [] };
   scene.routes ??= [];

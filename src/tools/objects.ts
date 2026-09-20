@@ -12,7 +12,7 @@ import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso, pointInPolygon } from './draw';
 
-export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE';
+export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE' | 'CAMERA';
 export interface ObjRef { kind: ObjKind; id: number }
 
 export function gpIndexOf(scene: GPScene, id: number): number {
@@ -32,6 +32,7 @@ export function listSelected(scene: GPScene): ObjRef[] {
   for (const l of scene.lights) if (l.select) out.push({ kind: 'LIGHT', id: l.id });
   for (const a of scene.actors) if (a.select) out.push({ kind: 'ACTOR', id: a.id });
   for (const m of scene.measures) if (m.select) out.push({ kind: 'MEASURE', id: m.id });
+  for (const c of scene.cameras) if (c.select) out.push({ kind: 'CAMERA', id: c.id });
   return out;
 }
 
@@ -58,6 +59,7 @@ function entityOf(scene: GPScene, ref: ObjRef):
   if (ref.kind === 'LIGHT') return scene.lights.find((l) => l.id === ref.id);
   if (ref.kind === 'ACTOR') return scene.actors.find((a) => a.id === ref.id);
   if (ref.kind === 'MEASURE') return scene.measures.find((m) => m.id === ref.id);
+  if (ref.kind === 'CAMERA') return scene.cameras.find((c) => c.id === ref.id);
   return scene.meshes.find((m) => m.id === ref.id);
 }
 
@@ -249,6 +251,11 @@ export function getObjectTransform(scene: GPScene, ref: ObjRef): ObjTransform | 
     const mm = scene.measures.find((x) => x.id === ref.id);
     return mm ? { translation: [...mm.translation], rotation: [...mm.rotation], scale: [...mm.scale] } : null;
   }
+  if (ref.kind === 'CAMERA') {
+    // a camera has no scale of its own: unit, so the widget behaves
+    const c = scene.cameras.find((x) => x.id === ref.id);
+    return c ? { translation: [...c.translation], rotation: [...c.rotation], scale: [1, 1, 1] } : null;
+  }
   const m = scene.meshes.find((x) => x.id === ref.id);
   return m ? { translation: [...m.translation], rotation: [...m.rotation], scale: [...m.scale] } : null;
 }
@@ -289,6 +296,9 @@ export function setObjectTransform(scene: GPScene, ref: ObjRef, t: ObjTransform)
   } else if (ref.kind === 'LIGHT') {
     const l = scene.lights.find((x) => x.id === ref.id);
     if (l) { l.translation = [...t.translation]; l.rotation = [...t.rotation]; } // scale ignored
+  } else if (ref.kind === 'CAMERA') {
+    const c = scene.cameras.find((x) => x.id === ref.id);
+    if (c) { c.translation = [...t.translation]; c.rotation = [...t.rotation]; } // scale ignored
   } else if (ref.kind === 'ACTOR') {
     // The pose is actor-LOCAL, so moving the actor carries the whole
     // ragdoll with it and the solver never sees the move at all.
@@ -340,6 +350,16 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     scene.actors = scene.actors.filter((a) => a.id !== ref.id);
   } else if (ref.kind === 'MEASURE') {
     scene.measures = scene.measures.filter((m) => m.id !== ref.id);
+  } else if (ref.kind === 'CAMERA') {
+    // the scene keeps at least one camera: it is the view every render, the
+    // timeline and every attachment reaches for
+    if (scene.cameras.length > 1) {
+      const i = scene.cameras.findIndex((c) => c.id === ref.id);
+      if (i >= 0) {
+        scene.cameras.splice(i, 1);
+        scene.activeCamera = Math.max(0, Math.min(scene.activeCamera, scene.cameras.length - 1));
+      }
+    }
   } else {
     scene.meshes = scene.meshes.filter((m) => m.id !== ref.id);
   }
@@ -358,6 +378,7 @@ export function allRefs(scene: GPScene): ObjRef[] {
     ...scene.lights.map((l) => ({ kind: 'LIGHT' as const, id: l.id })),
     ...scene.actors.map((a) => ({ kind: 'ACTOR' as const, id: a.id })),
     ...scene.measures.map((m) => ({ kind: 'MEASURE' as const, id: m.id })),
+    ...scene.cameras.map((c) => ({ kind: 'CAMERA' as const, id: c.id })),
   ];
 }
 
@@ -720,6 +741,19 @@ export class ObjectSelectTool implements Tool {
       for (const p of measureScreenPoints(ctx, m)) {
         if (Math.hypot(p.x - e.x, p.y - e.y) < 14) return { kind: 'MEASURE', id: m.id };
       }
+    }
+    // Glyph objects — a camera and a lamp are DRAWN as a wire helper with
+    // nothing to raycast, so they are picked the way the score glyphs are:
+    // by screen distance to where they stand. Cameras first, since a
+    // projector often sits at one.
+    for (const cam of ctx.scene.cameras) {
+      const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'CAMERA', id: cam.id }));
+      if (p && Math.hypot(p.x - e.x, p.y - e.y) < 30) return { kind: 'CAMERA', id: cam.id };
+    }
+    for (const l of ctx.scene.lights) {
+      if (l.visible === false) continue;
+      const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'LIGHT', id: l.id }));
+      if (p && Math.hypot(p.x - e.x, p.y - e.y) < 30) return { kind: 'LIGHT', id: l.id };
     }
     for (const s of ctx.scene.splats) {
       const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'SPLAT', id: s.id }));

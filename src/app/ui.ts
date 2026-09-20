@@ -84,6 +84,8 @@ export interface AppHandle {
   setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
   cameraViewOn(): boolean;
   toggleCameraView(): void;
+  lookThroughCamera(): void;
+  refreshTimelineControls(): void;
   applyTexture(ref: { kind: string; id: number }, src: string, name: string): void;
   projectorThrow(lightId: number): { distance: number; width: number; height: number } | null;
   projectFile(lightId: number, file: File): Promise<void>;
@@ -3530,6 +3532,30 @@ export class UI {
       ],
       rename: (v) => { l.name = v; },
     });
+    scene.cameras.forEach((c, i) => nodes.push({
+      ref: { kind: 'CAMERA', id: c.id }, icon: icon('camera'), name: c.name,
+      selected: !!c.select, parent: c.parent,
+      onSelect: (e) => {
+        // selecting a camera also makes it the ACTIVE one: "the camera I am
+        // working on" and "the camera the scene renders through" being two
+        // different things is a trap, not a feature
+        scene.activeCamera = i;
+        this.app.setLastPicked({ kind: 'CAMERA', id: c.id });
+        toggleSel((v) => { c.select = v; }, !!c.select, !!(e?.metaKey || e?.ctrlKey));
+        this.app.refreshTimelineControls();
+      },
+      extras: [
+        btn(icon('eye'), () => { scene.activeCamera = i; this.app.lookThroughCamera(); },
+          { cls: 'icon-btn', active: i === scene.activeCamera && this.app.cameraViewOn(), title: 'Look through this camera' }),
+        el('span', { text: `${c.fov.toFixed(0)}°`, title: 'field of view' }),
+        ...viewLockBtns(
+          { kind: 'CAMERA', id: c.id },
+          false, () => { /* a camera is always drawn: its frustum is its body */ },
+          !!c.lock, (v) => { c.lock = v; },
+        ),
+      ],
+      rename: (v) => { c.name = v; this.app.refreshTimelineControls(); },
+    }));
     for (const s of scene.splats) nodes.push({
       ref: { kind: 'SPLAT', id: s.id }, icon: icon('sparkles'), name: s.name, selected: s.select,
       parent: s.parent,
