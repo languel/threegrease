@@ -4082,8 +4082,8 @@ export class UI {
         + 'negative for depth'),
         checkbox('Draw target', m.drawTarget, (v) => { m.drawTarget = v; }),
         ...this.physicsRows(m),
-        ...(m.kind === 'MODEL' || m.kind === 'EMPTY'
-          ? [] // MODEL owns its imported materials; EMPTY has no surface
+        ...(m.kind === 'EMPTY' ? []                 // no surface to display
+          : m.kind === 'MODEL' ? this.importDisplayRows(m)
           : this.materialEditor(ref)),
       );
     } else if (ref.kind === 'MEASURE') {
@@ -5241,6 +5241,49 @@ export class UI {
     // read as one vector rather than three boxes that happen to be adjacent
     return fieldRow(label, get().map((component, i) =>
       numField('', component, (v) => set(i, v), step, angle ? { angle: true } : {})));
+  }
+
+  /**
+   * HOW AN IMPORT IS DISPLAYED — not what it is made of.
+   *
+   * A .glb or .obj brings its own materials and they should stay the file's,
+   * but an import is usually REFERENCE: a scan of the room you are planning
+   * a show inside, a backdrop, a thing to trace over. That wants the same
+   * handful of view controls everything else has, applied on top of what
+   * the file says rather than replacing it — so the tint multiplies the
+   * file's colour, Unlit moves its texture into emission rather than
+   * throwing the material away, and turning them back restores the import
+   * exactly.
+   *
+   * TWO-SIDED is the one that matters for a room scan and it is off by
+   * default: these are captured with their normals facing INWARD, so with
+   * backface culling the wall between you and the room is not drawn and you
+   * look straight in — Blender's dollhouse view. It is not only a display
+   * choice either: three's raycaster honours the same flag, so a wall you
+   * can see through is a wall you can reach through to put something on the
+   * floor.
+   */
+  private importDisplayRows(m: TGMesh): Node[] {
+    const { ctx } = this.app;
+    const touch = () => { ctx.requestRender(); };
+    return [
+      el('div', { class: 'menu-sep' }),
+      el('div', { class: 'menu-header', text: 'Display' }),
+      el('div', { class: 'row' },
+        tip(colorField('Tint', [...(m.color ?? [1, 1, 1]), 1], (rgb) => { m.color = rgb; touch(); }),
+          'multiplies the file\u2019s own colours — white leaves the import exactly as it came'),
+        numField('Opacity', m.opacity ?? 1, (v) => { m.opacity = v; touch(); }, 0.05,
+          { min: 0, max: 1, def: 1, fill: true }),
+      ),
+      tip(checkbox('Two-sided', m.doubleSided !== false, (v) => { m.doubleSided = v; touch(); }),
+        'Off (the default for an import) draws only the front of each face. A room scan\u2019s '
+        + 'normals face inwards, so the near wall disappears and you see into the room from '
+        + 'outside \u2014 and can click through it to place things on the floor.'),
+      tip(checkbox('Unlit', !!m.unlit, (v) => { m.unlit = v; touch(); }),
+        'show the import\u2019s own texture flat, unaffected by the scene\u2019s lights'),
+      tip(checkbox('Wireframe', !!m.wireframe, (v) => { m.wireframe = v; touch(); }),
+        'always wireframe \u2014 Wireframe shading already does this to everything'),
+    ];
   }
 
   /** Read-only bounding-box size line (Blender's Item panel "Dimensions"),

@@ -428,10 +428,56 @@ export class MeshManager {
           unlit: data.unlit, doubleSided: data.doubleSided, wireframe: data.wireframe,
         }, !!live);
       } else {
-        // MODEL imports own their materials (from the GLTF/OBJ); only the
-        // non-color display props are ours to set
+        // A MODEL owns its materials (they came out of the file) but how it
+        // is DISPLAYED is ours: an import is usually reference or a backdrop
+        // — a scan you are planning a show inside — and it has to be
+        // dimmable, tintable, flattenable and wireframe-able like anything
+        // else, without repainting what the file says it looks like.
         if (live) mat.color.setRGB(1, 1, 1);
-        mat.wireframe = data.wireframe;
+        // the file's own colour is kept once and TINTED, never overwritten,
+        // so turning the tint back to white restores the import exactly
+        const u = mat.userData as { baseColor?: THREE.Color; baseEmissive?: THREE.Color; unlit?: boolean };
+        if (!u.baseColor) u.baseColor = mat.color.clone();
+        if (!u.baseEmissive && mat.emissive) u.baseEmissive = mat.emissive.clone();
+        if (!live) mat.color.copy(u.baseColor).multiply(new THREE.Color(...(data.color ?? [1, 1, 1])));
+        // UNLIT for an import: a standard material cannot be swapped for a
+        // basic one without losing the file's maps, so the map is moved into
+        // EMISSION instead — the same picture, lit by nothing
+        if (mat.emissive && u.unlit !== !!data.unlit) {
+          // ONLY when it changes: adding or removing a map rebuilds the
+          // shader program, and doing that every frame is a recompile per
+          // frame — the kind of thing that reads as "the app got slow after
+          // I imported a scan"
+          u.unlit = !!data.unlit;
+          if (data.unlit) {
+            mat.emissive.setRGB(1, 1, 1);
+            mat.emissiveMap = (mat.userData as { baseMap?: THREE.Texture | null }).baseMap ?? mat.map;
+            mat.emissiveIntensity = 1;
+          } else {
+            mat.emissive.copy(u.baseEmissive ?? new THREE.Color(0, 0, 0));
+            if (mat.emissiveMap === mat.map
+              || mat.emissiveMap === (mat.userData as { baseMap?: THREE.Texture | null }).baseMap) {
+              mat.emissiveMap = null;
+            }
+          }
+          mat.needsUpdate = true;
+        }
+        // The VIEW's wireframe shading wins over the object's own setting —
+        // "wireframe" that still draws solid imports is not a wireframe view
+        // — and it is UNTEXTURED, like Blender's. A wireframe that still
+        // samples the map paints every line with the picture, and at a
+        // scan's triangle density (160k for one room) the lines cover the
+        // surface completely: it looks exactly like the solid view it was
+        // supposed to replace.
+        const wire = data.wireframe || materialManager.shading === 'WIREFRAME';
+        const um = mat.userData as { baseMap?: THREE.Texture | null; wired?: boolean };
+        if (um.wired !== wire) {
+          um.wired = wire;
+          if (wire) { um.baseMap = mat.map; mat.map = null; }
+          else if (um.baseMap !== undefined) { mat.map = um.baseMap; um.baseMap = undefined; }
+          mat.needsUpdate = true;
+        }
+        mat.wireframe = wire;
         mat.side = data.doubleSided !== false ? THREE.DoubleSide : THREE.FrontSide;
         mat.transparent = data.opacity < 1 || !!(mat.map);
         mat.opacity = data.opacity;
@@ -557,7 +603,17 @@ export function createMeshObject(
     translation: [...at], rotation: standUpRotation(kind, zUp), scale: [1, 1, 1],
     visible: true, select: false, drawTarget: kind !== 'EMPTY', wireframe: false,
     color: [0.62, 0.65, 0.72], opacity: 1,
-    parent: null, texture: null, unlit: false, doubleSided: true, billboard: 'NONE',
+    parent: null, texture: null, unlit: false,
+    // AN IMPORT IS SINGLE-SIDED, everything else two-sided. A scan of a room
+    // is captured with its normals facing INWARD, which is what lets you
+    // look into it from outside — the wall between you and the room is
+    // back-facing and simply is not drawn (Blender's dollhouse view). Forced
+    // two-sided, that same scan is a sealed box you can only see the outside
+    // of, and the raycasts go with it: three's raycaster honours
+    // `material.side`, so single-sided walls are also walls you can reach
+    // THROUGH to put something on the floor.
+    doubleSided: src ? false : true,
+    billboard: 'NONE',
     originOffset: [0, 0, 0],
   };
 }

@@ -1524,6 +1524,41 @@ the browser console or automated evals:
   and FBX arrive with PHONG materials, which ignore the environment map that
   is all of Solid shading's light — also black; they are converted to
   Standard.
+- **AN IMPORT IS SINGLE-SIDED, and that is the DOLLHOUSE VIEW.** A room
+  scan is captured with its normals facing INWARD, so with backface culling
+  the wall between you and the room is simply not drawn and you look
+  straight into it from outside — how a scanned space is planned in, and
+  what Blender gives you for free. `createMeshObject` therefore defaults
+  `doubleSided` to FALSE for anything with a `src`; forced two-sided (what
+  it used to do) the same scan is a sealed box you can only see the outside
+  of.
+  It is not only a display choice: **three's raycaster honours
+  `material.side`**, so a wall you can see through is a wall you can reach
+  THROUGH. Verified on a 162k-triangle gallery scan — a ray through the
+  middle of the view lands on the FLOOR at z = 0.09, not on the near wall,
+  and Nearest snapping (Element / Vertex / Edge / Face) lands there too,
+  because every one of those paths goes through a raycast. That is the
+  whole of the "culling" a staging tool needs: no separate facing test, and
+  nothing that can disagree with what is on screen.
+- **An import's DISPLAY is ours; its materials are the file's**
+  (`UI.importDisplayRows`, the MODEL branch of `MeshManager.apply`). An
+  import is usually reference — a scan to plan inside, a backdrop, something
+  to trace — so it needs the same view controls as everything else, applied
+  ON TOP of what the file says rather than replacing it: the tint
+  MULTIPLIES the file's own colour (kept once in `userData.baseColor`, so
+  white restores the import exactly), Unlit moves the file's map into
+  EMISSION rather than swapping the material class and losing its maps, and
+  opacity, two-sided and wireframe are direct.
+  WIREFRAME shading wins over the object's own flag and is UNTEXTURED, like
+  Blender's: a wireframe that still samples the map paints every line with
+  the picture, and at a scan's density (160k triangles for one room) the
+  lines cover the surface completely — it looks exactly like the solid view
+  it was meant to replace. The map is stashed in `userData.baseMap` and put
+  back on the way out.
+  Anything that changes the shader PROGRAM — adding or removing a map —
+  is done only on the transition, with `needsUpdate` set there and nowhere
+  else. Setting it every frame is a recompile every frame, which reads as
+  "the app got slow after I imported a scan".
 - **The Library** (`io/assets.ts`, the Library tab) is object DEFINITIONS
   plus thumbnails in IndexedDB — the files themselves are in the store, so an
   entry stays small and a scan is kept once however often it is placed.
