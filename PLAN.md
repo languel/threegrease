@@ -156,6 +156,17 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)
+- [x] Plan inside a SCAN: imports open into a dollhouse view (single-sided,
+      normals inward) and can be clicked and snapped THROUGH onto their own
+      floor; imports get tint/opacity/two-sided/unlit/wireframe of their own
+- [x] Per-instance video/GIF playback (play, pause, speed per object); the
+      Library's own copies rest; texture slots pick from the Library
+- [x] One selection mark everywhere: meshes take the render silhouette, and
+      so does the object being drawn
+- [x] Light gizmo: drag the cone, the blend and a point light's reach; aim a
+      projector by dragging the spot it makes
+- [x] Angles in degrees, with pi/deg/rad and arithmetic accepted in any
+      angle field
 - [x] Projector KEYSTONE: drag the four corners of the thrown picture onto
       the real corners of what it is aimed at (projection mapping), and aim
       a projector by dragging the spot it makes
@@ -182,6 +193,7 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Library as a container: folders, drag to file, zip export/import,
       cameras and videos as live sources, render view / selection to it
 - [ ] Pack a scene with its stored files for moving between machines
+      (**the next phase's first blocker** — see docs/HANDOFF.md)
 - [ ] Measurements: curved legs (arc/spline) and surface-following paths
 - [x] Shared snapping module so every tool gets the one magnet
 - [x] Semantic detection: open-vocabulary (text-query) streams feeding the

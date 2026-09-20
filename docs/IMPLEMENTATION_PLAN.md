@@ -2903,3 +2903,208 @@ outright, plus field of view shown both ways — degrees and the 35 mm
 equivalent focal length. That conversion is `12 / tan(fov/2)`, not 18:
 three's fov is VERTICAL and 35 mm film is 24 mm tall, and the half-WIDTH
 calls a normal 50 mm lens 75 mm.
+
+## Projectors: aiming, keystone, and which way up the picture lands
+
+Three things a projector needs before a room can be planned around it, and
+one bug that made the first two useless.
+
+### Which way up
+
+The picture landed a quarter-turn over, and the cause was not in our code at
+all. Both projection paths sample through `light.shadow.matrix` — three's own
+spot map does, and so does the flat projector — and three builds that matrix
+with a `lookAt` whose ROLL is resolved against `shadow.camera.up`, which it
+leaves at world **+Y**. In a Z-up scene that is sideways. Measured on the
+matrix before the fix: moving UP in the world raised its `u`, and moving
+RIGHT lowered its `v`.
+
+`LightManager.apply` points that up at the LAMP's own +Y, so the picture
+follows the projector's own roll — which is what a real one does, and what
+makes `projection.rotation` and the beam glyph's up-arrow agree with the
+wall.
+
+The same trap bit `addProjector` from the other side: `lookAt` resolves its
+roll against the object's `up`, also +Y by default, and a projector aimed
+across a Z-up room is looking almost exactly along that — leaving the roll
+arbitrary. `App.aimRotation` is now shared by the add and the aim so they
+cannot disagree.
+
+### Aiming by the spot it makes
+
+A lamp has no face to grab. The transform widget turns it about its origin
+and you have to already know which way its -Z went to predict the result, so
+aiming through the widget is guesswork; "look through the light" works but
+means leaving the view you were working in.
+
+The handle is the beam's own target, drawn where the beam LANDS —
+`projectorThrow` measures it, so the ring sits on the wall being lit — and
+dragging it turns the lamp to keep pointing at it. That is how a real
+projector is aimed: by watching the light. The drag aims at whatever SURFACE
+is under the pointer, so the spot follows the geometry across a room, and
+falls back to the view plane at the current throw over open space.
+
+Two things it has to get right: the ring is grabbed in the CAPTURE phase,
+because it sits on a wall and the wall would take the click; and the
+rotation is written in the light's PARENT space like every other object's,
+or a projector filed under a group aims somewhere else.
+
+### Keystone
+
+A projector is hardly ever square to what it throws at — it hangs above the
+screen, sits off to one side, shares a wall with another one — so the picture
+lands as a trapezium. Pulling each corner onto the real corner of the screen
+or the doorway is what projection mapping IS, and it is done by eye against
+the real surface, which is why the handles are dragged in the viewport.
+
+- A corner is stored as (u, v) in the BEAM's own square frustum, so the shape
+  survives moving and re-aiming the projector (verified); a corner's world
+  position is derived by casting the beam's own ray for that (u, v), never
+  stored.
+- Canvas 2D has no projective transform — `setTransform` is affine, and an
+  affine map cannot turn a rectangle into a trapezium — so the image is
+  subdivided 16x16 and each cell drawn affinely through the true HOMOGRAPHY's
+  corner points. A bilinear blend of the four corners is the obvious cheap
+  version and is the WRONG map: it bends straight lines, and the whole point
+  is that the picture's edges land straight on the edges of the thing being
+  projected at.
+- It is painted into the same canvas inside the same clip, so Rotate, Mirror,
+  the mask and the edge blend all compose with it and both paths see one
+  picture. The beam glyph draws the keystoned quad.
+
+### The rest of the light gizmo
+
+Blender's handles: the cone rim (the angle), the ring inside it (the blend),
+and a point light's reach. A cone angle typed into a field is a number you
+then have to go and look at; the ring IS the edge of the light on the wall.
+Everything is measured in the beam's own frame — the pointer ray meets the
+PLANE the rings lie in, and the radius there says what the angle must be.
+
+A POINT light has no orientation, so its reach ring has no plane of its own
+that is not arbitrary: drawn in the lamp's own XY it is edge-on from any
+level view, where the ray never meets the plane and the drag silently does
+nothing. It faces the camera instead, and the drag uses the view plane to
+match.
+
+## A transform has a frame and a pivot
+
+An axis lock only ever meant a WORLD axis, which is the wrong axis as soon as
+anything is turned. Orientation (Global / Local / Normal / Gimbal / View /
+Cursor / Parent) and Pivot (Median / Bounding Box / Cursor / Individual /
+Active) are settings with their own icon dropdowns, to the LEFT of the
+placement cluster — they are a step earlier in the same sentence: these
+decide the frame a transform is expressed in, the placement decides where the
+result lands.
+
+ONE representation: a world-space orthonormal BASIS, and `constrainDelta`
+projects the delta into it, keeps what the lock allows, and brings it back.
+**Global is the identity**, so the component masking both modals used to do by
+hand falls out of the general case — which is what made it safe to put under
+every existing gesture. Both modals read `tools/orientation.ts`, so the object
+editor and the stroke/mesh editor cannot drift into meaning different things
+by "X". The basis is frozen when the gesture starts, as Blender does.
+
+Two honest limitations, stated rather than faked: GIMBAL is an alias for
+Local (our rotations are XYZ eulers, whose first axis IS local X), and CURSOR
+orientation is the world's basis at the cursor, because `scene.cursor` is a
+Vec3 and carries no rotation. It still differs from Global as a PIVOT, which
+is the half people reach for.
+
+N / Shift+N lock along, or across, the NORMAL of what is being dragged: an
+object's own +Z, or in mesh edit the average normal of the selected faces by
+Newell's method. It is the move no axis lock can name once a surface is
+turned, and pulling a wall straight out of itself is most of blocking out a
+room. Pivot: Individual Origins has no single point, so the modal hands the
+App a delta PER OBJECT and `applyWorldDelta` takes a factory.
+
+## Angles in degrees, typed in whatever you like
+
+The G/R/S overlay always said "Rot: 30.0°" while the field under it said
+0.524. One of the two was lying about what the app works in, and it was the
+field.
+
+A field marked `angle: true` takes and returns RADIANS — so the data, the
+file format and every caller are unchanged — and works internally in the
+display unit, which is what makes scrubbing, the arrows, min/max and the
+reset value all land on whole degrees. The step is the display unit's own; a
+radian step shown in degrees scrubs at 57 degrees a pixel.
+
+Typing carries its own unit, so the setting only decides what a BARE number
+means: `30deg`, `0.5rad`, `pi/2`, `0.5 pi`, `2pi`, `-2*pi/3`, `(1+1)*45`.
+Three things it has to get right, and all three were caught in testing:
+
+- **Pi is a radian unit.** Reading `pi/2` as 1.57 DEGREES because the panel
+  happens to be in degrees is the most confusing answer available.
+- **No leading `\b` in the unit patterns.** There is no word boundary between
+  a digit and a letter, so `45deg` and `2pi` — which is how they are actually
+  typed — matched nothing and the unit was silently ignored.
+- **The evaluator is a recursive-descent parser, not `eval`.** A number field
+  is somewhere a pasted string lands. Implicit multiplication is allowed only
+  against pi, or "1 5" would quietly mean 5.
+
+## Scans: the dollhouse view, and reaching through a wall
+
+The moment of practical truth: a real 162k-triangle gallery scan, brought in
+to plan a student show in.
+
+A room scan is captured with its normals facing INWARD. With backface culling
+the wall between you and the room is simply not drawn and you look straight
+into it from outside — the dollhouse view, and how a scanned space is planned
+in. We forced every import two-sided, which made the same scan a sealed box
+you could only see the outside of. `createMeshObject` now defaults
+`doubleSided` to false for anything with a `src`.
+
+**The interaction half came free.** three's raycaster honours `material.side`,
+so a wall you cannot see is a wall you can reach THROUGH. Verified on the
+scan: a ray through the middle of the view lands on the FLOOR at z = 0.09,
+not the near wall, and Nearest snapping (Element / Vertex / Edge / Face)
+lands there too, because every one of those paths goes through a raycast.
+That is the whole of the "culling" a staging tool needs — no separate facing
+test, and nothing that can disagree with what is on screen.
+
+An import's DISPLAY is ours while its materials stay the file's
+(`UI.importDisplayRows`): the tint MULTIPLIES the file's colour (kept aside,
+so white restores it exactly), Unlit moves the file's map into EMISSION
+rather than swapping the material class and losing its maps, and opacity,
+two-sided and wireframe are direct. WIREFRAME shading reaches imports and is
+UNTEXTURED, like Blender's — a wireframe that still samples the map paints
+every line with the picture, and at 160k triangles the lines cover the
+surface completely, so it looks exactly like the solid view it replaced.
+Anything that changes the shader PROGRAM is done only on the transition:
+`needsUpdate` every frame is a recompile every frame, which reads as "the app
+got slow after I imported a scan".
+
+## A placed video is its own player
+
+A camera is one device and everything showing it shares the frame. A VIDEO is
+not: two planes showing the same file are two screens in a room, and one held
+on a frame while the other runs is the normal case. An object's media
+texture is tagged with the object's own id (`live:media:<ref>#<id>`) and gets
+its own player, position, rate and paused state, with Play/Pause and Speed in
+its panel. Verified with two planes on one file: pausing one froze it at 0
+frames while the other advanced at 0.25x.
+
+The Library's own copy rests. A tile is a picture of what the file IS, not a
+screen, and twenty tiles decoding at once cost the frame budget of the scene
+you are working in.
+
+Texture slots pick from the LIBRARY first and a file second. Every slot used
+to open a file dialog, which is the wrong way round once a Library exists —
+the picture is nearly always one already brought in, and a file dialog cannot
+offer a CAMERA or a video at all.
+
+## One mark for "selected", and one for "being made"
+
+A mesh's inverted-hull outline is drawn IN the scene, so against a room scan
+its rim is cut by whatever stands in front: a box placed on a scanned floor
+came out half outlined. Meshes now take the render SILHOUETTE with everything
+else — it draws the object alone into a mask, so the whole shape shows
+through anything, and one mark means "selected" for a mesh, a drawing, a scan
+and a character alike. The hull stays for HOVER, where it costs nothing and
+is rarely occluded.
+
+The object being DRAWN wears the same mark before it is selected
+(`ObjectDrawHost.drafting`): the thing you are dragging out is the one thing
+on screen that has to be readable, and on a scanned floor it is a pale box
+against a pale floor. Because the rim comes from the object rendered alone,
+you can drag a plinth out behind an existing one and still read its shape.

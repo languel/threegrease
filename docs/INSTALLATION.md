@@ -135,6 +135,30 @@ placements — with real-world dimensions throughout.
   and measurement rescales at once. Everything downstream then means
   something in metres.
 
+### Planning inside a real scan (shipped 2026-09-20)
+
+The blockout workflow above assumed you would BUILD the room from
+photographs. If you have a scan of it, you no longer have to.
+
+- **An import opens into a dollhouse view.** A room scan is captured with its
+  normals facing inward, so with backface culling the wall between you and
+  the room is not drawn and you look straight in from outside. Imports
+  default to single-sided for exactly this; `Two-sided` in the object's
+  Display rows turns it off for models that want it.
+- **You can reach through a wall you cannot see.** three's raycaster honours
+  the same flag, so placement, all four Nearest snap targets and Poly Build
+  land on the floor through the near wall. Verified on a 162k-triangle
+  gallery scan: a ray through the middle of the view lands at z = 0.09.
+- **Imports have their own display controls** — tint, opacity, two-sided,
+  unlit, wireframe — applied on top of the file's materials, because a scan
+  is usually reference or backdrop rather than the work.
+- **Objects are drawn in place at real sizes** (planes, boxes, cylinders,
+  n-gons, the platonics) through the same placement chain as a stroke, so a
+  plinth is dragged out on the scanned floor where it goes.
+- **Projectors are planned against the room**: aim one by dragging the spot
+  it makes, read its throw distance and image size off the surface it hits,
+  and keystone the picture onto the real corners of a wall or screen.
+
 ### Semantic detection (shipped, model loading UNVERIFIED)
 
 `src/mm/detect.ts` — open-vocabulary detection: find things by *describing*
@@ -471,6 +495,14 @@ output interface. A generator would replace the gait UNDER the steering
 layer rather than sit beside it. The blockers remain the ones in the
 research note — the weights are under NVIDIA research licences, it wants
 ~17 GB of VRAM, and it is offline rather than real-time.
+
+## The next phase
+
+`HANDOFF.md` ends with a brief for the phase this opens: planning an actual
+student show in the scanned gallery. The first blocker named there is worth
+repeating here, because it is the one that stops the work leaving this
+machine — **a saved scene carries `store:` references, not the files**, so
+the scan, the videos and the images do not travel with the .json.
 
 ## Walkthrough
 

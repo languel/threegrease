@@ -156,6 +156,28 @@ npm run dev     # open http://localhost:5199
   and Spring. Grab a Follow Path object with the transform widget and drag
   it *along* its path to retime it. Object/target fields have a Blender-
   style picker: eyedropper, dropdown, or type a name.
+- **Plan inside a scan**: a `.glb` of a real room opens into a **dollhouse
+  view** — scans are captured with their normals facing inward, so the wall
+  between you and the room is culled and you see straight in from outside —
+  and you can click, place and snap *through* that wall onto the floor.
+  Imports carry their own display controls (tint, opacity, two-sided, unlit,
+  wireframe) applied over the file's own materials, so a scan works as
+  reference or backdrop.
+- **Transform orientation and pivot** (top bar, Blender's pair): Global,
+  Local, Normal, Gimbal, View, Cursor, Parent; Median, Bounding Box, Cursor,
+  Individual Origins, Active. `N` / `Shift+N` during a transform move along
+  or across the normal of whatever you are dragging, and `Ctrl` inverts the
+  magnet in any drag.
+- **Angles are degrees** everywhere, and any angle field takes `pi/2`,
+  `0.5 pi`, `30deg`, `0.5rad` or arithmetic like `-2*pi/3` (Settings ▸
+  Angles switches what a bare number means).
+- **Projector keystone**: drag the four corners of the thrown picture onto
+  the real corners of the screen, the doorway, or the next projector's edge.
+  Aim a projector by dragging the spot it makes on the wall; drag the cone,
+  blend and reach handles on any light.
+- **Per-instance media**: two planes showing one video are two players —
+  play, pause and speed are per object, and the Library's own copies stay
+  paused.
 - **Quad view** (`Ctrl+Alt+Q`): draw, edit and measure in any pane —
   input, helpers, HUD and modals all follow the pointer's viewport. Leaving
   quad view keeps the view you were hovering, Maya-style.

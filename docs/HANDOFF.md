@@ -677,3 +677,127 @@ projector that works only in Rendered shading. The panel has to say so.
 report could have been blamed on any of a dozen things. The lap breakdown
 named it in one run, twice — and both causes were doing correct work at the
 wrong RATE, not doing anything wrong.
+
+## Session log (2026-09-20): lighting a real room — projectors, transforms, scans
+
+Detail in IMPLEMENTATION_PLAN.md under "Projectors: aiming, keystone, and
+which way up the picture lands", "A transform has a frame and a pivot",
+"Angles in degrees, typed in whatever you like", "Scans: the dollhouse view,
+and reaching through a wall", "A placed video is its own player" and "One
+mark for 'selected', and one for 'being made'".
+
+This is the session where the tool met a real room: a 162k-triangle scan of
+the gallery an actual student show is being planned in.
+
+- **Cameras became objects** (outliner, selection, widget, parenting,
+  delete) with lens, focal length, clipping and keys in their panel.
+- **Projectors became aimable**: drag the ring the beam draws on what it is
+  lighting, or Aim at cursor. Then KEYSTONE — drag the four corners of the
+  thrown picture onto the real corners of the screen, the doorway or the
+  next projector's edge, which is projection mapping.
+- **The quarter-turn bug**: the picture landed rotated 90 degrees because
+  three's shadow camera resolves its roll against world +Y, which is
+  sideways in a Z-up scene. Both projection paths sample through that
+  matrix, so both were wrong together.
+- **Transform orientation and pivot** as header settings, driving every axis
+  lock in both editors through one shared basis; N / Shift+N along and
+  across the normal; Ctrl inverts the magnet in every drag.
+- **Angles are degrees**, with `pi/2`, `30deg`, `0.5rad` and arithmetic
+  accepted in any angle field.
+- **The light gizmo is draggable** — cone, blend, and a point light's reach.
+- **Scans work**: imports are single-sided, so a room scan opens into the
+  dollhouse view AND you can reach through the near wall to place things on
+  the floor. Imports gained their own display controls; Wireframe shading
+  reaches them, untextured.
+- **Added objects arrive in your hand** — selected with a move armed, so
+  placing is one gesture rather than find/select/G.
+- **Per-instance video**, and texture slots that pick from the Library.
+- **One selection mark everywhere**: meshes take the render silhouette, and
+  so does the object being drawn.
+
+**The lesson from this one: the bug is usually in what the library assumes,
+not in the arithmetic.** Three separate "wrong rotation" bugs this session
+were all the same shape — `lookAt` and three's shadow camera resolve ROLL
+against an `up` vector that defaults to +Y, which in a Z-up scene is
+sideways or degenerate. None of them looked like a rotation bug: one was "a
+new projector throws its picture on its side", one was "the picture is a
+quarter-turn out", one was "aiming does nothing". The fix each time was to
+hand the library the scene's own up.
+
+The second lesson is cheaper: **the interaction half of the dollhouse view
+cost nothing, because three's raycaster already honours `material.side`.**
+The culling that makes a scanned room readable is the same culling that lets
+you click through it. Reaching for a bespoke facing test would have built a
+second source of truth that could disagree with the screen.
+
+---
+
+# THE NEXT PHASE: planning a real show in a real room
+
+Everything above was tooling. The next phase has a deadline and a room: a
+student show, in the gallery whose scan now loads. The work is whatever
+stands between "the scan is in" and "here is the plan, and here is what it
+will look like".
+
+## What is already true
+
+- A scan loads, opens into a dollhouse view, and can be clicked through onto
+  its own floor. Placement, all four Nearest snap targets and Poly Build
+  resolve against it.
+- Plinths and panels can be DRAWN in place at real sizes, and the scene can
+  be scaled to a measurement so the metres mean metres.
+- Projectors throw images, video, GIFs and cameras, are aimed by dragging the
+  spot, and keystone onto a real surface. Flat projection shows the media as
+  it will look in a blacked-out room.
+- Characters walk the space, so scale and sightlines can be checked with a
+  body rather than by eye.
+
+## What the next phase needs, in order
+
+1. **PACK A SCENE WITH ITS FILES.** A saved scene carries `store:`
+   references, and the files live in this browser's IndexedDB. The scan, the
+   videos and the images do not travel with the .json — so a plan cannot be
+   sent to a collaborator, opened on the gallery's laptop, or archived. This
+   is the first thing that will hurt, and it blocks every collaboration.
+   (Shape: a .zip of the scene plus `files/<hash>/<name>`, exactly as the
+   Library export already does.)
+2. **A SHOW IS A LIST OF WORKS, not a pile of objects.** A plan needs to say
+   "Ana's video, 2.4 x 1.35 m, projected on the north wall, 4.1 m throw" and
+   print it. The data is all there (objects, measurements, projector throw);
+   what is missing is the notion of a WORK — a named entry with an artist, a
+   medium, dimensions and a place — and a way to get it out as a sheet.
+3. **SIGHTLINES AND WALKTHROUGH.** Possession already walks the room. What is
+   missing is the question a curator asks: from where can you see this piece,
+   and what do you see behind it? A camera bookmark per viewpoint plus the
+   existing render-to-Library is most of the answer.
+4. **MULTIPLE PROJECTORS ON ONE SURFACE.** Edge blending exists per
+   projector; two projectors overlapping on one wall need their blend
+   regions to be derived from the overlap rather than typed. The throw
+   readout and the keystone corners give the geometry to do it.
+5. **LIGHTING AS A PLAN.** A room's lighting is a list of fixtures with
+   positions, angles and gels. The gizmo now shapes them; a schedule that
+   can be handed to whoever hangs them is the missing half.
+6. **PERFORMANCE WITH A SCAN IN THE SCENE.** 162k triangles is one room.
+   Measure before optimising, with the overlay: the known costs are the
+   silhouette pass on a large selection (scissored, but a selected scan is
+   the whole frame) and the per-frame GP rebuild, which a scan does not
+   touch but a drawing over it does.
+
+## Traps the next phase will hit
+
+- **A scan is a MODEL, and a MODEL's geometry only exists in the render
+  tree.** Anything that needs its triangles (physics colliders, export,
+  bake) goes through `MeshManager.collisionMesh`. There is no vertex data in
+  `GPScene` to reach for.
+- **The dollhouse view depends on the scan's own normals.** A scan exported
+  without inward normals will look solid from outside and single-sided from
+  inside; the fix is in the exporter, or Two-sided on the object.
+- **POLY meshes have no facing test.** Raycasts honour `material.side` for
+  meshes and imports, but a scan CONVERTED to an editable mesh picks its
+  elements from the data, which knows nothing about culling.
+- **Physics and scans do not mix by default.** A MODEL's collider is a hull
+  unless told otherwise, and a hull of a room is a solid block. Use TRIMESH
+  for the room, and remember a trimesh is a surface, not a solid: a dynamic
+  body built from one falls through it.
+- **Scenes are portable within this browser only** until (1) is done. Do not
+  plan a rehearsal on another machine before then.
