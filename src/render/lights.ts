@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import type { GPScene, TGLight, TGProjection } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 import { liveKeyOf, liveSources } from '../io/livesources';
+import { isCurved } from './lens';
 
 /** The projector canvas is square because three maps a spot light's texture
  *  over its SQUARE frustum; the cone then cuts the inscribed circle out of
@@ -104,7 +105,14 @@ function makeHelper(kind: TGLight['kind'], color: THREE.ColorRepresentation): TH
  * the cone, which is how the texture is laid in). A round gobo, or a spot
  * with no picture, keeps the cone.
  */
-function beamLines(angle: number, aspect: number, length: number): THREE.BufferGeometry {
+/**
+ * The wire beam. `up`, when given, is the direction the PICTURE's top edge
+ * points in the beam's own x/y plane — a projector throwing an image is the
+ * one light whose ROLL matters, and a cone (or even a rectangle, which is
+ * symmetric about both axes) cannot show it: a frame hung upside down or
+ * quarter-turned looks exactly like a correct one until you light it.
+ */
+function beamLines(angle: number, aspect: number, length: number, up?: [number, number] | null): THREE.BufferGeometry {
   const pts: number[] = [];
   const r = Math.tan(angle) * length;
   if (aspect > 0) {
@@ -121,6 +129,29 @@ function beamLines(angle: number, aspect: number, length: number): THREE.BufferG
       pts.push(Math.cos(a0) * r, Math.sin(a0) * r, -length, Math.cos(a1) * r, Math.sin(a1) * r, -length);
       if (i % 6 === 0) pts.push(0, 0, 0, Math.cos(a0) * r, Math.sin(a0) * r, -length);
     }
+  }
+  if (up) {
+    // an arrowhead riding just outside the beam's edge, along the picture's
+    // own up — drawn at the FAR end where the picture lands, and in the
+    // beam's plane, so it reads from wherever you can see the beam
+    const un = Math.hypot(up[0], up[1]) || 1;
+    const u: [number, number] = [up[0] / un, up[1] / un];
+    const side: [number, number] = [-u[1], u[0]];
+    // how far out the edge is in this direction: the rectangle's own half
+    // extent, or the disc's radius
+    let edge = r;
+    if (aspect > 0) {
+      const w = r * aspect / Math.hypot(1, aspect), h = r / Math.hypot(1, aspect);
+      edge = Math.min(Math.abs(u[0]) > 1e-6 ? w / Math.abs(u[0]) : Infinity,
+        Math.abs(u[1]) > 1e-6 ? h / Math.abs(u[1]) : Infinity);
+    }
+    const base = edge + r * 0.08, tip = edge + r * 0.3, half = r * 0.12;
+    const at = (a: number, b: number): [number, number, number] =>
+      [u[0] * a + side[0] * b, u[1] * a + side[1] * b, -length];
+    const t = at(tip, 0), l = at(base, -half), rr = at(base, half);
+    pts.push(...l, ...t, ...t, ...rr, ...rr, ...l);
+    // and a stem back to the edge, so the arrow reads as belonging to it
+    pts.push(...at(edge, 0), ...at(base, 0));
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
@@ -261,6 +292,7 @@ export class LightManager {
     const src = proj?.src ?? null;
     if (!src) {
       if (light.map) { light.map = null; }
+      light.visible = true;
       this.shapeBeam(entry, data, 0);
       return;
     }
@@ -279,7 +311,7 @@ export class LightManager {
     const b = proj!.blend;
     const key = `${src}|${proj!.mode ?? 'PROJECT'}|${proj!.aspect ?? 0}|${proj!.fit ?? 'CONTAIN'}`
       + `|${proj!.rotation ?? 0}|${proj!.flip ? 1 : 0}|${proj!.gain ?? 1}|${proj!.flat ? 1 : 0}`
-      + `|${proj!.maskSrc ?? ''}|${proj!.maskInvert ? 1 : 0}`
+      + `|${proj!.maskSrc ?? ''}|${proj!.maskInvert ? 1 : 0}|${proj!.lens?.type ?? ''}`
       + `|${b ? [b.left, b.right, b.top, b.bottom, b.gamma].join(',') : ''}`;
     const frame = ls?.frame ?? 0;
     if (key !== p.key || frame !== p.frame) {
@@ -292,21 +324,45 @@ export class LightManager {
         p.frame = frame;
       }
     }
-    light.map = proj!.flat ? null : p.texture;
-    this.shapeBeam(entry, data, proj!.aspect ?? 0);
+    // A CURVED lens is round and flat by derivation, never by editing the
+    // record. Writing `aspect: 0, flat: true` into the projection (as the
+    // panel used to) cannot be undone when the lens goes back to a pinhole:
+    // the picture stayed round and unlit, which reads as "switching back
+    // broke it". The stored aspect and flat are the user's; the lens simply
+    // overrides how they are USED.
+    const curved = isCurved(proj!.lens);
+    // The lamp only carries the picture on the LIT path. Under flat — or a
+    // curved lens, which has no frustum to throw through — it would
+    // otherwise wash the wall with a plain white cone beside the picture the
+    // material pass is drawing, which is the "a light's spot appears" bug.
+    const flat = curved || !!proj!.flat;
+    light.map = flat ? null : p.texture;
+    light.visible = !flat;
+    this.shapeBeam(entry, data, curved ? 0 : proj!.aspect ?? 0);
   }
 
   /** The wire beam, rebuilt only when its shape changes. */
   private shapeBeam(entry: Entry, data: TGLight, aspect: number): void {
     if (entry.kind !== 'SPOT') return;
     const angle = data.angle ?? Math.PI / 6;
-    const key = `${angle.toFixed(4)}|${aspect}`;
+    // Which way is UP in the picture, in the beam's own plane. The canvas is
+    // painted y-DOWN and a CanvasTexture is uploaded flipped, so v = 1 (the
+    // canvas's top row) lands at +y here: the picture's top is +y. The paint
+    // rotates the image by `rotation` in canvas coordinates, which takes its
+    // top (0, -1) to (sin, -cos) — that is (sin, cos) once the y flip is
+    // undone. MIRROR is not part of it: `scale(-1, 1)` negates x only, so a
+    // rear-projected picture reads backwards but still stands the same way
+    // up, and folding the flip in here pointed the arrow at the floor.
+    const proj = data.projection;
+    const rot = proj?.rotation ?? 0;
+    const up: [number, number] | null = proj?.src ? [Math.sin(rot), Math.cos(rot)] : null;
+    const key = `${angle.toFixed(4)}|${aspect}|${up ? `${up[0].toFixed(3)},${up[1].toFixed(3)}` : '-'}`;
     if (entry.beamKey === key) return;
     entry.beamKey = key;
     const lines = entry.helper.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
     if (!lines) return;
     lines.geometry.dispose();
-    lines.geometry = beamLines(angle, aspect, 0.9);
+    lines.geometry = beamLines(angle, aspect, 0.9, up);
   }
 
   /** The three.js light for a scene light (flat projectors need its own
@@ -360,7 +416,9 @@ function paintProjection(
   g.fillRect(0, 0, S, S);
   const sw = (picture as HTMLCanvasElement).width || (picture as HTMLImageElement).naturalWidth || 1;
   const sh = (picture as HTMLCanvasElement).height || (picture as HTMLImageElement).naturalHeight || 1;
-  const aspect = proj.aspect && proj.aspect > 0 ? proj.aspect : 0;
+  // a curved lens fills the circle: a fisheye image laid into a 16:9
+  // rectangle would be thrown as a rectangle with black bars round it
+  const aspect = !isCurved(proj.lens) && proj.aspect && proj.aspect > 0 ? proj.aspect : 0;
   // the beam's disc is the inscribed circle: diameter S
   const rw = aspect ? S * aspect / Math.hypot(1, aspect) : S;
   const rh = aspect ? S / Math.hypot(1, aspect) : S;

@@ -2879,13 +2879,33 @@ class App implements AppHandle {
         copy.translation[0] += 0.3;
         scene.measures.push(copy);
         clones.push({ kind: 'MEASURE', id: copy.id });
-      } else {
+      } else if (ref.kind === 'MESH') {
         const src = scene.meshes.find((m) => m.id === ref.id);
         if (!src) continue;
         const copy = { ...JSON.parse(JSON.stringify(src)), id: newId() };
         copy.translation[0] += 0.3;
         scene.meshes.push(copy);
         clones.push({ kind: 'MESH', id: copy.id });
+      } else if (ref.kind === 'LIGHT' || ref.kind === 'CAMERA' || ref.kind === 'ACTOR'
+        || ref.kind === 'STREAM' || ref.kind === 'TRIGGER') {
+        // Everything else USED to fall through to "it must be a mesh", so
+        // `scene.meshes.find` came back undefined and Shift+D silently did
+        // nothing — which is exactly how duplicating a projector failed.
+        // These all carry a name and a position, so one branch serves them;
+        // a TRIGGER's position field is `position`, not `translation`.
+        const list = ref.kind === 'LIGHT' ? scene.lights
+          : ref.kind === 'CAMERA' ? scene.cameras
+          : ref.kind === 'ACTOR' ? scene.actors
+          : ref.kind === 'STREAM' ? scene.mmStreams
+          : scene.score.triggers;
+        const src = (list as { id: number }[]).find((x) => x.id === ref.id);
+        if (!src) continue;
+        const copy = { ...JSON.parse(JSON.stringify(src)), id: newId(), select: false };
+        copy.name += ' copy';
+        const at = (copy.translation ?? copy.position) as Vec3 | undefined;
+        if (at) at[0] += 0.3;
+        (list as unknown[]).push(copy);
+        clones.push({ kind: ref.kind, id: copy.id });
       }
     }
     deselectAllObjects(scene);
@@ -4707,7 +4727,9 @@ class App implements AppHandle {
     const flats: FlatProjector[] = [];
     for (const l of scene.lights) {
       const p = l.projection;
-      if (!p?.src || !p.flat || l.kind !== 'SPOT' || !l.visible) continue;
+      // a curved lens is flat by derivation — three's lit spot is a frustum,
+      // so there is no other path for it (see LightManager.applyProjection)
+      if (!p?.src || !(p.flat || isCurved(p.lens)) || l.kind !== 'SPOT' || !l.visible) continue;
       const light = this.lights.lightFor(l.id) as THREE.SpotLight | null;
       const map = this.lights.projectionTexture(l.id);
       if (!light || !map) continue;

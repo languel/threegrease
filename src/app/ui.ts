@@ -30,7 +30,7 @@ import {
   renameFolder, restoreAssets, updateAsset, type TGAsset,
 } from '../io/assets';
 import { liveSources } from '../io/livesources';
-import { effectiveFov, LENS_PRESETS, LENS_TYPES, polyOf } from '../render/lens';
+import { effectiveFov, isCurved, LENS_PRESETS, LENS_TYPES, polyOf } from '../render/lens';
 import { perf } from './perf';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
@@ -1885,6 +1885,10 @@ export class UI {
       fieldRow('Source', el('div', { class: 'row' }, sourceBtn, pickFile)),
     ];
     if (!p?.src) return rows;
+    // a curved lens fills the circle and is thrown flat; the stored Shape
+    // and Flat are kept but overridden, so the panel says so rather than
+    // showing controls that quietly do nothing
+    const curvedLens = isCurved(p.lens);
     const throwAt = this.app.projectorThrow(l.id);
     const unit = (m: number) => `${m.toFixed(2)} m`;
     rows.push(
@@ -1892,14 +1896,16 @@ export class UI {
         ['PROJECT', 'Projection (its colours)'], ['GOBO', 'Gobo (a shape in the beam)'],
       ], (v) => set({ mode: v as 'GOBO' | 'PROJECT' })),
       'A gobo is read as a shape and takes the light\'s own colour; a projection throws the picture\'s colours.')),
-      fieldRow('Shape', tip(selectField('', String(p.aspect ?? 0), [
+      fieldRow('Shape', tip(selectField('', curvedLens ? '0' : String(p.aspect ?? 0), [
         ['1.7777777777777777', '16:9'], ['1.3333333333333333', '4:3'], ['1.85', '1.85:1'],
         ['2.39', '2.39:1'], ['1', 'Square'], ['0', 'Fill the cone (round)'],
       ], (v) => set({ aspect: Number(v) })),
-      'The picture sits in the beam at this shape, its diagonal across the cone — so the lit patch is the projector\'s rectangle, not a circle.')),
+      curvedLens ? 'A curved lens fills the circle: the lens decides the shape while it is chosen.'
+        : 'The picture sits in the beam at this shape, its diagonal across the cone — so the lit patch is the projector\'s rectangle, not a circle.')),
       fieldRow('Fit', selectField('', p.fit ?? 'CONTAIN', [['CONTAIN', 'Fit inside'], ['COVER', 'Fill (crop)']],
         (v) => set({ fit: v as 'CONTAIN' | 'COVER' }))),
-      checkbox('Flat (ignore lighting)', !!p.flat, (v) => set({ flat: v }),
+      checkbox('Flat (ignore lighting)', curvedLens || !!p.flat, (v) => set({ flat: v }),
+        curvedLens ? 'A curved lens can only be thrown flat — three\'s lit spot is a frustum.' :
         'The picture is added to the surfaces at its own brightness instead of being thrown as light: '
         + 'undimmed, untinted, unaffected by anything else lighting the room — a projection in a blacked-out '
         + 'room, and how you want to see media while placing it. It shows in every shading mode, and is '
@@ -1910,8 +1916,12 @@ export class UI {
       fieldRow('Lens', tip(selectField('', p.lens?.type ?? 'PERSPECTIVE', LENS_TYPES, (v) => {
         const next = v === 'PERSPECTIVE' ? undefined
           : { ...(p.lens ?? {}), type: v as NonNullable<TGLens['type']>, fov: p.lens?.fov ?? Math.PI };
-        // a curved lens has no frustum to throw through: it needs the flat path
-        set({ lens: next, flat: next ? true : p.flat, aspect: next ? 0 : p.aspect });
+        // A curved lens has no frustum to throw through, so it is round and
+        // flat — but that is DERIVED at use, not written here. Forcing
+        // `aspect: 0, flat: true` into the record left them that way when the
+        // lens went back to a pinhole, and the picture stayed round and
+        // unlit with a bare lamp spot beside it.
+        set({ lens: next });
       }), 'A dome or fisheye projector: the picture is thrown by the lens model rather than through a frustum. '
         + 'It needs Flat projection (a lit spot is a frustum in three.js), and nothing blocks its beam.')),
       ...this.lensRows(() => p.lens, (nl) => set({ lens: nl })),

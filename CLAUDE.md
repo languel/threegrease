@@ -552,6 +552,16 @@ the browser console or automated evals:
   Key here / Clear. The Scale row is hidden for a camera, which has no
   size and would not have accepted the value.
 
+- **Shift+D's last branch must not be "anything else is a mesh".**
+  `duplicateSelectedObjects` ended in an `else` that looked the ref up in
+  `scene.meshes`, so every kind it did not name — LIGHT, CAMERA, ACTOR,
+  STREAM, TRIGGER — found nothing and was skipped in silence. Duplicating a
+  projector simply did nothing, with no error anywhere. (A MEASURE had hit
+  this before and was fixed by adding one more branch above the trap rather
+  than removing it.) Each kind is named now and the shared branch copies
+  through its own list; a TRIGGER's position field is `position`, not
+  `translation`.
+
 - **The outliner has keyboard focus when the last pointerdown was in it**
   (`App.outlinerFocused`; rows are divs rebuilt on every refresh, so DOM
   focus cannot say). X, Delete and Cmd+Backspace then delete the SELECTED
@@ -1584,6 +1594,35 @@ the browser console or automated evals:
     picture with a gamma curve, which is what makes two overlapping
     projectors join without a bright seam. Verified on the painted canvas:
     edge 5, quarter-in 129, centre 255; a half-black mask gives 0 / 255.
+  - **A curved lens is DERIVED as round and flat, never written into the
+    record.** The panel used to set `aspect: 0, flat: true` when you picked a
+    fisheye, and nothing put them back: switching to a pinhole again left the
+    picture round and unlit, which reads as "the projector broke". The stored
+    Shape and Flat stay the user's; `applyProjection`, `paintProjection` and
+    `syncFlatProjectors` each ask `isCurved(p.lens)` at the point of use, and
+    the panel shows the overridden values with a tip saying the lens is
+    deciding. The paint key carries the lens type too, or the canvas is not
+    repainted on a swap.
+  - **A lamp that is not carrying the picture is turned OFF** (`light.visible
+    = false` while flat or curved). Otherwise it washes the wall with a plain
+    white cone BESIDE the picture the material pass is drawing — the "a
+    light's spot appears" bug, and it is worst under a curved lens, where the
+    frustum spot has nothing to do with where the picture lands. A projector
+    with no source at all lights normally again.
+  - **The beam glyph carries an UP ARROW while it throws a picture.** A
+    projector is the one light whose ROLL matters and a cone cannot show it —
+    a frame hung upside down or quarter-turned looks exactly like a correct
+    one until you light it. The arrow rides just outside the beam's edge at
+    the far end, along the picture's own up. That direction is +y in the
+    light's frame: the canvas is painted y-DOWN and a CanvasTexture is
+    uploaded flipped, so v = 1 (the canvas's top row) lands at +y, and the
+    paint's `rotate(θ)` takes the image's top to (sin θ, cos θ) there. MIRROR
+    is NOT part of it — `scale(-1, 1)` negates x only, so a rear-projected
+    picture reads backwards but stands the same way up, and folding the flip
+    in pointed the arrow at the floor. Verified by sampling the painted
+    canvas through three's own shadow matrix at points around the beam: at 0
+    the picture's top lands up and the arrow is world +z; at 90 degrees both
+    move to +x; at 180 both point down; mirrored, both stay up.
   - **Look through a light** (Ctrl+0, `App.toggleViewThrough`): the viewport
     camera BECOMES the light, so orbiting, panning and flying aim it, and a
     spot's cone becomes the field of view — a projector cannot be aimed any
