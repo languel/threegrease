@@ -3958,8 +3958,12 @@ export class UI {
       rows.push(
         this.vecRow('Loc', () => t.translation.map((v) => +v.toFixed(3)), (i, v) => { t.translation[i] = v; write(); }),
         this.vecRow('Rot', () => t.rotation.map((v) => +v.toFixed(3)), (i, v) => { t.rotation[i] = v; write(); }),
-        this.vecRow('Scale', () => t.scale.map((v) => +v.toFixed(3)), (i, v) => { t.scale[i] = v; write(); }),
       );
+      // a camera has no size: its scale row reported a unit it would not
+      // accept, which is a control that does nothing
+      if (ref.kind !== 'CAMERA') {
+        rows.push(this.vecRow('Scale', () => t.scale.map((v) => +v.toFixed(3)), (i, v) => { t.scale[i] = v; write(); }));
+      }
     }
 
     if (ref.kind === 'MESH') {
@@ -4040,6 +4044,58 @@ export class UI {
             ], (v) => { l.shadowMapSize = Number(v); })),
           ] : []),
         ]),
+      );
+    } else if (ref.kind === 'CAMERA') {
+      const cam = ctx.scene.cameras.find((c) => c.id === ref.id)!;
+      const i = ctx.scene.cameras.indexOf(cam);
+      const isActive = ctx.scene.activeCamera === i;
+      // A camera carries the same LENS a projector does — one model read
+      // backwards instead of forwards — so the rows are literally the same
+      // ones (`lensRows`), and the two can never drift apart.
+      const lens = cam.lens;
+      // what a photographer would call it: the 35 mm equivalent of this
+      // angle, which is the number lenses are actually named after
+      // 35 mm film is 36x24, three's fov is VERTICAL, so the half-height is 12
+      const focal = 12 / Math.tan((cam.fov * Math.PI / 180) / 2);
+      rows.push(
+        el('div', { class: 'menu-sep' }),
+        el('div', { class: 'menu-header', text: 'Camera' }),
+        el('div', { class: 'row' },
+          btn(isActive ? 'Active camera' : 'Make active',
+            () => { this.app.setActiveCamera(i); this.refresh(); },
+            { cls: isActive ? 'on' : '', title: 'the camera the scene renders through' }),
+          btn(this.app.cameraViewOn() && isActive ? 'Stop looking' : 'Look through',
+            () => { this.app.setActiveCamera(i); this.app.lookThroughCamera(); }),
+        ),
+        fieldRow('Lens', selectField('', lens?.type ?? 'PERSPECTIVE', LENS_TYPES, (v) => {
+          ctx.pushUndo();
+          cam.lens = v === 'PERSPECTIVE' ? undefined
+            : { ...(lens ?? {}), type: v as NonNullable<GPCamera['lens']>['type'], fov: lens?.fov ?? Math.PI };
+          this.refresh();
+        })),
+        ...(lens && lens.type !== 'PERSPECTIVE' ? [] : [
+          fieldRow('Field of view', tip(numField('', +cam.fov.toFixed(1), (v) => {
+            cam.fov = Math.max(1, Math.min(170, v));
+            if (this.app.cameraViewOn() && isActive) this.app.setActiveCamera(i);
+          }, 1, { def: 50, min: 1, max: 170 }), 'the VERTICAL angle, in degrees')),
+          fieldRow('Focal length', tip(numField('', +focal.toFixed(1), (v) => {
+            cam.fov = 2 * Math.atan(12 / Math.max(1, v)) * 180 / Math.PI;
+            if (this.app.cameraViewOn() && isActive) this.app.setActiveCamera(i);
+          }, 1, { def: 25.7, min: 1 }), 'the same angle as a 35 mm-equivalent focal length — 50 mm is a normal lens')),
+        ]),
+        ...this.lensRows(() => cam.lens, (l) => { cam.lens = l; ctx.requestRender(); }),
+        el('div', { class: 'row' },
+          tip(numField('Clip start', cam.near ?? 0.01, (v) => { cam.near = Math.max(0.0001, v); }, 0.01, { def: 0.01 }),
+            'nothing nearer than this is drawn through the camera'),
+          numField('end', cam.far ?? 500, (v) => { cam.far = Math.max(1, v); }, 10, { def: 500 })),
+        el('div', { class: 'row' },
+          el('span', { class: 'grow', text: cam.keys.length ? `${cam.keys.length} keys` : 'no animation' }),
+          btn('Key here', () => { this.app.setActiveCamera(i); this.app.addCameraKey(); this.refresh(); },
+            { title: 'keyframe this camera at the current frame' }),
+          ...(cam.keys.length ? [btn('Clear', () => {
+            ctx.pushUndo(); cam.keys = []; this.refresh();
+          }, { title: 'drop every camera key' })] : []),
+        ),
       );
     } else if (ref.kind === 'SPLAT') {
       const s = ctx.scene.splats.find((x) => x.id === ref.id)!;

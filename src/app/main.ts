@@ -2123,6 +2123,9 @@ class App implements AppHandle {
       this.applyCameraPose();
     } else {
       this.camera.fov = 50;
+      // the scene camera's own clipping range goes with it
+      this.camera.near = 0.01;
+      this.camera.far = 500;
       this.camera.updateProjectionMatrix();
       this.controls.enabled = true;
     }
@@ -2134,6 +2137,9 @@ class App implements AppHandle {
     this.camera.position.copy(pose.position);
     this.camera.quaternion.copy(pose.quaternion);
     this.camera.fov = pose.fov;
+    const cam = activeCam(this.ctx.scene);
+    this.camera.near = cam.near ?? 0.01;
+    this.camera.far = cam.far ?? 500;
     this.camera.updateProjectionMatrix();
     const fwd = this.camera.getWorldDirection(new THREE.Vector3());
     this.controls.target.copy(this.camera.position).addScaledVector(fwd, 4);
@@ -5288,8 +5294,15 @@ class App implements AppHandle {
       // the pivot is the one thing a silhouette cannot show.
       // (keyed by KIND as well as id: a GP object and a mesh can share a
       // number, and one used to switch the other's outline off)
+      // A camera and a lamp are already nothing BUT an outline — a wire
+      // frustum, a wire cone — and they say they are selected by going the
+      // selection colour (`syncCameraHelpers`, LightManager.selectionColor).
+      // A box round one adds a second, bigger, axis-aligned outline that
+      // describes a helper's arbitrary drawing size rather than anything in
+      // the scene.
       entry.helper.visible = !(ref.kind === 'MESH' && hulls.has(ref.id))
-        && !silhouetted.has(key);
+        && !silhouetted.has(key)
+        && ref.kind !== 'CAMERA' && ref.kind !== 'LIGHT';
       if (entry.helper.visible) {
         // EdgesGeometry every frame is not free, so only for the outlines
         // that are actually drawn

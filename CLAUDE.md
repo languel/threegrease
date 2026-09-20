@@ -539,6 +539,18 @@ the browser console or automated evals:
   same position and are picked the same way now. Adding one leaves it
   SELECTED with the widget on it, because a camera added "at the current
   view" is otherwise invisible — it is exactly where your eye is.
+  Neither a camera nor a lamp wears the selection BOX: a box round a helper
+  describes the helper's arbitrary drawing size, not anything in the scene,
+  and both of them are already nothing but an outline. The origin dot stays.
+  Its Properties panel carries what a projector's does, because a lens is
+  ONE model read in two directions: the same `lensRows` (type, presets, the
+  Bourke polynomial, shift), plus field of view shown BOTH ways — degrees and
+  the 35 mm-equivalent focal length, `12 / tan(fov/2)`, since three's fov is
+  VERTICAL and 35 mm film is 24 mm tall (using the 18 mm half-WIDTH there
+  calls a normal lens 75 mm) — the clipping range (`near`/`far`, applied
+  while looking through and restored on the way out), and the key count with
+  Key here / Clear. The Scale row is hidden for a camera, which has no
+  size and would not have accepted the value.
 
 - **The outliner has keyboard focus when the last pointerdown was in it**
   (`App.outlinerFocused`; rows are divs rebuilt on every refresh, so DOM

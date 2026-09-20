@@ -305,6 +305,11 @@ export interface GPCamera {
   /** a curved lens: fisheye, equirectangular, cylindrical, mirror ball.
    *  Absent = the ordinary pinhole the `fov` above describes. */
   lens?: TGLens;
+  /** clipping range while looking through this camera (metres). Absent uses
+   *  the viewport's own 0.01 / 500 — a camera INSIDE a scanned room wants a
+   *  nearer near, and one looking down a street a further far. */
+  near?: number;
+  far?: number;
   select?: boolean;
   lock?: boolean;
   parent?: ParentRef | null;
