@@ -156,6 +156,9 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)
+- [x] LENSES for cameras and projectors: equidistant / equisolid /
+      polynomial (Bourke's measured form) fisheye, equirectangular,
+      cylindrical, mirror ball — a dome projector and a 360 camera
 - [x] Draw objects in place (plane, rect, triangle, n-gon, box, cylinder,
       pyramid, sphere, the four platonic solids) with the same placement,
       plane, guide and snapping as a stroke — blocking out a set is drawing it

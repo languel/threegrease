@@ -268,6 +268,28 @@ export interface GPCameraKey {
   fov: number;
 }
 
+/**
+ * A LENS: how directions become picture, for a camera (read backwards) or a
+ * projector (read forwards). See render/lens.ts — the polynomial is Paul
+ * Bourke's fisheye-correction form, which is how real lenses are published.
+ */
+export interface TGLens {
+  type: 'PERSPECTIVE' | 'FISHEYE_EQUIDISTANT' | 'FISHEYE_EQUISOLID'
+  | 'FISHEYE_POLY' | 'EQUIRECT' | 'CYLINDRICAL' | 'MIRRORBALL';
+  /** the FULL field of view in radians (a 180 degree dome is PI) */
+  fov?: number;
+  /** FISHEYE_POLY: k0..k4 of r(θ) = k0 + k1θ + k2θ² + k3θ³ + k4θ⁴, with r
+   *  normalised so 1 is the edge of the image circle */
+  poly?: number[];
+  /** FISHEYE_EQUISOLID, the way lenses are sold: focal length and sensor
+   *  width in mm. Together they give the angle the image circle covers. */
+  focal?: number;
+  sensor?: number;
+  /** lens shift, in half-frames (a projector on a shelf throws upward) */
+  shiftX?: number;
+  shiftY?: number;
+}
+
 /** A scene camera: transformable, keyframable, viewable (numpad 0). */
 export interface GPCamera {
   name: string;
@@ -275,6 +297,9 @@ export interface GPCamera {
   rotation: Vec3;
   fov: number;
   keys: GPCameraKey[];     // sorted by frame
+  /** a curved lens: fisheye, equirectangular, cylindrical, mirror ball.
+   *  Absent = the ordinary pinhole the `fov` above describes. */
+  lens?: TGLens;
   /** wire-art target drawing for this viewpoint (dataURL), P6 */
   target?: string;
   targetOpacity?: number;  // assist overlay opacity in camera view
@@ -646,6 +671,10 @@ export interface TGProjection {
   maskSrc?: string | null;
   maskName?: string;
   maskInvert?: boolean;
+  /** The projector's LENS (render/lens.ts). A curved one — a fisheye, a
+   *  dome, an equirect — has no frustum to throw through, so it needs the
+   *  FLAT path; a lit projection stays a pinhole. */
+  lens?: TGLens;
 }
 
 /** A mesh scene object: primitive solid, plane, or imported model —

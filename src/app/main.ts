@@ -93,6 +93,7 @@ import {
 import { LIVE_PREFIX, isMediaName, liveKeyOf, liveSources, testCardDataUrl } from '../io/livesources';
 import { perf, PerfOverlay } from './perf';
 import { MAX_FLAT, setFlatProjectors, type FlatProjector } from '../render/projectors';
+import { effectiveFov, isCurved, LensCamera, lensTypeIndex, polyOf } from '../render/lens';
 
 function hasLight(o: THREE.Object3D): boolean {
   let found = false;
@@ -2103,6 +2104,8 @@ class App implements AppHandle {
       if (Math.abs((light.angle ?? 0) - angle) > 1e-4) light.angle = angle;
     }
   }
+
+  cameraViewOn(): boolean { return this.cameraView; }
 
   toggleCameraView(): void {
     this.cameraView = !this.cameraView;
@@ -4673,18 +4676,27 @@ class App implements AppHandle {
       const light = this.lights.lightFor(l.id) as THREE.SpotLight | null;
       const map = this.lights.projectionTexture(l.id);
       if (!light || !map) continue;
-      this.lights.rootFor(l.id)?.updateMatrixWorld(true);
+      const root = this.lights.rootFor(l.id);
+      root?.updateMatrixWorld(true);
       // three's own world -> [0,1] frustum matrix for this spot: the shadow
       // matrix IS the projection matrix (it is how three samples a spot map)
       light.shadow.updateMatrices(light);
+      const curved = isCurved(p.lens);
       flats.push({
         matrix: light.shadow.matrix,
+        // world -> the projector's own frame, for a curved lens
+        view: root ? new THREE.Matrix4().copy(root.matrixWorld).invert() : new THREE.Matrix4(),
+        lensType: curved ? lensTypeIndex(p.lens!.type) : 0,
+        lensHalfFov: Math.max(0.05, effectiveFov(p.lens) / 2),
+        lensK: polyOf(p.lens),
         map,
         gain: p.gain ?? 1,
         penumbra: l.penumbra ?? 0.1,
         // occlusion comes from the light's own shadow map, so a flat
         // projection is only blocked by things when the light casts shadows
-        shadow: l.castShadow ? light.shadow.map?.texture ?? null : null,
+        // — and a curved lens has no shadow map that matches it, so a dome
+        // projector throws through whatever is in the way
+        shadow: !curved && l.castShadow ? light.shadow.map?.texture ?? null : null,
         shadowBias: Math.abs(l.shadowBias ?? 0.0005) + 0.0015,
       });
       if (flats.length >= MAX_FLAT) break;
@@ -5868,7 +5880,18 @@ class App implements AppHandle {
         this.glRenderer.setRenderTarget(this.post.target);
         this.glRenderer.clear();
       }
-      this.glRenderer.render(this.scene3, this.nav.active);
+      // A CURVED LENS cannot be rasterised (a GPU draws straight lines), so
+      // the scene goes into a cube and one pass asks the lens where each
+      // pixel looks — see render/lens.ts. Only through the camera: it is the
+      // camera's own optics, not a property of the viewport.
+      const lens = this.cameraView ? activeCam(ctx.scene).lens : undefined;
+      if (isCurved(lens)) {
+        this.camera.updateMatrixWorld(true);
+        this.lensCam.render(this.glRenderer, this.scene3, this.camera, lens!,
+          styled ? this.post.target : null);
+      } else {
+        this.glRenderer.render(this.scene3, this.nav.active);
+      }
       perf.lap('render');
       for (const job of fxJobs) {
         const ob = ctx.scene.objects[job.obIndex];
@@ -5897,8 +5920,13 @@ class App implements AppHandle {
       perf.lap('post');
       // AFTER the look: a selection rim is interface, and belongs over the
       // finished frame rather than inside the bloom or the paper wash
-      this.silhouette.draw(this.glRenderer, this.scene3, this.nav.active,
-        this.silhouetteGroups, ctx.settings.uiHighlightAlpha);
+      // a selection rim is drawn by re-rendering through the view camera,
+      // which a curved lens is not — so it stands down there rather than
+      // drawing an outline where the object is not
+      if (!isCurved(this.cameraView ? activeCam(ctx.scene).lens : undefined)) {
+        this.silhouette.draw(this.glRenderer, this.scene3, this.nav.active,
+          this.silhouetteGroups, ctx.settings.uiHighlightAlpha);
+      }
       perf.lap('outline');
     }
 
@@ -5911,6 +5939,8 @@ class App implements AppHandle {
   }
 
   private perfOverlay: PerfOverlay | null = null;
+  /** cube-and-remap renderer for a camera with a curved lens (render/lens.ts) */
+  private readonly lensCam = new LensCamera();
 
   setRenderScale(scale: number): void {
     this.ctx.settings.renderScale = scale;

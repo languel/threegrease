@@ -19,6 +19,7 @@
 // light's OWN shadow map — the same one three renders for it — so a flat
 // projection is only as honest as the light's `castShadow` setting.
 import * as THREE from 'three';
+import { LENS_GLSL } from './lens';
 
 /** How many flat projectors can be live at once. Fixed so the shader can
  *  unroll (a sampler array cannot be indexed dynamically) — more than a
@@ -28,6 +29,14 @@ export const MAX_FLAT = 4;
 export interface FlatProjector {
   /** world -> the projector's [0,1] frustum (three's own shadow matrix) */
   matrix: THREE.Matrix4;
+  /** world -> the projector's own frame, for a CURVED lens: a fisheye or a
+   *  dome has no frustum to project through, so the direction is taken into
+   *  the lens's frame and the lens itself says where it lands */
+  view: THREE.Matrix4;
+  /** render/lens.ts type index; 0 = the ordinary frustum above */
+  lensType: number;
+  lensHalfFov: number;
+  lensK: number[];
   map: THREE.Texture;
   /** brightness of the thrown picture */
   gain: number;
@@ -59,6 +68,11 @@ export const projectorUniforms = {
   uFlatShadow: { value: Array.from({ length: MAX_FLAT }, () => dummy as THREE.Texture) },
   /** x = gain, y = penumbra, z = 1 when the shadow map is real, w = bias */
   uFlatParams: { value: Array.from({ length: MAX_FLAT }, () => new THREE.Vector4(1, 0.1, 0, 0.0005)) },
+  uFlatView: { value: Array.from({ length: MAX_FLAT }, () => new THREE.Matrix4()) },
+  /** x = lens type, y = half field of view */
+  uFlatLens: { value: Array.from({ length: MAX_FLAT }, () => new THREE.Vector2(0, Math.PI / 2)) },
+  /** k0..k4 per projector, flattened (GLSL has no array of arrays) */
+  uFlatK: { value: new Array(MAX_FLAT * 5).fill(0) },
 };
 
 const VERT_HEAD = /* glsl */`
@@ -69,12 +83,22 @@ const VERT_BODY = /* glsl */`
 `;
 
 const FRAG_HEAD = /* glsl */`
+${LENS_GLSL}
+// three's <packing> (which carries unpackRGBAToDepth) is only in materials
+// that ask for it — a MeshBasicMaterial has none — so the shadow depth is
+// unpacked here, self-contained like the rest of this chunk
+float flatUnpackDepth( vec4 v ) {
+  return dot( v, vec4( 1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0 ) ) * ( 255.0 / 256.0 );
+}
 varying vec3 vFlatWorld;
 uniform int uFlatCount;
 uniform mat4 uFlatMatrix[ ${MAX_FLAT} ];
 uniform sampler2D uFlatMap[ ${MAX_FLAT} ];
 uniform sampler2D uFlatShadow[ ${MAX_FLAT} ];
 uniform vec4 uFlatParams[ ${MAX_FLAT} ];
+uniform mat4 uFlatView[ ${MAX_FLAT} ];
+uniform vec2 uFlatLens[ ${MAX_FLAT} ];
+uniform float uFlatK[ ${MAX_FLAT * 5} ];
 `;
 
 // Added to the outgoing colour, so it is not touched by lighting, by the
@@ -83,21 +107,49 @@ const FRAG_BODY = /* glsl */`
   #pragma unroll_loop_start
   for ( int i = 0; i < ${MAX_FLAT}; i ++ ) {
     if ( UNROLLED_LOOP_INDEX < uFlatCount ) {
-      vec4 fpc = uFlatMatrix[ i ] * vec4( vFlatWorld, 1.0 );
-      if ( fpc.w > 0.0 ) {
-        vec3 fuv = fpc.xyz / fpc.w;
-        if ( fuv.x > 0.0 && fuv.x < 1.0 && fuv.y > 0.0 && fuv.y < 1.0 && fuv.z > 0.0 && fuv.z < 1.0 ) {
-          vec4 fpx = texture2D( uFlatMap[ i ], fuv.xy );
-          // the beam is the cone inscribed in its square frustum
-          float fr = length( fuv.xy - 0.5 ) * 2.0;
-          float fatt = 1.0 - smoothstep( 1.0 - uFlatParams[ i ].y, 1.0, fr );
-          float fvis = 1.0;
-          if ( uFlatParams[ i ].z > 0.5 ) {
-            float fdepth = unpackRGBAToDepth( texture2D( uFlatShadow[ i ], fuv.xy ) );
-            fvis = ( fuv.z - uFlatParams[ i ].w ) > fdepth ? 0.0 : 1.0;
-          }
-          outgoingLight += fpx.rgb * fpx.a * uFlatParams[ i ].x * fatt * fvis;
+      int ftype = int( uFlatLens[ i ].x );
+      vec2 fimg;                      // where this point lands in the picture
+      bool fon = false;
+      float fdepthCoord = 0.0;
+      bool fcanShadow = false;
+      if ( ftype == 0 ) {
+        // a pinhole projector: the frustum matrix answers directly
+        vec4 fpc = uFlatMatrix[ i ] * vec4( vFlatWorld, 1.0 );
+        if ( fpc.w > 0.0 ) {
+          vec3 fuv = fpc.xyz / fpc.w;
+          fon = fuv.x > 0.0 && fuv.x < 1.0 && fuv.y > 0.0 && fuv.y < 1.0 && fuv.z > 0.0 && fuv.z < 1.0;
+          fimg = fuv.xy;
+          fdepthCoord = fuv.z;
+          fcanShadow = true;
         }
+      } else {
+        // a CURVED lens: take the point into the projector's own frame and
+        // ask the lens where that direction lands (the forward model — no
+        // inversion, which is why a dome projector is the easy direction)
+        vec3 flocal = ( uFlatView[ i ] * vec4( vFlatWorld, 1.0 ) ).xyz;
+        float fk[5];
+        fk[0] = uFlatK[ UNROLLED_LOOP_INDEX * 5 + 0 ];
+        fk[1] = uFlatK[ UNROLLED_LOOP_INDEX * 5 + 1 ];
+        fk[2] = uFlatK[ UNROLLED_LOOP_INDEX * 5 + 2 ];
+        fk[3] = uFlatK[ UNROLLED_LOOP_INDEX * 5 + 3 ];
+        fk[4] = uFlatK[ UNROLLED_LOOP_INDEX * 5 + 4 ];
+        vec2 fp;
+        if ( lensProject( ftype, flocal, uFlatLens[ i ].y, fk, fp ) ) {
+          fimg = fp * 0.5 + 0.5;
+          fon = true;
+        }
+      }
+      if ( fon ) {
+        vec4 fpx = texture2D( uFlatMap[ i ], fimg );
+        // the beam is the cone inscribed in the picture's square
+        float fr = length( fimg - 0.5 ) * 2.0;
+        float fatt = 1.0 - smoothstep( 1.0 - uFlatParams[ i ].y, 1.0, fr );
+        float fvis = 1.0;
+        if ( fcanShadow && uFlatParams[ i ].z > 0.5 ) {
+          float fdepth = flatUnpackDepth( texture2D( uFlatShadow[ i ], fimg ) );
+          fvis = ( fdepthCoord - uFlatParams[ i ].w ) > fdepth ? 0.0 : 1.0;
+        }
+        outgoingLight += fpx.rgb * fpx.a * uFlatParams[ i ].x * fatt * fvis;
       }
     }
   }
@@ -121,9 +173,9 @@ export function receiveProjection(mat: THREE.Material): void {
       '#include <project_vertex>', `#include <project_vertex>\n${VERT_BODY}`,
     );
     shader.fragmentShader = FRAG_HEAD + shader.fragmentShader
-      // (`packing`, which carries unpackRGBAToDepth for the occlusion test,
-      // is already part of every material three builds — including it again
-      // redefines every one of its functions and the shader fails to compile)
+      // (three's own <packing> cannot be included here: it is already in
+      // some materials, where re-including redefines every one of its
+      // functions, and missing from others — hence flatUnpackDepth above)
       .replace('#include <opaque_fragment>', `${FRAG_BODY}\n#include <opaque_fragment>`);
   };
   mat.customProgramCacheKey = () => 'flatProjector';
@@ -138,6 +190,9 @@ export function setFlatProjectors(list: FlatProjector[]): void {
     const p = list[i];
     if (i < n && p) {
       projectorUniforms.uFlatMatrix.value[i].copy(p.matrix);
+      projectorUniforms.uFlatView.value[i].copy(p.view);
+      projectorUniforms.uFlatLens.value[i].set(p.lensType, p.lensHalfFov);
+      for (let k = 0; k < 5; k++) projectorUniforms.uFlatK.value[i * 5 + k] = p.lensK[k] ?? 0;
       projectorUniforms.uFlatMap.value[i] = p.map;
       projectorUniforms.uFlatShadow.value[i] = p.shadow ?? dummy;
       projectorUniforms.uFlatParams.value[i].set(p.gain, p.penumbra, p.shadow ? 1 : 0, p.shadowBias);

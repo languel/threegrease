@@ -1,6 +1,6 @@
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget, type NearestTarget } from '../tools/context';
 import type { EditorMode } from '../render/GPSceneRenderer';
-import type { TGLight, GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
+import type { TGLight, TGLens, GPCamera, GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
 import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, forEachSelectedStroke, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
@@ -30,6 +30,7 @@ import {
   renameFolder, restoreAssets, updateAsset, type TGAsset,
 } from '../io/assets';
 import { liveSources } from '../io/livesources';
+import { effectiveFov, LENS_PRESETS, LENS_TYPES, polyOf } from '../render/lens';
 import { perf } from './perf';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
@@ -81,6 +82,8 @@ export interface AppHandle {
   /** Edit mode is open on a mesh (vertex / edge / face editor) */
   meshEditing(): boolean;
   setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
+  cameraViewOn(): boolean;
+  toggleCameraView(): void;
   applyTexture(ref: { kind: string; id: number }, src: string, name: string): void;
   projectorThrow(lightId: number): { distance: number; width: number; height: number } | null;
   projectFile(lightId: number, file: File): Promise<void>;
@@ -1902,6 +1905,14 @@ export class UI {
       fieldRow('Brightness', slider('', p.gain ?? 1, 0, 2, 0.05, (v) => { set({ gain: v }); }, { def: 1 })),
       fieldRow('Rotate', slider('', p.rotation ?? 0, -Math.PI, Math.PI, 0.01, (v) => { set({ rotation: v }); }, { def: 0 })),
       checkbox('Mirror', !!p.flip, (v) => set({ flip: v }), 'rear projection'),
+      fieldRow('Lens', tip(selectField('', p.lens?.type ?? 'PERSPECTIVE', LENS_TYPES, (v) => {
+        const next = v === 'PERSPECTIVE' ? undefined
+          : { ...(p.lens ?? {}), type: v as NonNullable<TGLens['type']>, fov: p.lens?.fov ?? Math.PI };
+        // a curved lens has no frustum to throw through: it needs the flat path
+        set({ lens: next, flat: next ? true : p.flat, aspect: next ? 0 : p.aspect });
+      }), 'A dome or fisheye projector: the picture is thrown by the lens model rather than through a frustum. '
+        + 'It needs Flat projection (a lit spot is a frustum in three.js), and nothing blocks its beam.')),
+      ...this.lensRows(() => p.lens, (nl) => set({ lens: nl })),
       ...this.projectorMaskRows(l, set),
       ...this.projectorBlendRows(l, set),
       el('div', { class: 'row', text: throwAt
@@ -1970,6 +1981,80 @@ export class UI {
       ...(on ? [fieldRow('Blend curve', slider('', b.gamma ?? 1, 0.3, 3, 0.05,
         (v) => set({ blend: { ...b, gamma: v } }), { def: 1, title: 'the ramp\'s shape; raise it if the overlap still reads bright' }))] : []),
     ];
+  }
+
+  /**
+   * The active camera's LENS. A curved one is not a frustum, so the view
+   * through it is rendered into a cube and remapped (render/lens.ts) — six
+   * faces a frame, which is what a lens that sees past a frustum costs.
+   */
+  private cameraLensPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const cam = ctx.scene.cameras[ctx.scene.activeCamera] ?? ctx.scene.cameras[0];
+    if (!cam) return panel('Camera lens', el('div', { class: 'row', text: 'no camera in the scene' }));
+    const lens = cam.lens;
+    const rows: Node[] = [
+      fieldRow('Lens', selectField('', lens?.type ?? 'PERSPECTIVE', LENS_TYPES,
+        (v) => {
+          ctx.pushUndo();
+          cam.lens = v === 'PERSPECTIVE' ? undefined
+            : { ...(lens ?? {}), type: v as NonNullable<GPCamera['lens']>['type'], fov: lens?.fov ?? Math.PI };
+          this.refresh();
+        })),
+      ...this.lensRows(() => cam.lens, (l) => { cam.lens = l; ctx.requestRender(); }),
+    ];
+    if (lens && lens.type !== 'PERSPECTIVE' && !this.app.cameraViewOn()) {
+      rows.push(el('div', { class: 'row' },
+        el('span', { class: 'grow', text: 'Only seen through the camera.' }),
+        btn('Look through', () => { this.app.toggleCameraView(); this.refresh(); })));
+    }
+    return panel(`Camera lens — ${cam.name}`, ...rows);
+  }
+
+  /**
+   * The lens itself, shared by a camera and a projector: one model read
+   * backwards (which direction is this pixel?) or forwards (where does this
+   * direction land?). Presets carry published coefficient sets.
+   */
+  private lensRows(get: () => TGLens | undefined, put: (l: TGLens | undefined) => void): Node[] {
+    const lens = get();
+    if (!lens || lens.type === 'PERSPECTIVE') return [];
+    const set = (patch: Partial<TGLens>) => { put({ ...lens, ...patch }); this.refresh(); };
+    const rows: Node[] = [];
+    const presetBtn: HTMLElement = btn('Lens presets…', () => {
+      const r = presetBtn.getBoundingClientRect();
+      this.openContextMenu(r.left, r.bottom + 2, [
+        { header: 'Measured and standard lenses' },
+        ...LENS_PRESETS.map((p) => ({ label: p.name, do: () => { put({ ...p.lens }); this.refresh(); } })),
+      ]);
+    }, { title: 'Published lens models, including Paul Bourke\'s measured 190° fisheye' });
+    rows.push(el('div', { class: 'row' }, presetBtn));
+    if (lens.type !== 'EQUIRECT' && lens.type !== 'MIRRORBALL') {
+      rows.push(fieldRow('Field of view', tip(numField('', +((lens.fov ?? Math.PI) * 180 / Math.PI).toFixed(1),
+        (v) => set({ fov: Math.max(5, Math.min(360, v)) * Math.PI / 180 }), 1,
+        { def: 180, min: 5, max: 360 }), 'The FULL angle the image circle covers — 180° is a dome.')));
+    }
+    if (lens.type === 'FISHEYE_EQUISOLID') {
+      rows.push(el('div', { class: 'row' },
+        numField('Focal mm', lens.focal ?? 8, (v) => set({ focal: Math.max(0.5, v) }), 0.5, { def: 8 }),
+        numField('Sensor mm', lens.sensor ?? 36, (v) => set({ sensor: Math.max(1, v) }), 1, { def: 36 })),
+      );
+      rows.push(el('div', { class: 'row', text: `covers ${(effectiveFov(lens) * 180 / Math.PI).toFixed(0)}°` }));
+    }
+    if (lens.type === 'FISHEYE_POLY') {
+      const k = polyOf(lens);
+      rows.push(tip(el('div', { class: 'row' },
+        el('span', { class: 'grow', text: 'r(θ) = k0 + k1θ + k2θ² + k3θ³ + k4θ⁴' })),
+      'θ is the angle from the axis in radians and r is the radius on the image, 1 being the edge of '
+        + 'the circle — the form real lenses are published in (paulbourke.net/dome/fisheyecorrect).'));
+      rows.push(el('div', { class: 'row' },
+        ...k.map((v, i) => numField(`k${i}`, +v.toFixed(4),
+          (nv) => { const next = polyOf(lens); next[i] = nv; set({ poly: next }); }, 0.01, { def: i === 1 ? 0.5 : 0 }))));
+    }
+    rows.push(el('div', { class: 'row' },
+      numField('Shift X', lens.shiftX ?? 0, (v) => set({ shiftX: v }), 0.01, { def: 0 }),
+      numField('Y', lens.shiftY ?? 0, (v) => set({ shiftY: v }), 0.01, { def: 0 })));
+    return rows;
   }
 
   openStrokeOpsContextMenu(clientX: number, clientY: number): void {
@@ -2247,7 +2332,7 @@ export class UI {
     const tabs: { id: string; icon: IconName; title: string; build: () => HTMLElement[] }[] = [
       {
         id: 'scene', icon: 'globe', title: 'Scene — world · grid · background',
-        build: () => [this.worldPanel(), this.measurePanel(), this.scenePanel()],
+        build: () => [this.worldPanel(), this.cameraLensPanel(), this.measurePanel(), this.scenePanel()],
       },
       {
         id: 'object', icon: 'cube', title: 'Object — transform · material',

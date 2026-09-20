@@ -1441,6 +1441,41 @@ the browser console or automated evals:
     media is already compressed). IMPORT takes that zip, or a FOLDER of the
     same, adding beside what is there with fresh ids; a zip or folder with no
     library.json is imported as loose files (scans, models, images).
+- **LENSES** (`render/lens.ts`, `TGLens` on a camera and on a projection):
+  installations are full of curved optics — a dome, a fisheye projector, a
+  360 camera, a mirror ball — and none of them are a frustum. ONE model
+  serves both ends, because they are the same function read in opposite
+  directions: a camera asks "this pixel is at radius r — which direction?"
+  (the model inverted), a projector asks "this surface is at angle θ — where
+  in the picture?" (the model forward).
+  - The polynomial is Paul Bourke's published fisheye-correction form
+    (paulbourke.net/dome/fisheyecorrect): r(θ) = k0 + k1θ + k2θ² + k3θ³ +
+    k4θ⁴, θ in RADIANS from the axis, r NORMALISED with 1 the edge of the
+    image circle — which is how real lenses are measured, so a published set
+    pastes straight in (his measured 190° lens is a preset). Blender's
+    "Fisheye Lens Polynomial" is the same polynomial with r in sensor mm;
+    k0 is its offset term, kept for that reason. Equisolid can be given as
+    focal + sensor mm instead, which decides the covered angle
+    (`effectiveFov`: θ = 4·asin(sensor / 4f)).
+  - A CAMERA with a curved lens cannot be rasterised — a GPU draws straight
+    lines — so the scene is rendered into a CUBE and one full-screen pass
+    asks the lens where each pixel looks (`LensCamera`). Six faces a frame is
+    the honest cost. The cube is world-aligned and the camera's rotation is a
+    uniform (`uOrient`), so turning the view costs nothing extra. Outside the
+    image circle is BLACK, not "far". The selection rim stands down under a
+    curved lens: it re-renders through the view camera, which this is not.
+  - A PROJECTOR with a curved lens is the easy direction and needs no
+    inversion: the flat-projector shader takes the point into the
+    projector's own frame and calls the forward model (`lensProject`). That
+    is a real dome/fisheye projector. It REQUIRES the flat path (three's lit
+    spot is a frustum), so choosing a curved lens turns Flat on and the
+    picture round; and its beam is not blocked by anything, since the spot's
+    shadow map is a frustum that cannot match it.
+  - Two shader traps, both from injecting code BEFORE a material's own
+    source: three's `<common>` (which defines PI) has not been included yet,
+    so the chunk carries its own `LENS_PI`; and `unpackRGBAToDepth` lives in
+    `<packing>`, which some materials have and others (MeshBasicMaterial) do
+    not — the flat projector unpacks depth itself rather than including it.
 - **DRAW an object where it goes** (`tools/objectdraw.ts`, Object mode's
   toolbar): Add ▸ Box gives you a cube at the cursor that then has to be
   moved, turned and scaled — three operations to say one thing. These draw it
