@@ -28,6 +28,8 @@ interface Entry {
   helper: THREE.Object3D;
   kind: TGLight['kind'];
   shadowMapSize: number;
+  /** SPOT only: the draggable aim target out along the beam */
+  aim?: THREE.Object3D;
   /** the projected picture: its canvas, the texture over it, and what was
    *  last painted there (so a still image is painted once) */
   proj?: {
@@ -243,6 +245,40 @@ export class LightManager {
     }
   }
 
+  /**
+   * THE AIM HANDLE: a ring out along the beam, at the distance the beam
+   * actually reaches, with a stem back to the lamp. Dragging it aims the
+   * projector (App.aimDrag) — which is the only way to aim one from outside
+   * it, since a lamp has no face to grab and rotating it by eye through the
+   * transform widget means guessing which way -Z went.
+   *
+   * It is drawn only for the SELECTED spot, because it is a control and not
+   * a decoration, and it lives in the light's own space so it follows
+   * whatever moves the lamp.
+   */
+  private makeAimHandle(): THREE.Object3D {
+    const g = new THREE.Group();
+    const mat = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.9 });
+    const pts: number[] = [];
+    const R = 0.16;
+    for (let i = 0; i < 20; i++) {
+      const a0 = (i / 20) * Math.PI * 2, a1 = ((i + 1) / 20) * Math.PI * 2;
+      pts.push(Math.cos(a0) * R, Math.sin(a0) * R, 0, Math.cos(a1) * R, Math.sin(a1) * R, 0);
+    }
+    // a cross in the ring, so it reads as a target rather than a bubble
+    pts.push(-R, 0, 0, R, 0, 0, 0, -R, 0, 0, R, 0);
+    const ring = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(
+      Array.from({ length: pts.length / 3 }, (_, i) => new THREE.Vector3(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]))), mat);
+    g.add(ring);
+    g.renderOrder = 999;
+    return g;
+  }
+
+  /** Where each selected projector's handle sits, in metres down the beam —
+   *  the App measures it against what the beam hits, so the ring lands ON
+   *  the wall it is lighting. */
+  aimDistance = new Map<number, number>();
+
   private apply(entry: Entry, data: TGLight, scene: GPScene): void {
     const { light, root, helper } = entry;
     root.visible = data.visible;
@@ -253,6 +289,15 @@ export class LightManager {
     light.intensity = data.intensity;
     light.visible = this.lightsEnabled;
     helper.visible = this.helpersVisible;
+    if (data.kind === 'SPOT') {
+      if (!entry.aim) { entry.aim = this.makeAimHandle(); entry.root.add(entry.aim); }
+      const d = this.aimDistance.get(data.id) ?? 4;
+      entry.aim.visible = this.helpersVisible && !!data.select;
+      entry.aim.position.set(0, 0, -d);
+      // the ring keeps a constant apparent size relative to the throw, so
+      // it is grabbable whether the wall is 1 m or 20 m away
+      entry.aim.scale.setScalar(Math.max(0.35, d * 0.25));
+    }
     if ((data.select || this.hoverId === data.id) && this.selectionColor) this.tint.copy(this.selectionColor);
     else this.tint.setRGB(...data.color);
     helper.traverse((o) => {

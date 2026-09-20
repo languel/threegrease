@@ -79,7 +79,10 @@ export class ObjectModalTransform {
   /** Pivot: Individual Origins — one delta PER object, about its own origin. */
   onDeltaEach: ((per: (ref: ObjRef) => THREE.Matrix4) => void) | null = null;
 
-  begin(ctx: AppCtx, kind: ObjModalKind, pointer: { x: number; y: number }): boolean {
+  /** `undo: false` when the caller already pushed a step — placing a just
+   *  added object is ONE undo (the add), not two, or undoing the placement
+   *  would leave the object behind. */
+  begin(ctx: AppCtx, kind: ObjModalKind, pointer: { x: number; y: number }, undo = true): boolean {
     const refs = listSelected(ctx.scene);
     // INDIVIDUAL has no single pivot — each object turns about its own — so
     // the gesture still needs A point to measure the pointer against, and
@@ -88,7 +91,7 @@ export class ObjectModalTransform {
     const pivot = transformPivotPoint(ctx, refs, this.activeRef, this.boundsOf ?? undefined)
       ?? selectionPivot(ctx.scene);
     if (!refs.length || !pivot) return false;
-    ctx.pushUndo();
+    if (undo) ctx.pushUndo();
     this.refs = refs;
     this.base = refs.map((r) => getObjectTransform(ctx.scene, r)!);
     this.pivot.copy(pivot);

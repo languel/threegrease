@@ -1356,6 +1356,21 @@ class App implements AppHandle {
         this.ui.refresh();
         return;
       }
+      // a click before the pointer ever moved means "leave it where it is"
+      if (this.placeArmed) this.disarmPlacement();
+      // the aim handle is grabbed before anything else can claim the click:
+      // it sits ON a wall, and the wall would otherwise be picked instead
+      if (e.button === 0 && !this.nav.flying) {
+        const grab = this.aimHandleAt(e.clientX, e.clientY);
+        if (grab) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          this.ctx.pushUndo();
+          this.aimDrag = grab;
+          this.capture(e);
+          return;
+        }
+      }
       if (e.button !== 2 || !e.shiftKey || this.nav.flying) return;
       e.stopImmediatePropagation();
       e.preventDefault();
@@ -1443,6 +1458,17 @@ class App implements AppHandle {
         this.navDrag.x = te.x; this.navDrag.y = te.y;
         return;
       }
+      if (this.aimDrag) {
+        const at = this.aimPointAt(e.clientX, e.clientY, this.aimDrag.distance);
+        if (at) { this.aimLightAt(this.aimDrag.id, at); this.ui.refresh(); }
+        return;
+      }
+      if (this.placeArmed && !this.objModal.active) {
+        // a just-added object picks itself up the first time the pointer
+        // moves over the viewport (see placeNew)
+        this.pointerPane = this.paneAt(e.clientX, e.clientY);
+        this.startArmedPlacement(te);
+      }
       if (this.objModal.active) {
         this.withPane(this.pointerPane, () => this.objModal.update(this.ctx, this.toolEvent(e), { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey }));
         return;
@@ -1468,6 +1494,7 @@ class App implements AppHandle {
 
     canvas.addEventListener('pointerleave', () => { this.hoverPane = null; });
     canvas.addEventListener('pointerup', (e) => {
+      if (this.aimDrag) { this.aimDrag = null; this.ui.refresh(); return; }
       if (e.button === 2) {
         if (this.cursorDrag) { this.cursorDrag = false; return; }
         const down = this.rmbDown;
@@ -1647,6 +1674,12 @@ class App implements AppHandle {
     }
 
     // object-mode G/R/S modal takes precedence over everything
+    if (this.placeArmed && (key === 'Escape' || key === 'Enter')) {
+      // armed but never picked up: it stays where it was created
+      this.disarmPlacement();
+      e.preventDefault();
+      return;
+    }
     if (this.objModal.active) {
       const om = this.objModal;
       if (key === 'Escape') { om.cancel(ctx); this.refreshWidget(); this.ui.refresh(); }
@@ -3207,17 +3240,22 @@ class App implements AppHandle {
     this.ctx.pushUndo();
     const at = dropped ?? this.cursorTarget();
     const point = at.point;
+    // a DROPPED asset is already where the pointer put it; one PLACED from
+    // the Library (double-click) lands at the cursor and is picked up
+    let made: ObjRef | null = null;
     if (asset.kind === 'GP') {
       importGPObjects(scene, asset.payload);
       const ob = scene.objects[scene.objects.length - 1];
       ob.translation = [...point];
       scene.activeObject = scene.objects.length - 1;
+      made = { kind: 'GP', id: ob.id };
       this.gp.markDirty();
     } else if (asset.kind === 'POLY') {
       const def = JSON.parse(asset.payload);
       let id = Date.now() % 1e9;
       while (scene.polyMeshes.some((p) => p.id === id)) id++;
       scene.polyMeshes.push({ ...def, id, parent: null, select: false, translation: [...point], rev: 0 });
+      made = { kind: 'POLY', id };
     } else if (asset.kind === 'STREAM') {
       // a camera goes on as a picture of itself: an unlit plane whose
       // texture IS the stream, at the camera's own aspect
@@ -3233,6 +3271,7 @@ class App implements AppHandle {
       mesh.scale = [aspect * 0.5, 0.5, 1];
       if (at) this.orientPanel(mesh, at);
       scene.meshes.push(mesh);
+      made = { kind: 'MESH', id: mesh.id };
       if (key.startsWith('media:')) this.fitToMedia(mesh, key.slice('media:'.length), label);
       this.meshes.sync(scene, this.nav.active);
     } else if (asset.kind === 'MESH') {
@@ -3242,13 +3281,17 @@ class App implements AppHandle {
       // an image hangs on the wall it is dropped on, as a direct drop does
       if (def.kind === 'PLANE' && at) this.orientPanel(placed, at);
       scene.meshes.push(placed);
+      made = { kind: 'MESH', id };
       this.meshes.sync(scene);
       if (def.kind === 'MODEL') this.placing.push({ ref: { kind: 'MESH', id }, ground: point, since: performance.now() });
     } else {
       const def = JSON.parse(asset.payload);
-      scene.splats.push({ ...def, id: Date.now() % 1e9, parent: null, select: false, translation: [...point] });
+      const id = Date.now() % 1e9;
+      scene.splats.push({ ...def, id, parent: null, select: false, translation: [...point] });
+      made = { kind: 'SPLAT', id };
     }
-    this.ui.refresh();
+    if (made && !dropped) this.placeNew(made);
+    else this.ui.refresh();
   }
 
   /**
@@ -4554,10 +4597,57 @@ class App implements AppHandle {
   addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA' | 'EMPTY', src?: string, at?: [number, number, number]): void {
     this.ctx.pushUndo();
     const id = Date.now() % 1e9;
-    this.ctx.scene.meshes.push(createMeshObject(id, src ? 'MODEL' : kind, at ?? [...this.ctx.scene.cursor], src));
+    this.ctx.scene.meshes.push(createMeshObject(
+      id, src ? 'MODEL' : kind, at ?? [...this.ctx.scene.cursor], src,
+      this.ctx.settings.upAxis === 'Z'));
     this.meshes.sync(this.ctx.scene);
-    this.ui.refresh();
+    this.placeNew({ kind: 'MESH', id });
   }
+
+  /**
+   * A NEW OBJECT ARRIVES IN YOUR HAND.
+   *
+   * Everything added from a menu lands at the 3D cursor, which is almost
+   * never where it goes — so every add used to be followed by the same
+   * three steps: find the thing, select it, press G. Instead the new object
+   * is selected and a MOVE is armed: the next time the pointer moves over
+   * the viewport it picks the object up, and a click puts it down. Escape
+   * leaves it where it was created, because that is the one position you
+   * are certain about.
+   *
+   * The grab is ARMED rather than begun, and that is the whole trick: the
+   * pointer is over the MENU when the object is added, so starting the
+   * modal there would measure its delta from a position the object has
+   * nothing to do with and the thing would jump the moment the cursor came
+   * back over the viewport. Waiting for the first move means the gesture
+   * starts exactly where the pointer is.
+   */
+  private placeArmed: ObjRef | null = null;
+
+  private placeNew(ref: ObjRef): void {
+    const scene = this.ctx.scene;
+    deselectAllObjects(scene);
+    setObjectSelected(scene, ref, true);
+    this.setLastPicked(ref);
+    this.objModal.activeRef = ref;
+    this.placeArmed = ref;
+    this.refreshWidget();
+    this.ui.refresh();
+    this.setStatusHint('move the mouse to position it · click to place · Esc leaves it at the cursor', 4000);
+  }
+
+  /** Called on the first pointer move after an add. */
+  private startArmedPlacement(pointer: { x: number; y: number }): void {
+    const ref = this.placeArmed;
+    this.placeArmed = null;
+    if (!ref || this.objModal.active || this.modal.active) return;
+    // the add already pushed an undo step; the grab must not push a second,
+    // or undoing the placement leaves the object behind
+    this.withPane(this.pointerPane, () => this.objModal.begin(this.ctx, 'move', pointer, false));
+  }
+
+  /** Esc, or a click, before the pointer ever moved: leave it at the cursor. */
+  private disarmPlacement(): void { this.placeArmed = null; }
 
   /**
    * Rescale the WHOLE scene so a chosen measurement equals a real length.
@@ -4812,12 +4902,8 @@ class App implements AppHandle {
     const e = new THREE.Euler().setFromQuaternion(look.quaternion);
     l.rotation = [e.x, e.y, e.z];
     scene.lights.push(l);
-    deselectAllObjects(scene);
-    l.select = true;
-    this.setLastPicked({ kind: 'LIGHT', id: l.id });
-    this.refreshWidget();
-    this.ui.refresh();
-    this.setStatusHint('Projector added — drop an image, video or camera on it to throw it');
+    this.placeNew({ kind: 'LIGHT', id: l.id });
+    this.setStatusHint('Projector added — move to position it, click to place · drop an image, video or camera on it to throw it', 5000);
   }
 
   /**
@@ -4911,16 +4997,97 @@ class App implements AppHandle {
     return { distance, width, height };
   }
 
+  /**
+   * AIM A PROJECTOR BY DRAGGING THE SPOT IT MAKES.
+   *
+   * A lamp has no face to grab: the transform widget turns it about its
+   * origin, and you have to already know which way its -Z went to predict
+   * what that does — so aiming through the widget is guesswork, and "look
+   * through the light" (Ctrl+0) means leaving the view you were working in.
+   * The handle is the beam's own target, drawn on the surface it is
+   * lighting: drag it and the lamp turns to keep pointing at it, which is
+   * how you aim a real one — by watching where the light lands.
+   *
+   * The drag aims at whatever SURFACE is under the pointer, so the spot
+   * follows the geometry across a room; with nothing under the pointer it
+   * falls back to the view plane at the current throw distance, so the
+   * handle still tracks the mouse over open space.
+   */
+  private aimDrag: { id: number; distance: number } | null = null;
+
+  /** Turn a light to look at a world point. A lamp's beam runs down its own
+   *  -Z, like a camera's view, so `lookAt` (which points +Z for anything
+   *  that is not a camera) has to be turned around — the same correction
+   *  `addProjector` makes, and the reason a hand-built basis gets a lamp
+   *  pointing at the wall behind it. */
+  aimLightAt(id: number, at: THREE.Vector3 | Vec3): void {
+    const l = this.ctx.scene.lights.find((x) => x.id === id);
+    const root = this.lights.rootFor(id);
+    if (!l || !root) return;
+    // the UI is DOM-only and holds no three.js, so a plain [x, y, z] is a
+    // first-class way to say where to aim
+    const target = Array.isArray(at) ? new THREE.Vector3(...at) : at;
+    const from = new THREE.Vector3().setFromMatrixPosition(root.matrixWorld);
+    const look = new THREE.Object3D();
+    look.up.copy(this.ctx.settings.upAxis === 'Z' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0));
+    look.position.copy(from);
+    look.lookAt(target);
+    look.rotateY(Math.PI);
+    // the rotation is stored in the light's PARENT space, like every other
+    // object's — a projector filed under a group must still aim where you
+    // point it
+    const parentM = parentWorldMatrixOf(this.ctx.scene, { kind: 'LIGHT', id });
+    const local = new THREE.Matrix4().extractRotation(parentM).invert()
+      .multiply(new THREE.Matrix4().makeRotationFromQuaternion(look.quaternion));
+    const e = new THREE.Euler().setFromRotationMatrix(local);
+    l.rotation = [e.x, e.y, e.z];
+  }
+
+  /** Is the pointer on a selected projector's aim handle? */
+  private aimHandleAt(clientX: number, clientY: number): { id: number; distance: number } | null {
+    if (this.ctx.settings.mode !== 'OBJECT') return null;
+    const pane = this.paneAt(clientX, clientY);
+    return this.withPane(pane, () => {
+      const r = this.ctx.canvas.getBoundingClientRect();
+      const px = clientX - r.left, py = clientY - r.top;
+      for (const l of this.ctx.scene.lights) {
+        if (l.kind !== 'SPOT' || !l.select || l.visible === false) continue;
+        const root = this.lights.rootFor(l.id);
+        if (!root) continue;
+        root.updateMatrixWorld(true);
+        const d = this.projectorThrow(l.id)?.distance ?? 4;
+        const p = new THREE.Vector3(0, 0, -d).applyMatrix4(root.matrixWorld).project(this.ctx.camera);
+        if (p.z > 1) continue;
+        const sx = (p.x * 0.5 + 0.5) * r.width, sy = (-p.y * 0.5 + 0.5) * r.height;
+        if (Math.hypot(sx - px, sy - py) < 26) return { id: l.id, distance: d };
+      }
+      return null;
+    });
+  }
+
+  /** Where the handle should go for this pointer position: what the ray
+   *  hits, else the view plane at the distance the drag started at. */
+  private aimPointAt(clientX: number, clientY: number, distance: number): THREE.Vector3 | null {
+    const pane = this.paneAt(clientX, clientY);
+    return this.withPane(pane, () => {
+      const r = this.ctx.canvas.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(ndc, this.ctx.camera);
+      const hit = ray.intersectObjects([...this.ctx.pickableMeshes, ...this.ctx.surfaces], true)
+        .find((h) => h.object.visible && !h.object.userData.overlay);
+      if (hit) return hit.point.clone();
+      return ray.ray.at(distance, new THREE.Vector3());
+    });
+  }
+
   addLight(kind: TGLight['kind'], at?: [number, number, number]): void {
     const scene = this.ctx.scene;
     this.ctx.pushUndo();
     const l = createLight(kind, undefined, at ?? [...scene.cursor]);
     scene.lights.push(l);
-    deselectAllObjects(scene);
-    l.select = true;
-    this.setLastPicked({ kind: 'LIGHT', id: l.id });
-    this.refreshWidget();
-    this.ui.refresh();
+    this.placeNew({ kind: 'LIGHT', id: l.id });
   }
 
   /** Persist UVs on an editable mesh. Lives here (not in the UI) because
@@ -4977,10 +5144,8 @@ class App implements AppHandle {
     ob.translation = at ?? [...scene.cursor];
     scene.objects.push(ob);
     scene.activeObject = scene.objects.length - 1;
-    setObjectSelected(scene, { kind: 'GP', id: ob.id }, true);
     this.gp.markDirty();
-    this.refreshWidget();
-    this.ui.refresh();
+    this.placeNew({ kind: 'GP', id: ob.id });
   }
 
   /**
@@ -6078,6 +6243,14 @@ class App implements AppHandle {
     perf.lap('helpers');
     this.syncSelectionGlyphs();
     this.syncDropHighlight();
+    // the aim handle sits where the beam LANDS, so it is measured against
+    // what the beam hits — only for the selected spots, since that is the
+    // only time it is drawn (a raycast per selected projector per frame)
+    this.lights.aimDistance.clear();
+    for (const l of ctx.scene.lights) {
+      if (l.kind !== 'SPOT' || !l.select) continue;
+      this.lights.aimDistance.set(l.id, this.projectorThrow(l.id)?.distance ?? 4);
+    }
     perf.lap('selection');
 
     if (this.quadView && this.paneRects) {

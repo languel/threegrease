@@ -621,6 +621,43 @@ the browser console or automated evals:
   OBJECTS in any mode — in Draw or Edit mode X otherwise means "delete
   strokes", which is not what clicking a row in the object list asks for. A
   drawing mode that deletes its last pencil gets a fresh one.
+- **A NEW OBJECT ARRIVES IN YOUR HAND** (`App.placeNew` / `placeArmed`).
+  Everything added from a menu lands at the 3D cursor, which is almost never
+  where it goes, so every add was followed by the same three steps: find it,
+  select it, press G. Now the new object is selected and a MOVE is ARMED —
+  the next pointer move over the viewport picks it up, a click puts it down,
+  and Escape leaves it at the cursor, the one position you are sure of. The
+  whole gesture is the existing object modal, so axis locks, N, the magnet,
+  typed values and Ctrl-inverts-snap all come with it.
+  ARMED, NOT BEGUN, is the trick: the pointer is over the MENU when the
+  object is added, so a modal started there measures its delta from a
+  position the object has nothing to do with, and the thing JUMPS the moment
+  the cursor comes back over the viewport. Waiting for the first move starts
+  the gesture exactly where the pointer is.
+  The grab passes `undo: false` (`ObjectModalTransform.begin`), because the
+  add already pushed a step — two would mean an undo that puts the object
+  back at the cursor and leaves it there. Verified: one undo removes the
+  whole add. A DROPPED asset is not armed: it is already where you put it.
+- **A PROJECTOR IS AIMED BY DRAGGING THE SPOT IT MAKES** (`App.aimHandleAt`
+  / `aimLightAt`, the ring in `LightManager.makeAimHandle`). A lamp has no
+  face to grab: the transform widget turns it about its origin, and you have
+  to already know which way its -Z went to predict what that does, so aiming
+  through the widget is guesswork; "look through the light" (Ctrl+0) works
+  but means leaving the view you were working in. The handle is the beam's
+  own target, drawn where the beam LANDS — `projectorThrow` measures it, so
+  the ring sits on the wall being lit — and dragging it turns the lamp to
+  keep pointing at it, which is how a real one is aimed: by watching the
+  light. The drag aims at whatever SURFACE is under the pointer, so the spot
+  follows the geometry across a room, and falls back to the view plane at
+  the current throw distance over open space. `Aim at cursor` in the panel
+  is the exact form of the same thing (verified: the beam lands on the
+  cursor to 3 decimal places).
+  Two things it has to get right: the handle is grabbed in the CAPTURE phase
+  before anything else can claim the click, since it sits on a wall and the
+  wall would be picked instead; and the rotation is written in the light's
+  PARENT space like every other object's, or a projector filed under a group
+  aims somewhere else entirely.
+
 - **A new pencil continues the last one** (`App.newPencil`): its material
   slots and active slot are copied from the GP object last active
   (`lastPencil`, held by reference so a deleted object still answers), not

@@ -88,6 +88,9 @@ export interface AppHandle {
   refreshTimelineControls(): void;
   applyTexture(ref: { kind: string; id: number }, src: string, name: string): void;
   projectorThrow(lightId: number): { distance: number; width: number; height: number } | null;
+  /** point a light's beam at a world position (the exact form of dragging
+   *  the aim ring the beam draws on whatever it is lighting) */
+  aimLightAt(lightId: number, point: [number, number, number]): void;
   projectFile(lightId: number, file: File): Promise<void>;
   setRenderScale(scale: number): void;
   gpSeparate(how: 'SELECTION' | 'MATERIAL' | 'LOOSE'): number;
@@ -1967,9 +1970,16 @@ export class UI {
       ...this.lensRows(() => p.lens, (nl) => set({ lens: nl })),
       ...this.projectorMaskRows(l, set),
       ...this.projectorBlendRows(l, set),
-      el('div', { class: 'row', text: throwAt
-        ? `throw ${unit(throwAt.distance)} · image ${unit(throwAt.width)} × ${unit(throwAt.height)}`
-        : 'throw — nothing in the beam' }),
+      el('div', { class: 'row' },
+        el('span', { class: 'grow', text: throwAt
+          ? `throw ${unit(throwAt.distance)} · image ${unit(throwAt.width)} × ${unit(throwAt.height)}`
+          : 'throw — nothing in the beam' }),
+        tip(btn('Aim at cursor', () => {
+          ctx.pushUndo();
+          this.app.aimLightAt(l.id, [...ctx.scene.cursor]);
+          this.refresh();
+        }), 'Point the beam at the 3D cursor — the exact version of dragging '
+          + 'the ring the beam draws on what it is lighting')),
     );
     if (!l.castShadow) {
       rows.push(el('div', { class: 'row', text: 'Shadows are off: the beam passes through everything.' }));
