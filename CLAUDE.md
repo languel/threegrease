@@ -896,6 +896,14 @@ the browser console or automated evals:
   with no geometry (an EMPTY). Putting a proximity zone on a box therefore
   silently gives you a box-sized zone and no error. Use an EMPTY for
   "within N metres of", a primitive for "inside this volume".
+- **A new primitive is STOOD UP when it is created** (`standUpRotation` in
+  `render/meshes.ts`, used by `createMeshObject`): every caller that cared
+  used to fix the Y-up convention by hand afterwards and the Add menu did
+  not, so Add ▸ Cylinder gave you a column lying on the floor and Add ▸
+  Pyramid one on its side. A SPHERE is in the list too, and not for looks:
+  its poles (and so the whole UV seam a 360 panorama is wrapped on) ran
+  along X. BOX and the platonics are not — they have no meaningful axis to
+  stand up, and turning them would only re-label which face is the top.
 - **Primitive geometries are authored Y-UP, so in a Z-up scene a CYLINDER or
   PYRAMID lies on its side.** CylinderGeometry's axis and ConeGeometry's apex
   both run along +Y, and nothing rotates them for you: an unrotated column in
@@ -1616,6 +1624,12 @@ the browser console or automated evals:
     projection (and takes the picture's own aspect).
   - Lamps only light the scene in RENDERED shading, so the panel says so and
     offers the switch — otherwise a working projector reads as a broken one.
+    That rule is about the LIGHT, not the glyph: hiding the whole group
+    (`lights.group.visible`) took the wire beam with it, so in Solid or
+    Wireframe a projector was a selection dot with no beam — nothing to see
+    it by and nothing to aim. `LightManager.lightsEnabled` stands the lamps
+    down instead, and the glyph is drawn in every shading mode like a
+    camera's frustum.
   - **FLAT projection** (`projection.flat`, `render/projectors.ts`) is the
     second half of the feature: the picture is ADDED to surfaces after
     lighting — undimmed, untinted, unaffected by anything else in the room —
@@ -1682,12 +1696,32 @@ the browser console or automated evals:
     other way, since you have to stand behind it. Whatever moved the camera
     is written back each frame (through the parent's space when it has one),
     and zooming the view opens the beam.
-- **Dropping an image or camera ON a selected object textures it**
+- **Dropping an image or camera ON an object textures it**
   (`App.textureTargetAt` / `applyTexture`): a Library image or camera asset,
-  or a single image file from Finder, dropped on a SELECTED primitive mesh
-  (not a MODEL or EMPTY), editable mesh or pencil becomes its texture instead
-  of a new picture plane. Only selected targets, so a drop near something you
-  were not working on still hangs as a picture. A mesh gets it in its
+  or a single image or media file from Finder, dropped on a primitive mesh
+  (not a MODEL, which carries its own materials, nor an EMPTY, which has no
+  surface), editable mesh, pencil or PROJECTOR becomes its texture — or, for
+  a projector, the picture it throws — instead of a new picture plane.
+  **The target LIGHTS UP while you drag over it** (`App.dropHighlight`,
+  applied per frame in `syncDropHighlight`): the same inverted hull, render
+  silhouette and lamp-glyph tint the selection and hover already use, in the
+  accent colour, so it reads as "this one" rather than as a new kind of
+  marker. A PLANE takes the render silhouette rather than the hull — it has
+  no thickness for a hull to stand off, and it is the most common thing
+  anyone drops a picture on. The payload cannot be read during a drag (the
+  browser hands over only `types` until the drop), so the highlight cannot
+  tell a picture from a model and lights anything that could take one; that
+  is honest, since the drop is what decides what it means.
+  That highlight REPLACED the old safety rule, which was that only a
+  SELECTED object took a dropped picture — there to stop a stray drop
+  repainting whatever was behind the pointer. With the target lit while you
+  hover, requiring a selection as well is the surprising half: the thing is
+  glowing under the cursor and still refuses.
+  A PROJECTOR is tested FIRST, by screen distance to where the lamp stands.
+  Picking raycasts the meshes and returns the first hit, and a lamp is a
+  wire glyph with nothing to raycast, so a projector standing in front of
+  the wall it lights (which is every projector) could never be the target —
+  the wall behind it answered first. A mesh gets it in its
   material's base slot — its OWN material (a shared one is copied first) and
   a NEW image datablock (never overwriting one in use), base colour set to
   white so the image is not tinted. An unrotated SPHERE is stood up (+90 X)

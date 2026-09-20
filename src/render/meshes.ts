@@ -529,11 +529,32 @@ export class MeshManager {
   }
 }
 
-export function createMeshObject(id: number, kind: TGMesh['kind'], at: [number, number, number], src?: string): TGMesh {
+/**
+ * A new primitive's resting rotation.
+ *
+ * three's primitives are authored Y-UP: a CylinderGeometry's axis, a cone's
+ * apex and a UV sphere's poles all run along +Y. In a Z-up scene (our
+ * default) an unrotated one is therefore LYING DOWN — a column becomes a
+ * disc on the floor, a pyramid falls over, and a sphere's poles (and so its
+ * whole UV seam, which is what a 360 panorama is wrapped on) point sideways.
+ * Every caller that cared used to fix this by hand afterwards, and the Add
+ * menu did not, so adding a cylinder gave you one on its side.
+ *
+ * BOX and the platonics are not in the list because they have no meaningful
+ * axis to stand up: turning them would only re-label which face is "top".
+ */
+export function standUpRotation(kind: TGMesh['kind'], zUp: boolean): Vec3 {
+  const yUpAxis = kind === 'CYLINDER' || kind === 'PYRAMID' || kind === 'SPHERE';
+  return zUp && yUpAxis ? [Math.PI / 2, 0, 0] : [0, 0, 0];
+}
+
+export function createMeshObject(
+  id: number, kind: TGMesh['kind'], at: [number, number, number], src?: string, zUp = true,
+): TGMesh {
   return {
     id, name: src ? (src.split('/').pop() ?? 'model') : kind.toLowerCase(),
     kind, src,
-    translation: [...at], rotation: [0, 0, 0], scale: [1, 1, 1],
+    translation: [...at], rotation: standUpRotation(kind, zUp), scale: [1, 1, 1],
     visible: true, select: false, drawTarget: kind !== 'EMPTY', wireframe: false,
     color: [0.62, 0.65, 0.72], opacity: 1,
     parent: null, texture: null, unlit: false, doubleSided: true, billboard: 'NONE',

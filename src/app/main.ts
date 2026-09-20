@@ -1282,11 +1282,24 @@ class App implements AppHandle {
       if (t.includes('Files') || t.includes(ASSET_MIME)) {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
+        // light up whatever would RECEIVE this if it were let go here. The
+        // payload itself is unreadable during a drag (the browser only
+        // hands over `types` until the drop), so this cannot tell a picture
+        // from a model and lights any object that could take a texture —
+        // which is honest: it says "this one", and the drop decides what
+        // that means.
+        this.dropHighlight = this.textureTargetAt(e.clientX, e.clientY);
       }
     });
+    // a drag that leaves the viewport, or ends anywhere, stops claiming a target
+    vp.addEventListener('dragleave', (e) => {
+      if (!vp.contains(e.relatedTarget as Node)) this.dropHighlight = null;
+    });
+    window.addEventListener('dragend', () => { this.dropHighlight = null; });
     vp.addEventListener('drop', (e) => {
       if (!e.dataTransfer) return;
       e.preventDefault();
+      this.dropHighlight = null;
       const assetIds = e.dataTransfer.getData(ASSET_MIME);
       if (assetIds) {
         const ids = assetIds.split(',');
@@ -3286,6 +3299,28 @@ class App implements AppHandle {
     const ctx = this.ctx;
     const rect = ctx.canvas.getBoundingClientRect();
     const pane = this.paneAt(clientX, clientY);
+    // A PROJECTOR WINS WHEREVER IT IS. Picking raycasts the meshes first and
+    // returns the first hit, and a projector is a wire glyph with nothing to
+    // raycast — so a lamp standing in front of the wall it lights (which is
+    // every lamp) could never be the target: the wall behind it answered
+    // first. Aiming at the glyph is deliberate in a way that hovering a big
+    // wall is not, so it is tested first, by screen distance to where the
+    // lamp stands.
+    const spot = this.withPane(pane, () => {
+      const r = ctx.canvas.getBoundingClientRect();
+      const px = clientX - r.left, py = clientY - r.top;
+      for (const l of ctx.scene.lights) {
+        if (l.kind !== 'SPOT' || l.visible === false) continue;
+        const p = new THREE.Vector3()
+          .setFromMatrixPosition(worldMatrixOf(ctx.scene, { kind: 'LIGHT', id: l.id }))
+          .project(ctx.camera);
+        if (p.z > 1) continue;
+        const sx = (p.x * 0.5 + 0.5) * r.width, sy = (-p.y * 0.5 + 0.5) * r.height;
+        if (Math.hypot(sx - px, sy - py) < 30) return { kind: 'LIGHT' as const, id: l.id };
+      }
+      return null;
+    });
+    if (spot) return spot;
     const ref = this.withPane(pane, () => {
       const r = ctx.canvas.getBoundingClientRect();
       return this.objectPick.pick(ctx, {
@@ -3302,20 +3337,24 @@ class App implements AppHandle {
       return null;
     }
     const scene = ctx.scene;
+    // NO SELECTION REQUIRED. It used to be: only a SELECTED object took a
+    // dropped picture, so a stray drop could not repaint whatever happened
+    // to be behind the pointer. Now that the target lights up while you
+    // hover it, that rule is the surprising half — the thing is glowing
+    // under the cursor and still refuses. What an object IS still decides:
+    // a MODEL carries its own materials from its file and an EMPTY has no
+    // surface at all.
     if (ref.kind === 'MESH') {
       const m = scene.meshes.find((x) => x.id === ref.id);
-      return m && m.select && m.kind !== 'MODEL' && m.kind !== 'EMPTY' ? ref : null;
+      return m && m.kind !== 'MODEL' && m.kind !== 'EMPTY' ? ref : null;
     }
-    if (ref.kind === 'POLY') return scene.polyMeshes.find((x) => x.id === ref.id)?.select ? ref : null;
+    if (ref.kind === 'POLY') return scene.polyMeshes.find((x) => x.id === ref.id) ? ref : null;
     if (ref.kind === 'LIGHT') {
-      // a spot light takes a picture too: it throws it (a projector)
+      // a spot light takes a picture too: it THROWS it (a projector)
       const l = scene.lights.find((x) => x.id === ref.id);
-      return l && l.select && l.kind === 'SPOT' ? ref : null;
+      return l && l.kind === 'SPOT' ? ref : null;
     }
-    if (ref.kind === 'GP') {
-      const ob = scene.objects.find((o) => o.id === ref.id);
-      return ob && (ob.select || (ctx.settings.mode === 'EDIT' && ob === activeObject(scene))) ? ref : null;
-    }
+    if (ref.kind === 'GP') return scene.objects.find((o) => o.id === ref.id) ? ref : null;
     return null;
   }
 
@@ -5273,6 +5312,47 @@ class App implements AppHandle {
     }
   }
 
+  /**
+   * WHAT WOULD TAKE THIS, if I let go here.
+   *
+   * Dropping media used to be a guess: the same gesture either textured
+   * what was under the pointer or hung a new picture plane in the air, and
+   * nothing said which until it had happened. So while a drag is over the
+   * viewport the object that would receive it lights up — the SAME rim and
+   * hull the selection and hover use, in the accent colour, so it reads as
+   * "this one" rather than as a new kind of marker. A projector lights its
+   * beam, since that is all a lamp has to light.
+   *
+   * It also replaced the old safety rule. A drop only textured an object
+   * that was already SELECTED, which was there to stop a stray drop
+   * repainting whatever happened to be behind the pointer; with the target
+   * lit while you hover, requiring a selection as well is the surprising
+   * half — the thing is glowing under the cursor and still refuses.
+   */
+  dropHighlight: ObjRef | null = null;
+
+  private syncDropHighlight(): void {
+    const ref = this.dropHighlight;
+    this.lights.hoverId = ref?.kind === 'LIGHT' ? ref.id : null;
+    if (!ref) return;
+    const color = this.highlightColor(true);
+    const scene = this.ctx.scene;
+    if (ref.kind === 'MESH') {
+      const m = scene.meshes.find((x) => x.id === ref.id);
+      // a PLANE has no thickness for an inverted hull to stand off, so it
+      // takes the render-based silhouette instead — and a plane is the most
+      // common thing anyone drops a picture on
+      if (m && m.kind !== 'PLANE') {
+        this.meshes.setHover(ref.id, `#${color.getHexString()}`);
+        return;
+      }
+    }
+    const root = this.silhouetteRoot(ref) ?? this.objectRoot(ref);
+    if (root && root.visible) {
+      this.silhouetteGroups = [...this.silhouetteGroups, { roots: [root], color, boxes: undefined }];
+    }
+  }
+
   private syncSelectionGlyphs(): void {
     const scene = this.ctx.scene;
     const active = this.ctx.settings.mode === 'OBJECT' && !this.presentation;
@@ -5890,7 +5970,11 @@ class App implements AppHandle {
     // studio environment, so the scene's own lamps are held back until
     // Material/Rendered. Material shows the world but still ignores lamps;
     // only Rendered is the full scene.
-    this.lights.group.visible = ctx.settings.shading === 'RENDERED';
+    // Blender's rule is that LAMPS only light the scene in Rendered shading
+    // — not that a lamp disappears. Hiding the whole group took the wire
+    // glyphs with it, so a projector in Solid or Wireframe was a dot with no
+    // beam: nothing to see it by, nothing to aim.
+    this.lights.lightsEnabled = ctx.settings.shading === 'RENDERED';
     materialManager.shading = ctx.settings.shading;
     this.world.update(this.scene3, ctx.scene, ctx.settings.shading, ctx.settings.upAxis === 'Z');
     this.paints.sync(ctx.scene, this.glRenderer.domElement.height);
@@ -5993,6 +6077,7 @@ class App implements AppHandle {
 
     perf.lap('helpers');
     this.syncSelectionGlyphs();
+    this.syncDropHighlight();
     perf.lap('selection');
 
     if (this.quadView && this.paneRects) {

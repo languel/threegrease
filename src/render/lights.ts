@@ -188,11 +188,23 @@ export class LightManager {
   private entries = new Map<number, Entry>();
   /** helper glyphs hidden in presentation mode / when overlays are off */
   helpersVisible = true;
+  /**
+   * Do the LAMPS light the scene? Blender holds them back outside Rendered
+   * shading, and the whole group used to be hidden to do that — which took
+   * the wire GLYPHS with it, so in Solid or Wireframe a projector was a
+   * selection dot with no beam and nothing to aim. The glyph is editor
+   * furniture, like a camera's frustum: it is drawn in every shading mode,
+   * and only the light itself stands down.
+   */
+  lightsEnabled = true;
   /** Selection tint for the wire glyph, set by the App from
    *  settings.uiHighlight. A light has no surface for the usual Box3
    *  outline to hug, so the glyph itself turns highlight-coloured — same
    *  read as an outlined object, and how Blender marks a selected lamp. */
   selectionColor: THREE.Color | null = null;
+  /** the light a media drag is hovering: its glyph is all a lamp has to
+   *  light up with, so the beam says "drop it here and I will throw it" */
+  hoverId: number | null = null;
   private tint = new THREE.Color();
 
   sync(scene: GPScene): void {
@@ -239,8 +251,9 @@ export class LightManager {
 
     light.color.setRGB(...data.color);
     light.intensity = data.intensity;
+    light.visible = this.lightsEnabled;
     helper.visible = this.helpersVisible;
-    if (data.select && this.selectionColor) this.tint.copy(this.selectionColor);
+    if ((data.select || this.hoverId === data.id) && this.selectionColor) this.tint.copy(this.selectionColor);
     else this.tint.setRGB(...data.color);
     helper.traverse((o) => {
       const m = (o as THREE.Line).material as THREE.LineBasicMaterial | undefined;
@@ -292,7 +305,7 @@ export class LightManager {
     const src = proj?.src ?? null;
     if (!src) {
       if (light.map) { light.map = null; }
-      light.visible = true;
+      light.visible = this.lightsEnabled;
       this.shapeBeam(entry, data, 0);
       return;
     }
@@ -337,7 +350,7 @@ export class LightManager {
     // material pass is drawing, which is the "a light's spot appears" bug.
     const flat = curved || !!proj!.flat;
     light.map = flat ? null : p.texture;
-    light.visible = !flat;
+    light.visible = this.lightsEnabled && !flat;
     this.shapeBeam(entry, data, curved ? 0 : proj!.aspect ?? 0);
   }
 
