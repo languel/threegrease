@@ -65,7 +65,11 @@ npm run dev     # open http://localhost:5199
   viewport navigation — including flythrough — moves the camera; `＋CamKey`
   keyframes it and playback interpolates position/rotation/FOV between keys
   (slerped rotation). Every camera shows as a frustum gizmo (active one
-  highlighted), keys marked on the timeline.
+  highlighted), keys marked on the timeline. A camera is a full **object**:
+  an outliner row, selection (click its frustum), the transform widget,
+  G/R/S, parenting and delete, with a Properties panel carrying the lens,
+  field of view in degrees *and* 35 mm-equivalent focal length, the
+  clipping range and its keys.
 - **Settings dialog** (`,` or ⚙): preferences plus a full shortcut list —
   click any binding and press a new key to rebind it. Custom bindings and
   preferences persist in localStorage; one-click reset to defaults.
@@ -152,6 +156,37 @@ npm run dev     # open http://localhost:5199
   and Spring. Grab a Follow Path object with the transform widget and drag
   it *along* its path to retime it. Object/target fields have a Blender-
   style picker: eyedropper, dropdown, or type a name.
+- **Quad view** (`Ctrl+Alt+Q`): draw, edit and measure in any pane —
+  input, helpers, HUD and modals all follow the pointer's viewport. Leaving
+  quad view keeps the view you were hovering, Maya-style.
+- **Mesh edit mode**: enter Edit with a mesh selected and it becomes a
+  vertex / edge / face editor — a primitive converts in place to an
+  editable mesh, keeping its name, transform, material and parenting.
+  G/R/S with world-axis and plane locks, extrude, fill, delete, and
+  Separate (by selection, loose parts, or material for strokes).
+- **Draw objects in place** (Object mode toolbar): planes, rectangles,
+  triangles, n-gons, boxes, cylinders, pyramids, spheres and the four
+  platonic solids, drawn through the same placement, plane, guide and
+  snapping chain as a stroke — so blocking out a set is drawing it.
+- **Projectors**: a spot light that throws a gobo or a picture (image,
+  video, camera) at a real aspect, with the throw readout — distance and
+  image size on whatever it hits — plus **flat** (unlit) projection for
+  judging the media itself, edge blending, masking, and *look through the
+  light* (`Ctrl+0`) to aim one by flying it.
+- **Lenses** for cameras and projectors: fisheye (equidistant, equisolid,
+  and Paul Bourke's measured polynomial form), equirectangular,
+  cylindrical and mirror ball — a 360 camera and a dome projector out of
+  one model read in two directions.
+- **Library** (Library tab): an asset container, not an inbox — drop files
+  to keep them (with rendered thumbnails), drag a tile into the viewport
+  to place it or double-click to place at the 3D cursor, folders with drag
+  to file, render view / render selection into it, and export or import
+  the whole library as a zip. Cameras, videos and GIFs live there too as
+  playable sources with pause and freeze, feeding planes, textures,
+  projectors and tracking alike.
+- **Performance overlay** (`Ctrl+Alt+F`): per-phase frame breakdown, the
+  gap between the loop and what you actually get, draw calls, memory and
+  long tasks — plus a render-resolution setting for retina.
 - **MediaMime bridge**: live tracked-landmark positions (from
   [mediamime](https://github.com/languel/mediamime) or any sender) arrive
   over the WS/OSC bridge and can rig any object's translation, or spawn a

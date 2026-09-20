@@ -610,3 +610,70 @@ you cannot test the real thing. The mock caught two genuine result-shape
 bugs — a screenshot going out as base64 text instead of an image block, and
 handlers that return `{error}` rather than throwing being reported to the
 agent as successes.
+
+## Session log (2026-09-19): planning a room — quad view, mesh editing, the Library, projectors, lenses, cameras
+
+A long arc aimed at one use: BLOCKING OUT AN INSTALLATION and seeing what
+it would look like. Detail in IMPLEMENTATION_PLAN.md under "Quad view",
+"The magnet reaches drawing", "Mesh edit mode", "The Library as a
+container", "Live sources", "Perf pass", "Projectors", "Draw objects in
+place", "Lenses" and "Cameras are objects".
+
+What shipped, in commit order:
+
+- **Quad view you can work in**: input routed per pane by impersonation
+  (`App.withPane`), with the helpers, HUD, modals, picking and brush
+  circles all following the pointer's pane; leaving quad view adopts the
+  hovered ortho view, Maya-style.
+- **Precision drawing**: the magnet now reaches DRAWING, the grid lattice
+  lives in the active plane, `Plane: None`, `Placement: Nearest` targets
+  (Element / Vertex / Edge / Face), rectangles that are rectangles in their
+  plane, and pie menus (Opt+, . / ') for Placement, Plane, Guide and Snap.
+- **Mesh edit mode**: vertex / edge / face selection, G/R/S with world-axis
+  and plane locks, extrude, fill, delete, Separate (mesh and strokes, by
+  selection / loose parts / material), primitives converting in place to
+  editable meshes, and Sculpt folded in as an Edit tool.
+- **The Library as a container**: drop to keep rather than to place, studio
+  thumbnails, folders with drag to file, multi-select, zip export/import,
+  render view / render selection into it, and double-click to place at the
+  3D cursor through the placement chain.
+- **Live sources**: cameras, videos and GIFs as Library assets with pause
+  and freeze, feeding planes, textures and capture alike; a generated test
+  camera and test card so camera work is verifiable in the preview pane.
+- **A perf pass with an instrument**: the frame-breakdown overlay
+  (Ctrl+Alt+F), render resolution, and the two real costs it found — a live
+  camera copied every animation frame, and MediaPipe detecting on every
+  display frame of an unchanged picture. 1–2 fps back to 60.
+- **Projectors**: a spot light that throws a gobo or a picture at a real
+  aspect, with the throw readout, flat (unlit) projection, edge blending,
+  masking, and look-through-light aiming.
+- **Draw objects in place**: twelve kinds through the same placement chain
+  as a stroke, so blocking out a set is drawing it.
+- **Lenses** for cameras and projectors: fisheye (equidistant, equisolid,
+  Bourke polynomial), equirectangular, cylindrical, mirror ball — a dome
+  projector and a 360 camera out of one model read in two directions.
+- **Cameras are objects**: outliner row, selection, widget, parenting,
+  delete, and a properties panel with the lens, focal length, clipping and
+  keys.
+
+**The lesson from this one, in three parts.**
+
+*Every viewport assumption is a global.* Quad view broke sixty call sites
+that all did the same innocent thing — read the pointer against the canvas
+and unproject through the camera. The fix that worked was not touching the
+sixty; it was making those two answers lie correctly for the duration of an
+event. When a new mode contradicts an assumption that old code makes
+everywhere, moving the assumption beats visiting every caller.
+
+*A setting that is visibly on and does nothing is worse than a missing
+feature.* The magnet applied to the cursor and the transform tools but not
+to drawing; the grid lattice raycast the floor whatever the Plane said. Both
+read as "snapping is broken" rather than as an absent feature, and neither
+throws. The same shape recurs through this arc: the Library's silently
+refused `prompt()`, a drag the browser rejects over `effectAllowed`, a
+projector that works only in Rendered shading. The panel has to say so.
+
+*Measure before optimising, and build the instrument first.* The 1–2 fps
+report could have been blamed on any of a dozen things. The lap breakdown
+named it in one run, twice — and both causes were doing correct work at the
+wrong RATE, not doing anything wrong.

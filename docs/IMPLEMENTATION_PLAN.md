@@ -2625,3 +2625,281 @@ snap closed again on the very next refresh.
 
 Batching a whole prompt into ONE undo step (still one per tool call), and
 streaming assistant text — replies land whole.
+
+## Quad view: routing input per pane
+
+Four viewports drawn is easy; four viewports you can WORK in is not. Tools
+read the pointer against `ctx.canvas.getBoundingClientRect()` and unproject
+through `ctx.camera` in some sixty places, and in quad view both answers
+were wrong: the canvas was the whole window and the camera was the
+perspective one whichever pane you touched. A mark landed where the pointer
+would have been if the persp view filled the window.
+
+The fix is **impersonation** (`App.withPane`): for the length of one event
+`ctx.camera` becomes the pane's camera and `ctx.canvas` a Proxy whose
+bounding rect IS the pane. Nothing downstream changes. The pane is chosen
+at pointerdown and held for the whole gesture; hover follows the pointer.
+
+What that then forces, and each of these was a separate bug:
+
+- `tools.lastPointer` is PANE-relative afterwards, so everything reading it
+  back goes through the pane too — the plane and depth helpers, the
+  placement preview, tool HUDs (`paneHud`, translated and clipped), the
+  G/R/S modals and their axis keys, Shift+RMB cursor placement, picking, and
+  `hud._pointer`, which the brush circles read: that one was set from the
+  raw event, so in a side pane the circle drew offset and the brush appeared
+  not to follow the pointer.
+- `resize()` early-outs on an unchanged size, so toggling quad view must
+  reset `sized` or the pane rects are never computed at all.
+- An ortho pane camera's `matrixWorld` is only updated by the quad render,
+  so a click before the first frame unprojected through identity and put the
+  point at infinity. `withPane` updates it itself.
+- Measurements are scene objects that happen to be drawn on the HUD, so they
+  are drawn in EVERY pane (`eachPaneHud`).
+
+Leaving quad view with the pointer over an ortho pane adopts that view
+(Maya's rule, `Navigation.adoptOrthoView`) — its direction, framing and
+target, but at the CURRENT orbit distance, because a pane camera sits
+hundreds of units out and that as an orbit radius makes every later orbit
+swing wildly.
+
+## The magnet reaches drawing; the lattice lives in the plane
+
+The one magnet (`tools/snapping.ts`) only served the 3D cursor, the
+transform tools and the ruler, so a line drawn with Grid snap on landed
+wherever the pointer was — the setting was visibly on and did nothing.
+
+Now every PLACED point goes through it after the Placement resolves: a
+shape's ends and corners, and the pen's first and last points. Freehand
+samples in between are not snapped, because a staircase is not a stroke.
+Cmd opts a point out. A lattice snap ROUNDS the resolved point (so it
+composes with any Placement); a vertex/edge/face snap replaces it.
+
+**The lattice lives in the plane the point is going on.** It used to
+raycast the floor whatever the Plane said, so a Top plane through an object
+one metre up snapped back down to z = 0. An axis-aligned plane rounds its
+two in-plane world coordinates; a tilted one (Up from Ground's wall) rounds
+in its own up/across basis counted from the sticky seed, so a lift stays
+exactly above its snapped floor point. A stroke's first point snaps on the
+RESTING plane, since its own resolution has already captured the wall.
+
+Related in the same pass: `Plane: None` (Placement, magnet and guide decide;
+an uncaught point faces the camera; the grid rounds all three coordinates),
+`Placement: Nearest` gaining a Target (Element / Vertex / Edge / Face), and
+a box on a plane becoming a rectangle IN that plane — edges along the
+plane's own axes rather than the screen rectangle cast onto it, which under
+perspective is a trapezoid and on the wall came out a parallelogram.
+
+## Mesh edit mode
+
+Strokes had a point editor; meshes had a transform and nothing else. Edit
+mode on a mesh is now a vertex / edge / face editor (`tools/meshedit.ts`,
+ops in `core/polyedit.ts`), and entering it with a PRIMITIVE selected
+converts that primitive in place to a `TGPolyMesh` — one undo step — with
+name, transform, material, parent, constraints and every `{kind:'MESH'}`
+reference in the scene carried over.
+
+The conversion welds three's triangle soup and merges exactly coplanar
+edge-connected regions into n-gons, so the topology is Blender's: box 6
+quads, cylinder 24 quads plus two 24-gon caps, dodecahedron 12 pentagons,
+UV sphere 704 quads plus 64 pole triangles. A loose coplanarity test
+(0.9999) folded the pole fans into bent quads; it is 1e-6.
+
+- Selection is kept consistent by `flushSelection` after EVERY change,
+  because the transform only reads vertices.
+- G / R / S go through the same `ModalTransform` the stroke editor uses.
+  Axis locks are WORLD axes for a mesh (Blender's default) — a stood-up
+  cylinder's local Z points sideways.
+- E extrudes by mode and starts a grab as ONE undo step. A face-region
+  extrude keeps the original faces turned over, so a floor becomes a closed
+  block; Blender leaves that hole open.
+- SEPARATE finally does something: mesh by Selection or Loose Parts, strokes
+  by Selection, Material or Loose Parts. A vertex on the border is
+  duplicated so both halves stay whole. The mesh right-click menu is a MESH
+  menu now — it used to be the stroke editor's, which did nothing here.
+- Sculpt became an Edit-mode TOOL rather than a mode of its own.
+
+## The Library as a container
+
+Dropping a file on the Library used to route through the viewport's
+importer, so it also placed the file in the scene. The Library is a
+CONTAINER: entries are definitions plus thumbnails in IndexedDB, the bytes
+live in the file store, and nothing enters the scene until you ask.
+
+Pictures come from a private STUDIO — its own MeshManager or SplatManager,
+lights and environment, polled until the thing loads, rendered, thrown away.
+A tile is placed by DRAG (where you drop it) or DOUBLE-click, which goes to
+the 3D cursor through the Placement, Plane and magnet; a single click used
+to place, and a stray one put things in the scene.
+
+Then the parts that make it a library rather than a pile: folders with drag
+to file, inline rename, multi-select, remove with Restore, render view and
+render selection into it, and export/import as one zip carrying
+`library.json` plus every stored file an asset refers to — the scans and
+models are the point of moving a library.
+
+**No `prompt()` or `confirm()`**: an embedded browser can refuse them, and
+New folder, rename and remove all silently did nothing there. And a tile
+drag must allow `copyMove` — with only `copy` the browser refuses every drop
+onto a folder, which a synthetic-event test does not enforce, so it passed
+while the real gesture failed.
+
+## Live sources: cameras, videos, GIFs, a test camera
+
+A camera is a Library ASSET, not something the capture panel owns
+(`io/livesources.ts`). Each source draws into its OWN canvas and exposes a
+CanvasTexture over it — that indirection is what makes PAUSE work: stop the
+camera, stop redrawing, and every consumer holds the last frame. Several
+cameras can be open; a mesh shows one through a texture src of `live:<key>`,
+so the same camera can be on three planes and under detection at once.
+
+Videos and GIFs are the same kind of thing (`media:<store ref>`): a looping
+muted `<video>`, or WebCodecs `ImageDecoder` frame by frame with each
+frame's own duration. They need no permission, so `textureFor` opens one on
+first use and a saved plane plays again after a reload untouched.
+
+The TEST CAMERA (a generated 1280x720 source with bars, a sweeping marker
+and timecode) and the TEST CARD are first-class, not scaffolding: the
+preview pane blocks camera access, and they make camera work verifiable
+without a device.
+
+## Perf pass
+
+The app went to 1–2 fps with a camera open, and the fix needed measurement
+rather than guessing, so the first deliverable is the instrument.
+
+`app/perf.ts`: the frame loop marks LAPS between phases, so a slow frame
+says WHERE it went. Two clocks are kept apart deliberately — the loop's own
+CPU time, and the rAF-to-rAF interval you actually get. A large gap is
+flagged, because the time is then going somewhere the laps cannot see (the
+GPU, an event handler, layout, a long task) and the laps would look
+innocent. `renderer.info.autoReset` is off and reset per frame, or only the
+last of the several passes per frame would be counted.
+
+The two real costs it found:
+
+- A live camera was copied EVERY animation frame — a 30 fps camera
+  re-uploaded as a 720p texture 60 times a second. `requestVideoFrameCallback`
+  now sets a `fresh` flag and nothing copies without one.
+- Capture ran MediaPipe on every display frame of an unchanged picture (8.3
+  ms/frame for pose alone at 1280x720). Detection now runs on a snapshot at
+  most 640 wide, ONE detector per display frame, a new round only when the
+  last finished. The models resize to 256 internally and landmarks are
+  normalised, so nothing downstream changes.
+
+Plus `settings.renderScale`, because on retina 100% is four pixels per point
+and the look's post passes pay for all of them.
+
+## Projectors
+
+A projector is a SPOT LIGHT THAT THROWS A PICTURE (`TGProjection` on
+`TGLight`) — one mechanism for a gobo and for a projection, because they
+differ only in what the picture means.
+
+three maps a spot's texture over its square frustum and the cone cuts the
+inscribed circle out of it, so the picture is laid into a rectangle
+INSCRIBED IN THAT CIRCLE on a 1024 px canvas with black around it. That is
+what makes the lit patch the projector's rectangle rather than three's
+circular spot. `aspect: 0` keeps the circle, which is the round-gobo case.
+
+`App.projectorThrow` measures the beam centre to the first thing it hits and
+reports the picture's size there ("throw 6.03 m · image 5.06 × 2.85 m") —
+the number an installation is planned around, and one a cone cannot show.
+
+**FLAT (unlit) projection** (`render/projectors.ts`) is the second half. The
+lit path is physically right and is the wrong answer for judging the WORK: a
+video read through a diffuse surface at an angle, under whatever else is
+lit, tells you nothing about the piece. Flat ADDS the picture after lighting
+— undimmed, untinted — the way a projection looks in a blacked-out room.
+Measured there: flat 9.4 against 6.5 lit at full power and 4.4 for nothing.
+
+It is projective texturing patched into the materials the scene already uses
+(`receiveProjection`, one shared uniform block, so a projector moving or
+changing picture recompiles nothing), not a separate pass. Occlusion reads
+the light's own shadow map, so the beam is blocked only when the light casts
+shadows. Two shader traps: `#include <packing>` is already in every material
+three builds and including it again redefines every function in it (so the
+depth is unpacked locally); and three's loop unroller only substitutes the
+index inside `[ i ]`, so a bound test must be written
+`UNROLLED_LOOP_INDEX < uFlatCount` or `i` comes out undeclared.
+
+Edge blend and mask are painted INTO the projector's canvas, not into a
+shader, so both paths read one picture and cannot disagree. And **look
+through a light** (Ctrl+0) makes the viewport camera the light: a projector
+cannot be aimed any other way, since you have to stand behind it.
+
+## Draw objects in place
+
+Add ▸ Box gives you a cube at the cursor that then has to be moved, turned
+and scaled — three operations to say one thing. `tools/objectdraw.ts` draws
+the object where it goes, resolving every point through the SAME chain a
+stroke does, so a panel drawn with Up from Ground stands on the floor
+(verified: bottom exactly at z = 0, its own up axis up, grid-snapped) and
+one drawn under Placement: Surface lies on the scan.
+
+Three gestures by what the thing is: FLAT (plane, rect, triangle, polygon)
+is one drag; RAISED (box, cylinder, pyramid) drags the base then moves away
+from the plane to raise the height, measured as the skew-line solve against
+the pointer ray because the height runs along the view as often as across
+it; RADIAL (sphere, the four platonic solids) is one drag from the centre
+and they are SET DOWN on the plane rather than sunk half-way into it.
+
+The flat n-gons are editable meshes, not primitives, because the next thing
+you do to a blockout panel is drag a corner onto the real corner of the
+room. The orientation trap is the one this file already documents: a PLANE's
+normal is its own +Z, while a CYLINDER and PYRAMID are built Y-up and must
+stand their Y on the normal.
+
+## Lenses, for both ends of the same model
+
+Installations are full of curved optics — a dome, a fisheye projector, a
+360 camera, a mirror ball — and none of them is a frustum. ONE model serves
+both ends (`render/lens.ts`), because a camera and a projector ask the same
+question in opposite directions: "this pixel is at radius r, which
+direction?" is the model inverted; "this surface is at angle θ, where in the
+picture?" is the model forward.
+
+The polynomial is Paul Bourke's published fisheye-correction form,
+r(θ) = k0 + k1θ + k2θ² + k3θ³ + k4θ⁴ with θ in radians and r normalised so 1
+is the edge of the image circle — how real lenses are measured, so a
+published set pastes straight in (his 190° lens is a preset). Blender's
+"Fisheye Lens Polynomial" is the same polynomial with r in sensor mm.
+
+A CAMERA with a curved lens cannot be rasterised, since a GPU draws straight
+lines: the scene renders into a CUBE and one full-screen pass asks the lens
+where each pixel looks. Six faces a frame is the honest cost; the cube is
+world-aligned with the rotation as a uniform, so turning the view costs
+nothing extra. A PROJECTOR is the easy direction and needs no inversion —
+the flat shader takes the point into the projector's frame and calls the
+forward model. That is a real dome projector, and it requires the flat path,
+since three's lit spot is a frustum.
+
+Two shader traps from injecting code before a material's own source: `PI`
+comes from `<common>`, which has not been included yet (so the chunk carries
+its own), and `unpackRGBAToDepth` lives in `<packing>`, which some materials
+have and others do not.
+
+## Cameras are objects
+
+A camera lived only in `scene.cameras` as an index, so there was no outliner
+row, no selection, no widget, and no obvious way to add one. It gains an
+`id` (serialize.ts assigns them to older scenes and rewrites
+`score.attachments` from index to id) plus `select`/`lock`/`parent`/
+`constraints`, and `ObjKind` gains `'CAMERA'` — which brings the outliner,
+selection, the transform widget, G/R/S, parenting, grouping and delete with
+it. `getObjectTransform` reports unit scale, because a camera has no size,
+and `deleteObject` refuses the last camera.
+
+Two things a camera cannot share with a mesh. It is drawn as a WIRE frustum,
+so there is no surface to fatten into an inverted hull — it says it is
+selected by going the selection colour, and wears no bounding box, which
+would describe the helper's arbitrary drawing size rather than anything in
+the scene. And it has nothing to raycast, so it is picked by screen distance
+to where it stands, the way the score glyphs are. Lamps were in exactly the
+same position and are picked the same way now.
+
+Its Properties panel carries what a projector's does, sharing `lensRows`
+outright, plus field of view shown both ways — degrees and the 35 mm
+equivalent focal length. That conversion is `12 / tan(fov/2)`, not 18:
+three's fov is VERTICAL and 35 mm film is 24 mm tall, and the half-WIDTH
+calls a normal 50 mm lens 75 mm.

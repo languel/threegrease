@@ -156,6 +156,9 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)
+- [x] Cameras are OBJECTS: outliner row, selection, transform widget,
+      parenting and delete, with lens / focal length / clipping / keys in
+      the properties panel
 - [x] LENSES for cameras and projectors: equidistant / equisolid /
       polynomial (Bourke's measured form) fisheye, equirectangular,
       cylindrical, mirror ball — a dome projector and a 360 camera
