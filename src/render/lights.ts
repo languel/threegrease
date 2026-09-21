@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import type { GPScene, TGLight, TGProjection } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 import { liveKeyOf, liveSources } from '../io/livesources';
+import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import { isCurved } from './lens';
 
 /** The projector canvas is square because three maps a spot light's texture
@@ -20,7 +21,8 @@ import { isCurved } from './lens';
  *  it, and the picture is laid inside that circle. */
 const PROJ_SIZE = 1024;
 
-type AnyLight = THREE.AmbientLight | THREE.DirectionalLight | THREE.PointLight | THREE.SpotLight;
+type AnyLight = THREE.AmbientLight | THREE.DirectionalLight | THREE.PointLight
+  | THREE.SpotLight | THREE.RectAreaLight;
 
 interface Entry {
   root: THREE.Group;
@@ -80,6 +82,16 @@ function makeHelper(kind: TGLight['kind'], color: THREE.ColorRepresentation): TH
         );
       }
     }
+  } else if (kind === 'AREA') {
+    // the emitting rectangle itself, at a unit size that `apply` scales to
+    // the light's own width and height, with a stem showing which way it
+    // faces — a rectangle alone is ambiguous about which side emits
+    const q: [number, number][] = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+    for (let i = 0; i < 4; i++) {
+      const a = q[i], b = q[(i + 1) % 4];
+      pts.push(a[0], a[1], 0, b[0], b[1], 0);
+    }
+    pts.push(0, 0, 0, 0, 0, -0.45);
   } else { // SPOT: a cone opening down -Z
     const R = 0.35, L = 0.9;
     for (let i = 0; i < 16; i++) {
@@ -199,8 +211,17 @@ function makeLight(kind: TGLight['kind']): AnyLight {
     case 'SUN': return new THREE.DirectionalLight(0xffffff, 1);
     case 'POINT': return new THREE.PointLight(0xffffff, 1);
     case 'SPOT': return new THREE.SpotLight(0xffffff, 1);
+    case 'AREA': {
+      // three's rect area light needs its BRDF lookup tables uploaded once
+      // before any of them can be lit; without it the light is silently
+      // black, which looks like a broken light rather than a missing init.
+      if (!areaReady) { RectAreaLightUniformsLib.init(); areaReady = true; }
+      return new THREE.RectAreaLight(0xffffff, 1, 2, 1);
+    }
   }
 }
+
+let areaReady = false;
 
 export class LightManager {
   readonly group = new THREE.Group();
@@ -380,23 +401,12 @@ export class LightManager {
       });
     }
     if (data.kind === 'SPOT') {
-      if (!entry.aim) { entry.aim = this.makeAimHandle(); entry.root.add(entry.aim); }
       if (!entry.cone) {
         entry.cone = this.makeRing([1, 0]);        // 3 o'clock
         entry.blend = this.makeRing([0, 1]);       // 12 o'clock
         entry.root.add(entry.cone, entry.blend);
       }
       const d = this.aimDistance.get(data.id) ?? 4;
-      entry.aim.visible = this.helpersVisible && !!data.select;
-      // the aim target belongs to the gizmo: same colour as the rest of it
-      entry.aim.traverse((o) => {
-        const m = (o as THREE.Line).material as THREE.LineBasicMaterial | undefined;
-        if (m?.color) m.color.copy(this.tint);
-      });
-      entry.aim.position.set(0, 0, -d);
-      // the ring keeps a constant apparent size relative to the throw, so
-      // it is grabbable whether the wall is 1 m or 20 m away
-      entry.aim.scale.setScalar(Math.max(0.35, d * 0.25));
       const rim = Math.tan(data.angle ?? Math.PI / 6) * d;
       const show = this.helpersVisible && !!data.select;
       for (const [ring, radius] of [
@@ -422,6 +432,37 @@ export class LightManager {
       if (m?.color) m.color.copy(this.tint);
     });
 
+    if (light instanceof THREE.RectAreaLight) {
+      // A SOFT BOX, A STRIP, A WINDOW — the shape of the source is the
+      // whole point of an area light, and it is scene data (in metres) like
+      // everything else.
+      light.width = Math.max(0.01, data.width ?? 2);
+      light.height = Math.max(0.01, data.height ?? 1);
+      helper.scale.set(light.width, light.height, 1);   // the glyph IS the rectangle
+    } else {
+      helper.scale.setScalar(1);
+    }
+    // THE AIM HANDLE IS FOR ANYTHING WITH A DIRECTION. A sun has no
+    // position that matters to the lighting and every position that matters
+    // to the PLANNING — "the light comes from over there, at that angle" is
+    // the thing being decided — and turning it through the transform widget
+    // means knowing which way its -Z went. An area light is aimed for the
+    // same reason. Only ambient and point have nothing to aim.
+    const aimable = data.kind === 'SPOT' || data.kind === 'SUN' || data.kind === 'AREA';
+    if (aimable) {
+      if (!entry.aim) { entry.aim = this.makeAimHandle(); entry.root.add(entry.aim); }
+      const ad = this.aimDistance.get(data.id) ?? 4;
+      entry.aim.visible = this.helpersVisible && !!data.select;
+      entry.aim.position.set(0, 0, -ad);
+      // one apparent size whatever the reach is, so it stays grabbable
+      entry.aim.scale.setScalar(Math.max(0.35, ad * 0.25));
+      entry.aim.traverse((o) => {
+        const m = (o as THREE.Line).material as THREE.LineBasicMaterial | undefined;
+        if (m?.color) m.color.copy(this.tint);
+      });
+    } else if (entry.aim) {
+      entry.aim.visible = false;
+    }
     if (light instanceof THREE.PointLight || light instanceof THREE.SpotLight) {
       light.distance = data.distance ?? 0;
       light.decay = data.decay ?? 2;

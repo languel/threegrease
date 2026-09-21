@@ -3105,6 +3105,7 @@ class App implements AppHandle {
       { label: 'Sun light', icon: 'boltCircle', do: () => this.addLight('SUN', cursorAt) },
       { label: 'Point light', icon: 'boltCircle', do: () => this.addLight('POINT', cursorAt) },
       { label: 'Spot light', icon: 'boltCircle', do: () => this.addLight('SPOT', cursorAt) },
+      { label: 'Area light (soft box)', icon: 'boltCircle', do: () => this.addLight('AREA', cursorAt) },
       { label: 'Projector', icon: 'photo', do: () => this.addProjector(cursorAt) },
       { sep: true },
       { label: 'Traveler here', icon: 'cursorArrow', do: () => this.addTravelerObjectAt(hereAt, px.x, px.y), disabled: !strokeHit },
@@ -5356,7 +5357,26 @@ class App implements AppHandle {
     });
   }
 
-  /** Is the pointer on a selected projector's aim handle? */
+  /**
+   * How far a light's beam travels before it meets something — where its
+   * aim handle goes. A SPOT has a throw readout that already answers this;
+   * a SUN and an AREA light have no falloff, so the handle simply sits on
+   * whatever they are pointed at, and at a fixed arm's length over open
+   * space so there is still something to grab.
+   */
+  private beamReach(id: number): number {
+    const root = this.lights.rootFor(id);
+    if (!root) return 4;
+    root.updateMatrixWorld(true);
+    const from = new THREE.Vector3().setFromMatrixPosition(root.matrixWorld);
+    const dir = new THREE.Vector3(0, 0, -1).transformDirection(root.matrixWorld).normalize();
+    const hit = new THREE.Raycaster(from, dir)
+      .intersectObjects([...this.ctx.pickableMeshes, ...this.ctx.surfaces], true)
+      .find((h) => h.object.visible && !h.object.userData.overlay);
+    return hit ? hit.distance : 4;
+  }
+
+  /** Is the pointer on a light's aim handle? */
   private aimHandleAt(clientX: number, clientY: number): { id: number; distance: number } | null {
     if (this.ctx.settings.mode !== 'OBJECT') return null;
     const pane = this.paneAt(clientX, clientY);
@@ -5364,11 +5384,13 @@ class App implements AppHandle {
       const r = this.ctx.canvas.getBoundingClientRect();
       const px = clientX - r.left, py = clientY - r.top;
       for (const l of this.ctx.scene.lights) {
-        if (l.kind !== 'SPOT' || !l.select || l.visible === false) continue;
+        const aimable = l.kind === 'SPOT' || l.kind === 'SUN' || l.kind === 'AREA';
+        if (!aimable || !l.select || l.visible === false) continue;
         const root = this.lights.rootFor(l.id);
         if (!root) continue;
         root.updateMatrixWorld(true);
-        const d = this.projectorThrow(l.id)?.distance ?? 4;
+        const d = this.lights.aimDistance.get(l.id)
+          ?? (l.kind === 'SPOT' ? this.projectorThrow(l.id)?.distance ?? 4 : this.beamReach(l.id));
         const p = new THREE.Vector3(0, 0, -d).applyMatrix4(root.matrixWorld).project(this.ctx.camera);
         if (p.z > 1) continue;
         const sx = (p.x * 0.5 + 0.5) * r.width, sy = (-p.y * 0.5 + 0.5) * r.height;
@@ -5399,6 +5421,15 @@ class App implements AppHandle {
     const scene = this.ctx.scene;
     this.ctx.pushUndo();
     const l = createLight(kind, undefined, at ?? [...scene.cursor]);
+    // anything with a DIRECTION is pointed at the origin to start with,
+    // where a scene is usually built — an area light dropped in unrotated
+    // faces along -Z, which in a Z-up scene means it lights the floor it is
+    // standing on and nothing else
+    if (kind === 'SUN' || kind === 'AREA') {
+      const q = this.aimRotation(new THREE.Vector3(...l.translation), new THREE.Vector3(0, 0, 0));
+      const e = new THREE.Euler().setFromQuaternion(q);
+      l.rotation = [e.x, e.y, e.z];
+    }
     scene.lights.push(l);
     this.placeNew({ kind: 'LIGHT', id: l.id });
   }
@@ -6614,8 +6645,9 @@ class App implements AppHandle {
     this.lights.shadowFocus = this.shadowFocus();
     this.lights.aimDistance.clear();
     for (const l of ctx.scene.lights) {
-      if (l.kind !== 'SPOT' || !l.select) continue;
-      this.lights.aimDistance.set(l.id, this.projectorThrow(l.id)?.distance ?? 4);
+      if (!l.select) continue;
+      if (l.kind === 'SPOT') this.lights.aimDistance.set(l.id, this.projectorThrow(l.id)?.distance ?? 4);
+      else if (l.kind === 'SUN' || l.kind === 'AREA') this.lights.aimDistance.set(l.id, this.beamReach(l.id));
     }
     perf.lap('selection');
 

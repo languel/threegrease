@@ -951,7 +951,7 @@ const MESH_EDIT_TOOLS: [string, IconName, string][] = [
 function lightIcon(l: TGLight): IconName {
   if (l.kind === 'SPOT' && l.projection?.src) return 'lightProjector';
   return l.kind === 'AMBIENT' ? 'lightAmbient' : l.kind === 'SUN' ? 'lightSun'
-    : l.kind === 'POINT' ? 'lightPoint' : 'lightSpot';
+    : l.kind === 'POINT' ? 'lightPoint' : l.kind === 'AREA' ? 'lightArea' : 'lightSpot';
 }
 
 export class UI {
@@ -4238,12 +4238,31 @@ export class UI {
         el('div', { class: 'menu-header', text: 'Light' }),
         fieldRow('Type', selectField('', l.kind, [
           ['AMBIENT', 'Ambient'], ['SUN', 'Sun (directional)'], ['POINT', 'Point'], ['SPOT', 'Spot'],
+          ['AREA', 'Area (soft box)'],
         ], (v) => { ctx.pushUndo(); l.kind = v as typeof l.kind; this.refresh(); })),
         el('div', { class: 'row' },
           colorField('Color', [...l.color, 1], (rgb) => { l.color = rgb; }),
           slider('Power', l.intensity, 0, l.kind === 'POINT' || spot ? 200 : 5, 0.05,
             (v) => { l.intensity = v; }, { def: l.kind === 'AMBIENT' ? 0.9 : l.kind === 'SUN' ? 1.4 : 20 }),
         ),
+        ...(l.kind === 'AREA' ? [
+          el('div', { class: 'row' },
+            tip(numField('Width', l.width ?? 2, (v) => { l.width = Math.max(0.01, v); ctx.requestRender(); }, 0.05,
+              { min: 0.01, def: 2 }), 'the emitting rectangle, in metres — a soft box, a strip, a window'),
+            numField('Height', l.height ?? 1, (v) => { l.height = Math.max(0.01, v); ctx.requestRender(); }, 0.05,
+              { min: 0.01, def: 1 }),
+          ),
+          // Said plainly, because it is three's limit and not a setting
+          // anyone can find: a rect area light is a real soft source with a
+          // real falloff, and it casts NO shadow and lights only standard
+          // materials — so grease pencil, splats and anything unlit are
+          // untouched by it.
+          tip(el('div', { class: 'row', text: 'No shadows · lights meshes only' }),
+            'three.js\u2019s rectangular area light has no shadow map of any kind, and only '
+            + 'standard/physical materials respond to it — grease pencil, splats and unlit objects '
+            + 'do not. Use it for the soft wash a real soft box gives; use a spot when you need the '
+            + 'shadow.'),
+        ] : []),
         ...(positional ? [
           fieldRow('Distance', numField('', l.distance ?? 0, (v) => { l.distance = Math.max(0, v); }, 0.5, { def: 0 })),
           fieldRow('Decay', slider('', l.decay ?? 2, 0, 4, 0.05, (v) => { l.decay = v; }, { def: 2 })),
@@ -4255,7 +4274,7 @@ export class UI {
           fieldRow('Penumbra', slider('', l.penumbra ?? 0.2, 0, 1, 0.01, (v) => { l.penumbra = v; }, { def: 0.2 })),
           ...this.projectionRows(l),
         ] : []),
-        ...(l.kind === 'AMBIENT' ? [] : [
+        ...(l.kind === 'AMBIENT' || l.kind === 'AREA' ? [] : [
           el('div', { class: 'menu-header', text: 'Shadow' }),
           checkbox('Cast shadows', l.castShadow, (v) => { l.castShadow = v; this.refresh(); },
             'off by default — each shadow-casting light costs an extra depth pass'),

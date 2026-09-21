@@ -47,12 +47,16 @@ export function createLight(kind: TGLight['kind'], name?: string, at: Vec3 = [3,
     name: name ?? kind.charAt(0) + kind.slice(1).toLowerCase(),
     kind,
     color: [1, 1, 1],
-    intensity: kind === 'AMBIENT' ? 0.9 : kind === 'SUN' ? 1.4 : 20,
+    // an AREA light's intensity is radiance over its own surface, so a big
+    // soft box at a point light's 20 would blow the room out
+    intensity: kind === 'AMBIENT' ? 0.9 : kind === 'SUN' ? 1.4 : kind === 'AREA' ? 6 : 20,
     translation: [...at] as Vec3,
     rotation: [0, 0, 0],
     distance: 0,
     decay: 2,
     angle: Math.PI / 6,
+    width: 2,
+    height: 1,
     penumbra: 0.2,
     // shadows are off by default: they cost a depth pass per light, and
     // the two migrated defaults must reproduce today's shadowless look

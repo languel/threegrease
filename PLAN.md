@@ -156,6 +156,9 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)
+- [x] AREA lights (three's RectAreaLight: a soft box with a real falloff,
+      no shadows, meshes only) and an aim handle for every directional
+      light — sun, spot and area
 - [x] Plan inside a SCAN: imports open into a dollhouse view (single-sided,
       normals inward) and can be clicked and snapped THROUGH onto their own
       floor; imports get tint/opacity/two-sided/unlit/wireframe of their own

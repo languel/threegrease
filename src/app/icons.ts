@@ -120,6 +120,9 @@ const PATHS: Record<string, string> = {
   // centre. Deliberately not an eye: the eye means "is this drawn", and the
   // two sitting side by side in a row as the same glyph made picking the
   // active camera look like a second visibility toggle.
+  // an AREA light: the emitting rectangle, seen at an angle, with its
+  // direction coming off the front
+  lightArea: 'M4 7.5 13 5v11.5L4 19ZM13 5l7 1.8v9L13 16.5M8.5 12.2 5.5 15M16 10.5v6',
   cameraActive: 'M4 8.5h3.2l1.6-2h6.4l1.6 2H20v9H4ZM9.6 13a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0',
   // TRANSFORM ORIENTATION (Blender's header): each says what "X, Y, Z"
   // currently means — a world tripod, an object's own, a surface normal,

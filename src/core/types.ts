@@ -608,11 +608,15 @@ export interface TGLight {
   name: string;
   /** AMBIENT ignores transform (it's uniform); SUN is directional and uses
    *  only rotation; POINT/SPOT use translation. */
-  kind: 'AMBIENT' | 'SUN' | 'POINT' | 'SPOT';
+  kind: 'AMBIENT' | 'SUN' | 'POINT' | 'SPOT' | 'AREA';
   color: Vec3;
   intensity: number;
   translation: Vec3;
   rotation: Vec3;
+  /** AREA only: the size of the emitting rectangle, in metres. A soft box,
+   *  a strip, a window — the light a gallery is actually lit with. */
+  width?: number;
+  height?: number;
   /** POINT/SPOT falloff distance (0 = never falls off) */
   distance?: number;
   decay?: number;

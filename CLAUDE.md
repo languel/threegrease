@@ -1994,6 +1994,28 @@ the browser console or automated evals:
     canvas through three's own shadow matrix at points around the beam: at 0
     the picture's top lands up and the arrow is world +z; at 90 degrees both
     move to +x; at 180 both point down; mirrored, both stay up.
+  - **THE AIM HANDLE IS FOR ANYTHING WITH A DIRECTION**, not just a
+    projector: a SUN and an AREA light get one too. A sun's position means
+    nothing to the lighting and everything to the PLANNING — "the light
+    comes from over there, at that angle" is the thing being decided — and
+    turning it through the transform widget means already knowing which way
+    its -Z went. `App.beamReach` puts the handle where the beam actually
+    lands (a spot has its throw readout; a sun and an area light have no
+    falloff, so it is simply the first thing they are pointed at, or an
+    arm's length over open space). Only AMBIENT and POINT have nothing to
+    aim.
+  - **AREA lights are three's `RectAreaLight`**, and the limits are real
+    enough to say in the panel rather than let someone discover: it casts
+    NO SHADOW of any kind, and only standard/physical materials respond to
+    it — so grease pencil, splats and anything unlit are untouched. It is
+    the right light for the soft wash a real soft box gives a wall, and the
+    wrong one when the shadow is the point. Two more things it needs:
+    `RectAreaLightUniformsLib.init()` must run once before any of them can
+    be lit (without it the light is silently BLACK, which reads as a broken
+    light rather than a missing init), and its intensity is radiance over
+    its own surface, so a big soft box at a point light's 20 blows the room
+    out — the default is 6. `width`/`height` are scene data in metres and
+    the glyph IS that rectangle, scaled to match.
   - **Look through a light** (Ctrl+0, `App.toggleViewThrough`): the viewport
     camera BECOMES the light, so orbiting, panning and flying aim it, and a
     spot's cone becomes the field of view — a projector cannot be aimed any
