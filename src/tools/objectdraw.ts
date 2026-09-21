@@ -24,7 +24,7 @@ import type { AppCtx } from './context';
 import type { TGMesh, TGPolyMesh, Vec3 } from '../core/types';
 import type { Tool, ToolEvent } from './toolsys';
 import { addFace, addVertex, createPolyMesh, touchPolyMesh } from '../core/polymesh';
-import { currentStickyPlane, drawingPlane, reseatStickyPlane, screenToWorld, setStrokeExclusion } from './projection';
+import { currentStickyPlane, drawingPlane, reseatStickyPlane, screenToWorld, setRaycastExclusion, setStrokeExclusion } from './projection';
 import { magnetPoint } from './snapping';
 
 export type ObjectDrawKind =
@@ -132,6 +132,10 @@ export class ObjectDrawTool implements Tool {
       d.mesh = this.host?.addMesh(this.makeMesh(origin, axes)) ?? null;
     }
     this.draft = d;
+    // the draft is a draw target from the moment it exists, so a Surface or
+    // Nearest placement would resolve the NEXT point onto the shape being
+    // dragged out — it grows into its own face and runs at the camera
+    setRaycastExclusion(d.poly ? [{ kind: 'POLY', id: d.poly.id }] : d.mesh ? [{ kind: 'MESH', id: d.mesh.id }] : []);
     this.host?.drafting(d.poly ? { kind: 'POLY', id: d.poly.id } : d.mesh ? { kind: 'MESH', id: d.mesh.id } : null);
   }
 
@@ -311,6 +315,7 @@ export class ObjectDrawTool implements Tool {
     this.draft = null;
     this.host?.drafting(null);
     setStrokeExclusion(null);
+    setRaycastExclusion(null);
     if (!d) return;
     this.host?.finished(d.poly ? { kind: 'POLY', id: d.poly.id } : d.mesh ? { kind: 'MESH', id: d.mesh.id } : null);
     ctx.refreshUI();
@@ -321,6 +326,7 @@ export class ObjectDrawTool implements Tool {
     this.draft = null;
     this.host?.drafting(null);
     setStrokeExclusion(null);
+    setRaycastExclusion(null);
     if (!d) return;
     if (d.mesh) ctx.scene.meshes = ctx.scene.meshes.filter((m) => m.id !== d.mesh!.id);
     if (d.poly) ctx.scene.polyMeshes = ctx.scene.polyMeshes.filter((p) => p.id !== d.poly!.id);

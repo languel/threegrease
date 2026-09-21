@@ -82,6 +82,49 @@ let lockedDepth: number | null = null;
 /** placementSmooth's eased depth for STROKE/SPLAT/NEAREST — chases each
  *  newly-resolved depth instead of snapping straight to it. */
 let smoothedDepth: number | null = null;
+/**
+ * OBJECTS A SNAP MUST NOT SEE — the ones being moved, and the editor's own
+ * furniture.
+ *
+ * Every draw target is a snap target, and the object you are dragging is a
+ * draw target like any other: with Placement/Snap set to Surface or Face,
+ * the first thing under the pointer while you drag a sphere is THE SPHERE.
+ * The snap then puts it on its own surface, which moves it a little closer
+ * to the eye, which puts it under the pointer again — and it walks up the
+ * ray until it is wrapped around the camera. It looks like the object
+ * snapped to the camera, and it is a snap chasing itself.
+ *
+ * A stroke already had this problem and this answer (`setStrokeExclusion`);
+ * this is the same rule one level up, for whole objects.
+ */
+const excludedObjects = new Set<string>();
+
+export function setRaycastExclusion(refs: { kind: string; id: number }[] | null): void {
+  excludedObjects.clear();
+  for (const r of refs ?? []) excludedObjects.add(`${r.kind}:${r.id}`);
+}
+
+/**
+ * Should a raycast hit ignore this? True for anything excluded above, and
+ * for EDITOR FURNITURE — the gizmo (whose invisible drag plane is 90,000
+ * units across), the helpers, the glyphs. None of it is scene geometry, and
+ * a snap that can land on it is a snap that can land anywhere.
+ */
+export function ignoredBySnap(object: THREE.Object3D): boolean {
+  for (let o: THREE.Object3D | null = object; o; o = o.parent) {
+    const u = o.userData as Record<string, unknown>;
+    if (u.overlay || u.hoverShell) return true;
+    if (excludedObjects.size) {
+      if (u.meshId !== undefined && excludedObjects.has(`MESH:${u.meshId}`)) return true;
+      if (u.polyId !== undefined && excludedObjects.has(`POLY:${u.polyId}`)) return true;
+      if (u.splatId !== undefined && excludedObjects.has(`SPLAT:${u.splatId}`)) return true;
+      if (u.canvasId !== undefined && excludedObjects.has(`CANVAS:${u.canvasId}`)) return true;
+      if (u.actorId !== undefined && excludedObjects.has(`ACTOR:${u.actorId}`)) return true;
+    }
+  }
+  return false;
+}
+
 export function setStrokeExclusion(id: number | null): void {
   excludedStrokeId = id;
   stickyDepth = null;     // each new stroke re-acquires its depth anchor
@@ -637,8 +680,8 @@ export function raycastSurfaceHit(
     -((y - rect.top) / rect.height) * 2 + 1,
   );
   raycaster.setFromCamera(ndc, ctx.camera);
-  const hits = raycaster.intersectObjects(ctx.surfaces, true);
-  return hits.length ? { point: hits[0].point.clone(), object: hits[0].object } : null;
+  const hit = raycaster.intersectObjects(ctx.surfaces, true).find((h) => !ignoredBySnap(h.object));
+  return hit ? { point: hit.point.clone(), object: hit.object } : null;
 }
 
 /** Screen px -> the mesh TRIANGLE under the pointer (world-space), for the
@@ -655,6 +698,7 @@ export function raycastFaceTriangle(ctx: AppCtx, x: number, y: number): { point:
   for (const h of raycaster.intersectObjects(ctx.surfaces, true)) {
     const mesh = h.object as THREE.Mesh;
     if (!h.face || !(mesh as { isMesh?: boolean }).isMesh) continue;
+    if (ignoredBySnap(mesh)) continue;
     const pos = mesh.geometry.getAttribute('position');
     if (!pos) continue;
     const va = new THREE.Vector3().fromBufferAttribute(pos, h.face.a).applyMatrix4(mesh.matrixWorld);

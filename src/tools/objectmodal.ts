@@ -20,7 +20,7 @@
 import * as THREE from 'three';
 import { snapIncrement, type AppCtx } from './context';
 import { getObjectTransform, listSelected, selectionPivot, setObjectTransform, type ObjRef, type ObjTransform } from './objects';
-import { nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, perpendicularFoot, raycastFaceTriangle, raycastSurfaces } from './projection';
+import { nearestStrokeEdgeAll, nearestStrokePointAll, nearestStrokeSegmentAll, perpendicularFoot, raycastFaceTriangle, raycastSurfaces, setRaycastExclusion } from './projection';
 import { axisVector, basisFromNormal, originOf, transformBasis, transformPivotPoint, type Basis } from './orientation';
 import { allRefs, worldMatrixOf } from './objects';
 
@@ -107,6 +107,8 @@ export class ObjectModalTransform {
     this.lastPointer.copy(this.startPointer);
     this.pivotScreen.copy(this.worldToScreen(ctx, this.pivot));
     this.startWorld.copy(this.projectedHit(ctx, pointer.x, pointer.y) ?? this.pivot);
+    // what is moving cannot be what it snaps to (see setRaycastExclusion)
+    setRaycastExclusion(refs);
     this.active = true;
     ctx.canvas.style.cursor = CURSORS[kind];
     this.apply(ctx);
@@ -373,6 +375,7 @@ export class ObjectModalTransform {
   }
 
   confirm(ctx: AppCtx): void {
+    setRaycastExclusion(null);
     this.active = false;
     this.info = '';
     ctx.canvas.style.cursor = 'default';
@@ -387,6 +390,7 @@ export class ObjectModalTransform {
   }
 
   cancel(ctx: AppCtx): void {
+    setRaycastExclusion(null);
     this.restore(ctx);
     this.active = false;
     this.info = '';

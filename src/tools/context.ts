@@ -16,7 +16,11 @@ export type PlacementMode =
   | 'STROKE_PERP' | 'SPLAT' | 'NEAREST';
 export type StrokeTarget = 'ALL' | 'ENDS' | 'FIRST';
 /** which kind of element Placement: Nearest lands on */
-export type NearestTarget = 'ELEMENT' | 'VERTEX' | 'EDGE' | 'FACE';
+/** What Placement: Nearest looks for. DRAW is "anything I could draw on" —
+ *  the same list Surface placement uses, which is every object marked as a
+ *  draw target — and is the one that means "put this ON that", whatever
+ *  that turns out to be made of. */
+export type NearestTarget = 'ELEMENT' | 'VERTEX' | 'EDGE' | 'FACE' | 'DRAW';
 /** UPRIGHT: start on the GROUND, then grow straight up — the first point
  *  lands on the floor (or on whatever the Placement snaps it to), and the
  *  rest of the stroke lives on the VERTICAL plane through it that faces the

@@ -80,7 +80,7 @@ import {
   downloadScene, downloadText, importGPObjects, openSceneFile,
   remapGPObjectIds, serializeGPObject,
 } from '../io/serialize';
-import { currentStickyPlane, drawingPlane, nearestStrokeEdgeAll, nearestStrokePointAll, objectToScreen, placementPreview, raycastSurfaces, screenToWorld } from '../tools/projection';
+import { currentStickyPlane, drawingPlane, nearestStrokeEdgeAll, nearestStrokePointAll, objectToScreen, placementPreview, raycastSurfaces, screenToWorld, setRaycastExclusion } from '../tools/projection';
 import { evalCamera, insertCameraKey, removeCameraKey } from '../anim/camera';
 import { ACTIONS, Keymap, comboFromEvent } from './keymap';
 import { CommandRegistry } from './commands';
@@ -552,7 +552,7 @@ class App implements AppHandle {
     this.widget.addEventListener('dragging-changed', (e) => {
       this.controls.enabled = !(e as unknown as { value: boolean }).value;
       if ((e as unknown as { value: boolean }).value) this.beginWidgetDrag();
-      else this.widgetBase = null;
+      else { this.widgetBase = null; setRaycastExclusion(null); }
     });
     this.widget.addEventListener('objectChange', () => this.applyWidgetDrag());
     this.widget.enabled = false;
@@ -2626,6 +2626,7 @@ class App implements AppHandle {
   private beginWidgetDrag(): void {
     const refs = listSelected(this.ctx.scene);
     if (!refs.length) return;
+    setRaycastExclusion(refs);   // a drag must not snap to what it is dragging
     this.ctx.pushUndo();
     this.widgetBase = {
       refs,

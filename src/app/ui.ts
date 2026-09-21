@@ -1442,11 +1442,16 @@ export class UI {
           'ease toward a new target depth instead of jumping straight to it (ignored when Lock is on)'),
       ] : []),
       ...(s.placement === 'NEAREST' ? [
-        tip(selectField('Target', s.nearestTarget, [['ELEMENT', 'Nearest Element'], ['VERTEX', 'Vertex'], ['EDGE', 'Edge'], ['FACE', 'Face']] as [NearestTarget, string][],
+        tip(selectField('Target', s.nearestTarget, [
+          ['ELEMENT', 'Nearest Element'], ['VERTEX', 'Vertex'], ['EDGE', 'Edge'], ['FACE', 'Face'],
+          ['DRAW', 'Draw target (any surface)'],
+        ] as [NearestTarget, string][],
           (v) => { s.nearestTarget = v; this.buildTopbar(); }),
-        'Element: whatever is nearest, in priority order (mesh vertex, edge, face, surface, stroke, splat). '
-          + 'Vertex: a stroke point, a mesh or poly vertex, a splat centre. Edge: anywhere along a stroke or a mesh edge. '
-          + 'Face: a mesh surface.'),
+        'Element: whatever is nearest, in priority order. '
+          + 'Vertex: a corner — of a box, a poly mesh, a stroke, a splat. Edge: anywhere along one. '
+          + 'Face: a surface, at the point you are pointing at. '
+          + 'Draw target: the same, but it does not care what the thing is made of — anything marked '
+          + 'as a draw target, which is how you put one object ON another.'),
       ] : []),
       ...(s.placement === 'STROKE' ? [
         tip(selectField('Target', s.strokeTarget, [['ALL', 'All Points'], ['ENDS', 'End Points'], ['FIRST', 'First Point']] as [StrokeTarget, string][],

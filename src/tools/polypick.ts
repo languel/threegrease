@@ -7,9 +7,10 @@
 // rewriting interactions.
 import * as THREE from 'three';
 import type { AppCtx } from './context';
+import { refOfObject3D } from './objects';
 import type { PathRef, TGVertexBinding, Vec3 } from '../core/types';
 import { frameAt } from '../core/gpdata';
-import { drawingPlane, nearestStrokePointAll, nearestStrokeSegmentAll, raycastFaceTriangle } from './projection';
+import { drawingPlane, nearestStrokePointAll, nearestStrokeSegmentAll, raycastFaceTriangle, ignoredBySnap, raycastSurfaceHit } from './projection';
 import { snapIncrement } from './context';
 import { worldMatrixOf } from './objects';
 import { pickPaintCloudPoint, pickSplatPoint } from './splatpick';
@@ -50,7 +51,7 @@ export interface ConstructionOpts {
   splatPx?: number;
   /** only this kind of element (Placement: Nearest's target); ELEMENT or
    *  absent = the full priority chain */
-  only?: 'ELEMENT' | 'VERTEX' | 'EDGE' | 'FACE';
+  only?: 'ELEMENT' | 'VERTEX' | 'EDGE' | 'FACE' | 'DRAW';
 }
 
 /** Vertex binding matching a construction source (provenance only). */
@@ -140,6 +141,7 @@ export function pickPolyFace(
   const ndc = new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
   raycaster.setFromCamera(ndc, ctx.camera);
   for (const h of raycaster.intersectObjects(ctx.polyPick.faceMeshes(), false)) {
+    if (ignoredBySnap(h.object)) continue;
     const polyId = h.object.userData.polyId as number | undefined;
     if (polyId === undefined || h.faceIndex === undefined || h.faceIndex === null) continue;
     const pm = ctx.scene.polyMeshes.find((p) => p.id === polyId);
@@ -217,9 +219,107 @@ const ELEMENT_PX = 24;
  * renderer's, so a box's face diagonal counts as an edge — a mesh has no
  * other record of which of its edges are "real".
  */
+/**
+ * A CONVENTIONAL MESH'S OWN VERTICES AND EDGES, in screen space.
+ *
+ * Vertex and edge snapping used to reach poly meshes, strokes, splats and
+ * paint clouds — everything whose points live in `GPScene` — plus the
+ * corners of whichever triangle happened to be UNDER the pointer. A box, a
+ * cylinder or an imported model has its geometry only in the render tree,
+ * so snapping to the corner of a plinth meant hovering one of its faces
+ * first, and a corner approached through empty space offered nothing at
+ * all. These are the objects a blockout is mostly made of.
+ *
+ * THE BUDGET IS THE WHOLE DESIGN. Walking a geometry per pointer-move is
+ * fine for the primitives (a box is 24 vertices, a UV sphere 561) and
+ * absurd for a room scan (162k, on every mouse move, while dragging). So a
+ * mesh over `VERT_BUDGET` is skipped here and keeps the triangle-under-the-
+ * pointer answer, which is exact where you are actually pointing and costs
+ * one raycast. Small things you can snap to from anywhere; enormous things
+ * you snap to by pointing at them.
+ */
+const VERT_BUDGET = 3000;
+
+function meshElements(
+  ctx: AppCtx, x: number, y: number, px: number, want: 'VERTEX' | 'EDGE',
+): { world: THREE.Vector3; d: number } | null {
+  const rect = ctx.canvas.getBoundingClientRect();
+  let best: { world: THREE.Vector3; d: number } | null = null;
+  const v = new THREE.Vector3();
+  const project = (p: THREE.Vector3): { x: number; y: number; ok: boolean } => {
+    const q = p.clone().project(ctx.camera);
+    return { x: (q.x * 0.5 + 0.5) * rect.width, y: (-q.y * 0.5 + 0.5) * rect.height, ok: q.z <= 1 };
+  };
+  for (const root of ctx.pickableMeshes) {
+    if (!root.visible || ignoredBySnap(root)) continue;
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry || !mesh.visible || ignoredBySnap(mesh)) return;
+      const pos = mesh.geometry.getAttribute('position');
+      if (!pos || pos.count > VERT_BUDGET) return;
+      mesh.updateWorldMatrix(true, false);
+      // project once, then work in 2D — the alternative is a projection per
+      // edge test, three times over
+      const screen: { x: number; y: number; ok: boolean }[] = [];
+      const world: THREE.Vector3[] = [];
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+        world.push(v.clone());
+        screen.push(project(v));
+      }
+      if (want === 'VERTEX') {
+        for (let i = 0; i < screen.length; i++) {
+          if (!screen[i].ok) continue;
+          const d = Math.hypot(screen[i].x - x, screen[i].y - y);
+          if (d < px && (!best || d < best.d)) best = { world: world[i], d };
+        }
+        return;
+      }
+      const index = mesh.geometry.getIndex();
+      const tris = index ? index.count / 3 : pos.count / 3;
+      for (let t = 0; t < tris; t++) {
+        const a = index ? index.getX(t * 3) : t * 3;
+        const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+        const c = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+        for (const [i, j] of [[a, b], [b, c], [c, a]] as const) {
+          if (!screen[i]?.ok || !screen[j]?.ok) continue;
+          const d = segmentDistPx(screen[i], screen[j], x, y);
+          if (d.px < px && (!best || d.px < best.d)) {
+            best = { world: world[i].clone().lerp(world[j], d.t), d: d.px };
+          }
+        }
+      }
+    });
+  }
+  return best;
+}
+
+/** Point-to-segment distance in screen px, and where along it. */
+function segmentDistPx(
+  a: { x: number; y: number }, b: { x: number; y: number }, x: number, y: number,
+): { px: number; t: number } {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 1e-9 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2)) : 0;
+  return { px: Math.hypot(a.x + dx * t - x, a.y + dy * t - y), t };
+}
+
 function pickElement(
-  ctx: AppCtx, x: number, y: number, only: 'VERTEX' | 'EDGE' | 'FACE', rect: DOMRect, opts: ConstructionOpts,
+  ctx: AppCtx, x: number, y: number, only: 'VERTEX' | 'EDGE' | 'FACE' | 'DRAW', rect: DOMRect, opts: ConstructionOpts,
 ): ConstructionHit | null {
+  if (only === 'DRAW') {
+    // ANY DRAW TARGET: the surface under the pointer, whatever it belongs
+    // to — a scan, a plinth, a panel, a character. No element identity is
+    // offered because none is meant: the question is "what is there", and
+    // the answer has to be the same one Surface placement would give.
+    const hit = raycastSurfaceHit(ctx, x + rect.left, y + rect.top);
+    if (!hit) return null;
+    const ref = refOfObject3D(hit.object);
+    return {
+      world: [hit.point.x, hit.point.y, hit.point.z],
+      source: ref?.kind === 'MESH' ? { kind: 'MESH', objectId: ref.id } : { kind: 'ELEMENT' },
+    };
+  }
   const cands: { world: THREE.Vector3; d: number; source: ConstructionSource }[] = [];
   const dist = (w: THREE.Vector3) => {
     const s = screenOf(ctx, w, rect);
@@ -235,6 +335,9 @@ function pickElement(
     if (pc) cands.push({ world: new THREE.Vector3(...pc.world), d: pc.d, source: { kind: 'PCLOUD', cloudId: pc.cloudId, pointIndex: pc.pointIndex } });
     const sk = pickSplatPoint(ctx, x, y, ELEMENT_PX);
     if (sk) cands.push({ world: new THREE.Vector3(...sk.world), d: sk.d, source: { kind: 'SPLAT', objectId: sk.objectId, pointIndex: sk.pointIndex } });
+    // a box's corner, a cylinder's rim: the geometry a blockout is made of
+    const mv = meshElements(ctx, x, y, ELEMENT_PX, 'VERTEX');
+    if (mv) cands.push({ world: mv.world, d: mv.d, source: { kind: 'ELEMENT' } });
     if (tri) {
       // the corner of the face you are on — offered however far it is,
       // since being ON the face is what makes it the nearest vertex
@@ -250,6 +353,8 @@ function pickElement(
       const w = seg.a.clone().lerp(seg.b, seg.t);
       cands.push({ world: w, d: dist(w), source: { kind: 'ELEMENT' } });
     }
+    const me = meshElements(ctx, x, y, ELEMENT_PX, 'EDGE');
+    if (me) cands.push({ world: me.world, d: me.d, source: { kind: 'ELEMENT' } });
     if (tri) {
       const sides = [[tri.tri.a, tri.tri.b], [tri.tri.b, tri.tri.c], [tri.tri.c, tri.tri.a]];
       let best: THREE.Vector3 | null = null;
@@ -319,6 +424,7 @@ export function pickConstruction(ctx: AppCtx, x: number, y: number, opts: Constr
     const ndc = new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
     raycaster.setFromCamera(ndc, ctx.camera);
     for (const h of raycaster.intersectObjects(ctx.surfaces, true)) {
+      if (ignoredBySnap(h.object)) continue;
       let cur: THREE.Object3D | null = h.object;
       let meshId: number | undefined;
       let isPoly = false;

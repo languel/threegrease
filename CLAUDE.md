@@ -561,12 +561,42 @@ the browser console or automated evals:
   from Ground's wall it came out a parallelogram. Verified: corners square to
   0.00000, bottom edge on the floor. Target-seeking placements keep the old
   screen-built box.
+- **A SNAP MUST NOT SEE WHAT IT IS MOVING** (`setRaycastExclusion` /
+  `ignoredBySnap` in `tools/projection.ts`). Every draw target is a snap
+  target and the object being dragged is a draw target like any other, so
+  with Surface or Face snapping the first thing under the pointer while you
+  drag a sphere is THE SPHERE: the snap puts it on its own surface, which
+  moves it closer to the eye, which puts it under the pointer again — it
+  walks up the ray until it is wrapped around the camera. It reads as "the
+  object snapped to the camera" and it is a snap chasing itself. A stroke
+  already had this problem and this answer (`setStrokeExclusion`); this is
+  the same rule one level up. The object modal, the transform widget and
+  the object-draw draft all set it (the draft is a draw target from the
+  moment it exists, so a Surface placement would grow it into its own face).
+  The same filter drops EDITOR FURNITURE — anything `markOverlay`ed. The
+  gizmo alone hides a 90,000-unit invisible drag plane, and a snap that can
+  land on it can land anywhere.
 - **Placement: Nearest has a Target** (`settings.nearestTarget`,
-  `pickElement` in `polypick.ts`): Element (the old priority chain), Vertex
-  (poly vertex, stroke point, splat centre, or the corner of the mesh
-  triangle under the pointer), Edge (poly edge, anywhere along a stroke, the
-  nearest side of that triangle), Face (poly face, mesh surface). Mesh
-  "edges" are the renderer's triangles, so a box face's diagonal counts.
+  `pickElement` in `polypick.ts`): Element (the old priority chain), Vertex,
+  Edge, Face, and DRAW TARGET — "anything I could draw on", the same list
+  Surface placement uses, which is how you put one object ON another
+  whatever it happens to be made of. A camera is never a draw target, so it
+  is never in it.
+  VERTEX and EDGE reach CONVENTIONAL MESHES, not just the things whose
+  points live in `GPScene`. They used to offer poly vertices, stroke points,
+  splat centres and the corners of whichever triangle was UNDER the pointer
+  — so snapping to the corner of a plinth meant hovering one of its faces
+  first, and a corner approached through empty space offered nothing, which
+  is most of what a blockout is made of. `meshElements` walks the render
+  geometry in screen space instead.
+  **THE BUDGET IS THE WHOLE DESIGN THERE**: walking a geometry per
+  pointer-move is fine for primitives (a box is 24 vertices, a UV sphere
+  561) and absurd for a room scan (162k, on every move, while dragging), so
+  a mesh over `VERT_BUDGET` (3000) is skipped and keeps the
+  triangle-under-the-pointer answer — exact where you are pointing, one
+  raycast. Small things you snap to from anywhere; enormous things you snap
+  to by pointing at them. Mesh "edges" are still the renderer's triangles,
+  so a box face's diagonal counts.
 - **SELECTING A CAMERA DOES NOT MAKE IT ACTIVE.** It used to, on the theory
   that "the camera I am working on" and "the camera the scene renders
   through" should be one thing. They are not: selecting is how you reach a
