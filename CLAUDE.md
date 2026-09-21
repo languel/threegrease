@@ -2118,6 +2118,38 @@ the browser console or automated evals:
   stay in WORLD space; a note that should travel with the character needs the
   GP object parented to a joint, which is the existing constraint and stays a
   separate decision.
+- **A SPLAT HAS AN EDIT MODE, and nothing it does touches the file**
+  (`tools/splatedit.ts`, `splats/edit.ts`, `SparkSplats.applyEdits`). Edit
+  with a splat selected (the one you last clicked wins over a selected mesh)
+  opens a region selector: box / lasso / circle under one toolbar button (W
+  cycles), Blender's five select operations in the top bar, A / Alt+A /
+  Ctrl+I, X deletes. Selection goes THROUGH the cloud, like X-ray, because
+  the floaters are what hide behind the surface you can see.
+  - EVERY DISPLAY IS REBUILT FROM THE PACKED ARRAY AS LOADED (`orig`):
+    deleted and filtered splats get opacity 0, selected ones are tinted, and
+    none of it is ever read back as input. The trap: writing
+    `packedSplats.packedArray` and setting `needsUpdate` does NOTHING on its
+    own — Spark keeps drawing the old generation until the mesh's
+    `updateVersion()` is called too. And it lands a frame later, so the
+    panel's counts are refreshed from `onApplied`, not after the edit.
+  - A DELETION IS `TGSplat.removed`, a STRING: a base64 bitmask or varint
+    runs, whichever is shorter. Runs of numbers looked right and were not —
+    a scan's splats are not stored in spatial order, so half a room is ~25k
+    scattered runs (48k numbers in every undo snapshot); the bitmask is
+    bounded at n/6 characters.
+  - FILTERS are `TGSplat.display`: Min opacity (a faint splat is one the
+    capture was unsure of, so this is the confidence filter), Max size in
+    metres (floaters and sky blobs), compared in the packed BYTE domain so a
+    million splats cost one log, not three million. Show as POINT CLOUD fades
+    the gaussians (`mesh.opacity = 0`) and draws a child `THREE.Points` of the
+    shown centres, so it rides the mesh's transform and outline. Its raycast
+    is off: a Points threshold is in WORLD units and hits everything.
+  - Picking and snapping read the same state (`pickSplatPoint` over every
+    shown centre, one composed matrix, strided only past 250k), so a scan is
+    clicked where it IS in Object mode and a deleted splat cannot be snapped
+    to. Export writes what is shown, from the original colours.
+  - Not built: moving splats (G/R/S says so), a general boolean crop/filter
+    volume, and baking the edits into a new stored file.
 - **The shared walking body** (`actor/locomotion.ts`) is where collision and
   ground live, so a character does not collide differently depending on who
   is steering it. `walkVolume.gather(scene, frame)` is idempotent per frame.

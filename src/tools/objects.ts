@@ -1,6 +1,7 @@
 // Object mode (unified): one selection/transform model over GP objects,
 // canvas planes, splats, and mesh objects — now with parenting.
 // ObjRef.id is STABLE for every kind (GPObject.id, not its array index).
+import { pickSplatPoint } from './splatpick';
 import * as THREE from 'three';
 import type { AppCtx } from './context';
 import type { GPScene, ParentRef, TGMeasure, Vec3 } from '../core/types';
@@ -755,6 +756,10 @@ export class ObjectSelectTool implements Tool {
       const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'LIGHT', id: l.id }));
       if (p && Math.hypot(p.x - e.x, p.y - e.y) < 30) return { kind: 'LIGHT', id: l.id };
     }
+    // a scan is picked where it IS — any shown splat under the pointer —
+    // and, failing that, at its origin like the other glyph objects
+    const splatHit = pickSplatPoint(ctx, e.x, e.y, 8);
+    if (splatHit) return { kind: 'SPLAT', id: splatHit.objectId };
     for (const s of ctx.scene.splats) {
       const p = this.projectWorld(ctx, worldMatrixOf(ctx.scene, { kind: 'SPLAT', id: s.id }));
       if (p && Math.hypot(p.x - e.x, p.y - e.y) < 40) return { kind: 'SPLAT', id: s.id };

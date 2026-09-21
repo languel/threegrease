@@ -207,6 +207,7 @@ import type { BakeSource } from '../render/bake';
 import { bakeEngine } from '../render/bake';
 import { PaintCloudManager, createPaintCloud } from '../render/paintclouds';
 import { setSplatPickSource } from '../tools/splatpick';
+import { SplatEditTool, setSplatEditSource } from '../tools/splatedit';
 import { setStencilObjectResolver, setStencilVideoSource } from '../tools/stencil';
 import { SplatPaintTool } from '../tools/splatbrush';
 import { TexturePaintTool, setTexPaintMeshManager, setTexPaintPolyManager } from '../tools/texpaint';
@@ -390,6 +391,12 @@ class App implements AppHandle {
   private polyBuild = new PolyPenTool('polybuild', 'BUILD');
   private quadPatch = new PolyPenTool('quadpatch', 'PATCH');
   private meshEdit = new MeshEditTool();
+  /** Edit mode on a gaussian splat: box / lasso / circle, then delete */
+  private splatTools = [
+    new SplatEditTool('splat-select', 'BOX'),
+    new SplatEditTool('splat-select-lasso', 'LASSO'),
+    new SplatEditTool('splat-select-circle', 'CIRCLE'),
+  ];
   /** Draw an object where it goes (tools/objectdraw.ts) — one per shape. */
   private drawTools = ([
     'PLANE', 'RECT', 'TRIANGLE', 'POLYGON', 'BOX', 'CYLINDER', 'PYRAMID',
@@ -515,6 +522,8 @@ class App implements AppHandle {
     // between frames, so nothing else would mark the scene dirty afterwards
     this.splats.onLoaded = () => this.ctx.requestRender();
     setSplatPickSource(this.splats);
+    setSplatEditSource(this.splats);
+    this.splats.onApplied = () => this.ui.refresh();
     setTexPaintMeshManager(this.meshes);
     setTexPaintPolyManager(this.polys);
     // stencil masking: the live camera frame, and ObjRef -> three.js root
@@ -595,7 +604,7 @@ class App implements AppHandle {
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
       this.polyPen, this.polyBuild, this.quadPatch, this.meshEdit, ...this.drawTools, new SplatPaintTool(), new TexturePaintTool(),
-      new ActorPoseTool(), new MeasureTool(), new DirectTool(),
+      new ActorPoseTool(), new MeasureTool(), new DirectTool(), ...this.splatTools,
     ]) this.tools.register(t);
     this.tools.setActive(this.ctx, this.ctx.settings.activeTool || 'object-select');
     this.meshEdit.beginTransform = (kind, undo) => this.withPane(this.pointerPane, () => this.beginMeshTransform(kind, undo));
@@ -723,9 +732,16 @@ class App implements AppHandle {
     // selection, EDIT opens the vertex / edge / face editor on it (a
     // primitive is converted to an editable mesh first, as Blender's are
     // just meshes); GP objects keep the GP point editor.
-    const meshTarget = mode === 'EDIT' ? this.editableMeshTarget() : null;
+    // a SPLAT opens its own editor (select by region, delete). The one you
+    // last clicked wins over any other selected mesh; otherwise a mesh does.
+    const pickedSplat = mode === 'EDIT' ? this.pickedSplat() : null;
+    const meshTarget = mode === 'EDIT' && pickedSplat === null ? this.editableMeshTarget() : null;
     const enterPolyPen = meshTarget !== null;
     this.meshEditId = meshTarget;
+    const splatTarget = pickedSplat ?? (mode === 'EDIT' && meshTarget === null ? this.splatEditTarget() : null);
+    this.splatEditId = splatTarget;
+    for (const t of this.splatTools) t.targetId = splatTarget;
+    this.splats.setEditing(splatTarget);
     if (mode !== this.ctx.settings.mode) this.modeHistory = [this.ctx.settings.mode, mode];
     // OBJECT mode (and the outliner) tolerate zero GP objects — every
     // other mode edits the active one, so create a blank on entry rather
@@ -736,7 +752,7 @@ class App implements AppHandle {
       this.ctx.scene.activeObject = 0;
     }
     this.ctx.settings.mode = mode;
-    this.setTool(enterPolyPen ? 'meshedit' : DEFAULT_TOOL[mode]);
+    this.setTool(enterPolyPen ? 'meshedit' : splatTarget !== null ? this.splatSelectTool() : DEFAULT_TOOL[mode]);
     this.gp.markDirty();
     this.refreshWidget();
     this.ui.refresh();
@@ -881,6 +897,63 @@ class App implements AppHandle {
     touchPolyMesh(pm);
     ctx.requestRender();
     this.ui.refresh();
+  }
+
+  /** The splat Edit mode is open on, or null. */
+  private splatEditId: number | null = null;
+
+  /** The picked splat if selected, else the only kind selected. A selected
+   *  GP object or mesh wins — Edit mode edits what you were working on. */
+  private pickedSplat(): number | null {
+    const picked = this.objectPick.lastPicked;
+    return picked?.kind === 'SPLAT' && this.ctx.scene.splats.some((s) => s.id === picked.id && s.select)
+      ? picked.id : null;
+  }
+
+  private splatEditTarget(): number | null {
+    const scene = this.ctx.scene;
+    if (scene.objects.some((o) => o.select)) return null;
+    return scene.splats.find((s) => s.select)?.id ?? null;
+  }
+
+  /** The select family member last used in splat edit (W cycles it). */
+  private splatSelectTool(): string {
+    const cur = this.ctx.settings.activeTool;
+    return this.splatTools.some((t) => t.id === cur) ? cur : 'splat-select';
+  }
+
+  splatEditing(): boolean {
+    return this.ctx.settings.mode === 'EDIT' && this.splatEditId !== null
+      && this.ctx.scene.splats.some((s) => s.id === this.splatEditId);
+  }
+
+  /** The splat editor's operations, for the panel and the right-click menu. */
+  splatEditOp(op: 'all' | 'none' | 'invert' | 'delete' | 'restore', id?: number): void {
+    const t = this.splatTools[0];
+    if (op === 'restore') {
+      const data = this.ctx.scene.splats.find((s) => s.id === (id ?? this.splatEditId));
+      if (!data?.removed?.length) return;
+      this.ctx.pushUndo();
+      data.removed = '';
+      this.ui.refresh();
+      return;
+    }
+    if (op === 'all') t.setAll(this.ctx, 1);
+    else if (op === 'none') t.setAll(this.ctx, 0);
+    else if (op === 'invert') t.invert(this.ctx);
+    else {
+      const n = t.deleteSelected(this.ctx);
+      if (n) this.setStatusHint(`deleted ${n.toLocaleString()} splats`, 2000);
+    }
+  }
+
+  /** Counts for the panel: [shown, selected, removed, total]. */
+  splatEditCounts(id: number): [number, number, number, number] | null {
+    const st = this.splats.editState(id);
+    if (!st) return null;
+    let shown = 0;
+    for (let i = 0; i < st.n; i++) shown += st.alive[i];
+    return [shown, st.selCount, st.removedCount, st.n];
   }
 
   /** Edit mode is on a mesh (the vertex / edge / face editor or a poly tool). */
@@ -1537,6 +1610,7 @@ class App implements AppHandle {
         if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5 && !this.presentation) {
           if (this.ctx.settings.mode === 'OBJECT') this.ui.openObjectContextMenu(e.clientX, e.clientY);
           else if (this.meshEditing()) this.ui.openMeshOpsContextMenu(e.clientX, e.clientY);
+          else if (this.splatEditing()) this.ui.openSplatOpsContextMenu(e.clientX, e.clientY);
           else if (this.ctx.settings.mode === 'EDIT') this.ui.openStrokeOpsContextMenu(e.clientX, e.clientY);
         }
         return;
@@ -1847,6 +1921,7 @@ class App implements AppHandle {
       case 'move':
         this.withPane(this.pointerPane, () => {
           if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'move', this.tools.lastPointer);
+          else if (this.splatEditing()) this.setStatusHint('moving splats is not built yet — select and delete', 2500);
           else if (this.meshEditing()) this.beginMeshTransform('move');
           else if (this.editLike()) {
             // a stroke edit belongs to the active GP object: that is what
@@ -1861,6 +1936,7 @@ class App implements AppHandle {
       case 'rotate':
         this.withPane(this.pointerPane, () => {
           if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'rotate', this.tools.lastPointer);
+          else if (this.splatEditing()) this.setStatusHint('moving splats is not built yet — select and delete', 2500);
           else if (this.meshEditing()) this.beginMeshTransform('rotate');
           else if (this.editLike()) {
             // a stroke edit belongs to the active GP object: that is what
@@ -1875,6 +1951,7 @@ class App implements AppHandle {
       case 'scale':
         this.withPane(this.pointerPane, () => {
           if (ctx.settings.mode === 'OBJECT') this.objModal.begin(ctx, 'scale', this.tools.lastPointer);
+          else if (this.splatEditing()) this.setStatusHint('moving splats is not built yet — select and delete', 2500);
           else if (this.meshEditing()) this.beginMeshTransform('scale');
           else if (this.editLike()) {
             // a stroke edit belongs to the active GP object: that is what
@@ -7012,7 +7089,9 @@ class App implements AppHandle {
     };
     status.textContent = this.objModal.active
       ? 'LMB/Enter confirm · RMB/Esc cancel · X/Y/Z axis (Shift+axis = plane, again clears) · N along normal (Shift+N across it) · G/R/S switch · RR trackball · type a number for exact · Shift precision · Ctrl inverts snap'
-      : `${s.mode} — ${s.activeTool} · frame ${this.ctx.scene.frame} · ${hints[s.mode]}`;
+      : `${s.mode} — ${s.activeTool} · frame ${this.ctx.scene.frame} · ${this.splatEditing()
+        ? 'LMB drag to select splats (through the cloud) · Shift adds, Ctrl subtracts · W box / lasso / circle · A all, Alt+A none, Ctrl+I invert · X delete'
+        : hints[s.mode]}`;
   }
 }
 

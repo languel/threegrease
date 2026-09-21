@@ -11,7 +11,8 @@
 // import can resolve, so it has to exist synchronously from the start.
 import * as THREE from 'three';
 import type { GPScene } from '../core/types';
-import type { SparkSplats } from './spark';
+import type { SparkSplats, SplatEditState } from './spark';
+export type { SplatEditState } from './spark';
 
 export class SplatManager {
   readonly group = new THREE.Group();
@@ -48,6 +49,8 @@ export class SplatManager {
     this.loading = import('./spark')
       .then(({ SparkSplats }) => {
         this.impl = new SparkSplats(this.group, this.errors);
+        this.impl.editingId = this.editingId;
+        this.impl.onApplied = () => this.onApplied?.();
         if (this.renderer) this.impl.init(this.renderer);
         this.impl.sync(scene);
         this.onLoaded?.();
@@ -59,6 +62,19 @@ export class SplatManager {
       });
     return this.loading;
   }
+
+  /** Edit mode's view of a loaded cloud (centres, what is shown, the
+   *  selection), or null until it has loaded. */
+  editState(id: number): SplatEditState | null { return this.impl?.editState(id) ?? null; }
+  touchSelection(id: number): void { this.impl?.touchSelection(id); }
+  /** The splat Edit mode is open on — only its selection is tinted. */
+  setEditing(id: number | null): void {
+    this.editingId = id;
+    if (this.impl) this.impl.editingId = id;
+  }
+  editingId: number | null = null;
+  /** what a cloud shows changed (delete, undo, filter) — refresh the panel */
+  onApplied: (() => void) | null = null;
 
   meshFor(id: number): THREE.Object3D | null { return this.impl?.meshFor(id) ?? null; }
 

@@ -1,5 +1,6 @@
 import { angleSuffix, evaluate, formatAngle, parseAngle, type AngleUnit } from '../core/angleinput';
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget, type NearestTarget, type TransformOrientation, type TransformPivot } from '../tools/context';
+import { splatDisplay } from '../splats/edit';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { TGLight, TGLens, GPCamera, GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
 import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
@@ -87,6 +88,10 @@ export interface AppHandle {
   ctx: AppCtx;
   /** Edit mode is open on a mesh (vertex / edge / face editor) */
   meshEditing(): boolean;
+  splatEditing(): boolean;
+  splatEditOp(op: 'all' | 'none' | 'invert' | 'delete' | 'restore', id?: number): void;
+  /** [shown, selected, removed, total], or null until the cloud has loaded */
+  splatEditCounts(id: number): [number, number, number, number] | null;
   setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
   cameraViewOn(): boolean;
   toggleCameraView(): void;
@@ -992,6 +997,17 @@ const TOOLS_BY_MODE: Record<EditorMode, ToolSlot[]> = {
   WEIGHT: [['weightpaint', 'adjustments', 'Weight paint']],
 };
 
+/** Edit mode on a SPLAT: pick by region (it goes through the cloud, like
+ *  X-ray), then X deletes. */
+const SPLAT_EDIT_TOOLS: ToolSlot[] = [
+  { group: 'select', label: 'Select splats', tools: [
+    ['splat-select', 'squareTarget', 'Box select splats — through the cloud · Shift adds, Ctrl subtracts · A all, Alt+A none, Ctrl+I invert · X delete'],
+    ['splat-select-lasso', 'lasso', 'Lasso select splats'],
+    ['splat-select-circle', 'circle', 'Circle select splats — paint over them ([ ] size, Ctrl unpaints)'],
+  ] },
+  ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area)'],
+];
+
 /** Edit mode on a MESH: the element editor first, then the poly tools that
  *  build onto the same mesh, and the ruler. */
 const MESH_EDIT_TOOLS: ToolSlot[] = [
@@ -1573,6 +1589,21 @@ export class UI {
   private topbarPopover: string | null = null;
   private popoverCloserBound = false;
 
+  /** Blender's five box-select operations, shared by the mesh and splat
+   *  editors. */
+  private selectOpButtons(): HTMLElement[] {
+    const s = this.app.ctx.settings;
+    const ops: [typeof s.selectOp, IconName, string][] = [
+      ['SET', 'selOpSet', 'Box select: set a new selection'],
+      ['EXTEND', 'selOpExtend', 'Box select: extend the selection (Shift)'],
+      ['SUBTRACT', 'selOpSubtract', 'Box select: subtract from the selection (Ctrl)'],
+      ['DIFFERENCE', 'selOpDifference', 'Box select: invert what the box covers'],
+      ['INTERSECT', 'selOpIntersect', 'Box select: keep only what is already selected AND inside the box'],
+    ];
+    return ops.map(([op, ic, title]) =>
+      btn(icon(ic), () => { s.selectOp = op; this.buildTopbar(); }, { active: s.selectOp === op, title }));
+  }
+
   private buildTopbar(): void {
     if (!this.popoverCloserBound) {
       // a click anywhere outside an open popover closes it, as menus do
@@ -1662,6 +1693,9 @@ export class UI {
           tbField('size', 'Eraser size', slider('', s.eraser.radius, 4, 120, 1, (v) => { s.eraser.radius = v; }, { def: 24, title: 'Eraser size' })),
         );
       }
+    } else if (s.mode === 'EDIT' && this.app.splatEditing()) {
+      // a splat has one kind of element, so only the box-select operation
+      bar.append(...this.selectOpButtons());
     } else if (s.mode === 'EDIT' && this.app.meshEditing()) {
       const modes: ['VERTEX' | 'EDGE' | 'FACE', IconName, string][] = [
         ['VERTEX', 'selVertex', 'Vertex select'], ['EDGE', 'selEdge', 'Edge select'], ['FACE', 'selFace', 'Face select'],
@@ -1671,16 +1705,7 @@ export class UI {
           { active: s.meshSelectMode === m, title }));
       }
       bar.append(el('div', { class: 'sep' }));
-      const ops: [typeof s.selectOp, IconName, string][] = [
-        ['SET', 'selOpSet', 'Box select: set a new selection'],
-        ['EXTEND', 'selOpExtend', 'Box select: extend the selection (Shift)'],
-        ['SUBTRACT', 'selOpSubtract', 'Box select: subtract from the selection (Ctrl)'],
-        ['DIFFERENCE', 'selOpDifference', 'Box select: invert what the box covers'],
-        ['INTERSECT', 'selOpIntersect', 'Box select: keep only what is already selected AND inside the box'],
-      ];
-      for (const [op, ic, title] of ops) {
-        bar.append(btn(icon(ic), () => { s.selectOp = op; this.buildTopbar(); }, { active: s.selectOp === op, title }));
-      }
+      bar.append(...this.selectOpButtons());
       bar.append(el('div', { class: 'sep' }));
       bar.append(iconToggle('proportional', 'Proportional editing — moving a vertex drags its neighbours with a falloff',
         s.propEdit.enabled, (v) => { s.propEdit.enabled = v; this.buildTopbar(); }));
@@ -1775,6 +1800,7 @@ export class UI {
   /** The current mode's toolbar slots (what `buildToolbar` draws). */
   private toolSlots(): ToolSlot[] {
     const { ctx } = this.app;
+    if (ctx.settings.mode === 'EDIT' && this.app.splatEditing()) return SPLAT_EDIT_TOOLS;
     return ctx.settings.mode === 'EDIT' && this.app.meshEditing() ? MESH_EDIT_TOOLS : TOOLS_BY_MODE[ctx.settings.mode];
   }
 
@@ -2119,6 +2145,20 @@ export class UI {
 
   /** Right-click while editing a MESH: its own operations, not the stroke
    *  editor's (which acted on grease pencil and did nothing to the mesh). */
+  /** Right-click in splat Edit mode. */
+  openSplatOpsContextMenu(clientX: number, clientY: number): void {
+    const op = (o: 'all' | 'none' | 'invert' | 'delete' | 'restore') => () => this.app.splatEditOp(o);
+    this.openContextMenu(clientX, clientY, [
+      { header: 'Splats' },
+      { label: 'Select all', do: op('all') },
+      { label: 'Select none', do: op('none') },
+      { label: 'Invert selection', do: op('invert') },
+      { sep: true },
+      { label: 'Delete selected', do: op('delete') },
+      { label: 'Restore all removed', do: op('restore') },
+    ]);
+  }
+
   openMeshOpsContextMenu(clientX: number, clientY: number): void {
     const m = (op: Parameters<AppHandle['meshOp']>[0]) => () => this.app.meshOp(op);
     const items: CtxItem[] = [
@@ -2506,6 +2546,7 @@ export class UI {
       { label: 'Group under empty', action: 'groupToEmpty' },
       { label: 'Add to Library', do: () => { void this.app.saveSelectedAsAsset(); } },
       { label: 'Render selection to Library', do: () => this.app.renderToLibrary('SELECTION') },
+      ...(one?.kind === 'SPLAT' ? [{ label: 'Export splat as 3DGS PLY…', do: () => this.app.exportSplatPly(one.id) }] : []),
       {
         label: 'Export selection as…',
         items: EXPORT_FORMAT_LABELS.map(([id, label]) => ({
@@ -2688,7 +2729,8 @@ export class UI {
     // mode changes nudge the tab the way Blender's context tabs follow mode
     if (ctx.settings.mode !== this.lastMode) {
       this.lastMode = ctx.settings.mode;
-      this.propsTab = ctx.settings.mode === 'OBJECT' ? 'object'
+      // a splat's editor lives on its Object panel (filters, counts, ops)
+      this.propsTab = ctx.settings.mode === 'OBJECT' || this.app.splatEditing() ? 'object'
         : ctx.settings.mode === 'EDIT' ? 'data' : 'brush';
     }
 
@@ -2707,14 +2749,14 @@ export class UI {
           // materials first: which colour you are drawing with is asked far
           // more often than how the brush's dabs are spaced
           this.materialsPanel(), this.brushPanel(), this.stencilPanel(),
-          ...(ctx.settings.mode === 'EDIT' && !this.app.meshEditing() ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
+          ...(ctx.settings.mode === 'EDIT' && !this.app.meshEditing() && !this.app.splatEditing() ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
         ],
       },
       {
         id: 'data', icon: 'folder', title: 'Data — layers · strokes · onion skin',
         build: () => [
           this.layersPanel(),
-          ...(ctx.settings.mode === 'EDIT' && !this.app.meshEditing() ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
+          ...(ctx.settings.mode === 'EDIT' && !this.app.meshEditing() && !this.app.splatEditing() ? [this.strokeStylePanel(), this.strokePanel(), this.editOpsPanel()] : []),
           this.onionPanel(),
         ],
       },
@@ -3936,7 +3978,6 @@ export class UI {
       },
       extras: [
         btn(s.drawTarget ? icon('pencilSquare') : icon('dot'), () => { s.drawTarget = !s.drawTarget; this.refresh(); }, { cls: 'icon-btn', title: 'Draw target (GP surface placement raycasts the splat)' }),
-        btn('⬇.ply', () => this.app.exportSplatPly(s.id), { cls: 'icon-btn', title: 'Export as 3DGS PLY (PlayCanvas/SuperSplat compatible)' }),
         ...viewLockBtns(
           { kind: 'SPLAT', id: s.id },
           !s.visible, (v) => { s.visible = !v; },
@@ -4549,12 +4590,43 @@ export class UI {
       );
     } else if (ref.kind === 'SPLAT') {
       const s = ctx.scene.splats.find((x) => x.id === ref.id)!;
+      const d = splatDisplay(s.display);
+      // every field writes the whole record, so a scene with no display
+      // settings stays one with none until something is changed
+      const set = (patch: Partial<typeof d>) => { s.display = { ...splatDisplay(s.display), ...patch }; };
+      const counts = this.app.splatEditCounts(s.id);
+      const editing = this.app.splatEditing();
       rows.push(
         el('div', { class: 'menu-sep' }),
         el('div', { class: 'row' },
           checkbox('Visible', s.visible, (v) => { s.visible = v; }),
           checkbox('Draw target', !!s.drawTarget, (v) => { s.drawTarget = v; }),
-          btn('⬇ .ply', () => this.app.exportSplatPly(s.id), { title: '3DGS PLY (PlayCanvas/SuperSplat)' }),
+        ),
+        tip(selectField('Show as', d.mode, [['SPLATS', 'Splats'], ['POINTS', 'Point cloud']],
+          (v) => { set({ mode: v }); this.refresh(); }),
+        'Splats: the gaussians as captured · Point cloud: one dot per splat centre, which shows the structure a capture is made of and where its floaters are'),
+        ...(d.mode === 'POINTS' ? [tip(slider('Point size', d.pointSize, 1, 12, 0.5, (v) => set({ pointSize: v }), { def: 2 }),
+          'dot size in screen pixels')] : []),
+        tip(slider('Min opacity', d.minOpacity, 0, 1, 0.01, (v) => set({ minOpacity: v }), { def: 0 }),
+          'hide splats fainter than this — a faint splat is one the capture was unsure of, so this is a CONFIDENCE filter. It hides, it does not delete'),
+        tip(numField('Max size', d.maxSize, (v) => set({ maxSize: Math.max(0, v) }), 0.05, { def: 0, min: 0 }),
+          'hide splats whose largest axis is bigger than this, in metres (0 = no limit) — the floaters and sky blobs round a capture'),
+        ...(counts ? [el('div', { class: 'row dim', text:
+          `${counts[0].toLocaleString()} of ${counts[3].toLocaleString()} shown`
+          + (counts[2] ? ` · ${counts[2].toLocaleString()} deleted` : '')
+          + (editing && counts[1] ? ` · ${counts[1].toLocaleString()} selected` : '') })] : []),
+        ...(editing ? [el('div', { class: 'row' },
+          btn('All', () => this.app.splatEditOp('all'), { title: 'select every shown splat (A)' }),
+          btn('Invert', () => this.app.splatEditOp('invert'), { title: 'Ctrl+I' }),
+          btn('Delete', () => this.app.splatEditOp('delete'), { title: 'delete the selected splats (X) — undoable, and the file is untouched' }),
+        )] : []),
+        ...(s.removed?.length ? [el('div', { class: 'row' },
+          btn('Restore deleted', () => { this.app.splatEditOp('restore', s.id); this.refresh(); },
+            { title: 'put every deleted splat back' }),
+        )] : []),
+        el('div', { class: 'row' },
+          btn('Export PLY', () => this.app.exportSplatPly(s.id),
+            { title: '3DGS PLY (PlayCanvas / SuperSplat) — what is shown: deleted and filtered splats are left out' }),
         ),
       );
     } else if (ref.kind === 'GP') {

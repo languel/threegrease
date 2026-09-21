@@ -153,6 +153,8 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Plane: Up from Ground — floor plan first, then lift walls straight up
 - [x] Shape tools snap at their ends (Snap: Ends / Every point)
 - [x] Drop files onto the viewport to place them (splats, models, images, GP json)
+- [x] Splat Edit mode: box / lasso / circle select, delete (undoable, file untouched), point-cloud view, opacity (confidence) and size filters; export writes what is shown
+- [ ] Splats: move/rotate selected splats, boolean crop/filter volumes, bake edits into a new stored file
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)

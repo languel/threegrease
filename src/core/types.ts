@@ -537,6 +537,30 @@ export interface TGSplat {
   /** raycast target for SURFACE stroke placement (draw on the splat) */
   drawTarget?: boolean;
   constraints?: TGConstraint[];
+  /** how the cloud is shown and which splats count at all — a VIEW of the
+   *  file, never a change to it (src/splats/edit.ts) */
+  display?: TGSplatDisplay;
+  /** splats deleted in Edit mode, by the SOURCE FILE's indices, encoded by
+   *  src/splats/edit.ts (a bitmask or runs, whichever is shorter). The file
+   *  itself is untouched, so a deletion is undoable, survives a reload and
+   *  costs at most one bit a splat, not a copy of the scan. Export writes
+   *  only what is left. */
+  removed?: string;
+}
+
+export type SplatDisplayMode = 'SPLATS' | 'POINTS';
+
+export interface TGSplatDisplay {
+  mode: SplatDisplayMode;
+  /** point-cloud dot size, screen px */
+  pointSize: number;
+  /** hide splats below this opacity (0..1) — the usual stand-in for a
+   *  capture's CONFIDENCE, since a faint splat is one the optimiser was
+   *  unsure of */
+  minOpacity: number;
+  /** hide splats whose largest axis exceeds this, metres (0 = no limit) —
+   *  the floaters and sky blobs a capture leaves round its edges */
+  maxSize: number;
 }
 
 // ---- Materials & images (shared datablocks) -------------------------------
