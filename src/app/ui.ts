@@ -882,64 +882,110 @@ function renderDirectHud(app: AppHandle): void {
 
 // ---------------------------------------------------------------------------
 
-const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
+/** One tool: id, icon, tooltip. */
+type ToolDef = [string, IconName, string];
+/**
+ * A FAMILY of tools under one toolbar button, Blender-style. The button
+ * shows whichever member was used last and wears a corner mark; holding it
+ * (or right-clicking it, or clicking the mark) opens a flyout of the whole
+ * family. `group` names the family for the memory of which member is
+ * current, and for the shortcut that cycles it (W cycles the SELECT family).
+ */
+interface ToolGroup { group: string; label: string; tools: ToolDef[] }
+type ToolSlot = ToolDef | ToolGroup;
+const isGroup = (t: ToolSlot): t is ToolGroup => !Array.isArray(t);
+
+/**
+ * THE TOOLBAR, grouped. It used to be one button per tool — eighteen in
+ * Object mode, a column taller than most laptop viewports — and tools of one
+ * kind (three ways to select, twelve shapes to draw) sat as separate choices
+ * that read as twelve different ideas. They are families now, and the
+ * families follow what the tools actually ARE: the draw-object shapes split
+ * the way their GESTURES split in `tools/objectdraw.ts` (flat: one drag;
+ * solid: drag then raise; round: drag a radius), so one family is one way of
+ * moving your hand.
+ */
+const SELECT_OBJECT: ToolGroup = { group: 'select', label: 'Select', tools: [
+  ['object-select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
+  ['object-select-lasso', 'lasso', 'Lasso select'],
+  ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
+] };
+const SELECT_STROKE: ToolGroup = { group: 'select', label: 'Select', tools: [
+  ['select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
+  ['select-lasso', 'lasso', 'Lasso select'],
+  ['select-circle', 'circle', 'Circle select ([ ] size)'],
+] };
+const POLY_TOOLS: ToolGroup = { group: 'poly', label: 'Poly', tools: [
+  ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
+  ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
+  ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
+] };
+
+const TOOLS_BY_MODE: Record<EditorMode, ToolSlot[]> = {
   OBJECT: [
-    ['object-select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
-    ['object-select-lasso', 'lasso', 'Lasso select'],
-    ['object-select-circle', 'circle', 'Circle select ([ ] size)'],
-    ['actorpose', 'actorPose', 'Pose — drag a joint (the body follows through physics; Shift+click pins it), or drag a physics prop to move and throw it (Shift-drag scenery to make it one)'],
-    ['direct', 'actorDirect', 'Direct — click the world to send a character there. Pick the verb in the HUD: walk / run / sneak / march / jump / look / stop'],
-    ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area; Backspace undoes a point, Esc cancels); drag a placed point to adjust it'],
+    SELECT_OBJECT,
+    { group: 'actor', label: 'Character', tools: [
+      ['actorpose', 'actorPose', 'Pose — drag a joint (the body follows through physics; Shift+click pins it), or drag a physics prop to move and throw it (Shift-drag scenery to make it one)'],
+      ['direct', 'actorDirect', 'Direct — click the world to send a character there. Pick the verb in the HUD: walk / run / sneak / march / jump / look / stop'],
+    ] },
+    ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area)'],
     // Draw the object where it goes: same Placement / Plane / Guide / magnet
     // as a stroke, so a wall drawn with Up from Ground stands on the floor
-    ['draw-plane', 'drawPlane', 'Draw Plane — drag out a panel in the drawing plane'],
-    ['draw-rect', 'drawRect', 'Draw Rectangle — a four-corner EDITABLE face (drag its corners afterwards)'],
-    ['draw-triangle', 'drawTriangle', 'Draw Triangle — an editable three-corner face, drawn from its centre'],
-    ['draw-polygon', 'drawPolygon', 'Draw Polygon — an editable n-gon, drawn from its centre (sides in the top bar)'],
-    ['draw-box', 'cube', 'Draw Box — drag the base, then move away from the plane to raise it'],
-    ['draw-cylinder', 'drawCylinder', 'Draw Cylinder — drag the base, then raise it'],
-    ['draw-pyramid', 'drawPyramid', 'Draw Pyramid — drag the base, then raise it'],
-    ['draw-sphere', 'circle', 'Draw Sphere — drag a radius from its centre; it rests on the drawing plane'],
-    ['draw-tetra', 'drawTetra', 'Draw Tetrahedron — fire'],
-    ['draw-octa', 'drawOcta', 'Draw Octahedron — air'],
-    ['draw-dodeca', 'drawDodeca', 'Draw Dodecahedron — the cosmos'],
-    ['draw-icosa', 'drawIcosa', 'Draw Icosahedron — water'],
+    { group: 'drawFlat', label: 'Draw a flat shape', tools: [
+      ['draw-plane', 'drawPlane', 'Draw Plane — drag out a panel in the drawing plane'],
+      ['draw-rect', 'drawRect', 'Draw Rectangle — a four-corner EDITABLE face (drag its corners afterwards)'],
+      ['draw-triangle', 'drawTriangle', 'Draw Triangle — an editable three-corner face, drawn from its centre'],
+      ['draw-polygon', 'drawPolygon', 'Draw Polygon — an editable n-gon, drawn from its centre (sides in the top bar)'],
+    ] },
+    { group: 'drawSolid', label: 'Draw a solid', tools: [
+      ['draw-box', 'cube', 'Draw Box — drag the base, then move away from the plane to raise it'],
+      ['draw-cylinder', 'drawCylinder', 'Draw Cylinder — drag the base, then raise it'],
+      ['draw-pyramid', 'drawPyramid', 'Draw Pyramid — drag the base, then raise it'],
+    ] },
+    { group: 'drawRound', label: 'Draw a round solid', tools: [
+      ['draw-sphere', 'circle', 'Draw Sphere — drag a radius from its centre; it rests on the drawing plane'],
+      ['draw-tetra', 'drawTetra', 'Draw Tetrahedron — fire'],
+      ['draw-octa', 'drawOcta', 'Draw Octahedron — air'],
+      ['draw-dodeca', 'drawDodeca', 'Draw Dodecahedron — the cosmos'],
+      ['draw-icosa', 'drawIcosa', 'Draw Icosahedron — water'],
+    ] },
   ],
   DRAW: [
-    ['draw', 'pencil', 'Draw (D)'], ['erase', 'eraser', 'Erase (E)'],
-    ['smooth', 'wave', 'Smooth — relaxes stroke points toward their neighbors (Sculpt mode\'s Smooth brush, usable here); Shift = every visible object, not just the active one'],
+    ['draw', 'pencil', 'Draw (D)'],
+    ['erase', 'eraser', 'Erase (E)'],
     ['fill', 'swatch', 'Fill (F)'],
-    ['tint', 'brush', 'Tint'], ['cutter', 'scissors', 'Cutter'], ['eyedropper', 'droplet', 'Eyedropper'],
-    ['line', 'lineTool', 'Line'], ['polyline', 'polylineTool', 'Polyline'], ['arc', 'arcTool', 'Arc'],
-    ['curve', 'curveTool', 'Curve'], ['box', 'square', 'Box'], ['circle', 'circle', 'Circle'],
+    { group: 'shape', label: 'Shape', tools: [
+      ['line', 'lineTool', 'Line'],
+      ['polyline', 'polylineTool', 'Polyline'],
+      ['arc', 'arcTool', 'Arc'],
+      ['curve', 'curveTool', 'Curve'],
+      ['box', 'square', 'Box'],
+      ['circle', 'circle', 'Circle'],
+    ] },
+    ['smooth', 'wave', 'Smooth — relaxes stroke points toward their neighbors (Sculpt mode\'s Smooth brush, usable here); Shift = every visible object, not just the active one'],
+    { group: 'colour', label: 'Colour', tools: [
+      ['tint', 'brush', 'Tint'],
+      ['vertexpaint', 'brush', 'Vertex paint'],
+      ['weightpaint', 'adjustments', 'Weight paint'],
+    ] },
+    ['cutter', 'scissors', 'Cutter'],
+    ['eyedropper', 'droplet', 'Eyedropper'],
     ['interpolate', 'arrowsRightLeft', 'Interpolate (drag)'],
     // the quilt trio lives with the drawing tools: same Placement/Plane/
     // Guide options as the pencil, retopologizing over what you draw
-    // (strokes, meshes, and splats are snap sources)
-    ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
-    ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
-    ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
-    ['splatpaint', 'droplet', 'Splat Paint (3DGS) — deposit gaussian splats along the pointer path; Size=stamp px, Strength=alpha, vertex color=splat color, spacing/jitter from brush style; Ctrl+drag erases; placement/plane options apply'],
-    ['texpaint', 'photo', 'Texture Paint — brush directly into the texture of the mesh under the pointer (vertex color = paint color, Strength = opacity); persists to the mesh texture on release'],
-    // spray-style color tools, same brush family as VERTEX/WEIGHT modes —
-    // available here too so you never have to leave DRAW to touch color
-    ['vertexpaint', 'brush', 'Vertex Paint — spray per-point color onto the active GP object\'s strokes'],
-    ['weightpaint', 'adjustments', 'Weight Paint — spray the softness vertex group onto the active GP object\'s strokes'],
+    POLY_TOOLS,
+    { group: 'surfacePaint', label: 'Paint onto a surface', tools: [
+      ['splatpaint', 'droplet', 'Splat Paint (3DGS) — deposit gaussian splats along the pointer path; Size=stamp px, Strength=alpha, vertex color=splat color, spacing/jitter from brush style; Ctrl+drag erases; placement/plane options apply'],
+      ['texpaint', 'photo', 'Texture Paint — brush directly into the texture of the mesh under the pointer (vertex color = paint color, Strength = opacity); persists to the mesh texture on release'],
+    ] },
   ],
   EDIT: [
-    ['select', 'squareTarget', 'Box select (Ctrl lasso, C circle)'],
-    ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area; Backspace undoes a point, Esc cancels); drag a placed point to adjust it'],
-    ['select-lasso', 'lasso', 'Lasso select'],
-    ['select-circle', 'circle', 'Circle select ([ ] size)'],
+    SELECT_STROKE,
+    ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area)'],
     // Sculpt lives here for now rather than as a mode of its own: its
-    // brushes reshape the strokes you are editing, and a mode with one tool
-    // in it was a room with nothing else in it
-    ['sculpt', 'hand', 'Sculpt — Smooth, Thickness, Strength, Randomize, Grab, Push, Twist, Pinch, Clone (pick the brush in the top bar)'],
-    // the quilt trio (same entries as DRAW): retopologize over what you
-    // are editing — strokes, meshes, and splats are snap sources
-    ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
-    ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
-    ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
+    // brushes reshape the strokes you are editing
+    ['sculpt', 'hand', 'Sculpt brush'],
+    POLY_TOOLS,
   ],
   SCULPT: [['sculpt', 'hand', 'Sculpt brush']],
   VERTEX: [['vertexpaint', 'brush', 'Vertex paint']],
@@ -948,12 +994,10 @@ const TOOLS_BY_MODE: Record<EditorMode, [string, IconName, string][]> = {
 
 /** Edit mode on a MESH: the element editor first, then the poly tools that
  *  build onto the same mesh, and the ruler. */
-const MESH_EDIT_TOOLS: [string, IconName, string][] = [
+const MESH_EDIT_TOOLS: ToolSlot[] = [
   ['meshedit', 'squareTarget', 'Select — click a vertex / edge / face (the mode in the top bar), Shift adds, drag a box · G/R/S move/rotate/scale (X/Y/Z lock, Shift+ for the plane) · E extrude · F fill · X delete · A all, Alt+A none'],
   ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area)'],
-  ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
-  ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
-  ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
+  POLY_TOOLS,
 ];
 
 /** A light's own glyph — projector when it throws a picture, else its kind. */
@@ -1550,7 +1594,7 @@ export class UI {
       ['VERTEX', 'brush', 'Vertex paint'], ['WEIGHT', 'adjustments', 'Weight paint'],
     ];
     for (const [m, iconName, label] of modes) {
-      bar.append(btn(icon(iconName), () => this.app.setMode(m), { active: s.mode === m, title: label }));
+      bar.append(btn(icon(iconName), () => this.app.setMode(m), { active: s.mode === m, title: label, cls: 'tb-mode' }));
     }
     bar.append(el('div', { class: 'sep' }));
 
@@ -1717,18 +1761,121 @@ export class UI {
 
   // ------------------------------------------------------------ toolbar
 
+  /** Which member of each tool family was used last — what its toolbar
+   *  button shows and what a plain click on it picks. */
+  private groupPick: Record<string, string> = (() => {
+    try { return JSON.parse(localStorage.getItem('threegrease.toolGroups') ?? '{}'); } catch { return {}; }
+  })();
+
+  private rememberGroupPick(group: string, id: string): void {
+    this.groupPick[group] = id;
+    try { localStorage.setItem('threegrease.toolGroups', JSON.stringify(this.groupPick)); } catch { /* ok */ }
+  }
+
+  /** The current mode's toolbar slots (what `buildToolbar` draws). */
+  private toolSlots(): ToolSlot[] {
+    const { ctx } = this.app;
+    return ctx.settings.mode === 'EDIT' && this.app.meshEditing() ? MESH_EDIT_TOOLS : TOOLS_BY_MODE[ctx.settings.mode];
+  }
+
+  /** The member a family's button stands for: the ACTIVE tool if it is in
+   *  the family (so the button shows what you are actually using), else the
+   *  one used last, else the first. */
+  private groupCurrent(g: ToolGroup): ToolDef {
+    const active = this.app.ctx.settings.activeTool;
+    return g.tools.find((t) => t[0] === active)
+      ?? g.tools.find((t) => t[0] === this.groupPick[g.group])
+      ?? g.tools[0];
+  }
+
+  /**
+   * W, Blender's: step the SELECT family to its next member. Generalised to
+   * any family by name, since the only thing special about select is that it
+   * is the one worth a key.
+   */
+  cycleToolGroup(group: string): void {
+    const g = this.toolSlots().find((t): t is ToolGroup => isGroup(t) && t.group === group);
+    if (!g) return;
+    const cur = this.groupCurrent(g);
+    const next = g.tools[(g.tools.indexOf(cur) + 1) % g.tools.length];
+    this.rememberGroupPick(g.group, next[0]);
+    this.app.setTool(next[0]);
+    this.app.setStatusHint?.(`${g.label}: ${next[2].split(' —')[0].split(' (')[0]}`, 1500);
+  }
+
   private buildToolbar(): void {
     const { ctx } = this.app;
     const bar = $('toolbar');
     bar.replaceChildren();
-    const tools = ctx.settings.mode === 'EDIT' && this.app.meshEditing() ? MESH_EDIT_TOOLS : TOOLS_BY_MODE[ctx.settings.mode];
-    for (const [id, iconName, title] of tools) {
-      // the editable-mesh trio is a distinct family — rule it off
-      if (id === 'polypen') bar.append(el('div', { class: 'tool-sep' }));
-      bar.append(btn(icon(iconName, 18), () => this.app.setTool(id), {
-        active: ctx.settings.activeTool === id, title, cls: 'tool',
-      }));
+    for (const slot of this.toolSlots()) {
+      // the editable-mesh family is a distinct kind of work — rule it off
+      if (isGroup(slot) ? slot.group === 'poly' : slot[0] === 'polypen') {
+        bar.append(el('div', { class: 'tool-sep' }));
+      }
+      if (!isGroup(slot)) {
+        const [id, iconName, title] = slot;
+        bar.append(btn(icon(iconName, 18), () => this.app.setTool(id), {
+          active: ctx.settings.activeTool === id, title, cls: 'tool',
+        }));
+        continue;
+      }
+      bar.append(this.toolGroupButton(slot));
     }
+  }
+
+  /**
+   * One family's button. A plain click picks the member it shows; HOLDING it
+   * (a quarter second), right-clicking it, or clicking the corner mark opens
+   * the flyout — the three ways Blender offers, because a click that has to
+   * be held is invisible until someone tells you.
+   */
+  private toolGroupButton(g: ToolGroup): HTMLElement {
+    const { ctx } = this.app;
+    const [id, iconName, title] = this.groupCurrent(g);
+    const active = g.tools.some((t) => t[0] === ctx.settings.activeTool);
+    const b = btn(icon(iconName, 18), () => { /* handled on pointerup */ }, {
+      active, cls: 'tool tool-group',
+      title: `${title}\n\n${g.label}: hold, right-click or click the corner for the other ${g.tools.length - 1}`
+        + (g.group === 'select' ? ' · W cycles them' : ''),
+    });
+    b.dataset.group = g.group;
+    b.onclick = null;
+    const mark = el('span', { class: 'tool-group-mark' });
+    b.append(mark);
+    let timer = 0, opened = false;
+    const open = () => { opened = true; this.openToolFlyout(g, b); };
+    b.onpointerdown = (e) => {
+      if (e.button !== 0) return;
+      opened = false;
+      // the corner mark opens straight away
+      if (e.target === mark) { e.preventDefault(); open(); return; }
+      timer = window.setTimeout(open, 250);
+    };
+    b.onpointerup = (e) => {
+      if (e.button !== 0) return;
+      window.clearTimeout(timer);
+      if (!opened) { this.rememberGroupPick(g.group, id); this.app.setTool(id); }
+    };
+    b.onpointerleave = () => window.clearTimeout(timer);
+    b.oncontextmenu = (e) => { e.preventDefault(); window.clearTimeout(timer); open(); };
+    return b;
+  }
+
+  /** The family, listed beside its button: icon and name, the current one
+   *  lit — Blender's flyout. */
+  private openToolFlyout(g: ToolGroup, anchor: HTMLElement): void {
+    const r = anchor.getBoundingClientRect();
+    const cur = this.groupCurrent(g)[0];
+    this.openContextMenu(r.right + 4, r.top, [
+      { header: g.label },
+      ...g.tools.map(([tid, ic, title]) => ({
+        // the tooltip's first clause is the tool's NAME; the rest is how to
+        // use it, which is what the button's own tooltip is for
+        label: `${tid === cur ? '\u2022 ' : ''}${title.split(' \u2014 ')[0].split(' (')[0]}`,
+        icon: ic,
+        do: () => { this.rememberGroupPick(g.group, tid); this.app.setTool(tid); },
+      })),
+    ]);
   }
 
   // ------------------------------------------------------- context menu

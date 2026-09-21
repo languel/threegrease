@@ -1831,6 +1831,7 @@ class App implements AppHandle {
       case 'modeDraw': this.setMode('DRAW'); break;
       case 'modeEdit': this.setMode('EDIT'); break;
       // Sculpt is an Edit-mode tool now, not a mode of its own
+      case 'cycleSelectTool': this.ui.cycleToolGroup('select'); break;
       case 'modeSculpt': this.setMode('EDIT'); if (!this.meshEditing()) this.setTool('sculpt'); break;
       case 'modeVertex': this.setMode('VERTEX'); break;
       case 'modeWeight': this.setMode('WEIGHT'); break;

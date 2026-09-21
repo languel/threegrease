@@ -31,6 +31,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'snapPie', label: 'Snap pie menu', combo: "alt+'", category: 'Modes' },
   { id: 'modeDraw', label: 'Draw mode', combo: '1', category: 'Modes' },
   { id: 'modeEdit', label: 'Edit mode', combo: '2', category: 'Modes' },
+  { id: 'cycleSelectTool', label: 'Cycle selection tool', combo: 'w', category: 'Tools' },
   { id: 'modeSculpt', label: 'Sculpt mode', combo: '3', category: 'Modes' },
   { id: 'modeVertex', label: 'Vertex paint mode', combo: '4', category: 'Modes' },
   { id: 'modeWeight', label: 'Weight paint mode', combo: '5', category: 'Modes' },

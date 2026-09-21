@@ -226,6 +226,14 @@ Key invariants:
   sidebar rebuild and was firing on every sky change, so it now fires only on
   a STATUS transition (loading -> ok, or an error), which is the only thing
   the panel actually has to learn about.
+- **Tools of one kind share ONE toolbar button** (`ToolGroup` in
+  `TOOLS_BY_MODE`, `UI.toolGroupButton`), Blender's flyout: the button shows
+  the member in use (else the last one picked, remembered in localStorage
+  `threegrease.toolGroups`), a corner mark says there are more, and HOLDING
+  it, right-clicking it or clicking the mark lists the family. W cycles the
+  `select` family (`cycleSelectTool` -> `UI.cycleToolGroup`). The toolbar's
+  30 px buttons sit in a 3 px gutter and the top bar's mode buttons
+  (`tb-mode`) use the same size and gutter, so the two columns line up.
 - The UI talks to the app only through the `AppHandle` interface (top of
   `ui.ts`) — add methods there, implement on `App` in `main.ts`.
 - New keyboard shortcuts: add an `ActionDef` to `ACTIONS` in

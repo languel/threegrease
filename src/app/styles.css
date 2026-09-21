@@ -51,7 +51,7 @@ body {
 #app.presentation #menubar { display: none; }
 
 #topbar {
-  display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+  display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 3px;
   background: var(--panel); border-bottom: 1px solid var(--border);
   flex-wrap: wrap; min-height: 34px;
 }
@@ -61,8 +61,10 @@ body {
 #topbar > .grow { flex: 1 1 0; min-width: 0; }
 #middle { flex: 1; display: flex; min-height: 0; }
 #toolbar {
-  width: 44px; background: var(--panel); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 2px; padding: 4px; overflow-y: auto;
+  /* tool buttons are 30px in a 3px gutter: the topbar's mode buttons use the
+     same size and left gutter, so the first of each lines up in one column */
+  flex: none; width: auto; background: var(--panel); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 1px; padding: 3px; overflow-y: auto;
 }
 #viewport { flex: 1; position: relative; min-width: 0; }
 #gl, #hud { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -123,8 +125,9 @@ input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus,
 textarea:focus { border-color: var(--accent); }
 button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .tool-sep { height: 1px; background: var(--border); margin: 4px 3px; flex: none; }
-button.tool {
-  width: 34px; height: 34px; font-size: 15px; padding: 0;
+#topbar > button.tb-mode + button.tb-mode { margin-left: -5px; }
+button.tool, button.tb-mode {
+  width: 30px; height: 30px; flex: none; position: relative; font-size: 15px; padding: 0;
   display: flex; align-items: center; justify-content: center;
 }
 input[type="range"] { padding: 0; height: 18px; }
@@ -914,3 +917,12 @@ button.ib.icon-toggle.on:hover {
 /* a menu with a setting quietly away from its default still says so — the
    orange of `.tuned` has to survive the flattening */
 button.ib.tuned { color: var(--accent2); }
+
+/* A tool FAMILY: the member in use, with a corner mark saying there are more
+   (hold, right-click or click the mark to see them) — Blender's flyout. */
+.tool-group-mark {
+  position: absolute; right: 1px; bottom: 1px; width: 0; height: 0;
+  border-left: 5px solid transparent; border-bottom: 5px solid currentColor;
+  opacity: 0.55; cursor: pointer;
+}
+.tool-group-mark::after { content: ''; position: absolute; right: -2px; bottom: -6px; width: 9px; height: 9px; }
