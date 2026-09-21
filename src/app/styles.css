@@ -873,3 +873,44 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
   background: var(--bg2, #18181b); color: var(--fg, #e8e8ec);
   border: 1px solid var(--accent); border-radius: 4px; padding: 2px 4px;
 }
+
+/* ---- Flat icon buttons ------------------------------------------------
+   Every button whose whole content is an icon (`.ib`, set by `btn()` from
+   what the button contains) looks like the Properties tabs down the side:
+   no frame and no fill at rest, a quiet fill on hover, and a SLIGHT tinted
+   fill when it is on. A toolbar is a row of choices, and a box round every
+   one of them drew the eye to the boxes; the one that is selected is the
+   only one that should read as a shape.
+   Buttons with a label keep their frame on purpose — in a panel, the frame
+   is what tells a clickable "Look through" from a line of text. */
+button.ib,
+button.ib.tool,
+button.ib.icon-toggle,
+button.ib.imenu-btn,
+button.ib.tl-transport,
+button.ib.icon-btn {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+}
+button.ib:hover { background: var(--panel2); border-color: transparent; }
+/* ON: a slight fill in the accent, not the old solid block — it has to be
+   findable in a toolbar of twenty, and it must not shout louder than the
+   work in the viewport it sits beside */
+button.ib.active,
+button.ib.on,
+button.ib.open,
+button.ib.icon-toggle.on {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  border-color: transparent;
+  color: #fff;
+}
+button.ib.active:hover,
+button.ib.on:hover,
+button.ib.icon-toggle.on:hover {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  filter: none;
+}
+/* a menu with a setting quietly away from its default still says so — the
+   orange of `.tuned` has to survive the flattening */
+button.ib.tuned { color: var(--accent2); }

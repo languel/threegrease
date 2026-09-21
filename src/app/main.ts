@@ -3092,21 +3092,10 @@ class App implements AppHandle {
     const hereAt: [number, number, number] = pointerWorld ? [pointerWorld.x, pointerWorld.y, pointerWorld.z] : cursorAt;
     this.ui.openContextMenu(clientX, clientY, [
       { header: 'Add — at 3D cursor' },
-      { label: 'Grease Pencil (blank)', icon: 'pencil', do: () => this.addGPObject(cursorAt) },
-      { label: 'Plane', icon: 'square', do: () => this.addMeshObject('PLANE', undefined, cursorAt) },
-      { label: 'Box', icon: 'cube', do: () => this.addMeshObject('BOX', undefined, cursorAt) },
-      { label: 'Sphere', icon: 'circle', do: () => this.addMeshObject('SPHERE', undefined, cursorAt) },
-      { label: 'Pyramid', icon: 'cube', do: () => this.addMeshObject('PYRAMID', undefined, cursorAt) },
-      { label: 'Cylinder', icon: 'cylinder', do: () => this.addMeshObject('CYLINDER', undefined, cursorAt) },
-      { label: 'Editable Mesh', icon: 'wireframe', do: () => this.addPolyMeshObject(cursorAt) },
-      { label: 'Empty', icon: 'target', do: () => this.addMeshObject('EMPTY', undefined, cursorAt) },
-      { label: 'Actor (mannequin)', icon: 'actor', do: () => this.addActor(cursorAt) },
-      { sep: true },
-      { label: 'Sun light', icon: 'boltCircle', do: () => this.addLight('SUN', cursorAt) },
-      { label: 'Point light', icon: 'boltCircle', do: () => this.addLight('POINT', cursorAt) },
-      { label: 'Spot light', icon: 'boltCircle', do: () => this.addLight('SPOT', cursorAt) },
-      { label: 'Area light (soft box)', icon: 'boltCircle', do: () => this.addLight('AREA', cursorAt) },
-      { label: 'Projector', icon: 'photo', do: () => this.addProjector(cursorAt) },
+      // the SAME list the menubar's Add opens (UI.addMenuItems), so the two
+      // cannot drift apart again; only the pointer-relative entries below
+      // are Shift+A's own
+      ...this.ui.addMenuItems(cursorAt),
       { sep: true },
       { label: 'Traveler here', icon: 'cursorArrow', do: () => this.addTravelerObjectAt(hereAt, px.x, px.y), disabled: !strokeHit },
       { label: 'Trigger here', icon: 'boltCircle', do: () => this.addTriggerAt(hereAt) },

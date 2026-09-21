@@ -149,7 +149,10 @@ export interface AppHandle {
   sim: { enabled: boolean; damping: number; stiffness: number; reset(): void };
   splats: { errors: Map<number, string> };
   meshes: { errors: Map<number, string> };
-  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA' | 'EMPTY'): void;
+  addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA' | 'EMPTY', src?: string, at?: [number, number, number]): void;
+  addPolyMeshObject(at?: [number, number, number]): void;
+  addLight(kind: TGLight['kind'], at?: [number, number, number]): void;
+  addProjector(at?: [number, number, number]): void;
   /** Persist UVs on an editable mesh (App owns the camera for VIEW). */
   unwrapPoly(id: number, mode: UnwrapMode): void;
   /** Bake a source onto the selected object's base-color texture. */
@@ -160,7 +163,7 @@ export interface AppHandle {
   widgetMode: string;
   refreshWidget(): void;
   exportActiveGP(): void;
-  addGPObject(): void;
+  addGPObject(at?: [number, number, number]): void;
   saveSelectedAsAsset(): void;
   addAssetToScene(asset: import('../io/assets').TGAsset): void;
   refreshAssetThumb(assetId: number): void;
@@ -257,6 +260,12 @@ function btn(label: string | Node, onclick: () => void, opts: { active?: boolean
     class: `${opts.cls ?? ''} ${opts.active ? 'active' : ''}`,
   });
   b.append(label);
+  // AN ICON-ONLY BUTTON IS FLAT: no frame and no fill until it is hovered or
+  // on, like the Properties tabs down the side. The look is decided by what
+  // the button CONTAINS rather than by a class every caller has to remember,
+  // so a new toolbar button gets it for free and a labelled button in a panel
+  // keeps its frame — there, the frame is what says "this is a button".
+  if (!b.textContent?.trim() && b.querySelector('svg')) b.classList.add('ib');
   return b;
 }
 
@@ -1076,6 +1085,86 @@ export class UI {
     input.click();
   }
 
+  /**
+   * THE ADD MENU — one list, nested the way Blender's is.
+   *
+   * There used to be two: the menubar's flat Add and Shift+A's popup, which
+   * had already drifted (the platonics were in one, Editable Mesh and the
+   * lights in the other, and only one had icons). And the list had grown
+   * past what a flat menu can hold — twenty entries is a list you READ, not
+   * one you reach into. So objects and lights each become a submenu, the
+   * things there is only one of stay at the top level, and both entry
+   * points build from this function.
+   *
+   * `at` is where things land (Shift+A passes the 3D cursor explicitly; the
+   * menubar leaves it to each add, which uses the cursor anyway). Lights
+   * wear the same glyphs the outliner does, so a light found in this menu
+   * looks like the light it becomes.
+   */
+  addMenuItems(at?: [number, number, number]): CtxItem[] {
+    const a = this.app;
+    const mesh = (kind: Parameters<AppHandle['addMeshObject']>[0]) => () => a.addMeshObject(kind, undefined, at);
+    const assets = listAssets();
+    return [
+      { label: 'Stroke', icon: 'pencil', do: () => a.addGPObject(at) },
+      {
+        label: 'Object', icon: 'cube', items: [
+          { label: 'Plane', icon: 'drawPlane', do: mesh('PLANE') },
+          { label: 'Box', icon: 'cube', do: mesh('BOX') },
+          { label: 'Sphere', icon: 'circle', do: mesh('SPHERE') },
+          { label: 'Cylinder', icon: 'drawCylinder', do: mesh('CYLINDER') },
+          { label: 'Pyramid', icon: 'drawPyramid', do: mesh('PYRAMID') },
+          { sep: true },
+          { label: 'Tetrahedron', icon: 'drawTetra', do: mesh('TETRA') },
+          { label: 'Octahedron', icon: 'drawOcta', do: mesh('OCTA') },
+          { label: 'Dodecahedron', icon: 'drawDodeca', do: mesh('DODECA') },
+          { label: 'Icosahedron', icon: 'drawIcosa', do: mesh('ICOSA') },
+          { sep: true },
+          { label: 'Editable Mesh', icon: 'wireframe', do: () => a.addPolyMeshObject(at) },
+        ],
+      },
+      {
+        label: 'Light', icon: 'lightSun', items: [
+          { label: 'Sun', icon: 'lightSun', do: () => a.addLight('SUN', at) },
+          { label: 'Point', icon: 'lightPoint', do: () => a.addLight('POINT', at) },
+          { label: 'Spot', icon: 'lightSpot', do: () => a.addLight('SPOT', at) },
+          { label: 'Area (soft box)', icon: 'lightArea', do: () => a.addLight('AREA', at) },
+          { label: 'Ambient', icon: 'lightAmbient', do: () => a.addLight('AMBIENT', at) },
+        ],
+      },
+      { label: 'Projector', icon: 'lightProjector', do: () => a.addProjector(at) },
+      { label: 'Camera', icon: 'camera', do: () => a.addCamera() },
+      { label: 'Empty', icon: 'target', do: mesh('EMPTY') },
+      { label: 'Actor', icon: 'actor', do: () => a.addActor(at) },
+      { sep: true },
+      {
+        label: 'From the Library', icon: 'folder', disabled: !assets.length,
+        items: assets.length ? assets.map((as) => ({ label: as.name, do: () => a.addAssetToScene(as) })) : undefined,
+      },
+      {
+        label: 'Import', icon: 'arrowDownTray', items: [
+          { label: 'Reference image\u2026', icon: 'photo', do: () => this.filePick('image/*', (f) => a.importImagePlane(f)) },
+          { label: 'Model / avatar\u2026', icon: 'cubeModel', do: () => this.filePick('.glb,.gltf,.obj,.fbx,.ply,.vrm', (f) => a.importModelFile(f)) },
+          { label: 'Stroke file\u2026', icon: 'pencil', do: () => this.filePick('.json', (f) => a.importGPFile(f)) },
+          {
+            label: 'Splat from URL\u2026', icon: 'sparkles',
+            do: () => {
+              const url = prompt('Splat URL (.ply/.spz/.splat)');
+              if (!url) return;
+              const { ctx } = this.app;
+              ctx.pushUndo();
+              ctx.scene.splats.push({
+                id: scoreId(ctx.scene), name: url.split('/').pop() ?? 'splat', src: url.trim(),
+                translation: [0, 0, 0], rotation: [0, 0, 0], scale: 1, visible: true, select: false,
+              });
+              this.refresh();
+            },
+          },
+        ],
+      },
+    ];
+  }
+
   private buildMenubar(): void {
     const { ctx } = this.app;
     const bar = $('menubar');
@@ -1157,53 +1246,21 @@ export class UI {
       { label: 'Preferences…', action: 'settings' },
     ]);
 
-    const assetItems = listAssets().flatMap((a) => [{
-      label: a.name,
-      do: () => this.app.addAssetToScene(a),
-    }]);
-    menu('Add', [
-      {
-        label: 'Reference / image plane…',
-        do: () => this.filePick('image/*', (f) => this.app.importImagePlane(f)),
-      },
-      { sep: true },
-      { header: 'Assets' },
-      ...assetItems,
-      { label: 'Save selected to Library', do: () => this.app.saveSelectedAsAsset() },
-      { label: 'Open the Library…', do: () => { this.propsTab = 'library'; this.refresh(); } },
-      { sep: true },
-      { label: 'Plane', do: () => this.app.addMeshObject('PLANE') },
-      { label: 'Box', do: () => this.app.addMeshObject('BOX') },
-      { label: 'Sphere', do: () => this.app.addMeshObject('SPHERE') },
-      { label: 'Cylinder', do: () => this.app.addMeshObject('CYLINDER') },
-      { label: 'Pyramid', do: () => this.app.addMeshObject('PYRAMID') },
-      { label: 'Tetrahedron', do: () => this.app.addMeshObject('TETRA') },
-      { label: 'Octahedron', do: () => this.app.addMeshObject('OCTA') },
-      { label: 'Dodecahedron', do: () => this.app.addMeshObject('DODECA') },
-      { label: 'Icosahedron', do: () => this.app.addMeshObject('ICOSA') },
-      { label: 'Empty', do: () => this.app.addMeshObject('EMPTY') },
-      { sep: true },
-      { label: 'Actor (mannequin)', do: () => this.app.addActor() },
-      { sep: true },
-      { label: 'Model / avatar…', do: () => this.filePick('.glb,.gltf,.obj,.vrm', (f) => this.app.importModelFile(f)) },
-      { sep: true },
-      { label: 'Grease Pencil (blank)', do: () => this.app.addGPObject() },
-      { label: 'GP object…', do: () => this.filePick('.json', (f) => this.app.importGPFile(f)) },
-      {
-        label: 'Splat from URL…',
-        do: () => {
-          const url = prompt('Splat URL (.ply/.spz/.splat)');
-          if (!url) return;
-          ctx.pushUndo();
-          ctx.scene.splats.push({
-            id: scoreId(ctx.scene), name: url.split('/').pop() ?? 'splat', src: url.trim(),
-            translation: [0, 0, 0], rotation: [0, 0, 0], scale: 1, visible: true, select: false,
-          });
-          this.refresh();
-        },
-      },
-      { label: 'Camera (at current view)', do: () => this.app.addCamera() },
-    ]);
+    // ADD is the one menubar menu that opens the shared popup rather than
+    // its own flat list, so it has the same nesting and icons as Shift+A.
+    {
+      const addBtn: HTMLElement = btn('Add', () => {
+        this.openMenu = null;
+        this.buildMenubar();
+        const r = addBtn.getBoundingClientRect();
+        this.openContextMenu(r.left, r.bottom + 2, [
+          { header: 'Add \u2014 at the 3D cursor' },
+          ...this.addMenuItems(),
+        ]);
+      });
+      bar.append(el('div', { class: 'menu' }, addBtn));
+    }
+
 
     menu('View', [
       { label: 'Frame all', action: 'viewAll' },
@@ -1275,7 +1332,7 @@ export class UI {
       this.topbarPopover = open ? null : id;
       this.buildTopbar();
     }, {
-      cls: `imenu-btn${open ? ' open' : ''}${tuned ? ' tuned' : ''}`,
+      cls: `imenu-btn ib${open ? ' open' : ''}${tuned ? ' tuned' : ''}`,
       title: `${title}: ${cur[2]}${cur[3] ? ` — ${cur[3]}` : ''}`,
     });
     button.append(icon(cur[1], 17), icon('chevronDown', 9));

@@ -170,6 +170,30 @@ Key invariants:
   keystone corner, then cone/blend, then the aim ring — since they sit on
   the same wall as each other and as the object picking underneath.
 
+- **AN ICON-ONLY BUTTON IS FLAT** (`.ib`, `styles.css`): no frame and no
+  fill at rest, a quiet fill on hover, and a SLIGHT accent-tinted fill when
+  it is on — the Properties tabs' look, applied to every toolbar. A toolbar
+  is a row of choices, and a box round every one of them drew the eye to the
+  boxes; the selected one is the only one that should read as a shape.
+  `btn()` sets `.ib` itself from what the button CONTAINS (an svg and no
+  text), so a new toolbar button gets the look for free and a labelled
+  button in a panel keeps its frame — there, the frame is what tells a
+  clickable "Look through" from a line of text. The one exception is a
+  button built EMPTY and filled afterwards (`UI.iconMenu`), which cannot be
+  classified at construction and says `ib` in its own `cls`.
+- **THERE IS ONE ADD LIST** (`UI.addMenuItems`), nested the way Blender's
+  is: Stroke, Object ▸, Light ▸, Projector, Camera, Empty, Actor, From the
+  Library ▸, Import ▸. There used to be two — the menubar's flat Add and
+  Shift+A's popup — and they had already drifted (the platonics in one,
+  Editable Mesh and the lights in the other, icons in only one). Both now
+  build from this function: the menubar's Add opens the shared popup under
+  its own button instead of a menubar list, since menubar lists carry
+  neither icons nor submenus, and Shift+A appends only its pointer-relative
+  entries (Traveler here, Trigger here, Move cursor). Lights wear the
+  outliner's glyphs, so a light found in the menu looks like the light it
+  becomes. "Grease Pencil" is called STROKE in the menu, which is what it
+  is to anyone who has not used Blender.
+
 - **A checkbox's NAME goes in the label column and the box in the value
   column**, like every other row. It used to carry its own text, which put it
   the other way round — box first, name second, both adrift in the value
