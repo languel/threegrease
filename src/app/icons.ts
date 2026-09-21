@@ -172,6 +172,11 @@ const PATHS: Record<string, string> = {
   selFace: 'M4 8h12v12H4ZM4 8l4-4h12v12l-4 4M16 8l4-4',
   // box-select operations: two squares, the result region filled in
   selOpSet: 'M3 3h12v12H3ZM9 9h12v12H9Z',
+  // the Object properties tab: an object's frame round its (filled) body —
+  // the selection brackets, so it cannot be mistaken for the Library's cube
+  objectProps: 'M4 8.5V4h4.5M15.5 4H20v4.5M20 15.5V20h-4.5M8.5 20H4v-4.5M9 9h6v6H9Z',
+  // the Library: books on a shelf, one leaning
+  library: 'M4 4.5h3v15H4ZM8.5 4.5h3v15h-3ZM13.2 5.4l2.9-.8 3.9 14.5-2.9.8ZM3 20.25h18',
   selOpExtend: 'M3 3h12v12H3ZM9 9h12v12H9Z',
   selOpSubtract: 'M3 3h12v12H3ZM9 9h12v12H9Z',
   selOpDifference: 'M3 3h12v12H3ZM9 9h12v12H9Z',
@@ -198,6 +203,7 @@ const FILLS: Partial<Record<IconName, { d: string; evenodd?: boolean }>> = {
   selEdge: { d: 'M14.6 7.2h2.8v13.6h-2.8Z' },
   selFace: { d: 'M4 8h12v12H4Z' },
   selOpSet: { d: 'M9 9h12v12H9Z' },
+  objectProps: { d: 'M9 9h6v6H9Z' },
   selOpExtend: { d: 'M3 3h12v12H3ZM9 9h12v12H9Z' },
   selOpSubtract: { d: 'M3 3h12v12H3ZM9 9h6v6H9Z', evenodd: true },
   selOpDifference: { d: 'M3 3h12v12H3ZM9 9h12v12H9Z', evenodd: true },

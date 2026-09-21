@@ -2144,6 +2144,13 @@ the browser console or automated evals:
     the gaussians (`mesh.opacity = 0`) and draws a child `THREE.Points` of the
     shown centres, so it rides the mesh's transform and outline. Its raycast
     is off: a Points threshold is in WORLD units and hits everything.
+  - LOOK: `splatScale` multiplies every gaussian's size as a SHIFT of the
+    packed log-scale bytes (all three axes by one factor = one added
+    constant; a zero byte stays zero), and `opacity` is `SplatMesh.opacity`,
+    which takes values above 1 and lifts the faint majority of a capture.
+    Points take the multiplier too, capped at 1, with the dot's alpha test
+    lowered to match or faded dots vanish instead of fading. Both are the
+    view, so Export writes the file's own sizes and opacities.
   - Picking and snapping read the same state (`pickSplatPoint` over every
     shown centre, one composed matrix, strided only past 250k), so a scan is
     clicked where it IS in Object mode and a deleted splat cannot be snapped

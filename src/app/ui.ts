@@ -946,8 +946,6 @@ const TOOLS_BY_MODE: Record<EditorMode, ToolSlot[]> = {
       ['draw-box', 'cube', 'Draw Box — drag the base, then move away from the plane to raise it'],
       ['draw-cylinder', 'drawCylinder', 'Draw Cylinder — drag the base, then raise it'],
       ['draw-pyramid', 'drawPyramid', 'Draw Pyramid — drag the base, then raise it'],
-    ] },
-    { group: 'drawRound', label: 'Draw a round solid', tools: [
       ['draw-sphere', 'circle', 'Draw Sphere — drag a radius from its centre; it rests on the drawing plane'],
       ['draw-tetra', 'drawTetra', 'Draw Tetrahedron — fire'],
       ['draw-octa', 'drawOcta', 'Draw Octahedron — air'],
@@ -2740,7 +2738,7 @@ export class UI {
         build: () => [this.worldPanel(), this.cameraLensPanel(), this.measurePanel(), this.scenePanel()],
       },
       {
-        id: 'object', icon: 'cube', title: 'Object — transform · material',
+        id: 'object', icon: 'objectProps', title: 'Object — transform · material',
         build: () => [this.objectPropsPanel(), this.bakePanel()],
       },
       {
@@ -2786,7 +2784,7 @@ export class UI {
         build: () => [this.splatsPanel(), this.solverPanel()],
       },
       {
-        id: 'library', icon: 'cubeModel', title: 'Library — scans, models and drawings to place',
+        id: 'library', icon: 'library', title: 'Library — scans, models and drawings to place',
         build: () => [this.libraryPanel()],
       },
       {
@@ -4605,8 +4603,13 @@ export class UI {
         tip(selectField('Show as', d.mode, [['SPLATS', 'Splats'], ['POINTS', 'Point cloud']],
           (v) => { set({ mode: v }); this.refresh(); }),
         'Splats: the gaussians as captured · Point cloud: one dot per splat centre, which shows the structure a capture is made of and where its floaters are'),
-        ...(d.mode === 'POINTS' ? [tip(slider('Point size', d.pointSize, 1, 12, 0.5, (v) => set({ pointSize: v }), { def: 2 }),
-          'dot size in screen pixels')] : []),
+        d.mode === 'POINTS'
+          ? tip(slider('Point size', d.pointSize, 0.5, 12, 0.5, (v) => set({ pointSize: v }), { def: 2 }),
+            'dot size in screen pixels')
+          : tip(slider('Splat scale', d.splatScale, 0.05, 4, 0.05, (v) => set({ splatScale: v }), { def: 1 }),
+            'multiplies every gaussian\'s size: below 1 the scan breaks into distinct marks, above 1 it melts into a blur'),
+        tip(slider('Opacity', d.opacity, 0, 3, 0.05, (v) => set({ opacity: v }), { def: 1 }),
+          'multiplies every splat\'s opacity — above 1 lifts the faint splats a capture is mostly made of (points stop at 1)'),
         tip(slider('Min opacity', d.minOpacity, 0, 1, 0.01, (v) => set({ minOpacity: v }), { def: 0 }),
           'hide splats fainter than this — a faint splat is one the capture was unsure of, so this is a CONFIDENCE filter. It hides, it does not delete'),
         tip(numField('Max size', d.maxSize, (v) => set({ maxSize: Math.max(0, v) }), 0.05, { def: 0, min: 0 }),

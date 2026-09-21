@@ -554,6 +554,12 @@ export interface TGSplatDisplay {
   mode: SplatDisplayMode;
   /** point-cloud dot size, screen px */
   pointSize: number;
+  /** multiplies every gaussian's size — below 1 the cloud breaks up into
+   *  distinct marks, above 1 it melts into a painterly blur */
+  splatScale: number;
+  /** multiplies every splat's (or dot's) opacity; above 1 lifts the faint
+   *  ones a capture is full of */
+  opacity: number;
   /** hide splats below this opacity (0..1) — the usual stand-in for a
    *  capture's CONFIDENCE, since a faint splat is one the optimiser was
    *  unsure of */

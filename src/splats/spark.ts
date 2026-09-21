@@ -192,12 +192,12 @@ export class SparkSplats {
   private applyEdits(id: number, mesh: SplatMesh, data: TGSplat): void {
     const d = splatDisplay(data.display);
     const untouched = !data.removed?.length && !d.minOpacity && !d.maxSize && d.mode === 'SPLATS'
-      && !this.edits.has(id);
+      && d.splatScale === 1 && d.opacity === 1 && !this.edits.has(id);
     if (untouched) return;
     const st = this.editState(id);
     if (!st) return;
     const editing = this.editingId === id;
-    const key = [d.mode, d.pointSize, d.minOpacity, d.maxSize,
+    const key = [d.mode, d.pointSize, d.minOpacity, d.maxSize, d.splatScale, d.opacity,
       editing ? st.selVersion : -1].join('|');
     const removedStr = data.removed ?? '';
     if (key === st.key && removedStr === st.removedApplied) return;
@@ -216,6 +216,11 @@ export class SparkSplats {
     // three per splat
     const maxByte = d.maxSize > 0 ? Math.floor((Math.log(d.maxSize) - lnMin) / lnPerStep) + 1 : 256;
     const minA = Math.round(d.minOpacity * 255);
+    // SCALE is a shift in the packed log-scale bytes: every step is the same
+    // factor, so multiplying all three axes by k is adding ln(k)/step to each
+    // (a byte of 0 means "zero size" and stays so)
+    const shift = Math.round(Math.log(Math.max(0.01, d.splatScale)) / lnPerStep);
+    const scaleByte = (u: number) => (u === 0 ? 0 : Math.max(1, Math.min(255, u + shift)));
     const tint = editing && st.selCount > 0;
     let shownBefore = 0;
     for (let i = 0; i < st.n; i++) shownBefore += st.alive[i];
@@ -232,6 +237,10 @@ export class SparkSplats {
           | ((((b + SEL_RGB[2] * 2) / 3) | 0) << 16) | (a << 24);
       }
       arr[i * 4] = out;
+      if (shift) {
+        arr[i * 4 + 3] = scaleByte(w3 & 255) | (scaleByte((w3 >>> 8) & 255) << 8)
+          | (scaleByte((w3 >>> 16) & 255) << 16) | (w3 & 0xff000000);
+      } else arr[i * 4 + 3] = w3;
     }
     packed.needsUpdate = true;
     mesh.updateVersion();
@@ -274,9 +283,16 @@ export class SparkSplats {
         st.points.geometry.dispose();
         st.points.geometry = geo;
       }
-      (st.points.material as THREE.PointsMaterial).size = d.pointSize * (window.devicePixelRatio || 1);
+      const pm = st.points.material as THREE.PointsMaterial;
+      pm.size = d.pointSize * (window.devicePixelRatio || 1);
+      // the dot's own edge is an alpha test, which the opacity multiplies
+      // into — so the cut-off follows it down or faded dots vanish outright
+      pm.opacity = Math.min(1, d.opacity);
+      pm.transparent = d.opacity < 1;
+      pm.alphaTest = 0.5 * Math.min(1, d.opacity);
+      pm.needsUpdate = true;
     } else {
-      mesh.opacity = 1;
+      mesh.opacity = d.opacity;
       if (st.points) {
         mesh.remove(st.points);
         st.points.geometry.dispose();

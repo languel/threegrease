@@ -14,7 +14,7 @@
 import type { TGSplatDisplay } from '../core/types';
 
 export const DEFAULT_SPLAT_DISPLAY: TGSplatDisplay = {
-  mode: 'SPLATS', pointSize: 2, minOpacity: 0, maxSize: 0,
+  mode: 'SPLATS', pointSize: 2, splatScale: 1, opacity: 1, minOpacity: 0, maxSize: 0,
 };
 
 export function splatDisplay(d: TGSplatDisplay | undefined): TGSplatDisplay {
