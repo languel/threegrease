@@ -18,6 +18,7 @@ import {
   raycastFaceTriangle, raycastSurfaceHit, screenToWorld,
 } from './projection';
 import { allRefs, refOfObject3D, worldMatrixOf, type ObjRef } from './objects';
+import { pickSplatPoint } from './splatpick';
 
 /** What the returned point actually landed on — for HUD feedback, so the
  *  user can tell a real vertex hit from a fallback onto the drawing plane. */
@@ -73,6 +74,11 @@ export function snapWorldPoint(
       // no stroke nearby: fall through to plane placement rather than
       // refusing to place anything
       if (hit) return { point: new THREE.Vector3(hit.x, hit.y, hit.z), kind: 'VERTEX' };
+      // a scan's vertices are its splat centres — and the hit carries the
+      // splat, so a measurement point placed there BINDS to the scan and
+      // rides it through an alignment
+      const sp = pickSplatPoint(ctx, x, y, 14);
+      if (sp) return { point: new THREE.Vector3(...sp.world), kind: 'VERTEX', ref: { kind: 'SPLAT', id: sp.objectId } };
     }
 
     if (snap.mode === 'EDGE' || snap.mode === 'EDGE_CENTER' || snap.mode === 'EDGE_PERP') {
@@ -107,6 +113,10 @@ export function snapWorldPoint(
     if (snap.mode === 'SURFACE' || snap.mode === 'CANVAS') {
       const hit = raycastSurfaceHit(ctx, clientX, clientY);
       if (hit) return { point: hit.point.clone(), kind: 'SURFACE', ref: refOfObject3D(hit.object) };
+      // a scan that is not a draw target has no surface to raycast, but its
+      // splat centres are still somewhere to put a point
+      const sp = pickSplatPoint(ctx, x, y, 10);
+      if (sp) return { point: new THREE.Vector3(...sp.world), kind: 'SURFACE', ref: { kind: 'SPLAT', id: sp.objectId } };
       // nothing under the pointer: fall through to plane placement
     }
 

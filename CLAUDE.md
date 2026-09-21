@@ -1640,6 +1640,11 @@ the browser console or automated evals:
       1.6x-oversized copy; eight corners picked ±2 cm fit to 9 mm RMS with
       scale 0.623. Because the source points are bound, they ride the
       object and visibly land on the targets.
+    - A point placed ON A SCAN binds to it: the magnet's Vertex and Surface
+      modes fall back to the nearest splat centre and carry the splat as the
+      hit's ref (a scan that is not a draw target has no surface to raycast,
+      and without the ref the point was free and the scan could not be
+      aligned by it).
   - `scaleSceneToMeasure` no longer special-cases them: a measurement is a
     root object, so the same loop scales it, and a bound point needs no
     scaling at all because whatever it is stuck to was just scaled underneath

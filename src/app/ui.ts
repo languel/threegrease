@@ -1535,7 +1535,7 @@ export class UI {
     return [
       ['INCREMENT', 'snapIncrement', 'Increment', 'round to the grid step'],
       ['GRID', 'snapGrid', 'Grid', 'the visible floor grid'],
-      ['POINT', 'snapVertex', 'Vertex', 'stroke points'],
+      ['POINT', 'snapVertex', 'Vertex', 'stroke points and splat centres'],
       ['EDGE', 'snapEdge', 'Edge', 'anywhere along a stroke'],
       ['EDGE_CENTER', 'snapEdgeCenter', 'Edge Center', 'the middle of a stroke segment'],
       ['EDGE_PERP', 'snapEdgePerp', 'Edge Perpendicular', 'the foot of a perpendicular onto a stroke'],
