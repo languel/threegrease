@@ -1012,6 +1012,52 @@ class App implements AppHandle {
     this.ui.refresh();
   }
 
+  /** Objects that can serve as a selection VOLUME for splats. */
+  splatVolumes(): { id: number; name: string; kind: string }[] {
+    return this.ctx.scene.meshes
+      .filter((m) => m.visible !== false && (m.kind === 'BOX' || m.kind === 'SPHERE' || m.kind === 'CYLINDER' || m.kind === 'PLANE'))
+      .map((m) => ({ id: m.id, name: m.name, kind: m.kind }));
+  }
+
+  /**
+   * SELECT BY VOLUME: any box, sphere or cylinder in the scene selects the
+   * splats inside it; a PLANE selects the ones in FRONT of it (its +Z side).
+   * The volume is an ordinary object, so it is placed, turned, scaled and
+   * snapped with every tool the app already has — a crop box is a box — and
+   * it can stay in the scene to crop the next take the same way. Tested in
+   * the primitive's own space: unit box, 0.5-radius sphere, cylinder 0.5
+   * round and 1.2 tall along its Y.
+   */
+  splatSelectInside(meshId: number): void {
+    const data = this.ctx.scene.splats.find((s) => s.id === this.splatEditId);
+    const vol = this.ctx.scene.meshes.find((m) => m.id === meshId);
+    const st = data ? this.splats.editState(data.id) : null;
+    if (!data || !vol || !st) return;
+    const toVol = new THREE.Matrix4().copy(worldMatrixOf(this.ctx.scene, { kind: 'MESH', id: vol.id })).invert()
+      .multiply(worldMatrixOf(this.ctx.scene, { kind: 'SPLAT', id: data.id }));
+    const e = toVol.elements;
+    const c = st.centers;
+    const hit = new Uint8Array(st.n);
+    let count = 0;
+    for (let i = 0; i < st.n; i++) {
+      if (!st.alive[i]) continue;
+      const px = c[i * 3], py = c[i * 3 + 1], pz = c[i * 3 + 2];
+      const x = e[0] * px + e[4] * py + e[8] * pz + e[12];
+      const y = e[1] * px + e[5] * py + e[9] * pz + e[13];
+      const z = e[2] * px + e[6] * py + e[10] * pz + e[14];
+      let inside = false;
+      switch (vol.kind) {
+        case 'BOX': inside = Math.abs(x) <= 0.5 && Math.abs(y) <= 0.5 && Math.abs(z) <= 0.5; break;
+        case 'SPHERE': inside = x * x + y * y + z * z <= 0.25; break;
+        case 'CYLINDER': inside = x * x + z * z <= 0.25 && Math.abs(y) <= 0.6; break;
+        case 'PLANE': inside = z >= 0; break;
+      }
+      if (inside) { hit[i] = 1; count++; }
+    }
+    this.splatTools[0].selectHits(this.ctx, hit);
+    this.setStatusHint(`${count.toLocaleString()} splats ${vol.kind === 'PLANE' ? 'in front of' : 'inside'} ${vol.name}`, 2500);
+  }
+
   /** Counts for the panel: [shown, selected, removed, total]. */
   splatEditCounts(id: number): [number, number, number, number] | null {
     const st = this.splats.editState(id);

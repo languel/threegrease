@@ -165,6 +165,16 @@ export class SplatEditTool implements Tool {
     return c;
   }
 
+  /** Combine a hit mask computed elsewhere (a volume select) with the
+   *  selection, by the top bar's select operation. */
+  selectHits(ctx: AppCtx, hit: Uint8Array): void {
+    const t = this.target(ctx);
+    if (!t) return;
+    this.op = ctx.settings.selectOp;
+    this.combine(t.st, hit);
+    this.commit(ctx);
+  }
+
   private commit(ctx: AppCtx): void {
     if (this.targetId !== null) source?.touchSelection(this.targetId);
     ctx.refreshUI();

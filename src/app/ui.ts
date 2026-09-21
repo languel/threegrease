@@ -90,6 +90,8 @@ export interface AppHandle {
   meshEditing(): boolean;
   splatEditing(): boolean;
   splatEditOp(op: SplatEditOp, id?: number): void;
+  splatVolumes(): { id: number; name: string; kind: string }[];
+  splatSelectInside(meshId: number): void;
   /** [shown, selected, removed, total], or null until the cloud has loaded */
   splatEditCounts(id: number): [number, number, number, number] | null;
   setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
@@ -2143,6 +2145,19 @@ export class UI {
 
   /** Right-click while editing a MESH: its own operations, not the stroke
    *  editor's (which acted on grease pencil and did nothing to the mesh). */
+  /** "Select inside ▸" — every box, sphere, cylinder or plane in the scene
+   *  as a selection volume. */
+  private splatVolumeItem(): CtxItem & { items?: CtxItem[] } {
+    const vols = this.app.splatVolumes();
+    return vols.length
+      ? { label: 'Select inside', items: vols.map((v) => ({
+        label: `${v.kind === 'PLANE' ? 'In front of' : 'Inside'} ${v.name}`,
+        icon: (v.kind === 'PLANE' ? 'drawPlane' : v.kind === 'SPHERE' ? 'circle' : v.kind === 'CYLINDER' ? 'drawCylinder' : 'cube') as IconName,
+        do: () => this.app.splatSelectInside(v.id),
+      })) }
+      : { label: 'Select inside (add a box, sphere or plane)', disabled: true, do: () => {} };
+  }
+
   /** Right-click in splat Edit mode. */
   openSplatOpsContextMenu(clientX: number, clientY: number): void {
     const op = (o: SplatEditOp) => () => this.app.splatEditOp(o);
@@ -2153,6 +2168,7 @@ export class UI {
       { label: 'Invert selection', do: op('invert') },
       { sep: true },
       { label: 'Select filtered', do: op('selectFiltered') },
+      this.splatVolumeItem(),
       { sep: true },
       { label: 'Delete selected', do: op('delete') },
       { label: 'Crop to selection', do: op('crop') },
@@ -4599,6 +4615,7 @@ export class UI {
       // settings stays one with none until something is changed
       const set = (patch: Partial<typeof d>) => { s.display = { ...splatDisplay(s.display), ...patch }; };
       const counts = this.app.splatEditCounts(s.id);
+      let selInside: HTMLButtonElement;
       const editing = this.app.splatEditing();
       rows.push(
         el('div', { class: 'menu-sep' }),
@@ -4629,6 +4646,11 @@ export class UI {
           btn('Invert', () => this.app.splatEditOp('invert'), { title: 'Ctrl+I' }),
           btn('Delete', () => this.app.splatEditOp('delete'), { title: 'delete the selected splats (X) — undoable, and the file is untouched' }),
         ), el('div', { class: 'row' },
+          selInside = btn('Select inside…', () => {
+            const r = selInside.getBoundingClientRect();
+            const it = this.splatVolumeItem();
+            this.openContextMenu(r.left, r.bottom + 2, it.items ?? [it]);
+          }, { title: 'select the splats inside a box, sphere or cylinder in the scene, or in front of a plane (by the top bar\'s select operation)' }),
           btn('Crop', () => this.app.splatEditOp('crop'), { title: 'keep only the selection: delete everything else (restorable)' }),
           btn('Separate', () => this.app.splatEditOp('separate'),
             { title: 'move the selection into a NEW splat object, baked into a PLY of its own — for further processing' }),

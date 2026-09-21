@@ -2166,8 +2166,14 @@ the browser console or automated evals:
     stored PLY (`exportPly(id, only)`, original colours) and becomes a new
     splat object with the source's transform and look, and leaves the
     source as a restorable deletion.
-  - Not built: moving splats (G/R/S says so) and a general boolean
-    crop/filter VOLUME.
+  - SELECT INSIDE a volume (`App.splatSelectInside`): any BOX, SPHERE or
+    CYLINDER mesh selects the splats inside it, a PLANE the ones in front of
+    it (+Z). The volume is an ordinary object on purpose — placed, turned,
+    scaled and snapped with the tools that already exist, and kept in the
+    scene to crop the next take the same way. Tested in the primitive's own
+    unit space (box ±0.5, sphere r 0.5, cylinder r 0.5 × 1.2 along Y).
+  - Not built: moving splats (G/R/S says so) and a LIVE crop volume (a
+    filter that follows the box as it moves, rather than a one-off select).
 - **The shared walking body** (`actor/locomotion.ts`) is where collision and
   ground live, so a character does not collide differently depending on who
   is steering it. `walkVolume.gather(scene, frame)` is idempotent per frame.
