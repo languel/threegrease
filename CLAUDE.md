@@ -2155,8 +2155,19 @@ the browser console or automated evals:
     shown centre, one composed matrix, strided only past 250k), so a scan is
     clicked where it IS in Object mode and a deleted splat cannot be snapped
     to. Export writes what is shown, from the original colours.
-  - Not built: moving splats (G/R/S says so), a general boolean crop/filter
-    volume, and baking the edits into a new stored file.
+  - FILTERED IS NOT DELETED: the selection tools only reach SHOWN splats, so
+    whatever a filter hides survives a lasso-and-delete and comes back when
+    the filter is relaxed. `removedMask` is what tells "deleted" from
+    "filtered" (`alive` is 0 for both). Select filtered / Delete filtered
+    make a filter permanent (still restorable); a hidden splat that is
+    selected is tinted the moment a filter lets it back into view.
+  - CROP deletes everything unselected (restorable, like any deletion).
+    SEPARATE is the way to take a crop on: the selection is written to a new
+    stored PLY (`exportPly(id, only)`, original colours) and becomes a new
+    splat object with the source's transform and look, and leaves the
+    source as a restorable deletion.
+  - Not built: moving splats (G/R/S says so) and a general boolean
+    crop/filter VOLUME.
 - **The shared walking body** (`actor/locomotion.ts`) is where collision and
   ground live, so a character does not collide differently depending on who
   is steering it. `walkVolume.gather(scene, frame)` is idempotent per frame.

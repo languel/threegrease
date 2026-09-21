@@ -37,6 +37,9 @@ export interface SplatEditState {
   removedApplied: string;
   /** how many splats that record removes */
   removedCount: number;
+  /** that record decoded: 1 = deleted. `alive` is 0 for these AND for
+   *  whatever the filters hide; this is what tells the two apart */
+  removedMask: Uint8Array;
   selVersion: number;
   points: THREE.Points | null;
 }
@@ -164,7 +167,7 @@ export class SparkSplats {
     packed.forEachSplat((i, c) => { centers[i * 3] = c.x; centers[i * 3 + 1] = c.y; centers[i * 3 + 2] = c.z; });
     const st: SplatEditState = {
       n, centers, alive: new Uint8Array(n).fill(1), sel: new Uint8Array(n), selCount: 0,
-      orig: packed.packedArray.slice(0, n * 4), key: '', removedApplied: '', removedCount: 0, selVersion: 0, points: null,
+      orig: packed.packedArray.slice(0, n * 4), key: '', removedApplied: '', removedCount: 0, removedMask: new Uint8Array(n), selVersion: 0, points: null,
     };
     this.edits.set(id, st);
     return st;
@@ -209,6 +212,7 @@ export class SparkSplats {
     let rc = 0;
     for (let i = 0; i < st.n; i++) rc += removed[i];
     st.removedCount = rc;
+    st.removedMask = removed;
     const enc = packed.splatEncoding;
     const lnMin = enc?.lnScaleMin ?? -12, lnMax = enc?.lnScaleMax ?? 9;
     const lnPerStep = (lnMax - lnMin) / 254;
@@ -325,7 +329,7 @@ export class SparkSplats {
    * the interchange format every splat tool reads. Inverse of the usual
    * reader transforms: opacity -> logit, scale -> log, color -> f_dc.
    */
-  exportPly(id: number): ArrayBuffer | null {
+  exportPly(id: number, only?: Uint8Array): ArrayBuffer | null {
     const mesh = this.meshFor(id);
     const packed = (mesh as unknown as { packedSplats?: {
       getNumSplats(): number;
@@ -339,7 +343,8 @@ export class SparkSplats {
     // out, and the colours come from the file as loaded, not the tint
     const st = this.edits.get(id);
     const arr = (packed as unknown as { packedArray?: Uint32Array }).packedArray;
-    const shown = st ? st.alive : null;
+    // `only` picks the splats to write (Separate); otherwise what is shown
+    const shown = only ?? (st ? st.alive : null);
     let n = n0;
     if (shown) { n = 0; for (let i = 0; i < n0; i++) n += shown[i]; }
     const current = st && arr ? arr.slice(0, n0 * 4) : null;

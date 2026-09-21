@@ -13,6 +13,10 @@
 //    a handful of floaters picked off one by one.
 import type { TGSplatDisplay } from '../core/types';
 
+/** What the splat editor's buttons and menu can ask for. */
+export type SplatEditOp = 'all' | 'none' | 'invert' | 'delete' | 'restore'
+  | 'selectFiltered' | 'deleteFiltered' | 'crop' | 'separate';
+
 export const DEFAULT_SPLAT_DISPLAY: TGSplatDisplay = {
   mode: 'SPLATS', pointSize: 2, splatScale: 1, opacity: 1, minOpacity: 0, maxSize: 0,
 };

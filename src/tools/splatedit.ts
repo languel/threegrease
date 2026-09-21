@@ -156,7 +156,8 @@ export class SplatEditTool implements Tool {
     const mask = decodeRemoved(t.data.removed, t.st.n);
     let c = 0;
     for (let i = 0; i < t.st.n; i++) {
-      if (t.st.sel[i] && t.st.alive[i]) { mask[i] = 1; c++; }
+      // shown OR hidden by a filter — Select filtered picks the hidden ones
+      if (t.st.sel[i] && !mask[i]) { mask[i] = 1; c++; }
       t.st.sel[i] = 0;
     }
     t.data.removed = encodeRemoved(mask);

@@ -87,5 +87,5 @@ export class SplatManager {
 
   /** Serialize a loaded splat to a standard (uncompressed) 3DGS PLY.
    *  Null when nothing is loaded — which is also the no-Spark case. */
-  exportPly(id: number): ArrayBuffer | null { return this.impl?.exportPly(id) ?? null; }
+  exportPly(id: number, only?: Uint8Array): ArrayBuffer | null { return this.impl?.exportPly(id, only) ?? null; }
 }

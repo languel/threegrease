@@ -145,6 +145,7 @@ function imageThumb(img: HTMLImageElement): string {
   return c.toDataURL('image/jpeg', 0.85);
 }
 import { isStoreRef, putFile } from '../io/blobstore';
+import { decodeRemoved, encodeRemoved, type SplatEditOp } from '../splats/edit';
 import { classifyFile, isYUpModel } from '../io/dropfiles';
 import { mediamime } from '../io/mediamime';
 import { createStream, mmStreamEngine, streamStore } from '../mm/streams';
@@ -928,8 +929,42 @@ class App implements AppHandle {
   }
 
   /** The splat editor's operations, for the panel and the right-click menu. */
-  splatEditOp(op: 'all' | 'none' | 'invert' | 'delete' | 'restore', id?: number): void {
+  splatEditOp(op: SplatEditOp, id?: number): void {
     const t = this.splatTools[0];
+    const target = id ?? this.splatEditId;
+    const data = this.ctx.scene.splats.find((s) => s.id === target);
+    const st = data ? this.splats.editState(data.id) : null;
+    if (op === 'selectFiltered' || op === 'deleteFiltered' || op === 'crop') {
+      if (!data || !st) return;
+      // FILTERED = hidden by Min opacity / Max size but not deleted
+      const filtered = (i: number) => !st.alive[i] && !st.removedMask[i];
+      if (op === 'selectFiltered') {
+        let c = 0;
+        for (let i = 0; i < st.n; i++) if (filtered(i)) { st.sel[i] = 1; c++; }
+        this.splats.touchSelection(data.id);
+        this.setStatusHint(`${c.toLocaleString()} filtered splats selected — X deletes them, or relax the filter to see them`, 3000);
+        this.ui.refresh();
+        return;
+      }
+      this.ctx.pushUndo();
+      const mask = decodeRemoved(data.removed, st.n);
+      let c = 0;
+      for (let i = 0; i < st.n; i++) {
+        if (mask[i]) continue;
+        // CROP keeps the selection and deletes the rest
+        const go = op === 'crop' ? !st.sel[i] : filtered(i);
+        if (go) { mask[i] = 1; st.sel[i] = 0; c++; }
+      }
+      data.removed = encodeRemoved(mask);
+      this.splats.touchSelection(data.id);
+      this.setStatusHint(`deleted ${c.toLocaleString()} splats (Restore deleted brings them back)`, 2500);
+      this.ui.refresh();
+      return;
+    }
+    if (op === 'separate') {
+      if (data && st) void this.separateSplats(data.id);
+      return;
+    }
     if (op === 'restore') {
       const data = this.ctx.scene.splats.find((s) => s.id === (id ?? this.splatEditId));
       if (!data?.removed?.length) return;
@@ -945,6 +980,36 @@ class App implements AppHandle {
       const n = t.deleteSelected(this.ctx);
       if (n) this.setStatusHint(`deleted ${n.toLocaleString()} splats`, 2000);
     }
+  }
+
+  /**
+   * SEPARATE: the selected splats become a NEW splat object, baked into a
+   * stored PLY of their own — the way to take a crop on for further
+   * processing — and leave the source (as a restorable deletion there).
+   */
+  private async separateSplats(id: number): Promise<void> {
+    const data = this.ctx.scene.splats.find((s) => s.id === id);
+    const st = this.splats.editState(id);
+    if (!data || !st || !st.selCount) { this.setStatusHint('select some splats to separate first', 2000); return; }
+    const only = new Uint8Array(st.n);
+    let c = 0;
+    for (let i = 0; i < st.n; i++) if (st.sel[i] && !st.removedMask[i]) { only[i] = 1; c++; }
+    const buffer = c ? this.splats.exportPly(id, only) : null;
+    if (!buffer) return;
+    const base = data.name.replace(/\.\w+$/, '');
+    const src = await putFile(new Blob([buffer], { type: 'application/octet-stream' }), `${base}-part.ply`);
+    this.ctx.pushUndo();
+    const mask = decodeRemoved(data.removed, st.n);
+    for (let i = 0; i < st.n; i++) if (only[i]) { mask[i] = 1; st.sel[i] = 0; }
+    data.removed = encodeRemoved(mask);
+    this.splats.touchSelection(id);
+    let nid = Date.now() % 1e9;
+    while (this.ctx.scene.splats.some((s) => s.id === nid)) nid++;
+    this.ctx.scene.splats.push({
+      ...structuredClone(data), id: nid, name: `${base} part`, src, removed: '', select: false,
+    });
+    this.setStatusHint(`${c.toLocaleString()} splats separated into "${base} part"`, 3000);
+    this.ui.refresh();
   }
 
   /** Counts for the panel: [shown, selected, removed, total]. */

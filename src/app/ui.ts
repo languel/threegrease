@@ -1,6 +1,6 @@
 import { angleSuffix, evaluate, formatAngle, parseAngle, type AngleUnit } from '../core/angleinput';
 import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type PaintBrush, type PlacementMode, type PlaneMode, type SculptBrush, type StrokeTarget, type NearestTarget, type TransformOrientation, type TransformPivot } from '../tools/context';
-import { splatDisplay } from '../splats/edit';
+import { splatDisplay, type SplatEditOp } from '../splats/edit';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { TGLight, TGLens, GPCamera, GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
 import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
@@ -89,7 +89,7 @@ export interface AppHandle {
   /** Edit mode is open on a mesh (vertex / edge / face editor) */
   meshEditing(): boolean;
   splatEditing(): boolean;
-  splatEditOp(op: 'all' | 'none' | 'invert' | 'delete' | 'restore', id?: number): void;
+  splatEditOp(op: SplatEditOp, id?: number): void;
   /** [shown, selected, removed, total], or null until the cloud has loaded */
   splatEditCounts(id: number): [number, number, number, number] | null;
   setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
@@ -2145,14 +2145,20 @@ export class UI {
    *  editor's (which acted on grease pencil and did nothing to the mesh). */
   /** Right-click in splat Edit mode. */
   openSplatOpsContextMenu(clientX: number, clientY: number): void {
-    const op = (o: 'all' | 'none' | 'invert' | 'delete' | 'restore') => () => this.app.splatEditOp(o);
+    const op = (o: SplatEditOp) => () => this.app.splatEditOp(o);
     this.openContextMenu(clientX, clientY, [
       { header: 'Splats' },
       { label: 'Select all', do: op('all') },
       { label: 'Select none', do: op('none') },
       { label: 'Invert selection', do: op('invert') },
       { sep: true },
+      { label: 'Select filtered', do: op('selectFiltered') },
+      { sep: true },
       { label: 'Delete selected', do: op('delete') },
+      { label: 'Crop to selection', do: op('crop') },
+      { label: 'Delete filtered', do: op('deleteFiltered') },
+      { label: 'Separate selection', do: op('separate') },
+      { sep: true },
       { label: 'Restore all removed', do: op('restore') },
     ]);
   }
@@ -4622,6 +4628,16 @@ export class UI {
           btn('All', () => this.app.splatEditOp('all'), { title: 'select every shown splat (A)' }),
           btn('Invert', () => this.app.splatEditOp('invert'), { title: 'Ctrl+I' }),
           btn('Delete', () => this.app.splatEditOp('delete'), { title: 'delete the selected splats (X) — undoable, and the file is untouched' }),
+        ), el('div', { class: 'row' },
+          btn('Crop', () => this.app.splatEditOp('crop'), { title: 'keep only the selection: delete everything else (restorable)' }),
+          btn('Separate', () => this.app.splatEditOp('separate'),
+            { title: 'move the selection into a NEW splat object, baked into a PLY of its own — for further processing' }),
+        )] : []),
+        ...((d.minOpacity || d.maxSize) ? [el('div', { class: 'row' },
+          ...(editing ? [btn('Select filtered', () => this.app.splatEditOp('selectFiltered'),
+            { title: 'select every splat the filters are hiding (add to the selection)' })] : []),
+          btn('Delete filtered', () => this.app.splatEditOp('deleteFiltered', s.id),
+            { title: 'delete every splat the filters are hiding, so relaxing a filter cannot bring them back (restorable)' }),
         )] : []),
         ...(s.removed?.length ? [el('div', { class: 'row' },
           btn('Restore deleted', () => { this.app.splatEditOp('restore', s.id); this.refresh(); },
