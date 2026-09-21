@@ -567,6 +567,30 @@ the browser console or automated evals:
   triangle under the pointer), Edge (poly edge, anywhere along a stroke, the
   nearest side of that triangle), Face (poly face, mesh surface). Mesh
   "edges" are the renderer's triangles, so a box face's diagonal counts.
+- **SELECTING A CAMERA DOES NOT MAKE IT ACTIVE.** It used to, on the theory
+  that "the camera I am working on" and "the camera the scene renders
+  through" should be one thing. They are not: selecting is how you reach a
+  camera's properties, move it or parent it, and having the render jump
+  every time you touch one is a change you did not ask for. Making it active
+  is its own button on the row, with its OWN icon (`cameraActive`, a camera
+  body with a filled centre) — beside the visibility eye, a second eye read
+  as a second visibility toggle. Clicking it when it is already active looks
+  through it.
+  `lookThroughCamera(on?)` takes an explicit state for callers that just
+  switched which camera is active — "look through camera 2" while already
+  looking through camera 1 must not read as "you are looking through
+  something, so stop". With no argument it toggles, which is what the
+  outliner wants. It used to re-apply the pose when already in camera view,
+  so "Stop looking" could never stop: a toggle that cannot untoggle.
+- **A new object's colour is WHITE.** For an IMPORT the field is a TINT that
+  multiplies the file's own colours, so anything else quietly darkens every
+  scan and model brought in — the old blue-grey default took them to 62%
+  before they had been looked at. For a primitive it is the base colour, and
+  white is what anyone expects to then paint. One default, and it is the
+  identity for both meanings.
+- **The app opens in OBJECT mode**, not DRAW. The first thing anyone does
+  with a scene is look at it and move something; opening with a pencil in
+  hand means the first click draws a stroke nobody asked for.
 - **A CAMERA is an object** (`ObjKind` `'CAMERA'`), not just an entry in
   `scene.cameras`. It gained an `id` (serialize.ts assigns them to old
   scenes and rewrites `score.attachments` from index to id), plus
@@ -1698,13 +1722,33 @@ the browser console or automated evals:
   in the picture?" (the model forward).
   - The polynomial is Paul Bourke's published fisheye-correction form
     (paulbourke.net/dome/fisheyecorrect): r(θ) = k0 + k1θ + k2θ² + k3θ³ +
-    k4θ⁴, θ in RADIANS from the axis, r NORMALISED with 1 the edge of the
-    image circle — which is how real lenses are measured, so a published set
-    pastes straight in (his measured 190° lens is a preset). Blender's
-    "Fisheye Lens Polynomial" is the same polynomial with r in sensor mm;
-    k0 is its offset term, kept for that reason. Equisolid can be given as
-    focal + sensor mm instead, which decides the covered angle
-    (`effectiveFov`: θ = 4·asin(sensor / 4f)).
+    k4θ⁴, θ in RADIANS from the axis. Blender's "Fisheye Lens Polynomial" is
+    the same polynomial with r in sensor mm; k0 is its offset term, kept for
+    that reason. Equisolid can be given as focal + sensor mm instead, which
+    decides the covered angle (`effectiveFov`: θ = 4·asin(sensor / 4f)).
+  - **A POLYNOMIAL IS NORMALISED TO ITS OWN EDGE**, r(θ) / r(fov/2). It
+    gives the SHAPE of the mapping, not an absolute screen radius: a
+    published set is a fit over that lens's own range in whatever units it
+    was measured in, and Bourke's own 190° example only ever reaches
+    r = 0.73 — it turns over at about 72° and is negative by 180°. Read as
+    screen radius directly (what this did at first), everything past
+    r = 0.73 has NO solution: Newton walks off, those pixels sample
+    backwards, and the picture collapses into a small disc in the middle of
+    a black frame. It reads as "the fisheye zoomed to the centre", and
+    scrubbing the coefficients to fix it only makes it worse.
+    Dividing by the value at the half field puts the image circle exactly at
+    the half field — and it is also what makes FIELD OF VIEW mean something
+    for this type, which it previously did not: the shader used it only as a
+    Newton seed, so the control sat there doing nothing. The inverse solves
+    poly(t) = r · poly(halfFov) the same way.
+  - **Your own lenses can be saved** (`customLenses` / `saveCustomLens` in
+    `render/lens.ts`, "Save this lens as…" in the presets menu). A dome
+    projector or a 360 camera in a real room is a specific piece of glass,
+    measured once — often by the person using it, off a photograph of a grid
+    — and used for years. They live in localStorage, not in the scene,
+    because a lens belongs to the room's equipment rather than to one plan
+    of one show, and they are named INLINE rather than through `prompt()`,
+    which an embedded browser can refuse.
   - A CAMERA with a curved lens cannot be rasterised — a GPU draws straight
     lines — so the scene is rendered into a CUBE and one full-screen pass
     asks the lens where each pixel looks (`LensCamera`). Six faces a frame is

@@ -58,6 +58,41 @@ export const LENS_PRESETS: { name: string; lens: TGLens }[] = [
   { name: 'Mirror ball', lens: { type: 'MIRRORBALL', fov: Math.PI * 2 } },
 ];
 
+/**
+ * YOUR OWN LENSES, kept beside the published ones.
+ *
+ * A projector or a dome camera in a real room is a specific piece of glass,
+ * measured once and then used for years — and often measured by the person
+ * using it, from a photograph of a grid. Retyping five coefficients every
+ * time that lens is wanted again is how a measurement gets lost, so a lens
+ * can be SAVED by name. They live in localStorage rather than in the scene
+ * because a lens belongs to the room's equipment, not to one plan of one
+ * show.
+ */
+const CUSTOM_KEY = 'threegrease.lenses';
+
+export function customLenses(): { name: string; lens: TGLens }[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((e) => e && typeof e.name === 'string' && e.lens) : [];
+  } catch { return []; }
+}
+
+/** Save (or replace by name) a lens. Returns the new list. */
+export function saveCustomLens(name: string, lens: TGLens): { name: string; lens: TGLens }[] {
+  const list = customLenses().filter((e) => e.name !== name);
+  list.push({ name, lens: JSON.parse(JSON.stringify(lens)) as TGLens });
+  try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(list)); } catch { /* full or blocked */ }
+  return list;
+}
+
+export function deleteCustomLens(name: string): { name: string; lens: TGLens }[] {
+  const list = customLenses().filter((e) => e.name !== name);
+  try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(list)); } catch { /* full or blocked */ }
+  return list;
+}
+
 export function lensTypeIndex(t: TGLens['type'] | undefined): number {
   return ['PERSPECTIVE', 'FISHEYE_EQUIDISTANT', 'FISHEYE_EQUISOLID', 'FISHEYE_POLY', 'EQUIRECT', 'CYLINDRICAL', 'MIRRORBALL']
     .indexOf(t ?? 'PERSPECTIVE');
@@ -107,8 +142,21 @@ float lensRadius( int type, float theta, float halfFov, float k[5] ) {
   if ( type == 1 ) return theta / max( halfFov, 1e-4 );
   if ( type == 2 ) return sin( theta * 0.5 ) / max( sin( halfFov * 0.5 ), 1e-4 );
   if ( type == 3 ) {
+    // NORMALISED TO ITS OWN EDGE. The polynomial gives the SHAPE of the
+    // mapping, not an absolute radius: a published set is a fit over the
+    // lens's own range in whatever units it was measured in, and Bourke's
+    // 190 degree example only ever reaches r = 0.73 (it turns over at about
+    // 72 degrees and goes negative by 180). Read as screen radius directly,
+    // everything past r = 0.73 has NO solution — Newton walks off, the
+    // pixels sample backwards, and the picture collapses into a small disc
+    // in the middle of a black frame. Dividing by its value at the half
+    // field puts the edge of the image circle exactly at the half field,
+    // which is also what makes Field of view mean something for this type.
+    float e = k[0] + k[1] * halfFov + k[2] * halfFov * halfFov
+      + k[3] * halfFov * halfFov * halfFov + k[4] * halfFov * halfFov * halfFov * halfFov;
+    if ( abs( e ) < 1e-5 ) return theta / max( halfFov, 1e-4 );
     float t = theta;
-    return k[0] + k[1] * t + k[2] * t * t + k[3] * t * t * t + k[4] * t * t * t * t;
+    return ( k[0] + k[1] * t + k[2] * t * t + k[3] * t * t * t + k[4] * t * t * t * t ) / e;
   }
   if ( type == 6 ) return sin( theta * 0.5 ) / max( sin( halfFov * 0.5 ), 1e-4 );
   return theta / max( halfFov, 1e-4 );
@@ -118,13 +166,18 @@ float lensAngle( int type, float r, float halfFov, float k[5] ) {
   if ( type == 1 ) return r * halfFov;
   if ( type == 2 || type == 6 ) return 2.0 * asin( clamp( r * sin( halfFov * 0.5 ), -1.0, 1.0 ) );
   if ( type == 3 ) {
-    // invert r(theta) by Newton: monotone over a lens's half angle
+    // the inverse of the NORMALISED forward model above: solve
+    // poly(t) = r * poly(halfFov) by Newton, seeded equidistant
+    float e = k[0] + k[1] * halfFov + k[2] * halfFov * halfFov
+      + k[3] * halfFov * halfFov * halfFov + k[4] * halfFov * halfFov * halfFov * halfFov;
+    if ( abs( e ) < 1e-5 ) return r * halfFov;
+    float goal = r * e;
     float t = r * halfFov;
-    for ( int i = 0; i < 5; i ++ ) {
-      float f = k[0] + k[1] * t + k[2] * t * t + k[3] * t * t * t + k[4] * t * t * t * t - r;
+    for ( int i = 0; i < 6; i ++ ) {
+      float f = k[0] + k[1] * t + k[2] * t * t + k[3] * t * t * t + k[4] * t * t * t * t - goal;
       float d = k[1] + 2.0 * k[2] * t + 3.0 * k[3] * t * t + 4.0 * k[4] * t * t * t;
       if ( abs( d ) < 1e-6 ) break;
-      t = clamp( t - f / d, 0.0, 3.2 );
+      t = clamp( t - f / d, 0.0, halfFov * 1.2 );
     }
     return t;
   }

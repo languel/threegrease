@@ -33,7 +33,10 @@ import {
 import { isMediaName, liveKeyOf, liveSources, LIVE_PREFIX } from '../io/livesources';
 import { instanceMediaSrc } from '../render/meshes';
 import { putFile } from '../io/blobstore';
-import { effectiveFov, isCurved, LENS_PRESETS, LENS_TYPES, polyOf } from '../render/lens';
+import {
+  customLenses, deleteCustomLens, effectiveFov, isCurved, LENS_PRESETS, LENS_TYPES,
+  polyOf, saveCustomLens,
+} from '../render/lens';
 import { perf } from './perf';
 import { CONSTRAINT_DEFS, createConstraint } from '../score/constraints';
 import { smoothPolyMesh, subdividePolyMesh } from '../core/polymesh';
@@ -87,7 +90,7 @@ export interface AppHandle {
   setMeshSelectMode(mode: 'VERTEX' | 'EDGE' | 'FACE'): void;
   cameraViewOn(): boolean;
   toggleCameraView(): void;
-  lookThroughCamera(): void;
+  lookThroughCamera(on?: boolean): void;
   refreshTimelineControls(): void;
   applyTexture(ref: { kind: string; id: number }, src: string, name: string): void;
   projectorThrow(lightId: number): { distance: number; width: number; height: number } | null;
@@ -2133,16 +2136,57 @@ export class UI {
     const rows: Node[] = [];
     const presetBtn: HTMLElement = btn('Lens presets…', () => {
       const r = presetBtn.getBoundingClientRect();
+      const mine = customLenses();
       this.openContextMenu(r.left, r.bottom + 2, [
+        ...(mine.length ? [
+          { header: 'Your lenses' },
+          ...mine.map((p) => ({
+            label: p.name,
+            do: () => { put({ ...p.lens }); this.refresh(); },
+          })),
+          { sep: true as const },
+        ] : []),
         { header: 'Measured and standard lenses' },
         ...LENS_PRESETS.map((p) => ({ label: p.name, do: () => { put({ ...p.lens }); this.refresh(); } })),
+        { sep: true as const },
+        {
+          label: 'Save this lens as…',
+          do: () => {
+            const cur = get();
+            if (!cur) return;
+            // named INLINE, in the button itself, rather than through
+            // prompt() — which an embedded browser can refuse (the Library
+            // learned this the hard way and lost New folder to it)
+            this.inlineEdit(presetBtn, this.lensNameFor(cur), (name: string) => {
+              if (!name.trim()) return;
+              saveCustomLens(name.trim(), cur);
+              this.refresh();
+            });
+          },
+        },
+        ...(mine.length ? [{
+          label: 'Forget one of mine…',
+          do: () => {
+            const r2 = presetBtn.getBoundingClientRect();
+            this.openContextMenu(r2.left, r2.bottom + 2, [
+              { header: 'Forget which?' },
+              ...mine.map((p) => ({
+                label: p.name,
+                do: () => { deleteCustomLens(p.name); this.refresh(); },
+              })),
+            ]);
+          },
+        }] : []),
       ]);
-    }, { title: 'Published lens models, including Paul Bourke\'s measured 190° fisheye' });
+    }, { title: 'Published lens models, your own saved ones, and Save this lens as…' });
     rows.push(el('div', { class: 'row' }, presetBtn));
     if (lens.type !== 'EQUIRECT' && lens.type !== 'MIRRORBALL') {
-      rows.push(fieldRow('Field of view', tip(numField('', +((lens.fov ?? Math.PI) * 180 / Math.PI).toFixed(1),
-        (v) => set({ fov: Math.max(5, Math.min(360, v)) * Math.PI / 180 }), 1,
-        { def: 180, min: 5, max: 360 }), 'The FULL angle the image circle covers — 180° is a dome.')));
+      rows.push(fieldRow('Field of view', tip(numField('', lens.fov ?? Math.PI,
+        (v) => set({ fov: v }), 0.01,
+        { angle: true, def: Math.PI, min: 5 * Math.PI / 180, max: 2 * Math.PI }),
+      'The FULL angle the image circle covers — 180° is a dome. For a polynomial lens it is also '
+        + 'what the coefficients are normalised against: the edge of the image circle sits at half '
+        + 'this angle, and the polynomial supplies the distortion in between.')));
     }
     if (lens.type === 'FISHEYE_EQUISOLID') {
       rows.push(el('div', { class: 'row' },
@@ -3644,17 +3688,28 @@ export class UI {
       ref: { kind: 'CAMERA', id: c.id }, icon: icon('camera'), name: c.name,
       selected: !!c.select, parent: c.parent,
       onSelect: (e) => {
-        // selecting a camera also makes it the ACTIVE one: "the camera I am
-        // working on" and "the camera the scene renders through" being two
-        // different things is a trap, not a feature
-        scene.activeCamera = i;
+        // SELECTING A CAMERA DOES NOT MAKE IT ACTIVE. It used to — on the
+        // theory that "the camera I am working on" and "the camera the
+        // scene renders through" should be one thing — but selecting is how
+        // you reach a camera's properties, move it or parent it, and having
+        // the render jump to it every time you touch one is a change you
+        // did not ask for and have to undo by clicking another camera.
+        // Making it active is its own button, below.
         this.app.setLastPicked({ kind: 'CAMERA', id: c.id });
         toggleSel((v) => { c.select = v; }, !!c.select, !!(e?.metaKey || e?.ctrlKey));
-        this.app.refreshTimelineControls();
       },
       extras: [
-        btn(icon('eye'), () => { scene.activeCamera = i; this.app.lookThroughCamera(); },
-          { cls: 'icon-btn', active: i === scene.activeCamera && this.app.cameraViewOn(), title: 'Look through this camera' }),
+        btn(icon('cameraActive'), () => {
+          if (scene.activeCamera === i) { this.app.lookThroughCamera(); return; }
+          this.app.setActiveCamera(i);
+          this.refresh();
+        }, {
+          cls: 'icon-btn',
+          active: i === scene.activeCamera,
+          title: i === scene.activeCamera
+            ? `Active camera — click again to ${this.app.cameraViewOn() ? 'stop looking through it' : 'look through it'}`
+            : 'Make this the active camera (what the scene renders through)',
+        }),
         ...viewLockBtns(
           { kind: 'CAMERA', id: c.id },
           false, () => { /* a camera is always drawn: its frustum is its body */ },
@@ -3867,6 +3922,16 @@ export class UI {
   }
 
   /** One texture slot row: image name, load/replace, clear, factor. */
+  /**
+   * A name to offer when saving a lens: what it is and how wide, which is
+   * how a lens is spoken about ("the 190 fisheye", "the dome lens").
+   */
+  private lensNameFor(lens: TGLens): string {
+    const deg = Math.round(effectiveFov(lens) * 180 / Math.PI);
+    const kind = LENS_TYPES.find(([v]) => v === lens.type)?.[1] ?? lens.type;
+    return `${String(kind).replace(/\s*\(.*\)$/, '')} ${deg}\u00b0`;
+  }
+
   /**
    * PICK A PICTURE — from the Library first, a file second.
    *
@@ -4218,7 +4283,11 @@ export class UI {
             () => { this.app.setActiveCamera(i); this.refresh(); },
             { cls: isActive ? 'on' : '', title: 'the camera the scene renders through' }),
           btn(this.app.cameraViewOn() && isActive ? 'Stop looking' : 'Look through',
-            () => { this.app.setActiveCamera(i); this.app.lookThroughCamera(); }),
+            () => {
+              const want = !(this.app.cameraViewOn() && isActive);
+              this.app.setActiveCamera(i);
+              this.app.lookThroughCamera(want);
+            }),
         ),
         fieldRow('Lens', selectField('', lens?.type ?? 'PERSPECTIVE', LENS_TYPES, (v) => {
           ctx.pushUndo();

@@ -116,6 +116,11 @@ const PATHS: Record<string, string> = {
   proportional: 'M3.5 12a8.5 8.5 0 1 0 17.0 0a8.5 8.5 0 1 0 -17.0 0M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2',
   multiframe: 'M8 4h12v12h-4M4 8h12v12H4Z',
   // Transform header: one glyph per Placement / Plane / Guide / Snap choice.
+  // The camera the scene RENDERS THROUGH — a camera body with a filled
+  // centre. Deliberately not an eye: the eye means "is this drawn", and the
+  // two sitting side by side in a row as the same glyph made picking the
+  // active camera look like a second visibility toggle.
+  cameraActive: 'M4 8.5h3.2l1.6-2h6.4l1.6 2H20v9H4ZM9.6 13a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0',
   // TRANSFORM ORIENTATION (Blender's header): each says what "X, Y, Z"
   // currently means — a world tripod, an object's own, a surface normal,
   // the screen, the cursor, the parent.

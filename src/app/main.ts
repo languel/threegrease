@@ -597,7 +597,7 @@ class App implements AppHandle {
       this.polyPen, this.polyBuild, this.quadPatch, this.meshEdit, ...this.drawTools, new SplatPaintTool(), new TexturePaintTool(),
       new ActorPoseTool(), new MeasureTool(), new DirectTool(),
     ]) this.tools.register(t);
-    this.tools.setActive(this.ctx, 'draw');
+    this.tools.setActive(this.ctx, this.ctx.settings.activeTool || 'object-select');
     this.meshEdit.beginTransform = (kind, undo) => this.withPane(this.pointerPane, () => this.beginMeshTransform(kind, undo));
     // drawing an object: the scene's ids, the renderers and the outliner are
     // the App's, so the tools ask for them rather than reaching in
@@ -2301,9 +2301,20 @@ class App implements AppHandle {
 
   /** New camera captures the current viewport pose. */
   /** Look through the active camera (and switch to it if we were not). */
-  lookThroughCamera(): void {
-    if (!this.cameraView) this.toggleCameraView();
-    else this.applyCameraPose();
+  /**
+   * Look through the active camera, or stop.
+   *
+   * It used to re-apply the pose when already in camera view, so the panel's
+   * "Stop looking" and the outliner's own button could never turn it off —
+   * the only way out was the View menu. A toggle that cannot untoggle is
+   * not a toggle.
+   */
+  lookThroughCamera(on?: boolean): void {
+    // `on` is explicit for callers that just switched which camera is
+    // active: "look through camera 2" while already looking through camera
+    // 1 must not read as "you are looking through something, so stop".
+    if (on !== undefined && on === this.cameraView) { this.applyCameraPose(); this.ui.refresh(); return; }
+    this.toggleCameraView();
     this.ui.refreshTimelineControls();
     this.ui.refresh();
   }

@@ -319,8 +319,11 @@ export interface AppCtx {
 
 export function defaultSettings(): Settings {
   return {
-    mode: 'DRAW',
-    activeTool: 'draw',
+    // OBJECT, not DRAW: the app opens on a scene, and the first thing
+    // anyone does with one is look at it and move something. Opening with a
+    // pencil in hand means the first click draws a stroke nobody asked for.
+    mode: 'OBJECT',
+    activeTool: 'object-select',
     directAction: '',
     brush: {
       preset: 'Pen',

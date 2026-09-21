@@ -622,7 +622,13 @@ export function createMeshObject(
     kind, src,
     translation: [...at], rotation: standUpRotation(kind, zUp), scale: [1, 1, 1],
     visible: true, select: false, drawTarget: kind !== 'EMPTY', wireframe: false,
-    color: [0.62, 0.65, 0.72], opacity: 1,
+    // WHITE. For an import this field is a TINT that multiplies the file's
+    // own colours, so anything but white quietly darkens every scan and
+    // model brought in (the old grey took them to 62% before they were
+    // even looked at); for a primitive it is the base colour, and a new box
+    // arriving white rather than blue-grey is what anyone expects to then
+    // paint. One default, and it is the identity for both meanings.
+    color: [1, 1, 1], opacity: 1,
     parent: null, texture: null, unlit: false,
     // AN IMPORT IS SINGLE-SIDED, everything else two-sided. A scan of a room
     // is captured with its normals facing INWARD, which is what lets you
