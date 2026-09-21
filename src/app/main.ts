@@ -5829,6 +5829,32 @@ class App implements AppHandle {
   /** What a draw-object gesture is making at this moment (ObjectDrawHost). */
   private draftRef: ObjRef | null = null;
 
+  /**
+   * The sphere a SUN's shadows have to cover: everything with geometry,
+   * plus the grid's own extent so a shadow does not stop at the edge of the
+   * objects and leave the floor beyond it conspicuously unshadowed.
+   *
+   * Recomputed each frame, which is cheap because `Box3.setFromObject`
+   * reads each geometry's CACHED bounding box rather than its vertices — a
+   * 162k-triangle scan costs one matrix transform, not a walk.
+   */
+  private shadowFocus(): { center: THREE.Vector3; radius: number } | null {
+    const box = new THREE.Box3();
+    const add = (o: THREE.Object3D | null | undefined) => {
+      if (!o || !o.visible) return;
+      const b = new THREE.Box3().setFromObject(o);
+      if (!b.isEmpty() && Number.isFinite(b.min.x)) box.union(b);
+    };
+    for (const m of this.ctx.scene.meshes) add(this.meshes.rootFor(m.id));
+    for (const p of this.ctx.scene.polyMeshes) add(this.polys.rootFor(p.id));
+    for (const g of this.gp.objectGroups) add(g);
+    if (box.isEmpty()) return null;
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    // a floor is usually the biggest thing in a blockout and the shadows
+    // fall ON it, so a little margin keeps the ends of long shadows inside
+    return { center: sphere.center, radius: Math.min(500, sphere.radius * 1.15 + 1) };
+  }
+
   private syncTransientHighlights(): void {
     // the object being DRAWN is marked the way a selection is — it is not
     // selected yet (that happens when the gesture finishes), but it is the
@@ -6584,6 +6610,7 @@ class App implements AppHandle {
     // only time it is drawn (a raycast per selected projector per frame)
     this.syncKeystoneRings();
     this.lights.viewQuat = this.nav.active.quaternion;
+    this.lights.shadowFocus = this.shadowFocus();
     this.lights.aimDistance.clear();
     for (const l of ctx.scene.lights) {
       if (l.kind !== 'SPOT' || !l.select) continue;

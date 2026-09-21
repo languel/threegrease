@@ -71,7 +71,11 @@ export function createLight(kind: TGLight['kind'], name?: string, at: Vec3 = [3,
 /** The two lights that used to be hardcoded in the App constructor.
  *  Reproduces the previous look exactly so migrating changes nothing. */
 export function defaultLights(): TGLight[] {
-  const amb = createLight('AMBIENT', 'Ambient');
+  // NOT THE SAME PLACE. An ambient light has no position — it is uniform —
+  // but its glyph has to be somewhere, and sitting it on top of the sun's
+  // put two different lights under one ring: clicking picked whichever was
+  // tested first, and the scene looked like it had one lamp.
+  const amb = createLight('AMBIENT', 'Ambient', [-3, -4, 6]);
   amb.intensity = 0.9;
   const sun = createLight('SUN', 'Sun', [3, -4, 6]);
   sun.intensity = 1.4;

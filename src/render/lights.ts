@@ -230,6 +230,9 @@ export class LightManager {
    *  level view, which is most of them, and both unreadable and ungrabbable.
    *  It faces the camera instead, like Blender's. */
   viewQuat: THREE.Quaternion | null = null;
+  /** The scene's bounding sphere, for fitting a SUN's shadow box. Set by
+   *  the App each frame; without it the old fixed box is used. */
+  shadowFocus: { center: THREE.Vector3; radius: number } | null = null;
   private tint = new THREE.Color();
 
   sync(scene: GPScene): void {
@@ -459,11 +462,49 @@ export class LightManager {
           entry.shadowMapSize = size;
         }
         if (light instanceof THREE.DirectionalLight) {
-          // a sun's shadow camera is orthographic and doesn't auto-fit;
-          // a fixed generous box beats shadows silently vanishing offscreen
+          // A SUN IS INFINITE, so its shadows have to reach as far as the
+          // scene does. Its shadow camera is ORTHOGRAPHIC and three fits it
+          // to nothing: a fixed box (this was 24 m square, 60 deep, hung at
+          // the lamp's own position) ends somewhere in the middle of any
+          // real room, and the edge is VISIBLE — a straight line across the
+          // floor with shadows on one side and none on the other, the far
+          // side reading as BRIGHTER because nothing is shadowing it rather
+          // than because more light reaches it. It looks like a mysterious
+          // half-plane "behind the sun", which is exactly what it is.
+          //
+          // So the box is fitted to the scene's bounding SPHERE, which is
+          // the one shape that needs no re-fitting as the light turns: the
+          // extents are its radius whatever direction the sun comes from,
+          // and near/far span it along the light's own axis. The light
+          // itself is not moved — a directional light's shadow depends only
+          // on its direction and this box, and moving the lamp to fit would
+          // move the glyph the user placed.
           const cam = light.shadow.camera as THREE.OrthographicCamera;
-          cam.left = -12; cam.right = 12; cam.top = 12; cam.bottom = -12;
-          cam.near = 0.1; cam.far = 60;
+          const f = this.shadowFocus;
+          const r = Math.max(1, f?.radius ?? 12);
+          cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r;
+          if (f) {
+            const dir = new THREE.Vector3(0, 0, -1).transformDirection(root.matrix).normalize();
+            const at = new THREE.Vector3().setFromMatrixPosition(root.matrix);
+            // how far along the beam the scene's centre is: the slab has to
+            // contain the whole sphere about that
+            const d = f.center.clone().sub(at).dot(dir);
+            cam.near = Math.max(0.01, d - r * 1.5);
+            cam.far = Math.max(cam.near + 1, d + r * 1.5);
+          } else {
+            cam.near = 0.1; cam.far = 60;
+          }
+          // THE BIAS HAS TO FOLLOW THE BOX. `shadowBias` is in the shadow
+          // map's own depth units, so one value cannot serve a 10 m box and
+          // a 100 m one: fitted to a big scene, the map's texels cover tens
+          // of centimetres each and a flat floor shadows ITSELF a little
+          // everywhere inside the frustum — which is invisible as acne and
+          // very visible as a STEP at the frustum's edge, one side faintly
+          // darker than the other. (Measured on a 60 m floor: 210-214
+          // inside against 225 outside.) `normalBias` is in WORLD units, so
+          // scaling it with the texel's world size holds across any fit.
+          const texel = (cam.right - cam.left) / Math.max(256, size);
+          light.shadow.normalBias = Math.max(0.02, texel * 2.5);
           cam.updateProjectionMatrix();
         }
       }

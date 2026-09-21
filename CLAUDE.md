@@ -993,6 +993,41 @@ the browser console or automated evals:
   it. This does not look like a wrong transform — it looks like "tracking
   silently never sees anything". Use a real camera object (see
   `lookRotation` in `app/demoscene.ts`).
+- **A SUN IS INFINITE, so its shadow box has to be FITTED** (the
+  DirectionalLight branch of `LightManager.apply`, fed by
+  `App.shadowFocus`). Its shadow camera is ORTHOGRAPHIC and three fits it to
+  nothing: the fixed box this used to carry (24 m square, 60 deep, hung at
+  the lamp's own position) ends somewhere in the middle of any real scene,
+  and the edge is VISIBLE — a straight line across the floor with shadows on
+  one side and none on the other. The unshadowed side reads as BRIGHTER,
+  which makes it look like a mysterious half-plane "behind the sun" rather
+  than like a frustum running out.
+  The box is fitted to the scene's bounding SPHERE, which is the one shape
+  that needs no re-fitting as the light turns: the extents are its radius
+  from any direction, and near/far span it along the light's own axis. The
+  lamp is NOT moved to fit — a directional light's shadow depends only on
+  its direction and this box, and moving it would move the glyph someone
+  placed. `Box3.setFromObject` reads each geometry's cached bounding box, so
+  recomputing per frame costs a matrix transform rather than a walk over a
+  162k-triangle scan.
+  **THE BIAS HAS TO FOLLOW THE BOX.** `shadowBias` is in the shadow map's
+  own depth units, so one value cannot serve a 10 m box and a 100 m one:
+  fitted to a big scene the texels cover tens of centimetres and a flat
+  floor shadows ITSELF everywhere inside the frustum. That is invisible as
+  acne and very visible as a STEP at the frustum's edge — measured on a 60 m
+  floor, 210-214 inside against 225 outside, which is the same "half-plane"
+  symptom wearing a second hat. `normalBias` is in WORLD units, so scaling
+  it with the texel's world size holds across any fit.
+- **The default AMBIENT and SUN are not in the same place.** An ambient
+  light has no position — it is uniform — but its glyph has to be
+  somewhere, and sitting it exactly on the sun's put two different lights
+  under one ring: clicking picked whichever was tested first, and the scene
+  looked like it had one lamp.
+- **A new scene has exactly one camera, on purpose.** `activeCam` and the
+  timeline's camera row assume one exists, and `deleteObject` refuses to
+  remove the last — a scene with no camera would need every one of those
+  paths to grow an empty case for no gain. Blender ships a default camera
+  for the same reason.
 - **A `TRIGGER` takes its SHAPE from its carrier, and `radius` is often
   ignored.** On a BOX/SPHERE/CYLINDER mesh it tests that primitive's own
   local bounds; on a PLANE it is a crossing detector; on a POLY it tests the
