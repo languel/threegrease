@@ -228,6 +228,7 @@ import {
   type ObjRef, type ObjTransform,
   refOfObject3D, objectName,
 } from '../tools/objects';
+import { alignPoints } from '../core/align';
 import { UI, type AppHandle } from './ui';
 import { SilhouetteOutline, type OutlineGroup } from '../render/outline';
 import type { Tool } from '../tools/toolsys';
@@ -4894,6 +4895,84 @@ class App implements AppHandle {
    * Only ROOTS are touched: a parented object is carried by its parent's
    * scale, so scaling both would square the factor on every child.
    */
+  /**
+   * The one object a measurement is ATTACHED to: every bound point stuck to
+   * the same object (free points are allowed — they are only references).
+   * Null when nothing is bound, or when the points span several objects,
+   * since then there is no single thing to move.
+   */
+  measureTarget(measureId: number): ObjRef | null {
+    const m = this.ctx.scene.measures.find((x) => x.id === measureId);
+    if (!m) return null;
+    let ref: ObjRef | null = null;
+    for (const p of m.points) {
+      if (!p.bind) continue;
+      const t = p.bind.target;
+      if (ref && (ref.kind !== t.kind || ref.id !== t.id)) return null;
+      ref = { kind: t.kind, id: t.id } as ObjRef;
+    }
+    return ref;
+  }
+
+  /** Put a world-space transform on one object, through its parent. */
+  private applyWorldTransform(ref: ObjRef, delta: THREE.Matrix4): void {
+    const t = getObjectTransform(this.ctx.scene, ref);
+    if (!t) return;
+    this.applyWorldDelta([ref], [t], delta);
+    this.gp.markDirty();
+    this.refreshWidget();
+    this.ctx.requestRender();
+    this.ui.refresh();
+  }
+
+  /**
+   * "This measurement is really N long", for the OBJECT it is attached to:
+   * scales that object alone, about the measurement's first point (so the
+   * point you measured from stays where it is). The measurement's own
+   * points are bound, so they ride the scale and the reading becomes N.
+   */
+  scaleObjectToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string } {
+    const scene = this.ctx.scene;
+    const m = scene.measures.find((x) => x.id === measureId);
+    const ref = this.measureTarget(measureId);
+    if (!m || !ref) return { ok: false, error: 'the measurement is not attached to one object' };
+    const current = measureLength(scene, m);
+    if (current < 1e-9 || !(realLength > 0)) return { ok: false, error: 'nothing to scale' };
+    const k = realLength / current;
+    const pivot = worldPointsOf(scene, m)[0];
+    this.ctx.pushUndo();
+    this.applyWorldTransform(ref, new THREE.Matrix4().makeTranslation(pivot.x, pivot.y, pivot.z)
+      .multiply(new THREE.Matrix4().makeScale(k, k, k))
+      .multiply(new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z)));
+    return { ok: true, factor: k };
+  }
+
+  /**
+   * ALIGN BY MEASUREMENTS: move, turn and scale the object the SOURCE
+   * measurement is attached to, so its points land on the TARGET's, pair by
+   * pair in the order they were clicked — the corners of a pedestal in a
+   * scan onto the same corners of a virtual box of known size. Best fit in
+   * the least-squares sense (core/align.ts), so four or eight corners picked
+   * a little roughly average out; the residual says how well they agreed.
+   */
+  alignByMeasures(sourceId: number, targetId: number, allowScale = true):
+    { ok: boolean; rms?: number; max?: number; scale?: number; error?: string } {
+    const scene = this.ctx.scene;
+    const src = scene.measures.find((x) => x.id === sourceId);
+    const dst = scene.measures.find((x) => x.id === targetId);
+    const ref = this.measureTarget(sourceId);
+    if (!src || !dst) return { ok: false, error: 'measurement not found' };
+    if (!ref) return { ok: false, error: `"${src.name}" is not attached to one object — place its points on the thing to move` };
+    if (src.points.length !== dst.points.length) {
+      return { ok: false, error: `"${src.name}" has ${src.points.length} points and "${dst.name}" has ${dst.points.length} — they pair by order` };
+    }
+    const fit = alignPoints(worldPointsOf(scene, src), worldPointsOf(scene, dst), allowScale);
+    if (!fit) return { ok: false, error: 'need at least 3 pairs, not all on one line' };
+    this.ctx.pushUndo();
+    this.applyWorldTransform(ref, fit.matrix);
+    return { ok: true, rms: fit.rms, max: fit.max, scale: fit.scale };
+  }
+
   scaleSceneToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string } {
     const scene = this.ctx.scene;
     const m = scene.measures.find((x) => x.id === measureId);

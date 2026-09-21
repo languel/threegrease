@@ -155,7 +155,8 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Drop files onto the viewport to place them (splats, models, images, GP json)
 - [x] Splat Edit mode: box / lasso / circle select, delete (undoable, file untouched), point-cloud view, opacity (confidence) and size filters; export writes what is shown
 - [x] Splats: select/delete filtered, crop to selection, separate selection into a new baked PLY
-- [ ] Splats: move/rotate selected splats, boolean crop/filter volumes
+- [x] Measurements: rescale the attached object; align an object by paired measurements (scan pedestal onto a virtual one)
+- [ ] Splats: move/rotate selected splats, live boolean crop/filter volumes
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)

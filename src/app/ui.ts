@@ -114,6 +114,10 @@ export interface AppHandle {
    *  load status, since an image or video source resolves asynchronously */
   world: { status: 'ok' | 'loading' | 'error'; error: string };
   scaleSceneToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string };
+  measureTarget(measureId: number): ObjRef | null;
+  scaleObjectToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string };
+  alignByMeasures(sourceId: number, targetId: number, allowScale?: boolean):
+    { ok: boolean; rms?: number; max?: number; scale?: number; error?: string };
   addActor(at?: [number, number, number]): void;
   resetActor(id: number): void;
   export3D(format: string, selectedOnly: boolean): void;
@@ -3414,6 +3418,12 @@ export class UI {
     return rows;
   }
 
+  /** per-measurement UI state for the Measure panel (not scene data) */
+  private measureScope = new Map<number, 'OBJECT' | 'SCENE'>();
+  private alignPick = new Map<number, number>();
+  private alignResult = new Map<number, string>();
+  private alignScale = true;
+
   private measurePanel(): HTMLElement {
     const { ctx } = this.app;
     const scene = ctx.scene;
@@ -3449,10 +3459,48 @@ export class UI {
         if (e.key !== 'Enter') return;
         const v = Number(real.value);
         if (!Number.isFinite(v) || v <= 0) { real.value = ''; return; }
-        const res = this.app.scaleSceneToMeasure(m.id, toWorldLength(v, ctx.settings.lengthUnit));
+        const len = toWorldLength(v, ctx.settings.lengthUnit);
+        const res = target && this.measureScope.get(m.id) !== 'SCENE'
+          ? this.app.scaleObjectToMeasure(m.id, len)
+          : this.app.scaleSceneToMeasure(m.id, len);
         if (!res.ok) { real.value = ''; return; }
         this.refresh();
       };
+      // what "is really" rescales: the object the ruler is attached to, or
+      // everything. Attached rulers default to their object — you measured
+      // the scan's pedestal to fix the SCAN, not the room you built round it
+      const target = this.app.measureTarget(m.id);
+      const targetName = target ? objectName(scene, target) : '';
+      const scope = target ? selectField('', this.measureScope.get(m.id) ?? 'OBJECT',
+        [['OBJECT', targetName], ['SCENE', 'whole scene']],
+        (v) => { this.measureScope.set(m.id, v); }) : null;
+      if (scope) tip(scope, 'what typing a real length rescales: the object this measurement is attached to, or every object in the scene');
+
+      // ALIGN: pair this ruler's points with another's, by order
+      const partners = target ? scene.measures.filter((o) => o.id !== m.id && o.points.length === m.points.length && m.points.length >= 3) : [];
+      const alignRow = partners.length ? (() => {
+        const pick = el('select') as HTMLSelectElement;
+        for (const o of partners) pick.append(el('option', { value: String(o.id), text: o.name }));
+        const prev = this.alignPick.get(m.id);
+        if (prev !== undefined && partners.some((o) => o.id === prev)) pick.value = String(prev);
+        pick.onchange = () => this.alignPick.set(m.id, Number(pick.value));
+        const scaleBox = el('input', { type: 'checkbox' }) as HTMLInputElement;
+        scaleBox.checked = this.alignScale;
+        scaleBox.onchange = () => { this.alignScale = scaleBox.checked; };
+        const result = this.alignResult.get(m.id);
+        return el('div', { class: 'row' },
+          tip(btn(`Align ${targetName} onto`, () => {
+            const r = this.app.alignByMeasures(m.id, Number(pick.value), this.alignScale);
+            this.alignResult.set(m.id, r.ok
+              ? `fit: ${formatLength(r.rms ?? 0, unit)} rms, worst ${formatLength(r.max ?? 0, unit)}${this.alignScale ? ` · scaled ×${(r.scale ?? 1).toFixed(4)}` : ''}`
+              : r.error ?? 'failed');
+            this.refresh();
+          }), `move, turn${this.alignScale ? ' and scale' : ''} ${targetName} so this measurement's points land on the other's, pair by pair in the order they were clicked (least squares)`),
+          pick,
+          tip(el('label', { class: 'inline' }, scaleBox, 'scale'), 'allow uniform scale — off for a scan already in true units'),
+          ...(result ? [el('div', { class: 'hint', text: result })] : []),
+        );
+      })() : null;
 
       rows.push(el('div', { class: 'measure-row' },
         el('div', { class: 'row' },
@@ -3478,9 +3526,11 @@ export class UI {
               : 'no point is attached to anything — this ruler stays put when the scene moves',
           }),
           el('span', { class: 'grow' }),
-          el('span', { class: 'measure-set', text: 'is really', title: 'Rescale the scene so this measurement equals the length you type' }),
+          el('span', { class: 'measure-set', text: 'is really', title: 'Rescale so this measurement equals the length you type' }),
           real,
         ),
+        ...(scope ? [fieldRow('Rescales', scope)] : []),
+        ...(alignRow ? [alignRow] : []),
       ));
     }
 

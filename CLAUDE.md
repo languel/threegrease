@@ -1626,6 +1626,20 @@ the browser console or automated evals:
     points finish as a plain ruler since they enclose nothing. Verified: Up from Ground takes a ruler
     from (1,1,0) straight up to 2.34 m; a Parallel guide flattens an
     off-axis click onto the horizontal.
+  - A MEASUREMENT ATTACHED TO ONE OBJECT (`App.measureTarget`: every bound
+    point on the same object; free points allowed) can move that object:
+    - "is really N" rescales the OBJECT (default) or the whole scene, about
+      the measurement's first point (`scaleObjectToMeasure`).
+    - ALIGN pairs its points with another measurement's BY CLICK ORDER and
+      moves, turns and (optionally) scales the object so they coincide —
+      corners of a pedestal in a scan onto the same corners of a virtual box
+      of known size (`alignByMeasures`, `core/align.ts`: Horn's quaternion
+      closed form, least squares, reports RMS and worst residual). A unit
+      quaternion cannot mirror, so there is no reflection case to guard.
+      Verified: an exact pair lands to 5e-16 and recovers scale 0.625 for a
+      1.6x-oversized copy; eight corners picked ±2 cm fit to 9 mm RMS with
+      scale 0.623. Because the source points are bound, they ride the
+      object and visibly land on the targets.
   - `scaleSceneToMeasure` no longer special-cases them: a measurement is a
     root object, so the same loop scales it, and a bound point needs no
     scaling at all because whatever it is stuck to was just scaled underneath
