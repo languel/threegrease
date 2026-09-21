@@ -730,6 +730,43 @@ The culling that makes a scanned room readable is the same culling that lets
 you click through it. Reaching for a bespoke facing test would have built a
 second source of truth that could disagree with the screen.
 
+## Session log (2026-09-21): the room lit, the snapping honest
+
+Detail in IMPLEMENTATION_PLAN.md under "Lighting a room", "Snapping that
+does not chase its own tail" and "Camera and lens corrections".
+
+A pass of corrections found by USING the thing on a real gallery scan
+rather than by reading it:
+
+- **The sun was not infinite.** Its shadow box was fixed, so it ended in the
+  middle of the room with a visible edge — and the unshadowed side read as
+  brighter, which is why it looked like a half-plane rather than a frustum.
+  Fitted to the scene now, with the bias scaled to the fit (the second
+  layer: a big box puts the same step back as self-shadowing acne).
+- **Area lights** (three's RectAreaLight) with their limits stated in the
+  panel: no shadows, standard materials only.
+- **An aim handle for every light with a direction** — sun, spot, area.
+- **Snapping was chasing the object being dragged**, walking it up the ray
+  into the camera. Drags exclude what they drag; editor furniture is
+  excluded from every snap raycast.
+- **Vertex and Edge snapping reach conventional meshes**, with a vertex
+  budget so a 162k scan costs one raycast rather than a walk per mouse move.
+- **A polynomial lens is normalised to its own edge**, which fixes both the
+  collapsed fisheye and the Field of view control that did nothing.
+- Cameras: selecting one no longer makes it active, "Stop looking" stops,
+  lenses can be saved by name.
+
+**The lesson from this one: the symptom names the wrong culprit almost every
+time.** "It snapped to the camera" was a snap chasing the dragged object up
+its own ray. "There is a shadow half-plane behind the sun" was a shadow
+frustum ending, and then — once fitted — the same line again from shadow
+acne, which is a different cause with an identical picture. "The fisheye
+zoomed to the centre" was a polynomial that never reaches the edge of the
+image circle. In each case the fix was found by MEASURING the thing the
+picture was actually made of (the shadow matrix's uv, the lit-pixel
+histogram either side of the seam, r(θ) at the half angle) rather than by
+adjusting what the symptom pointed at.
+
 ---
 
 # THE NEXT PHASE: planning a real show in a real room
@@ -801,3 +838,66 @@ will look like".
   body built from one falls through it.
 - **Scenes are portable within this browser only** until (1) is done. Do not
   plan a rehearsal on another machine before then.
+
+
+---
+
+# TURNING TO GAUSSIAN SPLATS: where that work starts
+
+The next stretch of work is splats. What follows is the ground, so it does
+not have to be re-derived.
+
+## What exists
+
+- **`src/splats/` is the only place Spark lives.** `spark.ts` is the sole
+  importer of `@sparkjsdev/spark`; `index.ts` is a lazy FACADE that
+  dynamic-imports it the first time a scene actually contains a splat.
+  That is not tidiness — Spark is ~4.9 MB, about 80% of the production
+  bundle, and it cuts first load from ~2.0 MB gzipped to ~0.33 MB for
+  everyone who is only drawing. **Nothing outside `index.ts` may import
+  `spark.ts` statically**, or that saving is silently undone.
+- A splat is an ordinary scene object (`TGSplat`, `ObjKind` 'SPLAT'): it has
+  a transform, a parent, selection, the outliner row, the Library, drop-to-
+  place, and it wears the render silhouette when selected.
+- It is a DRAW TARGET, so Placement: Surface, the magnet and the new Nearest
+  targets already land on one.
+- `SplatMesh` is a `THREE.Object3D` and renders alongside the stroke meshes,
+  so strokes and splats occlude each other correctly.
+- Reading the actual gaussians is possible but ONE-WAY today:
+  `packedSplats.forEachSplat(...)` is walked for PLY export and for the
+  centres-only bounding box. Nothing constructs or edits splats in memory.
+
+## The traps already paid for
+
+- **Spark draws EVERY splat through one `SparkRenderer`**, which is a
+  SIBLING of the splat meshes rather than an ancestor. Anything that
+  isolates objects by visibility (the selection silhouette, thumbnails,
+  render-to-Library) must leave that renderer ON or nothing draws.
+- **A `SplatMesh`'s own geometry is one instanced quad**, so
+  `Box3.setFromObject` gives a tiny box at the origin whatever the cloud
+  looks like. Ask Spark: `getBoundingBox(true)`.
+- A capture's FLOATERS reach metres past the room, so framing anything to
+  its full extent shows the room as a speck. `splatCore` (5th-95th
+  percentile of centres) is what thumbnails and framing use; `splatReach`
+  (full extent, gaussians included) is what the selection scissor needs.
+- `.ply` is two formats under one name — the HEADER decides (`f_dc_0`,
+  `scale_0`, `rot_0` mean splat, not mesh).
+
+## The open question
+
+**N8 splat nibs** — painting WITH splats — is the standing roadmap item, and
+its prerequisite (the texture atlas) is done. What remains is a research
+spike: Spark offers no documented in-memory construction path, and the
+existing code only ever READS through `forEachSplat`. Before designing a
+brush, find out whether a `PackedSplats` can be built or appended to at
+runtime, and what it costs to re-upload when it changes. If it cannot, the
+honest fallback is to author splats in our own buffer and hand Spark a
+freshly built mesh per stroke, which changes the performance conversation
+entirely.
+
+Second question, and the one the gallery work makes urgent: **a scan is
+currently either a mesh or a splat, and the show wants both** — the mesh for
+snapping and collision, the splat for how the room actually looks. Whether
+that is two objects with a shared transform, or one object with two
+representations, is a data-model decision worth making deliberately rather
+than by accident.

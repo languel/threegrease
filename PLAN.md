@@ -156,6 +156,11 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)
+- [x] Snapping: a drag no longer snaps to the object it is dragging; Vertex
+      and Edge reach conventional meshes (budgeted, so a scan stays cheap);
+      Nearest gains a Draw target
+- [x] A sun's shadow box is fitted to the scene, with the bias scaled to
+      the fit
 - [x] AREA lights (three's RectAreaLight: a soft box with a real falloff,
       no shadows, meshes only) and an aim handle for every directional
       light — sun, spot and area

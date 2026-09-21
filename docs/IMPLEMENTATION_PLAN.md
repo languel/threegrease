@@ -3108,3 +3108,118 @@ The object being DRAWN wears the same mark before it is selected
 on screen that has to be readable, and on a scanned floor it is a pale box
 against a pale floor. Because the rim comes from the object rendered alone,
 you can drag a plinth out behind an existing one and still read its shape.
+
+## Lighting a room: the sun, area lights, and aiming anything
+
+### A sun is infinite, so its shadow box has to be fitted
+
+The sun's shadow camera is ORTHOGRAPHIC and three fits it to nothing, so we
+carried a fixed box — 24 m square, 60 deep, hung at the lamp's own position.
+That ends somewhere in the middle of any real scene and the edge is VISIBLE:
+a straight line across the floor with shadows on one side and none on the
+other. The unshadowed side reads as BRIGHTER, which makes it look like a
+mysterious half-plane "behind the sun" rather than like a frustum running
+out.
+
+The box is fitted to the scene's bounding SPHERE, the one shape that needs
+no re-fitting as the light turns: the extents are its radius from any
+direction, and near/far span it along the light's own axis. The lamp is not
+moved to fit — a directional light's shadow depends only on its direction
+and this box, and moving it would move the glyph someone placed.
+`Box3.setFromObject` reads each geometry's cached bounding box, so
+recomputing per frame costs a matrix transform rather than a walk over a
+162k-triangle scan.
+
+**And the bias has to follow the box.** `shadowBias` is in the shadow map's
+own depth units, so one value cannot serve a 10 m box and a 100 m one:
+fitted to a big scene the texels cover tens of centimetres and a flat floor
+shadows ITSELF everywhere inside the frustum. That is invisible as acne and
+very visible as a STEP at the frustum's edge — measured on a 60 m floor,
+210-214 inside against 225 outside, which is the same half-plane symptom
+wearing a second hat. `normalBias` is in WORLD units and scales with the
+texel.
+
+### Area lights
+
+three's `RectAreaLight`: a real soft source with a real falloff, sized in
+metres, with the glyph drawn as the emitting rectangle. The limits are
+stated in the panel rather than left to be discovered — it casts NO shadow
+of any kind, and only standard/physical materials respond, so grease pencil,
+splats and anything unlit are untouched by it. Right for the soft wash a
+real soft box gives a wall; wrong when the shadow is the point.
+
+`RectAreaLightUniformsLib.init()` must run once before any of them can be
+lit; without it the light is silently BLACK, which reads as a broken light
+rather than a missing init. Its intensity is radiance over its own surface,
+so a big soft box at a point light's 20 blows the room out.
+
+### The aim handle is for anything with a direction
+
+A sun's position means nothing to the lighting and everything to the
+PLANNING, and an area light is aimed for the same reason. Both get the ring
+a projector has: `App.beamReach` puts it where the beam actually lands (a
+spot has its throw readout; a sun and an area light have no falloff, so it
+is the first thing they are pointed at, or an arm's length over open space).
+Only ambient and point have nothing to aim.
+
+## Snapping that does not chase its own tail
+
+Dragging an object with Surface or Face snapping snapped it to ITSELF. Every
+draw target is a snap target and the object in your hand is a draw target
+like any other, so the first thing under the pointer while you drag a sphere
+is the sphere: the snap puts it on its own surface, which moves it nearer
+the eye, which puts it under the pointer again — it walks up the ray until
+it is wrapped around the camera. It reads as "it snapped to the camera" and
+it is a snap chasing itself.
+
+`setRaycastExclusion` is the same rule `setStrokeExclusion` already applied
+to a stroke, one level up: the object modal, the transform widget and the
+object-draw draft each exclude what they are moving. The same filter drops
+EDITOR FURNITURE — the gizmo alone hides a 90,000-unit invisible drag plane,
+and a snap that can land on that can land anywhere.
+
+**Vertex and Edge reach conventional meshes now.** They used to offer only
+things whose points live in `GPScene` (poly meshes, strokes, splats) plus
+the corners of whichever triangle was UNDER the pointer — so snapping to the
+corner of a plinth meant hovering one of its faces first, and a corner
+approached through open space offered nothing, which is most of what a
+blockout is made of.
+
+THE BUDGET IS THE WHOLE DESIGN: walking a geometry per pointer-move is fine
+for primitives (a box is 24 vertices, a UV sphere 561) and absurd for a room
+scan (162k, on every move, while dragging). Over `VERT_BUDGET` a mesh keeps
+the triangle-under-the-pointer answer — exact where you are pointing, one
+raycast. Small things you snap to from anywhere; enormous things you snap to
+by pointing at them.
+
+Nearest also gains a DRAW TARGET: whatever is under the pointer that is
+marked as one, which is how you put one object on another without caring
+what it is made of. A camera is never a draw target, so it is never in it.
+
+## Camera and lens corrections
+
+- **A polynomial lens is normalised to its own edge**, r(θ) / r(fov/2). It
+  gives the SHAPE of the mapping, not an absolute screen radius: Bourke's
+  own 190° example only reaches r = 0.73, turns over at about 72° and is
+  negative by 180°. Read as screen radius directly, everything past r = 0.73
+  has NO solution — Newton walks off, those pixels sample backwards, and the
+  picture collapses into a small disc in a black frame ("the fisheye zoomed
+  to the centre"). Normalising also gives FIELD OF VIEW something to do for
+  this type, which it previously did not: the shader used it only as a
+  Newton seed, so the control sat there doing nothing.
+- **Lenses can be SAVED by name** (localStorage, not the scene): a dome
+  projector's glass belongs to the room's equipment, not to one plan of one
+  show, and is often measured by the person using it off a photograph of a
+  grid. Named inline, because an embedded browser can refuse `prompt()`.
+- **Selecting a camera no longer makes it active.** Selecting is how you
+  reach a camera's properties, move it or parent it, and having the render
+  jump every time you touch one is a change nobody asked for. Making it
+  active is its own button with its own icon — a second EYE beside the
+  visibility eye read as a second visibility toggle.
+- **"Stop looking" stops.** It re-applied the pose when already in camera
+  view, so the toggle could never untoggle.
+- **A new object's colour is white.** For an import that field is a TINT
+  multiplying the file's own colours, so the old blue-grey was taking every
+  scan to 62% before it had been looked at.
+- **The app opens in OBJECT mode**: the first thing anyone does with a scene
+  is look at it and move something, not draw a stroke nobody asked for.
