@@ -340,8 +340,11 @@ const FRAG = /* glsl */`
         // smaller than its own box. There it is normalised per RAY instead —
         // every ray through the cube gathers the same total (the Ghost
         // value), so the block reads as a uniform translucent box to its
-        // very edges.
-        float span = uPlayhead > 0 ? dt / max(tOut - tIn, 1e-3) : dt * 4.0;
+        // very edges — but that flattened the look into an even tint.
+        // So: per depth — the cloud, denser where the block is thicker, which
+        // is the look — with a FLOOR per ray, so a ray that only clips an edge
+        // still gathers at least half the ghost and the cloud reaches the box.
+        float span = uPlayhead > 0 ? max(dt * 4.0, 0.5 * dt / max(tOut - tIn, 1e-3)) : dt * 4.0;
         float a = passes(uvt, c) * (1.0 - pow(1.0 - clamp(uDensity, 0.0, 0.999), span));
         acc.rgb += (1.0 - acc.a) * a * c.rgb;
         acc.a += (1.0 - acc.a) * a;
