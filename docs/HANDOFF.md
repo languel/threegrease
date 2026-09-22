@@ -830,6 +830,55 @@ looked right however the cube was built. A dancer moving in place is the
 honest test: an oblique slice has to show two dancers at two moments, and a
 surface bump has to push part of one into the past.
 
+## Session log (2026-09-22): the mesh editor made honest, and one brush for everything
+
+Detail in IMPLEMENTATION_PLAN.md under "Poly Edit mode: picking, dissolve
+and welds", "Material shading's missing light", "Poke, and two-click cuts
+that join the topology", "E is Extrude everywhere; the eraser moves to
+hold-D", "Vertex and Weight paint stop being modes", "Sculpt across kinds,
+and Relax", and "Measure wherever points are placed".
+
+A day of the poly editor being wrong in ways that all looked like different
+bugs and were mostly one: geometry that LOOKED joined and was not. A click
+into a face dropped a free vertex that only appeared to belong to it; a
+two-click line between two existing points made an edge with no face on
+either side; a vertex you had just added mid-edge could not be dissolved
+without taking the whole face; corners built as separate chains sat
+coincident and unwelded. Each fix is small; together they are the
+difference between a topology tool and a drawing of one.
+
+Then the keys. E meant Extrude in one editor and the eraser in another, so
+E is Extrude everywhere and the eraser moved to hold-D + right-drag. Vertex
+and Weight paint turned out to be modes wrapping tools that already sat in
+Draw's own toolbar, with the top bar already wired for them — half a
+refactor someone had left, finished here. And Sculpt, which had only ever
+reached grease-pencil points, now brushes whatever Edit mode is actually
+editing, with RELAX as a real brush beside Smooth.
+
+Where to pick up: Thickness, Strength and Clone are still stroke-only (they
+say so on a mesh rather than doing nothing); sculpting an imported MODEL is
+deliberately out (no conversion, and a 162k-triangle scan is not per-move
+work); a Relax that also honours a crease INSIDE a surface, not just its
+border, is the obvious next refinement.
+
+**Three lessons, all the same shape: a fix that looks right can quietly
+break the thing next to it.**
+
+- Making the extrude+grab one undo step by pointing the drag's snapshot at
+  the pre-extrude state ALSO pointed the drag's per-vertex position lookup
+  there — and the extruded vertices had no entry in it, so they never moved.
+  It reads as "the axis lock snapped my face to the ground". One field
+  serving two roles is the whole bug; splitting it is the whole fix.
+- A relax brush that slides vertices "anywhere but along the normal" eats
+  its own mesh, because a free border contracts under a Laplacian: a
+  3.0-wide row came out 0.04 wide, perfectly evenly spaced. And pinning the
+  border is not enough — an unpinned CORNER cuts itself off and bows the
+  edges beside it.
+- Test an effect against material that does not already look like the
+  effect (carried over from the volumes session, earned again here): the
+  first cut test used a quad whose two endpoints happened to share a face,
+  which the narrow fix handled and the real case did not.
+
 ---
 
 # THE NEXT PHASE: planning a real show in a real room

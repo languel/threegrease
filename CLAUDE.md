@@ -1936,10 +1936,13 @@ the browser console or automated evals:
     a real corner always gives. Projecting onto a coordinate plane instead
     reports a wall's area as zero the moment it stands up (verified: a 2x3
     ring reads 6 m2 flat on the floor and 6 m2 stood on end).
-  - Measure is a tool in OBJECT and EDIT mode, and `UI.placementControls`
-    (Placement, Plane, Guide and their options) shows for it in both — the
-    same group Draw mode shows, because a ruler resolves its points through
-    exactly the same chain as a stroke. Two things a ruler needed to behave
+  - Measure is a tool in OBJECT, DRAW and EDIT mode — every mode that places
+    points — and the placement cluster (Placement, Plane, Guide and their
+    options) shows for it in all three, because a ruler resolves its points
+    through exactly the same chain as a stroke. Draw mode was the one that
+    was missing, for no reason but the toolbar list: measuring the wall you
+    are about to draw on should not cost a mode switch, and the cluster was
+    already showing there, so the entry was the whole change. Two things a ruler needed to behave
     like one: the GUIDE is applied to the pointer before the magnet (measured
     from the previous point, as a stroke's is from its start), and each draft
     opens a sticky placement SESSION (`setStrokeExclusion(-1)`) — the planes

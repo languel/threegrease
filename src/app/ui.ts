@@ -971,7 +971,7 @@ const TOOLS_BY_MODE: Record<EditorMode, ToolSlot[]> = {
   ],
   DRAW: [
     ['draw', 'pencil', 'Draw (D)'],
-    ['erase', 'eraser', 'Erase (E)'],
+    ['erase', 'eraser', 'Erase \u2014 or hold D and right-drag from any tool'],
     ['fill', 'swatch', 'Fill (F)'],
     { group: 'shape', label: 'Shape', tools: [
       ['line', 'lineTool', 'Line'],
@@ -989,6 +989,7 @@ const TOOLS_BY_MODE: Record<EditorMode, ToolSlot[]> = {
     ] },
     ['cutter', 'scissors', 'Cutter'],
     ['eyedropper', 'droplet', 'Eyedropper'],
+    ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area)'],
     ['interpolate', 'arrowsRightLeft', 'Interpolate (drag)'],
     // the quilt trio lives with the drawing tools: same Placement/Plane/
     // Guide options as the pencil, retopologizing over what you draw

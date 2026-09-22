@@ -3349,3 +3349,143 @@ what it is made of. A camera is never a draw target, so it is never in it.
   and side, the passed part empty; SLICE at ghost 0.12 shows one sharp frame
   through a faint block; Play at 0.15 moved the playhead 0.35 → 0.575 in
   1.5 s; Pause held it exactly.
+
+## Poly Edit mode: picking, dissolve and welds
+
+- `pickConstruction` compares vertex and edge candidates by actual screen
+  distance (vertex keeps a 2 px bias for an exact-click tie) instead of
+  returning the first kind with any candidate in range.
+- The vertex diamonds are one InstancedMesh whose shared geometry sits at
+  the local origin, so three culled the whole batch as soon as that tiny
+  sphere left the frustum: `frustumCulled = false`, as `previewLine` already
+  had.
+- `dissolveVertex` dissolves a genuine 2-edge pass-through vertex however
+  many faces use it (every T-vertex `splitEdge` makes is one), instead of
+  refusing and falling through to the whole-face cascade.
+- `dissolveEdge` stopped trimming each boundary walk: the walks already
+  exclude only their own `from`, so the trim dropped one real corner per
+  face and made triangle+triangle merges fail outright.
+- M merges the selected vertices to their centre; Shift+M welds each
+  screen-close PAIR independently (union-find, 18 px), which is the one for
+  a seam between separately built chains.
+- Select-toggle moved to Cmd+click: `ToolEvent` gained a true `meta`, since
+  `ctrl` is Ctrl-OR-Cmd and Ctrl already means "disable snapping" for the
+  same click, which suppressed the very vertex snap that would have found
+  the vertex.
+- Acceptance: a click 6 px off an edge and 9.6 px from a corner picks the
+  edge, 2.8 px from the corner picks the vertex; splitting a quad's edge and
+  dissolving the new point returns 4 vertices / 1 face; two quads dissolve
+  to a 6-corner hexagon and two triangles to a quad; two quads built as
+  separate chains weld 8 vertices to 6 with both faces intact.
+
+## Material shading's missing light
+
+- Real lamps are on only in RENDERED, and Material/Rendered's own light is
+  the world IBL, which exists only once World ▸ Lighting is on — default
+  off. A new scene's Material view therefore had neither and every standard
+  material rendered flat black whatever its colour.
+- `WorldManager.update` falls back to the same studio rig Solid/Wireframe
+  use, and steps aside for the true environment once `w.lighting` is on and
+  its cube has rendered.
+- Acceptance: Solid and unlit Material share one studio texture; turning
+  World ▸ Lighting on swaps Material to the real environment without
+  touching Solid.
+
+## Poke, and two-click cuts that join the topology
+
+- `pokeFace` replaces a face with a triangle fan from a new interior vertex,
+  wired into `PolyPenTool.vertexFromHit`: a click into a face's interior had
+  been dropping a free, topologically disconnected vertex that only LOOKED
+  like it belonged (delete either side and the other stood whole; dragging
+  the face left the point behind).
+- `cutAcrossMesh` is Knife's own solver factored out of `finishKnife` and
+  shared: split every edge the line crosses, then split every face left with
+  exactly two cut points on its boundary. `clickAction` runs it for the
+  chain's FIRST segment with the two clicked vertices seeded in, so a plain
+  two-click line between existing points is a CUT rather than an edge with
+  no face on either side of it.
+- It also folds in any existing vertex the line passes through, not just
+  edges it crosses — the common case for a fan of triangles cut
+  symmetrically through its shared centre.
+- Acceptance: poking a quad's centre gives 4 triangles, 4 corners kept, 8
+  edges; a plain quad clicked corner to opposite corner gives 2 triangles
+  sharing a real diagonal (5 edges, no stray vertices); a 4-triangle fan cut
+  between two opposite edge midpoints gives 6 faces where it used to give
+  one crossing chord; a poked triangle cut to the far corner of its
+  neighbour now joins instead of falling through to a bare `addEdge`.
+
+## E is Extrude everywhere; the eraser moves to hold-D
+
+- PolyQuilt/Poly Build had no keyboard extrude (only hold+drag on a boundary
+  edge or vertex), so E fell through to the global keymap, which bound it to
+  the eraser — one key meaning two unrelated things depending on which
+  editor had focus.
+- `PolyPenTool.extrudeSelected` reuses `core/polyedit`'s `extrudeSelection`,
+  the same function meshedit.ts's E calls, inferring FACE/EDGE/VERTEX from
+  whichever selection is populated, then arms a move-grab.
+- `toolErase` keeps its action id (toolbar/palette) but loses its `e` combo;
+  the eraser is reached by holding D and right-dragging, intercepted in the
+  CAPTURE phase (OrbitControls claimed RIGHT for pan first) and driving the
+  erase tool directly rather than switching the active tool. The held flag
+  clears on keyup AND on window blur, the trap fly mode's `flyKeys` already
+  paid for.
+- `MOVE_ELEMS` carries `before` (the POST-mutation snapshot the drag
+  interpolates from) and `undoBefore` (the PRE-mutation one `onUp` commits)
+  as two fields: one field serving both roles meant the extruded vertices
+  had no entry in the snapshot the drag read, so they never moved at all —
+  "extrude a face, lock Z, and it snaps back to the ground".
+- Acceptance: extruding a selected quad face gives 6 faces / 12 edges / 8
+  verts and arms MOVE_ELEMS; pointer-up then Z raises it to Z ≈ 1.0 with the
+  original 4 base vertices still at 0; one undo reverts extrude and drag
+  together; a plain RMB drag across a stroke still pans, the same drag with
+  D held erases it.
+
+## Vertex and Weight paint stop being modes
+
+- Both were already tools in DRAW's own "Colour" group next to Tint, and the
+  top bar already had DRAW+activeTool branches rendering their controls
+  there. The standalone modes were the redundant half.
+- `modeVertex`/`modeWeight` (4 and 5) switch to DRAW and select the tool;
+  the mode buttons and pie slots are gone, as SCULPT's already were. The
+  type keeps both values and the top bar keeps legacy-only branches for an
+  old persisted `settings.mode`.
+- Acceptance: 4 and 5 land in DRAW with the right tool and its own controls
+  (Brush/Color, the Weight slider); the mode row shows Object/Draw/Edit; the
+  pie is back to a 3-way Draw/Object/Edit.
+
+## Sculpt across kinds, and Relax
+
+- `tools/sculpttargets.ts`: one `SculptTarget` per kind (GP strokes, poly
+  mesh), built once per stroke since sculpting never changes topology. A
+  primitive needs no third path — Edit mode already converts it.
+- The target comes from `setMode`'s `meshEditId`, handed to the tool the way
+  the splat tools get theirs; `polyOverlay.editMeshId` falls back to
+  `polyMeshes[0]` and would aim the brush at an unrelated mesh. 'sculpt'
+  joined `MESH_TOOLS` so picking it keeps the overlay, and the top bar's
+  `meshEditing()` branch stands down for it.
+- `relaxPass`: Smooth with the shape-changing half removed — only the part
+  of the pull that glides a point ALONG what it belongs to
+  (`SculptPoint.tangential`: across the normal for a mesh vertex, along the
+  chord for a stroke point or a loose wire). Shared by the Relax brush and
+  the poly tools' Shift+drag.
+- A border vertex averages only against BORDER neighbours and slides only
+  along that chord (a free boundary contracts under a Laplacian); a border
+  corner turning more than ~40 degrees is pinned and reports no neighbours,
+  so Smooth holds it too.
+- Shift+drag relaxes in the poly tools, on the DRAG not the press —
+  Shift+click is already AutoQuad and delete-the-element there.
+- Acceptance: a V-shaped wire's apex stays at exactly 2.0 under 20 Relax
+  passes where Smooth collapses it to 0.105; a bump on a grid survives 40
+  passes at 1.000; an uneven row (0.2 / 0.2 / 2.2 / 0.4) relaxes to exactly
+  0.75 / 0.75 / 0.75 / 0.75 with corners, borders and the 3.0 extent
+  unmoved and zero out-of-plane drift (before the border and corner rules:
+  the same row came out 0.04 wide, and a corner walked 0.11 off true).
+
+## Measure wherever points are placed
+
+- Measure joins DRAW's toolbar beside the eyedropper. The tool is already
+  mode-agnostic and the placement cluster already shows in DRAW, so the
+  toolbar entry was the whole change — measuring the wall you are about to
+  draw on should not cost a mode switch.
+- Acceptance: Measure appears in Draw's toolbar, Placement/Plane/Guide show
+  for it, and a two-point ruler commits with Enter without leaving DRAW.

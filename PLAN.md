@@ -80,12 +80,22 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Snap to grid / cursor
 - [x] Multiframe editing (falloff across selected keyframes)
 
-### Sculpt mode
+### Sculpt (an Edit-mode TOOL, not a mode)
 - [x] Brushes: Smooth, Thickness, Strength, Randomize, Grab, Push, Twist,
       Pinch, Clone; pressure + invert (Ctrl), screen-space radius falloff
+- [x] Relax: Smooth with the shape-changing half removed — points glide
+      ALONG the surface/curve, so spacing evens out and the silhouette
+      holds; borders slide only along themselves and sharp corners pin
+- [x] Any target, not just strokes: GP points and editable meshes (a
+      primitive converts on the way into Edit mode). Thickness / Strength /
+      Clone stay stroke-only and say so on a mesh
+- [x] Shift+drag relaxes in the poly tools, the way Shift+drag smooths
+      under the pencil
+- [ ] Sculpt an imported MODEL (no conversion path; a scan is not per-move
+      work) — and Relax honouring a crease INSIDE a surface, not just a border
 
-### Weight & vertex paint
-- [x] Vertex paint mode: Draw/Blur/Average/Smear on point & fill colors
+### Weight & vertex paint (TOOLS in Draw, not modes)
+- [x] Vertex paint: Draw/Blur/Average/Smear on point & fill colors
 - [x] Weight paint: single "softness" group used by noise/opacity modifiers
 
 ### Animation
