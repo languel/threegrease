@@ -30,8 +30,10 @@ export type NearestTarget = 'ELEMENT' | 'VERTEX' | 'EDGE' | 'FACE' | 'DRAW';
 export type PlaneMode = 'NONE' | 'VIEW' | 'FRONT' | 'SIDE' | 'TOP' | 'CURSOR' | 'VIEW_ORIGIN' | 'UPRIGHT';
 export type GuideType = 'NONE' | 'CIRCULAR' | 'RADIAL' | 'PARALLEL' | 'GRID' | 'ISO';
 export type EraserMode = 'POINT' | 'STROKE' | 'SOFT';
+/** RELAX is Smooth with its shape-changing half removed — see
+ *  `SculptPoint.tangential` in tools/sculpttargets.ts. */
 export type SculptBrush =
-  | 'SMOOTH' | 'THICKNESS' | 'STRENGTH' | 'RANDOMIZE' | 'GRAB' | 'PUSH' | 'TWIST' | 'PINCH' | 'CLONE';
+  | 'SMOOTH' | 'RELAX' | 'THICKNESS' | 'STRENGTH' | 'RANDOMIZE' | 'GRAB' | 'PUSH' | 'TWIST' | 'PINCH' | 'CLONE';
 export type PaintBrush = 'DRAW' | 'BLUR' | 'AVERAGE' | 'SMEAR';
 
 export interface Settings {

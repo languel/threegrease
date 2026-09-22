@@ -47,6 +47,9 @@ import { deselectAllObjects } from './objects';
 import { bindingFor, pickConstruction, pickPolyEdge, pickPolyFace, pickPolyVertex, type ConstructionHit } from './polypick';
 import { autoQuad, walkQuadLoop, type LoopCutPlan } from './polyops';
 import { clearPolyOverlay, polyOverlay } from '../render/polymesh';
+import { relaxPass } from './sculpt';
+import { sculptTarget, type SculptTarget } from './sculpttargets';
+import { drawBrushCircle } from './draw';
 
 const VERTEX_PX = 14;
 const EDGE_PX = 10;
@@ -101,7 +104,8 @@ type ToolState =
       kind: 'LOOPCUT'; meshId: number; plan: LoopCutPlan; before: string;
       hoverEdgeId: number; t: number;
     }
-  | { kind: 'KNIFE'; meshId: number; before: string; a: THREE.Vector2; b: THREE.Vector2 };
+  | { kind: 'KNIFE'; meshId: number; before: string; a: THREE.Vector2; b: THREE.Vector2 }
+  | { kind: 'RELAX'; meshId: number; before: string };
 
 /** Pointer press being disambiguated into click / drag / hold / hold+drag. */
 interface Pending {
@@ -147,6 +151,8 @@ export class PolyPenTool implements Tool {
   private lockOrigin: THREE.Vector3 | null = null;
   /** the last pointer event, to re-run the drag when the lock changes */
   private lastEvent: ToolEvent | null = null;
+  /** Built once per Shift+drag: relaxing moves vertices, never topology. */
+  private relaxTarget: SculptTarget | null = null;
 
   constructor(id = 'polypen', variant: PolyToolVariant = 'QUILT') {
     this.id = id;
@@ -314,6 +320,7 @@ export class PolyPenTool implements Tool {
       case 'VERT_EXTRUDE': this.updateVertExtrude(ctx, e, pm); return;
       case 'LOOPCUT': this.updateLoopCut(ctx, e, pm); return;
       case 'KNIFE': this.state.b.set(e.x, e.y); ctx.requestRender(); return;
+      case 'RELAX': this.applyRelax(ctx, e.x, e.y, e.pressure); return;
       default: break;
     }
 
@@ -337,6 +344,7 @@ export class PolyPenTool implements Tool {
     if (this.state.kind !== 'IDLE') return; // BUILD ignores drags
     this.axisLock = null;
     this.lockOrigin = null;
+    if (p.shift) { this.beginRelax(ctx, pm, p); return; }
     const src = p.hit.source;
     if (src.kind === 'POLY_VERTEX' && src.meshId === pm.id) {
       if (held) {
@@ -386,6 +394,35 @@ export class PolyPenTool implements Tool {
         a: new THREE.Vector2(p.x, p.y), b: new THREE.Vector2(p.x, p.y),
       };
     }
+  }
+
+  /**
+   * SHIFT+DRAG RELAXES THE MESH under the brush — the poly answer to the
+   * pencil's own "hold Shift to smooth the stroke you are on", and the same
+   * `relaxPass` the Sculpt tool's Relax brush runs, so the two cannot drift.
+   * Vertices GLIDE ALONG the surface they belong to (their spacing evens
+   * out, a lumpy silhouette combs straight) instead of being averaged into
+   * it, which is what would slowly deflate the shape.
+   *
+   * It engages on the DRAG, not the press: Shift+CLICK is already AutoQuad
+   * in PolyQuilt and delete-the-element in Poly Build, so taking Shift at
+   * pointerdown the way DrawTool does would eat both. `beginDragOp` only
+   * runs once the press has travelled DRAG_PX, which is exactly the fork.
+   */
+  private beginRelax(ctx: AppCtx, pm: TGPolyMesh, p: Pending): void {
+    const target = sculptTarget(ctx, pm.id);
+    if (!target) return;
+    this.relaxTarget = target;
+    this.state = { kind: 'RELAX', meshId: pm.id, before: takeSnapshot(pm) };
+    this.applyRelax(ctx, p.x, p.y, 1);
+  }
+
+  private applyRelax(ctx: AppCtx, x: number, y: number, pressure: number): void {
+    const target = this.relaxTarget;
+    if (!target) return;
+    relaxPass(target, new THREE.Vector2(x, y), ctx.settings.sculpt.radius,
+      (pressure || 0.7) * ctx.settings.sculpt.strength);
+    target.flush(ctx);
   }
 
   /** Up from Ground lifts: an edge/face drag starts locked to the up axis. */
@@ -479,6 +516,14 @@ export class PolyPenTool implements Tool {
       }
       case 'LOOPCUT': this.finishLoopCut(ctx, pm); return;
       case 'KNIFE': this.finishKnife(ctx, pm); return;
+      case 'RELAX': {
+        const st = this.state;
+        this.state = { kind: 'IDLE' };
+        this.pending = null;
+        this.relaxTarget = null;
+        this.commit(ctx, pm, st.before);
+        return;
+      }
       default: break;
     }
 
@@ -1172,6 +1217,7 @@ export class PolyPenTool implements Tool {
     if (pm && this.state.kind !== 'IDLE') restoreSnapshot(pm, this.state.before);
     this.state = { kind: 'IDLE' };
     this.pending = null;
+    this.relaxTarget = null;
     clearPolyOverlay();
     if (pm) polyOverlay.editMeshId = pm.id;
     ctx.requestRender();
@@ -1183,6 +1229,9 @@ export class PolyPenTool implements Tool {
     const lockAt = this.state.kind === 'MOVE_ELEMS' || this.state.kind === 'EXTRUDE'
       ? this.state.startWorld : this.state.kind !== 'IDLE' ? this.lockOrigin : null;
     if (this.axisLock && lockAt) this.drawLock(ctx, hud, lockAt);
+    if (this.state.kind === 'RELAX') {
+      drawBrushCircle(hud, ctx.settings.sculpt.radius, [0.55, 0.85, 1]);
+    }
     if (this.state.kind === 'KNIFE') {
       hud.beginPath();
       hud.moveTo(this.state.a.x, this.state.a.y);

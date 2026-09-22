@@ -248,7 +248,11 @@ import { timeVolumes } from '../render/timevolume';
 import { getBlob as storeBlob, resolveSrc as storeUrl } from '../io/blobstore';
 
 /** tools that work on a poly mesh (they target `polyOverlay.editMeshId`) */
-const MESH_TOOLS = new Set(['meshedit', 'polypen', 'polybuild', 'quadpatch']);
+// Tools that WORK ON an editable mesh: picking one keeps the topology
+// overlay and its edit target alive (App.setTool clears both for anything
+// else). Sculpt is in here because it brushes that mesh's own vertices,
+// and seeing them while you push them around is most of the feedback.
+const MESH_TOOLS = new Set(['meshedit', 'polypen', 'polybuild', 'quadpatch', 'sculpt']);
 
 const DEFAULT_TOOL: Record<EditorMode, string> = {
   OBJECT: 'object-select', DRAW: 'draw', EDIT: 'select',
@@ -404,6 +408,9 @@ class App implements AppHandle {
   private polyBuild = new PolyPenTool('polybuild', 'BUILD');
   private quadPatch = new PolyPenTool('quadpatch', 'PATCH');
   private meshEdit = new MeshEditTool();
+  /** Sculpt takes its mesh target the way the splat tools take theirs (see
+   *  setMode) — it brushes the mesh Edit mode is on, else the drawing. */
+  private sculptTool = new SculptTool();
   /** Edit mode on a gaussian splat: box / lasso / circle, then delete */
   private splatTools = [
     new SplatEditTool('splat-select', 'BOX'),
@@ -618,7 +625,7 @@ class App implements AppHandle {
       new PrimitiveTool('arc'), new PrimitiveTool('curve'), new PrimitiveTool('box'),
       new PrimitiveTool('circle'), this.interpTool,
       new SelectTool('select', 'BOX'), new SelectTool('select-lasso', 'LASSO'),
-      new SelectTool('select-circle', 'CIRCLE'), new SculptTool(),
+      new SelectTool('select-circle', 'CIRCLE'), this.sculptTool,
       new VertexPaintTool(), new WeightPaintTool(),
       this.objectPick, this.objectPickLasso, this.objectPickCircle,
       this.polyPen, this.polyBuild, this.quadPatch, this.meshEdit, ...this.drawTools, new SplatPaintTool(), new TexturePaintTool(),
@@ -756,6 +763,7 @@ class App implements AppHandle {
     const meshTarget = mode === 'EDIT' && pickedSplat === null ? this.editableMeshTarget() : null;
     const enterPolyPen = meshTarget !== null;
     this.meshEditId = meshTarget;
+    this.sculptTool.meshTargetId = meshTarget;
     const splatTarget = pickedSplat ?? (mode === 'EDIT' && meshTarget === null ? this.splatEditTarget() : null);
     this.splatEditId = splatTarget;
     for (const t of this.splatTools) t.targetId = splatTarget;

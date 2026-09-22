@@ -937,9 +937,9 @@ const SELECT_STROKE: ToolGroup = { group: 'select', label: 'Select', tools: [
   ['select-circle', 'circle', 'Circle select ([ ] size)'],
 ] };
 const POLY_TOOLS: ToolGroup = { group: 'poly', label: 'Poly', tools: [
-  ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Cmd+click=select (Ctrl+click disables snapping) · E extrudes the selection + starts a grab · M welds selection to one point, Shift+M welds its close pairs'],
-  ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element · E extrudes the selection + starts a grab · M welds selection to one point, Shift+M welds its close pairs'],
-  ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
+  ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Cmd+click=select (Ctrl+click disables snapping) · E extrudes the selection + starts a grab · M welds selection to one point, Shift+M welds its close pairs · Shift+drag relaxes the mesh under the brush (vertices glide along the surface, borders stay put)'],
+  ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element · E extrudes the selection + starts a grab · M welds selection to one point, Shift+M welds its close pairs · Shift+drag relaxes the mesh under the brush (vertices glide along the surface, borders stay put)'],
+  ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete) · Shift+drag relaxes the mesh under the brush (vertices glide along the surface, borders stay put)'],
 ] };
 
 const TOOLS_BY_MODE: Record<EditorMode, ToolSlot[]> = {
@@ -1026,6 +1026,7 @@ const SPLAT_EDIT_TOOLS: ToolSlot[] = [
  *  build onto the same mesh, and the ruler. */
 const MESH_EDIT_TOOLS: ToolSlot[] = [
   ['meshedit', 'squareTarget', 'Select — click a vertex / edge / face (the mode in the top bar), Shift adds, drag a box · G/R/S move/rotate/scale (X/Y/Z lock, Shift+ for the plane) · E extrude · F fill · X delete · A all, Alt+A none'],
+  ['sculpt', 'hand', 'Sculpt brush — brushes this mesh\u2019s own vertices (Smooth averages them, Relax only evens out their spacing); Ctrl inverts'],
   ['measure', 'ruler', 'Measure — click points for a ruler (Enter commits; hold Cmd on the last click, or Cmd+Enter, to close it into an area)'],
   POLY_TOOLS,
 ];
@@ -1719,7 +1720,7 @@ export class UI {
     } else if (s.mode === 'EDIT' && this.app.splatEditing()) {
       // a splat has one kind of element, so only the box-select operation
       bar.append(...this.selectOpButtons());
-    } else if (s.mode === 'EDIT' && this.app.meshEditing()) {
+    } else if (s.mode === 'EDIT' && this.app.meshEditing() && s.activeTool !== 'sculpt') {
       const modes: ['VERTEX' | 'EDGE' | 'FACE', IconName, string][] = [
         ['VERTEX', 'selVertex', 'Vertex select'], ['EDGE', 'selEdge', 'Edge select'], ['FACE', 'selFace', 'Face select'],
       ];
@@ -1734,8 +1735,9 @@ export class UI {
         s.propEdit.enabled, (v) => { s.propEdit.enabled = v; this.buildTopbar(); }));
     } else if ((s.mode === 'EDIT' && s.activeTool === 'sculpt') || s.mode === 'SCULPT') {
       const brushes: [SculptBrush, string][] = [
-        ['SMOOTH', 'Smooth'], ['THICKNESS', 'Thickness'], ['STRENGTH', 'Strength'], ['RANDOMIZE', 'Randomize'],
-        ['GRAB', 'Grab'], ['PUSH', 'Push'], ['TWIST', 'Twist'], ['PINCH', 'Pinch'], ['CLONE', 'Clone'],
+        ['SMOOTH', 'Smooth'], ['RELAX', 'Relax'], ['THICKNESS', 'Thickness'], ['STRENGTH', 'Strength'],
+        ['RANDOMIZE', 'Randomize'], ['GRAB', 'Grab'], ['PUSH', 'Push'], ['TWIST', 'Twist'],
+        ['PINCH', 'Pinch'], ['CLONE', 'Clone'],
       ];
       bar.append(
         tbField('hand', 'Sculpt brush', selectField('', s.sculpt.brush, brushes, (v) => { s.sculpt.brush = v; })),

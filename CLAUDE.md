@@ -575,6 +575,74 @@ the browser console or automated evals:
   toolbar and the top bar shows them when it is active. The SCULPT mode
   still exists in the type for old scenes; the mode button and pie slot are
   gone, and the `modeSculpt` action opens Edit with the tool.
+- **SCULPT WORKS ON WHATEVER IS BEING EDITED, and RELAX is not Smooth**
+  (`tools/sculpttargets.ts`, `relaxPass` in `tools/sculpt.ts`). SculptTool
+  used to reach GP stroke points and nothing else — `activeObject` ->
+  layers -> frames -> strokes, hardcoded — so "Sculpt" in the Edit toolbar
+  did nothing at all to the mesh Edit mode was actually editing. The brush
+  GESTURES are the same wherever they land (drag a circle over points and
+  move / average / jitter them); only WHERE the points live differs. That
+  is the target seam: one `SculptTarget` per kind, built ONCE per stroke
+  because sculpting moves points and never topology.
+  - A raw primitive needs no third representation: Edit mode already
+    converts one to a TGPolyMesh on the way in, so "sculpt a mesh" IS the
+    poly path with the existing conversion in front of it. An imported
+    MODEL stays out (`isConvertiblePrimitive` refuses it, and a 162k
+    triangle scan is not something to hand a per-move brush).
+  - THE TARGET COMES FROM THE APP, NOT THE OVERLAY. `SculptTool.meshTargetId`
+    is set from `setMode`'s own `meshEditId` the way the splat tools are
+    handed theirs. Reading `polyOverlay.editMeshId` instead looks equivalent
+    and is not: `App.setTool` falls back through "any selected poly mesh"
+    all the way to `polyMeshes[0]`, so in a scene that merely CONTAINS a
+    mesh, picking Sculpt to work on your drawing would quietly aim it at
+    that mesh. 'sculpt' also joined `MESH_TOOLS`, or picking it would CLEAR
+    the topology overlay — you want to see the vertices you are pushing.
+  - THE TOOL DECIDES THE TOP BAR: the `meshEditing()` branch now stands
+    down for `activeTool === 'sculpt'`, or sculpting a mesh showed the
+    vertex/edge/face select buttons instead of the brush and its radius.
+  - **RELAX IS SMOOTH WITH THE SHAPE-CHANGING HALF REMOVED.** Both send a
+    point toward the average of its neighbours; Relax keeps only the part
+    that GLIDES IT ALONG the thing it belongs to (`SculptPoint.tangential`
+    — across the surface normal for a mesh vertex, along the chord between
+    its neighbours for a stroke point or a loose wire). So spacing evens out
+    and a lumpy silhouette combs straight while the surface stays where it
+    is. Measured on a V-shaped wire, 20 full-strength passes: Relax left the
+    apex at exactly 2.0, Smooth collapsed it to 0.105. On a flat grid the
+    bump at its centre survived 40 Relax passes at height 1.000.
+  - **A FREE BORDER IS WHAT MAKES A RELAX BRUSH EAT THE MESH.** A border
+    vertex's normal points out of the sheet, so "everything except the
+    normal" leaves it free to travel INWARD — and a Laplacian with a free
+    boundary contracts. Measured before the fix: a 3.0-wide row of an open
+    grid came out 0.04 wide, perfectly evenly spaced and useless. A border
+    vertex therefore averages only against its BORDER neighbours and slides
+    only along the chord between them. A vertex with no faces at all is a
+    border by the same rule, which is how a loose wire relaxes like a
+    stroke.
+  - **AND A CORNER OF THAT BORDER IS A FEATURE.** Sliding a corner along the
+    chord between its two border neighbours cuts the corner off, and then
+    drags ITS neighbours off the border with it, so a straight edge bows in
+    from both ends (measured: the corner walked 0.11 off true and the edge
+    beside it wobbled by the same). Corners are classified once, at the
+    start of the stroke, by how far the border TURNS there — past ~40
+    degrees it holds, so a coarse circle (30 degrees a vertex) still relaxes
+    while a box's corners do not. A pinned corner reports NO neighbours, so
+    Smooth holds it too, the same rule a stroke's endpoints have always had.
+    With both in place the same uneven grid relaxes to exactly uniform 0.75
+    spacing with its corners, borders and extent unmoved and zero
+    out-of-plane drift. (Corner-pinning is not a special case bolted on: at
+    a SYMMETRIC corner the pull toward the mean is already square to the
+    chord, so its sliding part is zero — the threshold only catches the
+    lopsided ones.)
+  - **SHIFT+DRAG RELAXES, in the poly tools** (`PolyPenTool.beginRelax`) —
+    the answer to the pencil's own "hold Shift to smooth the stroke you are
+    on", running the same `relaxPass` so the two cannot drift. It engages on
+    the DRAG, never the press: Shift+CLICK is already AutoQuad in PolyQuilt
+    and delete-the-element in Poly Build, so taking Shift at pointerdown the
+    way DrawTool does would eat both. `beginDragOp` only runs once the press
+    has travelled DRAG_PX, which is exactly the fork.
+  - Thickness, Strength and Clone are the three brushes that act on
+    something only a stroke has. On a mesh they say so rather than doing
+    nothing silently.
 - **Vertex paint and Weight paint got the same demotion, and it was half
   done already.** Both have always been ordinary tools in DRAW's own
   "Colour" toolbar group (`vertexpaint`/`weightpaint`, alongside `tint`),
