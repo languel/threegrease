@@ -931,6 +931,21 @@ the browser console or automated evals:
   Also: `DataTexture` defaults `flipY:false`, so row 0 is v=0, which
   `equirectUv` maps to `dir.y = -1` — fill these maps NADIR-first or the
   sky renders upside down.
+- **MATERIAL SHADING WAS BLACK BY DEFAULT** (`WorldManager.update` in
+  world.ts). Real scene lights are only on in RENDERED
+  (`App`: `lightsEnabled = shading === 'RENDERED'`), and Material/Rendered's
+  OWN light — the world's IBL — only exists once World ▸ Lighting is turned
+  on, which defaults to OFF. So a brand-new scene's Material view had
+  NEITHER: no scene lights, no environment, nothing shining on a
+  MeshStandardMaterial object at all — every object read flat black
+  whatever its base colour, and nothing about that said "turn on World
+  Lighting" to anyone who hadn't read this file. Material/Rendered now fall
+  back to the same STUDIO rig Solid/Wireframe already lean on for exactly
+  this reason (never literally unlit) and step aside for the true world
+  environment the moment `w.lighting` is on and its cube has rendered.
+  Verified: Solid and unlit Material share the identical studio texture;
+  turning World ▸ Lighting on swaps Material to a different (the real)
+  environment texture without touching Solid.
 - **The viewport background is `scene.world.color` and nothing else.** There
   used to be a second copy as a view pref (`settings.background`, shown as
   Scene ▸ Background ▸ Color) — one value under two names, and they drifted:

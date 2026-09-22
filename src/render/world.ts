@@ -140,9 +140,20 @@ export class WorldManager {
     // SOLID uses its own studio light and ignores the world entirely, so a
     // modelling view stays readable no matter what the environment is.
     const useStudio = shading === 'SOLID' || shading === 'WIREFRAME';
-    const env = useStudio ? this.studio() : (w.lighting ? this.envRT?.texture ?? null : null);
+    // MATERIAL/RENDERED show the world's own IBL — but ONLY once World ▸
+    // Lighting is turned on (`w.lighting`, off by default) and its cube has
+    // actually been rendered once (`envRT`, built asynchronously). Falling
+    // through to `null` there used to mean "no environment at all", and
+    // real scene lights are OFF outside RENDERED (`App`'s
+    // `lightsEnabled = shading === 'RENDERED'`) — so a brand-new scene's
+    // Material view had NOTHING lighting a MeshStandardMaterial object,
+    // which rendered flat black however bright its own base colour was.
+    // The studio rig is the same safety net SOLID already leans on: never
+    // literally unlit, and it steps aside the moment the world is ready.
+    const worldReady = !useStudio && w.lighting && !!this.envRT;
+    const env = worldReady ? this.envRT!.texture : this.studio();
     scene3.environment = env;
-    scene3.environmentIntensity = useStudio ? 1 : w.strength;
+    scene3.environmentIntensity = worldReady ? w.strength : 1;
 
     // The world is only *visible* in modes that show it. Solid/Wireframe keep
     // the flat colour so the drawing reads against a calm ground.
