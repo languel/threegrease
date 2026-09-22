@@ -2098,11 +2098,16 @@ class App implements AppHandle {
       case 'snapPie': this.ui.openTransformPie('snap', this.canvasPointer()); break;
       case 'modeDraw': this.setMode('DRAW'); break;
       case 'modeEdit': this.setMode('EDIT'); break;
-      // Sculpt is an Edit-mode tool now, not a mode of its own
+      // Sculpt, Vertex paint and Weight paint are tools now, not modes of
+      // their own — each already sat in some other mode's own toolbar
+      // (Sculpt in Edit's, Vertex/Weight paint in Draw's "Colour" group)
+      // doing the exact same thing a dedicated mode did, just one click
+      // further away. VERTEX/WEIGHT stay in the EditorMode type and
+      // TOOLS_BY_MODE for old scenes/settings that still carry them.
       case 'cycleSelectTool': this.ui.cycleToolGroup('select'); break;
       case 'modeSculpt': this.setMode('EDIT'); if (!this.meshEditing()) this.setTool('sculpt'); break;
-      case 'modeVertex': this.setMode('VERTEX'); break;
-      case 'modeWeight': this.setMode('WEIGHT'); break;
+      case 'modeVertex': this.setMode('DRAW'); this.setTool('vertexpaint'); break;
+      case 'modeWeight': this.setMode('DRAW'); this.setTool('weightpaint'); break;
       case 'modePoly':
         // '6': jump to the PolyQuilt tool (in EDIT unless already in a
         // toolbar mode that hosts the trio)

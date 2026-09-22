@@ -575,6 +575,30 @@ the browser console or automated evals:
   toolbar and the top bar shows them when it is active. The SCULPT mode
   still exists in the type for old scenes; the mode button and pie slot are
   gone, and the `modeSculpt` action opens Edit with the tool.
+- **Vertex paint and Weight paint got the same demotion, and it was half
+  done already.** Both have always been ordinary tools in DRAW's own
+  "Colour" toolbar group (`vertexpaint`/`weightpaint`, alongside `tint`),
+  and the top bar's tool-settings dispatcher ALREADY had dedicated
+  `s.mode === 'DRAW' && s.activeTool === 'vertexpaint'` /`'weightpaint'`
+  branches ahead of its generic DRAW fallback — someone had already built
+  the real entry point. What was left was the REDUNDANT one: a standalone
+  VERTEX/WEIGHT mode with its own top-bar button and mode-pie slot, doing
+  the exact same thing one click further away — the same shape of
+  redundancy Sculpt already had and lost. `modeVertex`/`modeWeight` (keys 4
+  and 5) now do `setMode('DRAW'); setTool('vertexpaint' | 'weightpaint')`
+  instead of switching to a mode of their own; the VERTEX/WEIGHT mode
+  buttons and pie slots are gone, matching Sculpt's SCULPT slot. The type
+  keeps `VERTEX`/`WEIGHT` as valid `EditorMode` values and the top bar's
+  dispatcher keeps its old `s.mode === 'VERTEX'` / `'WEIGHT'` branches as
+  LEGACY-ONLY fallbacks — unreachable from any current entry point (the
+  DRAW+tool branches above them in the same if/else-if chain already own
+  that case), kept only so an old scene or synced `settings.mode` that
+  still carries the retired value renders something sensible instead of a
+  blank top bar. Verified: `modeVertex`/`modeWeight` land in DRAW with the
+  right tool active and the top bar shows that tool's own controls (Brush/
+  Color for vertex paint, the Weight slider for weight paint); the mode
+  button row shows only Object/Draw/Edit; the mode pie shows only
+  Draw/Object/Edit, back to a plain 3-way layout.
 - **A VERTEX PICK MUST ACTUALLY BE NEARER THAN THE EDGE, not just found
   first** (`pickConstruction` in polypick.ts). The priority chain (vertex,
   then edge, then face, …) used to return the first kind that had ANY

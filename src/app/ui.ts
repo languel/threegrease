@@ -1641,9 +1641,11 @@ export class UI {
     const bar = $('topbar');
     bar.replaceChildren();
 
+    // Sculpt, Vertex paint and Weight paint have no button here — each is a
+    // tool inside another mode's own toolbar now (Sculpt in Edit's, Vertex/
+    // Weight paint in Draw's "Colour" group), not a mode of its own.
     const modes: [EditorMode, IconName, string][] = [
       ['OBJECT', 'cursorArrow', 'Object mode'], ['DRAW', 'pencil', 'Draw mode'], ['EDIT', 'pencilSquare', 'Edit mode'],
-      ['VERTEX', 'brush', 'Vertex paint'], ['WEIGHT', 'adjustments', 'Weight paint'],
     ];
     for (const [m, iconName, label] of modes) {
       bar.append(btn(icon(iconName), () => this.app.setMode(m), { active: s.mode === m, title: label, cls: 'tb-mode' }));
@@ -1749,6 +1751,9 @@ export class UI {
           s.multiframe, (v) => { s.multiframe = v; this.buildTopbar(); }),
       );
     } else if (s.mode === 'VERTEX') {
+      // legacy only: the DRAW+vertexpaint case above already owns the real
+      // entry point, so this branch fires solely for an old persisted
+      // settings.mode still carrying the retired standalone mode
       bar.append(
         tbField('brush', 'Brush', selectField('', s.paint.brush, [['DRAW', 'Draw'], ['BLUR', 'Blur'], ['AVERAGE', 'Average'], ['SMEAR', 'Smear']] as [PaintBrush, string][], (v) => { s.paint.brush = v; })),
         tip(colorField('', [...s.brush.vertexColor, 1], (rgb) => { s.brush.vertexColor = rgb; }), 'Color'),
@@ -1756,6 +1761,7 @@ export class UI {
         tbField('droplet', 'Strength', slider('', s.paint.strength, 0.05, 1, 0.05, (v) => { s.paint.strength = v; }, { title: 'Strength' })),
       );
     } else if (s.mode === 'WEIGHT') {
+      // legacy only, same reasoning as VERTEX above
       bar.append(
         tbField('weight', 'Weight', slider('', s.weight.target, 0, 1, 0.05, (v) => { s.weight.target = v; }, { title: 'Weight' })),
         tbField('radius', 'Radius', slider('', s.weight.radius, 5, 150, 1, (v) => { s.weight.radius = v; }, { def: 40, title: 'Radius' })),
@@ -1963,10 +1969,6 @@ export class UI {
       { mode: 'DRAW', label: 'Draw', icon: 'pencil', key: '8', angleDeg: -90 },
       { mode: 'OBJECT', label: 'Object', icon: 'cursorArrow', key: '4', angleDeg: 180 },
       { mode: 'EDIT', label: 'Edit', icon: 'pencilSquare', key: '6', angleDeg: 0 },
-      // pushed further from Draw (N, -90) than a plain ±45 hexagon would
-      // put them, so Draw has breathing room at the top
-      { mode: 'WEIGHT', label: 'Weight Paint', icon: 'adjustments', key: '7', angleDeg: -150 },
-      { mode: 'VERTEX', label: 'Vertex Paint', icon: 'brush', key: '9', angleDeg: -30 },
     ];
     const R = 105;
     const rect = ctx.canvas.getBoundingClientRect();
