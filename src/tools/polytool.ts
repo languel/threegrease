@@ -38,7 +38,7 @@ import { snapIncrement } from './context';
 import { worldMatrixOf } from './objects';
 import {
   addEdge, addFace, addVertex, cleanupDegenerateFaces, dissolveEdge, dissolveVertex,
-  edgeFaceCount, getEdge, getFace, getVertex, isBoundaryEdge, mergeVertices,
+  edgeFaceCount, getEdge, getFace, getVertex, isBoundaryEdge, mergeVertices, pokeFace,
   removeEdge, removeFace, removeFaceCascade, removeVertex, splitEdge, splitFace, touchPolyMesh,
 } from '../core/polymesh';
 import { createPolyMesh } from '../core/polymesh';
@@ -230,6 +230,15 @@ export class PolyPenTool implements Tool {
       if (src.t < ENDPOINT_SNAP_T) return e.v[0];
       if (src.t > 1 - ENDPOINT_SNAP_T) return e.v[1];
       return splitEdge(pm, src.edgeId, src.t)?.id ?? null;
+    }
+    if (src.kind === 'POLY_FACE' && src.meshId === pm.id) {
+      // POKE it (fan-triangulate from the new point) — a plain addVertex
+      // here would put a point that LOOKS like it is on the face without
+      // ever joining its topology; see pokeFace's own doc for what that
+      // silently broke.
+      const v = addVertex(pm, this.worldToLocal(ctx, pm, hit.world), bindingFor(src));
+      pokeFace(pm, src.faceId, v.id);
+      return v.id;
     }
     return addVertex(pm, this.worldToLocal(ctx, pm, hit.world), bindingFor(src)).id;
   }

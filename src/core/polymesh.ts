@@ -307,6 +307,42 @@ export function dissolveVertex(pm: TGPolyMesh, vertexId: number): boolean {
   return true;
 }
 
+/**
+ * POKE (Blender's Poke Faces): replace a face with a triangle FAN from one
+ * new interior vertex to every one of its boundary edges — the operation
+ * the topology pen's own doc table promises for clicking a face ("vertex
+ * on face -> fill") and never actually did: `vertexFromHit`'s face-hit
+ * branch just dropped a free, disconnected vertex at the click point, only
+ * VISUALLY sitting on the face (matching its world position) without ever
+ * joining its topology. Two symptoms fell out of that: a "notch" clicked
+ * into a face's interior was really a second, separate island merely
+ * touching the original by ordinary (non-boundary) edges — deleting either
+ * side left the other standing, whole, on its own; and any line drawn to
+ * or through such a point moved independently of the face when the face
+ * (read from ITS OWN `face.vertices`, which never contained that point)
+ * was dragged — "the line was left behind" is exactly a vertex the drag
+ * never knew belonged to what you dragged.
+ * `vertexId` must not already be on the boundary. Returns every new
+ * triangle, or null untouched. */
+export function pokeFace(pm: TGPolyMesh, faceId: number, vertexId: number): TGPolyFace[] | null {
+  const f = getFace(pm, faceId);
+  const v = getVertex(pm, vertexId);
+  if (!f || !v || f.vertices.length < 3 || f.vertices.includes(vertexId)) return null;
+  const boundary = [...f.vertices];
+  const n = boundary.length;
+  pm.faces = pm.faces.filter((x) => x.id !== faceId);
+  const out: TGPolyFace[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = boundary[i], b = boundary[(i + 1) % n];
+    addEdge(pm, vertexId, a);
+    const tri: TGPolyFace = { id: allocElemId(pm), vertices: [a, b, vertexId], select: false };
+    pm.faces.push(tri);
+    out.push(tri);
+  }
+  touchPolyMesh(pm);
+  return out;
+}
+
 /** Split a face into two along two of its boundary vertices (non-adjacent
  *  in the loop). Creates the connecting edge; each half keeps boundary
  *  order. Returns the two new faces, or null untouched. */

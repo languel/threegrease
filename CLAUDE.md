@@ -659,6 +659,29 @@ the browser console or automated evals:
   left open by an earlier click swallows the next one silently, since the
   select check only runs while `state.kind === 'IDLE'`): Ctrl+click left
   the vertex unselected, Cmd+click toggled it on, Cmd+click again off.
+- **A CLICK ON A FACE NEVER ACTUALLY JOINED IT — POKE DOES**
+  (`core.pokeFace`, wired into `PolyPenTool.vertexFromHit`). The tool's own
+  header table has always promised "face -> vertex on face -> fill", but
+  the code just dropped a free vertex at the click point (`addVertex`,
+  surface-BOUND for its position but topologically disconnected) — it only
+  LOOKED like it belonged to the face. Two things fell out of that
+  silently: a shape clicked into a face's interior (a "notch") was really a
+  second, separate island merely touching the original by ordinary edges —
+  delete either side and the other stood there whole, on its own; and a
+  line drawn to or through such a point moved independently when the face
+  was dragged, since `beginMoveElems` reads `face.vertices`, which never
+  contained it — "the line was left behind" is exactly a vertex the drag
+  never knew was part of what you grabbed. `pokeFace` replaces the face
+  with a triangle FAN from the new point to every boundary edge — a real,
+  connected topology, the same one a face-interior click composes onto
+  correctly when it happens again (a later click just lands in whichever
+  wedge of the fan it falls in and pokes that). Verified: poking a quad's
+  centre gives 4 triangles sharing the new vertex, all 4 original corners
+  preserved, 8 edges (4 boundary + 4 spokes); dragging one triangle moves
+  only its own vertices (its fan-neighbours correctly move WITH it at any
+  vertex they share, which is the point — real topology has no gaps to
+  leave a line in); a real click through the tool on a face's interior,
+  finalized with Enter, gives the same 4-triangle result end to end.
 - **Poly Build drags take G's axis locks** (`PolyPenTool.axisLock`): X / Y /
   Z mid-drag locks a vertex move, a vertex extrude, an edge/face move or a
   boundary extrusion to that WORLD axis, Shift+ to the plane square to it,
