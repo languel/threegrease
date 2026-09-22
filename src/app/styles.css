@@ -259,6 +259,11 @@ input[type="checkbox"]:checked {
   cursor: ew-resize; touch-action: none;
 }
 .numdrag-row.fill .numdrag { width: 120px; }
+/* in a field GROUP a slider takes the room it is given: at its standalone
+   120px, beside a button, it spilled left over the button (the row aligns
+   right) and hid it */
+.field-group .numdrag-row.fill { flex: 1 1 0; min-width: 0; }
+.field-group .numdrag-row.fill .numdrag { width: 100%; }
 .numdrag:hover { background: #383840; border-color: #4a4a52; }
 .numdrag.dragging { background: #383840; }
 .numdrag-fillbar {
