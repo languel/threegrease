@@ -767,6 +767,40 @@ picture was actually made of (the shadow matrix's uv, the lit-pixel
 histogram either side of the seam, r(θ) at the half angle) rather than by
 adjusting what the symptom pointed at.
 
+## Session log (2026-09-21, later): splats you can edit, scans you can register
+
+Detail in IMPLEMENTATION_PLAN.md under "Tool families and one Add list",
+"Splat Edit mode", "Registration by measurements" and "Snapping you can see".
+
+- **UI**: flat icon buttons on every toolbar; one nested Add list shared by
+  the menu bar and Shift+A; tools of one kind share a toolbar button with a
+  flyout (W cycles selection); a narrower toolbar aligned with the mode
+  buttons; distinct Object and Library tab icons.
+- **Splat Edit mode**: box / lasso / circle select through the cloud,
+  select inside a box / sphere / cylinder or in front of a plane, delete,
+  crop, separate into a new baked PLY. Deletions are a bitmask-or-runs
+  string of source indices on `TGSplat.removed` — the file is untouched,
+  undo works, Restore brings everything back.
+- **Splat display**: splats or point cloud, splat scale, opacity
+  multiplier, min-opacity (confidence) and max-size filters, select / delete
+  filtered. Everything is rebuilt from the packed array AS LOADED.
+- **Registration**: a measurement attached to one object can rescale that
+  object, and ALIGN it onto any other measurement — order-free pairing,
+  subset matching (hypothesise and verify), or a shape fit (ICP onto the
+  other's legs, both ways), least turn among ties.
+- **Snapping**: the magnet's Vertex / Edge reach mesh elements and splat
+  centres and carry the object hit so measurement points bind; the catch is
+  shown as a glyph and as the cursor.
+
+**The lesson from this one: an ambiguity is not an error, and it has to be
+broken on purpose.** A box has 24 equally exact corner orderings, a square
+top fits four ways, a flat outline cannot say which side the object is on,
+and four corners fit a traced outline's midpoints as exactly as its corners.
+Every one of those passed the obvious test (the residual is zero) and gave
+the wrong answer. What breaks them is what the person meant: the order they
+clicked, the points left over lying on the shape, and the object having been
+put in roughly the right way up — in that priority.
+
 ---
 
 # THE NEXT PHASE: planning a real show in a real room

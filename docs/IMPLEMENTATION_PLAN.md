@@ -3223,3 +3223,71 @@ what it is made of. A camera is never a draw target, so it is never in it.
   scan to 62% before it had been looked at.
 - **The app opens in OBJECT mode**: the first thing anyone does with a scene
   is look at it and move something, not draw a stroke nobody asked for.
+
+
+## Tool families and one Add list
+
+- Icon-only buttons are flat (`.ib`, set by `btn()` from its content): no
+  frame at rest, a quiet fill on hover, a slight accent fill when on.
+- `UI.addMenuItems` is the ONE Add list (Stroke, Object ▸, Light ▸,
+  Projector, Camera, Empty, Actor, From the Library ▸, Import ▸), used by
+  the menu bar's Add and by Shift+A.
+- `ToolGroup` slots in `TOOLS_BY_MODE`: one button per family showing the
+  member in use (remembered in localStorage), a corner mark, and a flyout on
+  hold / right-click / the mark. `cycleSelectTool` (W) steps the select
+  family. Toolbar buttons are 30 px in a 3 px gutter, matching the top bar's
+  mode buttons so the two columns align.
+- Acceptance: W changes object-select to lasso; right-click on a family
+  lists its members; the first toolbar and mode buttons share left 3 / width 30.
+
+## Splat Edit mode
+
+- `TGSplat.display` (mode SPLATS / POINTS, pointSize, splatScale, opacity,
+  minOpacity, maxSize) and `TGSplat.removed` (splats/edit.ts: 'b' + base64
+  bitmask or 'r' + base64 varint runs, whichever is shorter).
+- `SparkSplats.applyEdits` rebuilds the packed array from `orig` whenever the
+  key changes: removed and filtered splats get alpha 0, selected ones are
+  tinted, scale is a shift of the log-scale bytes; then `needsUpdate` AND
+  `mesh.updateVersion()` (without the second Spark keeps the old
+  generation). Point cloud = `mesh.opacity = 0` plus a child `THREE.Points`.
+- `tools/splatedit.ts`: box / lasso / circle select in screen space through
+  the cloud, Blender's select operations, A / Alt+A / Ctrl+I, X deletes.
+  `App.splatSelectInside` selects by any box / sphere / cylinder (inside) or
+  plane (in front). Ops: select / delete filtered, crop, separate (bakes the
+  selection into a stored PLY, `exportPly(id, only)`), restore.
+- `pickSplatPoint` projects every shown centre (strided past 250k), so a
+  scan is clicked where it is and deleted splats are not snapped to.
+- Acceptance (100k-splat scan): lasso + X removes exactly the selected
+  count; undo / redo round-trip; export header matches the shown count;
+  a fitted box crop kept 73,469 and removed the 26,531-splat floater shell;
+  separate produced a 94,205-splat object in place.
+
+## Registration by measurements
+
+- `App.measureTarget`: the one object all bound points share.
+  `scaleObjectToMeasure` rescales it about the first point;
+  `alignByMeasures` applies `alignShapes` (core/align.ts) to it.
+- `alignPoints`: Horn's quaternion closed form with least-squares scale.
+- `alignShapes`: (1) same count — every order, the clicked order preferred
+  when as good; (2) ≥4 points, different counts — hypothesise and verify
+  (widest triangle vs every ordered triple, distinct-point verification,
+  coverage then least-turn tie-break); (3) shape fit — PCA seeds × 24
+  relabellings, symmetric ICP onto legs.
+- Acceptance (a 1.6x-oversize tilted copy of a 0.5×0.5×1 pedestal): shuffled
+  8, 6 of 8, a closed top from another start and 4 corners vs a
+  midpoint-traced outline all exact; 5 of 8 at ±1.5 cm within 9 mm; a
+  9-point traced L vs 3 corners, scale 0.6249 of 0.625.
+
+## Snapping you can see
+
+- The magnet's Vertex / Edge modes go through `pickElement` (polypick.ts):
+  poly vertices, stroke points, splat centres, primitive corners, and the
+  triangle under the pointer on a big mesh; `ConstructionHit.ref` carries
+  the object so a measurement point binds to it.
+- `drawSnapGlyph` / `snapCursor` (snapping.ts): the Snap Target icon shapes
+  drawn round the target with a leash to the pointer, and as an SVG cursor;
+  `App.drawSnapHover` for every point-placing tool, re-snapped only when the
+  pointer or camera moves.
+- Acceptance: a click 11 px off a box's top corner lands on box-local
+  (0.5, 0.5, 0.5), bound to the box; hover shows the ring on a vertex and
+  the dotted square on a face centre.

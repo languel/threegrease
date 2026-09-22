@@ -206,6 +206,29 @@ npm run dev     # open http://localhost:5199
   the whole library as a zip. Cameras, videos and GIFs live there too as
   playable sources with pause and freeze, feeding planes, textures,
   projectors and tracking alike.
+- **Gaussian splat editing**: Edit a selected scan to box, lasso or circle
+  select its splats (through the cloud, like X-ray; `W` cycles the tools)
+  or select everything inside any box, sphere or cylinder in the scene, or
+  in front of a plane. Delete, **Crop** to the selection, or **Separate** it
+  into a new splat of its own — every deletion is undoable and restorable,
+  and the scan file itself is never touched. Show a scan as **splats or a
+  point cloud**, scale the gaussians or the dots, multiply its opacity,
+  and hide faint (low-confidence) or oversized splats with filters — then
+  **Select / Delete filtered** to make a filter permanent. Export PLY writes
+  what is shown.
+- **Registration with measurements**: a measurement placed on an object
+  sticks to it. Type the real length of one and it rescales just that
+  object (or the whole scene). Pair two measurements — corners of a
+  pedestal in a scan, and the same pedestal as a virtual box of known size
+  — and **Align** moves, turns and scales the scan onto it. The two need not
+  match point for point: the order is found, a subset of corners is matched
+  to the full set, and anything else is fitted by shape, with the residual
+  reported.
+- **Snapping you can see**: the magnet's Vertex and Edge modes reach mesh
+  vertices and edges (and splat centres), and what it would catch is shown
+  as a glyph round the target and as the cursor itself — ring for a vertex,
+  square with a dot for a face centre, and so on, the same shapes as the
+  Snap Target icons.
 - **Performance overlay** (`Ctrl+Alt+F`): per-phase frame breakdown, the
   gap between the loop and what you actually get, draw calls, memory and
   long tasks — plus a render-resolution setting for retina.
