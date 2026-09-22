@@ -1432,8 +1432,16 @@ export interface TGMeasure {
   closed?: boolean;
   /** ink colour; the default reads on both a dark viewport and white paper */
   color?: Vec3;
+  /** ink opacity, 0..1 */
+  opacity?: number;
   /** show the interior angle at each corner */
   angles?: boolean;
+  /** show each leg's own length, at its midpoint */
+  edgeLengths?: boolean;
+  /** show the enclosed area (closed measurements only) */
+  showArea?: boolean;
+  /** show the running total / perimeter */
+  showTotalLength?: boolean;
 }
 
 /** One open-vocabulary detection: what matched, how strongly, and where.

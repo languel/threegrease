@@ -356,8 +356,10 @@ export function drawMeasures(
     if (!m.visible) continue;
     const selected = isObjectSelected(ctx.scene, { kind: 'MEASURE', id: m.id });
     const color = m.locked || m.lock ? '#7f8c9a' : rgbCss(m.color ?? MEASURE_COLOR);
+    hud.globalAlpha = m.opacity ?? 1;
     drawRuler(ctx, hud, worldPointsOf(ctx.scene, m), m, unit, color, false, selected,
       live?.hover?.id === m.id ? live.hover.index : -1);
+    hud.globalAlpha = 1;
   }
 
   if (live?.draft.length) {
@@ -441,12 +443,16 @@ function drawRuler(
     if (bound) { hud.fillStyle = color; hud.fill(); } else { hud.stroke(); }
   }
 
-  // per-segment length, written along the segment's midpoint
-  const legs = closed ? pts.length : pts.length - 1;
-  for (let i = 0; i < legs; i++) {
-    const j = (i + 1) % pts.length;
-    const mid = { x: (screen[i].x + screen[j].x) / 2, y: (screen[i].y + screen[j].y) / 2 };
-    label(hud, formatLength(pts[i].distanceTo(pts[j]), unit), mid.x, mid.y - 9, color);
+  // per-segment length, written along the segment's midpoint — on by
+  // default (Blender shows it the same way), off when it just clutters a
+  // ruler with a lot of legs and only the total matters
+  if (m.edgeLengths !== false) {
+    const legs = closed ? pts.length : pts.length - 1;
+    for (let i = 0; i < legs; i++) {
+      const j = (i + 1) % pts.length;
+      const mid = { x: (screen[i].x + screen[j].x) / 2, y: (screen[i].y + screen[j].y) / 2 };
+      label(hud, formatLength(pts[i].distanceTo(pts[j]), unit), mid.x, mid.y - 9, color);
+    }
   }
 
   // interior angles — squaring a room off photographs is mostly a question
@@ -465,14 +471,21 @@ function drawRuler(
     }
   }
 
-  // running total, once it is actually a path rather than one segment
+  // running total / enclosed area, once it is actually a path rather than
+  // one segment — AREA only means anything closed, TOTAL LENGTH applies
+  // either way, and each has its own toggle so a room's perimeter can stay
+  // up without its area cluttering a ruler nobody asked to be a room
   if (pts.length > 2) {
-    const total = pathLength(pts, closed);
-    const last = screen[screen.length - 1];
-    const text = closed
-      ? `⬡ ${formatArea(polygonArea(pts), unit)} · ${formatLength(total, unit)}`
-      : `Σ ${formatLength(total, unit)}`;
-    label(hud, text, last.x + 10, last.y + 12, color);
+    const showArea = closed && m.showArea !== false;
+    const showTotal = m.showTotalLength !== false;
+    if (showArea || showTotal) {
+      const total = pathLength(pts, closed);
+      const last = screen[screen.length - 1];
+      const parts: string[] = [];
+      if (showArea) parts.push(`⬡ ${formatArea(polygonArea(pts), unit)}`);
+      if (showTotal) parts.push(`${closed ? '' : 'Σ '}${formatLength(total, unit)}`);
+      label(hud, parts.join(' · '), last.x + 10, last.y + 12, color);
+    }
   }
 }
 

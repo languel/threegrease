@@ -1930,6 +1930,30 @@ the browser console or automated evals:
     visible only inside one tool is a mode, not an annotation. A bound point
     is drawn FILLED and a free one hollow, because which is which decides
     whether the dimension survives the next edit.
+  - **WHAT IS DRAWN IS FOUR INDEPENDENT TOGGLES, not one "show labels"
+    switch** (`edgeLengths`, `showArea`, `showTotalLength`, `opacity` on
+    `TGMeasure`; drawn in `drawRuler`). Edge lengths (on by default, like
+    Blender's own per-edge length) are each leg's own label at its
+    midpoint; Total length is the running sum / perimeter; Area only means
+    anything once `closed` is true, so its checkbox is hidden until then.
+    The two summary toggles are independent on purpose — a room's
+    perimeter can stay up without its area cluttering a ruler nobody meant
+    to close, and vice versa. `opacity` is a plain `hud.globalAlpha` around
+    the whole per-measurement draw (reset to 1 after), separate from
+    `color` (still pure RGB — an `<input type=color>` has no alpha channel
+    to give it one). Verified by spying on `hud.fillText`: turning Edge
+    lengths off removes exactly the four leg labels and leaves the corner
+    angles and the summary; Area off / Total on renders `8.00 m` alone
+    where both-on rendered `⬡ 4.00 m² · 8.00 m`; both off renders no
+    summary line at all; `globalAlpha` at the first draw call matches
+    `opacity` exactly (1 vs 0.3).
+  - **THE PROPERTIES PANEL SUMMARISES WHAT A MEASUREMENT IS ATTACHED TO**,
+    above the per-point breakdown that already said it one row at a time.
+    Every bound point on the SAME target reads as "Attached to Wall
+    (1/2 points)"; a mix of targets as "Attached to N objects"; none bound
+    as "Free — every point moves independently" — the question worth
+    answering before scrolling the point list is whether this thing
+    tracks anything at all.
   - `closed` turns a path into a ring: perimeter plus AREA, by NEWELL's
     method — the cross-product sum is twice the area vector, so it is right
     at any orientation and sane for the slightly non-planar ring that tracing

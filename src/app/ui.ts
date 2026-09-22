@@ -3608,6 +3608,21 @@ export class UI {
     const pts = worldPointsOf(scene, m);
     const area = measureArea(scene, m);
 
+    // WHAT IT IS ATTACHED TO, summarised — the per-point rows below already
+    // say this one at a time, but "is this thing tracking anything at all"
+    // is the question worth answering before scrolling through them. Every
+    // bound point on the SAME target reads as attached to that target (the
+    // common case: a dimension pinned to one wall); a mix of targets reads
+    // as "N objects"; none bound is FREE.
+    const bound = m.points.map((p) => p.bind).filter((b): b is NonNullable<typeof b> => !!b);
+    const targetKey = (b: NonNullable<typeof bound[number]>) => `${(b.target as ObjRef).kind}:${(b.target as ObjRef).id}`;
+    const distinctTargets = new Set(bound.map(targetKey));
+    const attachedText = bound.length === 0
+      ? 'Free — every point moves independently'
+      : distinctTargets.size === 1
+        ? `Attached to ${objectName(scene, bound[0].target as ObjRef)} (${bound.length}/${m.points.length} points)`
+        : `Attached to ${distinctTargets.size} objects (${bound.length}/${m.points.length} points)`;
+
     const rows: Node[] = [
       el('div', { class: 'menu-sep' }),
       el('div', { class: 'menu-header', text: 'Measurement' }),
@@ -3615,13 +3630,23 @@ export class UI {
         class: 'row',
         text: `${formatLength(measureLength(scene, m), unit)}${area > 0 ? ` · ${formatArea(area, unit)}` : ''} · ${m.points.length} points`,
       }),
+      el('div', {
+        class: 'row dim', text: attachedText,
+        title: bound.length ? 'a bound point follows that object; a free one stays where it is' : undefined,
+      }),
       checkbox('Closed', !!m.closed, (v) => {
         ctx.pushUndo(); m.closed = v; this.refresh();
       }, 'join the last point back to the first: a perimeter and an enclosed AREA instead of a running length'),
       checkbox('Corner angles', m.angles !== false, (v) => { m.angles = v; }),
+      checkbox('Edge lengths', m.edgeLengths !== false, (v) => { m.edgeLengths = v; },
+        'each leg’s own length, written at its midpoint'),
+      checkbox('Total length', m.showTotalLength !== false, (v) => { m.showTotalLength = v; },
+        'the running total (or perimeter, once Closed)'),
+      ...(m.closed ? [checkbox('Area', m.showArea !== false, (v) => { m.showArea = v; })] : []),
       checkbox('Freeze', !!m.locked, (v) => { m.locked = v; this.refresh(); },
         'stop it being dragged, so the reference the scene was scaled from cannot move by accident'),
       fieldRow('Ink', colorField('', [...(m.color ?? MEASURE_COLOR), 1], (rgb) => { m.color = rgb; })),
+      fieldRow('Opacity', slider('', m.opacity ?? 1, 0, 1, 0.05, (v) => { m.opacity = v; }, { def: 1 })),
       el('div', {
         class: 'menu-header', text: 'Points',
         title: 'Place them with the Measure tool — the magnet decides what a point attaches to. '
