@@ -3307,6 +3307,11 @@ what it is made of. A camera is never a draw target, so it is never in it.
   plane turned about the cube's up shows different moments across its width
   and is clipped to the cube; a MAP plane with a left-to-right gradient runs
   time across the picture.
-- Next: a live-camera ring buffer (Khronos with a camera), a raymarched
+- LIVE volumes (`live:<key>`, Add ▸ Time volume ▸ Live / Test camera): a
+  ring of N layers of a DataArrayTexture, one layer uploaded per new frame
+  (`addLayerUpdate`), time 0 = the oldest; Freeze holds. Acceptance: the
+  ring's newest layer advances with the camera (23 fps measured with the
+  test camera) and its layers differ over time.
+- Next: a raymarched
   volume display, conversion to splats (density controllable), animated
   strokes and actors as sources.

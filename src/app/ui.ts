@@ -92,6 +92,7 @@ export interface AppHandle {
   splatEditOp(op: SplatEditOp, id?: number): void;
   splatVolumes(): { id: number; name: string; kind: string }[];
   addVolume(src: string, name?: string, at?: [number, number, number]): number;
+  addLiveVolume(test: boolean): Promise<void>;
   addVolumeSlice(volumeId: number, mode?: 'POSITION' | 'MAP'): number | null;
   /** the decode state of a time volume, for its panel */
   volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number } | null;
@@ -1174,11 +1175,17 @@ export class UI {
     const media = listAssets().filter((as) => as.kind === 'STREAM'
       && (JSON.parse(as.payload) as { key?: string }).key?.startsWith('media:'));
     return {
-      label: 'Time volume', icon: 'timeVolume', disabled: !media.length,
-      items: media.length ? media.map((as) => ({
-        label: as.name,
-        do: () => { this.app.addVolume((JSON.parse(as.payload) as { key: string }).key.slice('media:'.length), as.name, at); },
-      })) : undefined,
+      label: 'Time volume', icon: 'timeVolume',
+      items: [
+        // a camera recorded into the cube: the last N frames, always
+        { label: 'Live camera', icon: 'camera', do: () => { void this.app.addLiveVolume(false); } },
+        { label: 'Test camera', icon: 'camera', do: () => { void this.app.addLiveVolume(true); } },
+        ...(media.length ? [{ sep: true as const }] : []),
+        ...media.map((as) => ({
+          label: as.name,
+          do: () => { this.app.addVolume((JSON.parse(as.payload) as { key: string }).key.slice('media:'.length), as.name, at); },
+        })),
+      ],
     };
   }
 
@@ -2177,7 +2184,9 @@ export class UI {
       : st.status === 'error' ? `could not decode: ${st.error}` : `${st.width} × ${st.height} × ${st.frames} frames`;
     return [
       el('div', { class: 'menu-sep' }),
-      el('div', { class: 'row dim', text: status }),
+      el('div', { class: 'row dim', text: (v.src.startsWith('live:') ? 'live · ' : '') + status }),
+      ...(v.src.startsWith('live:') ? [tip(checkbox('Freeze', !!v.frozen, (x) => { v.frozen = x; }),
+        'stop recording and hold the frames the cube has — time 0 is the oldest of them, 1 the newest')] : []),
       tip(selectField('Show', v.display, [['FACES', 'Faces'], ['WIRE', 'Wire']], (x) => { v.display = x; }),
         'Faces: the cube\'s own faces show the film — the first frame at the front, the last at the back, time streaking down the sides · Wire: only its edges, so the slices inside are the picture'),
       checkbox('Edges', v.outline !== false, (x) => { v.outline = x; }),

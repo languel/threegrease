@@ -2263,6 +2263,20 @@ the browser console or automated evals:
     Both scrub (`time`) and play (`rate`, films a second).
   - The slice material REPLACES the mesh's own (`applySlice`, hooked first
     in `MeshManager.apply`) and puts it back when the slice goes.
+  - THE VOLUME IS A TEXTURE ARRAY, NOT A 3D TEXTURE: one layer per frame,
+    and the shader blends the two neighbouring layers itself (an array does
+    not filter across layers). A 3D texture filters time for free but can
+    only be re-uploaded WHOLE, and a LIVE volume — a camera (`live:<key>`)
+    recorded into a ring of N layers, time 0 the oldest and 1 now — writes a
+    frame thirty times a second: 9 MB a frame whole, one layer with
+    `addLayerUpdate`. `uStart` is the ring's oldest layer (0 for a file).
+    Freeze stops recording. The ring is allocated when the camera's first
+    frame says what shape it is. Verified with the test camera: the newest
+    layer advanced 23 frames a second and old and middle layers differed.
+    TEST WITH A CLIP THAT IS NOT ALREADY SPACE-TIME: car-4d.gif is itself a
+    render of this effect, so it looks right however the cube is built — a
+    giphy dance (a figure moving in place) shows an oblique slice as two
+    dancers at two moments.
   - Decoding is ONCE per (file, resolution, frames): GIFs through
     ImageDecoder (COMPOSITED frames — a GIF frame is usually only what
     changed), videos by seeking a hidden <video> to the middle of each slot

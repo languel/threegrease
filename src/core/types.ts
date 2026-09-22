@@ -557,8 +557,11 @@ export interface TGSplat {
 export interface TGVolume {
   id: number;
   name: string;
-  /** a stored or URL video / GIF */
+  /** a stored or URL video / GIF, or `live:<source key>` — a CAMERA
+   *  recorded into a ring of `frames` layers (time 0 the oldest, 1 now) */
   src: string;
+  /** LIVE: stop recording and hold what the ring has */
+  frozen?: boolean;
   translation: Vec3;
   rotation: Vec3;
   scale: Vec3;

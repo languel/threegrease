@@ -544,6 +544,7 @@ class App implements AppHandle {
     this.scene3.add(timeVolumes.group);
     timeVolumes.resolve = async (src) => ({ url: await storeUrl(src), blob: await storeBlob(src).catch(() => null) });
     timeVolumes.textureFor = (src) => materialManager.textureForSrc(src);
+    timeVolumes.live = liveSources;
     timeVolumes.onChange = () => { this.fitVolumes(); this.ui.refresh(); };
     this.scene3.add(this.polys.group);
     this.scene3.add(this.paints.group);
@@ -4866,6 +4867,25 @@ class App implements AppHandle {
     timeVolumes.sync(this.ctx.scene);
     this.placeNew({ kind: 'VOLUME', id });
     return id;
+  }
+
+  /**
+   * A LIVE time volume: a camera recorded into the cube, the last N frames
+   * always in it. The test camera needs no device; a real one asks for
+   * permission and uses the default (or the one already open).
+   */
+  async addLiveVolume(test: boolean): Promise<void> {
+    let key = 'test:camera';
+    if (!test) {
+      try {
+        const s = await liveSources.open();
+        key = s.key;
+      } catch (err) {
+        this.setStatusHint(`no camera: ${err instanceof Error ? err.message : String(err)}`, 4000);
+        return;
+      }
+    }
+    this.addVolume(`live:${key}`, test ? 'Test camera volume' : 'Camera volume');
   }
 
   volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number } | null {

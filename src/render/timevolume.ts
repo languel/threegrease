@@ -38,7 +38,13 @@ import type { GPScene, TGMesh, TGVolume } from '../core/types';
 import { worldMatrixOf } from '../tools/objects';
 
 export interface VolumeTex {
-  tex: THREE.Data3DTexture | null;
+  /** one LAYER per frame (a texture array, not a 3D texture): a live
+   *  camera writes one layer per new frame, and a 3D texture can only be
+   *  re-uploaded whole — 9 MB a frame at 30 fps */
+  tex: THREE.DataArrayTexture | null;
+  /** LIVE: the ring's newest layer; time 0 is the one after it (the oldest) */
+  head: number;
+  live?: { key: string; lastFrame: number; canvas: HTMLCanvasElement; g: CanvasRenderingContext2D; filled: number };
   status: 'loading' | 'ok' | 'error';
   error?: string;
   width: number; height: number; frames: number;
@@ -136,8 +142,11 @@ const VERT = /* glsl */`
 
 const FRAG = /* glsl */`
   precision highp float;
-  precision highp sampler3D;
-  uniform sampler3D uVol;
+  precision highp sampler2DArray;
+  uniform sampler2DArray uVol;
+  uniform float uFrames;
+  uniform float uStart;     // the layer time 0 is in (a live ring's oldest)
+  uniform bool uRing;
   uniform mat4 uWorldToVol;
   uniform int uMode;        // 0 position, 1 map
   uniform float uTime;      // offset along time, 0..1 of the film
@@ -170,8 +179,13 @@ const FRAG = /* glsl */`
       }
       uvt = vec3(vUv, wrapT(uTime + uGain * m));
     }
-    // a 3D texture's third coordinate is its depth: the frame
-    vec4 col = texture(uVol, uvt);
+    // TIME is a layer index, blended between the two neighbours by hand (a
+    // texture array does not filter across layers the way a 3D texture does)
+    float f = uvt.z * (uFrames - 1.0);
+    float f0 = floor(f);
+    float f1 = min(f0 + 1.0, uFrames - 1.0);
+    float l0 = mod(f0 + uStart, uFrames), l1 = mod(f1 + uStart, uFrames);
+    vec4 col = mix(texture(uVol, vec3(uvt.xy, l0)), texture(uVol, vec3(uvt.xy, l1)), f - f0);
     gl_FragColor = vec4(col.rgb, col.a * uOpacity);
     #include <colorspace_fragment>
   }
@@ -181,11 +195,12 @@ const FRAG = /* glsl */`
 
 type Uniforms = Record<string, THREE.IUniform>;
 
-function sliceMaterial(empty: THREE.Data3DTexture): THREE.ShaderMaterial {
+function sliceMaterial(empty: THREE.DataArrayTexture): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FRAG, side: THREE.DoubleSide, transparent: true,
     uniforms: {
       uVol: { value: empty }, uWorldToVol: { value: new THREE.Matrix4() },
+      uFrames: { value: 1 }, uStart: { value: 0 }, uRing: { value: false },
       uMode: { value: 0 }, uTime: { value: 0 }, uGain: { value: 1 }, uRepeat: { value: true },
       uHasMap: { value: false }, uMap: { value: null }, uInvertMap: { value: false },
       uOpacity: { value: 1 }, uReady: { value: false },
@@ -211,10 +226,12 @@ export class TimeVolumeManager {
   /** a volume finished (or failed) decoding — redraw the panel */
   onChange: (() => void) | null = null;
   private emptyTex = (() => {
-    const t = new THREE.Data3DTexture(new Uint8Array([64, 64, 72, 255]), 1, 1, 1);
+    const t = new THREE.DataArrayTexture(new Uint8Array([64, 64, 72, 255]), 1, 1, 1);
     t.needsUpdate = true;
     return t;
   })();
+  /** the app's live sources (cameras), for LIVE volumes */
+  live: { get(key: string): { canvas: HTMLCanvasElement; frame: number; status: string } | undefined; openTest(): unknown } | null = null;
 
   static key(v: TGVolume): string {
     return `${v.src}|${v.resolution}|${v.frames}`;
@@ -225,10 +242,57 @@ export class TimeVolumeManager {
     const key = TimeVolumeManager.key(v);
     const hit = this.vols.get(key);
     if (hit) return hit;
-    const vt: VolumeTex = { tex: null, status: 'loading', width: 0, height: 0, frames: 0, aspect: 1, progress: 0 };
+    const vt: VolumeTex = { tex: null, head: -1, status: 'loading', width: 0, height: 0, frames: 0, aspect: 1, progress: 0 };
     this.vols.set(key, vt);
-    void this.load(v, vt);
+    if (v.src.startsWith('live:')) this.startLive(v, vt);
+    else void this.load(v, vt);
     return vt;
+  }
+
+  /**
+   * A LIVE volume: the camera recorded into a ring of `frames` layers, so the
+   * cube always holds the last N frames and time 0 is the oldest. This is
+   * the Khronos Projector as built — a camera, a buffer, and a surface you
+   * push into the past. Nothing is decoded up front; the ring is allocated
+   * when the camera's first frame says what shape it is.
+   */
+  private startLive(v: TGVolume, vt: VolumeTex): void {
+    const key = v.src.slice('live:'.length);
+    if (key === 'test:camera') this.live?.openTest();
+    const canvas = document.createElement('canvas');
+    vt.live = { key, lastFrame: -1, canvas, g: canvas.getContext('2d', { willReadFrequently: true })!, filled: 0 };
+  }
+
+  private recordLive(v: TGVolume, vt: VolumeTex): void {
+    const L = vt.live;
+    const src = L ? this.live?.get(L.key) : undefined;
+    if (!L || !src || src.canvas.width < 2) return;
+    if (src.frame === L.lastFrame || v.frozen) return;
+    L.lastFrame = src.frame;
+    if (!vt.tex) {
+      const aspect = src.canvas.width / src.canvas.height;
+      const w = Math.max(16, Math.min(1024, v.resolution || 256)), h = Math.max(1, Math.round(w / aspect));
+      let n = Math.max(2, v.frames || 128);
+      if (w * h * n * 4 > MAX_BYTES) n = Math.max(8, Math.floor(MAX_BYTES / (w * h * 4)));
+      L.canvas.width = w; L.canvas.height = h;
+      const tex = new THREE.DataArrayTexture(new Uint8Array(w * h * n * 4), w, h, n);
+      tex.format = THREE.RGBAFormat;
+      tex.type = THREE.UnsignedByteType;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = tex.magFilter = THREE.LinearFilter;
+      tex.unpackAlignment = 1;
+      tex.needsUpdate = true;
+      Object.assign(vt, { tex, status: 'ok', width: w, height: h, frames: n, aspect, progress: 1, head: -1 });
+      this.onChange?.();
+    }
+    const tex = vt.tex!;
+    const w = vt.width, h = vt.height;
+    vt.head = (vt.head + 1) % vt.frames;
+    copySlice(tex.image.data as Uint8Array, vt.head, L.g, w, h, src.canvas);
+    // only this layer goes up to the GPU — the reason for a texture array
+    tex.addLayerUpdate(vt.head);
+    tex.needsUpdate = true;
+    L.filled = Math.min(vt.frames, L.filled + 1);
   }
 
   statusOf(v: TGVolume): VolumeTex | undefined { return this.vols.get(TimeVolumeManager.key(v)); }
@@ -246,13 +310,13 @@ export class TimeVolumeManager {
       const r = isGif
         ? await decodeGif(blob ?? await (await fetch(url)).blob(), maxW, frames, progress)
         : await decodeVideo(url, maxW, frames, progress);
-      const tex = new THREE.Data3DTexture(r.data, r.w, r.h, r.n);
+      const tex = new THREE.DataArrayTexture(r.data as Uint8Array<ArrayBuffer>, r.w, r.h, r.n);
       tex.format = THREE.RGBAFormat;
       tex.type = THREE.UnsignedByteType;
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.minFilter = THREE.LinearFilter;
       tex.magFilter = THREE.LinearFilter;
-      tex.wrapS = tex.wrapT = tex.wrapR = THREE.ClampToEdgeWrapping;
+      tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
       tex.unpackAlignment = 1;
       tex.needsUpdate = true;
       Object.assign(vt, { tex, status: 'ok', width: r.w, height: r.h, frames: r.n, aspect: r.aspect, progress: 1 });
@@ -267,6 +331,10 @@ export class TimeVolumeManager {
     const vt = this.volume(v);
     u.uVol.value = vt.tex ?? this.emptyTex;
     u.uReady.value = vt.status === 'ok';
+    u.uFrames.value = Math.max(1, vt.frames);
+    // a live ring's time 0 is the layer after the newest; a file's is layer 0
+    u.uStart.value = vt.live ? (vt.head + 1) % Math.max(1, vt.frames) : 0;
+    u.uRing.value = !!vt.live;
     (u.uWorldToVol.value as THREE.Matrix4).copy(worldMatrixOf(scene, { kind: 'VOLUME', id: v.id })).invert();
     return vt;
   }
@@ -345,8 +413,13 @@ export class TimeVolumeManager {
     return true;
   }
 
-  /** Advance every PLAYING volume and slice by its rate (cycles a second). */
+  /** Advance every PLAYING volume and slice by its rate (cycles a second),
+   *  and record a new frame into every LIVE one. */
   tick(dt: number, scene: GPScene): void {
+    for (const v of scene.volumes) {
+      const vt = this.vols.get(TimeVolumeManager.key(v));
+      if (vt?.live) this.recordLive(v, vt);
+    }
     for (const v of scene.volumes) {
       const e = this.entries.get(v.id);
       if (e && v.rate) e.phase = (e.phase + v.rate * dt) % 1;
