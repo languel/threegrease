@@ -240,6 +240,9 @@ const FRAG = /* glsl */`
   uniform bool uKeyKeep;
   uniform float uLumaMin, uLumaMax;
   uniform float uMotion;
+  uniform int uPlayhead;     // 0 off, 1 crisp slice, 2 cut
+  uniform float uPH;         // the playhead, 0..1 along the scan axis
+  uniform int uScan;         // axis in the cube's local space: 0 x, 1 y (time), 2 z
   varying vec3 vWorld;
   varying vec2 vUv;
 
@@ -292,17 +295,58 @@ const FRAG = /* glsl */`
       float tIn = max(max(max(tn.x, tn.y), tn.z), 0.0);
       float tOut = min(min(tf.x, tf.y), tf.z);
       if (tOut <= tIn) discard;
+      // the PLAYHEAD plane, in the cube's space, and where the ray meets it
+      float ph = uPH - 0.5;
+      float ea = uScan == 0 ? eye.x : uScan == 1 ? eye.y : eye.z;
+      float da = uScan == 0 ? dir.x : uScan == 1 ? dir.y : dir.z;
+      float tPlane = abs(da) > 1e-6 ? (ph - ea) / da : -1.0;
+      // CUT: the block that remains is the part of the cube PAST the
+      // playhead; the ray's first hit on it is an opaque surface — the
+      // playhead face shows the current frame, the other faces the streaks
+      float tSolid = 1e9;
+      if (uPlayhead == 2) {
+        vec3 lo = vec3(-0.5), hi = vec3(0.5);
+        if (uScan == 0) lo.x = ph; else if (uScan == 1) lo.y = ph; else lo.z = ph;
+        vec3 s0 = (lo - eye) * inv, s1 = (hi - eye) * inv;
+        vec3 sn = min(s0, s1), sf = max(s0, s1);
+        float a0 = max(max(sn.x, sn.y), sn.z), a1 = min(min(sf.x, sf.y), sf.z);
+        if (a1 > max(a0, 0.0)) tSolid = max(a0, 0.0);
+      }
       const int STEPS = 160;
       float dt = (tOut - tIn) / float(STEPS);
       vec4 acc = vec4(0.0);
+      bool slicePending = uPlayhead == 1 && tPlane >= tIn && tPlane <= tOut;
       for (int i = 0; i < STEPS; i++) {
-        vec3 p = eye + dir * (tIn + (float(i) + 0.5) * dt) + 0.5;
+        float t = tIn + (float(i) + 0.5) * dt;
+        // the crisp SLICE is composited exactly where the ray crosses it
+        if (slicePending && t >= tPlane) {
+          slicePending = false;
+          vec3 q = eye + dir * tPlane + 0.5;
+          vec3 quvt = vec3(q.x, q.z, wrapT(q.y + uTime));
+          vec4 c = sampleAt(quvt);
+          float a = passes(quvt, c);
+          acc.rgb += (1.0 - acc.a) * a * c.rgb;
+          acc.a += (1.0 - acc.a) * a;
+        }
+        if (t >= tSolid) break;
+        vec3 p = eye + dir * t + 0.5;
         vec3 uvt = vec3(p.x, p.z, wrapT(p.y + uTime));
         vec4 c = sampleAt(uvt);
-        float a = passes(uvt, c) * clamp(uDensity * dt * 40.0, 0.0, 1.0);
+        // DENSITY is opacity per unit of depth, not per step: at 0.1 a ray
+        // right through the cube keeps about half its light (a ghost you see
+        // the playhead through), at 1 the first voxel is a surface
+        float a = passes(uvt, c) * (1.0 - pow(1.0 - clamp(uDensity, 0.0, 0.999), dt * 4.0));
         acc.rgb += (1.0 - acc.a) * a * c.rgb;
         acc.a += (1.0 - acc.a) * a;
         if (acc.a > 0.98) break;
+      }
+      if (tSolid < 1e8 && acc.a < 0.98) {
+        vec3 q = eye + dir * (tSolid + 1e-4) + 0.5;
+        vec3 quvt = vec3(q.x, q.z, wrapT(q.y + uTime));
+        vec4 c = sampleAt(quvt);
+        float a = passes(quvt, c);
+        acc.rgb += (1.0 - acc.a) * a * c.rgb;
+        acc.a += (1.0 - acc.a) * a;
       }
       if (acc.a < 0.003) discard;
       gl_FragColor = vec4(acc.rgb / acc.a, acc.a * uOpacity);
@@ -344,6 +388,7 @@ function sliceMaterial(empty: THREE.DataArrayTexture): THREE.ShaderMaterial {
       uFrames: { value: 1 }, uStart: { value: 0 }, uRing: { value: false }, uDensity: { value: 0.5 },
       uPeople: { value: 0 }, uPeopleTh: { value: 0.5 }, uKey: { value: false }, uKeyColor: { value: new THREE.Color(0, 1, 0) },
       uKeyTol: { value: 0.25 }, uKeyKeep: { value: false }, uLumaMin: { value: 0 }, uLumaMax: { value: 1 }, uMotion: { value: 0 },
+      uPlayhead: { value: 0 }, uPH: { value: 0 }, uScan: { value: 1 },
       uField: { value: 0 }, uVolToWorld: { value: new THREE.Matrix4() }, uBase: { value: 0 },
       uAmount: { value: 0 }, uRadius: { value: 0.25 }, uFreq: { value: 1 }, uCenter: { value: new THREE.Vector2(0.5, 0.5) },
       uHasFieldMap: { value: false }, uFieldMap: { value: null },
@@ -566,7 +611,13 @@ export class TimeVolumeManager {
       if (mat.side !== side) { mat.side = side; mat.needsUpdate = true; }
       mat.depthWrite = !march;
       u.uDensity.value = v.density ?? 0.5;
-      u.uTime.value = v.time + e.phase;
+      // with a PLAYHEAD, `time` is where the playhead is, not a shift of the
+      // whole film — the block stays put and the playhead moves through it
+      const ph = march ? (v.playhead ?? 'OFF') : 'OFF';
+      u.uPlayhead.value = ph === 'SLICE' ? 1 : ph === 'CUT' ? 2 : 0;
+      u.uPH.value = v.time;
+      u.uScan.value = v.scan === 'ACROSS' ? 0 : v.scan === 'UP' ? 2 : 1;
+      u.uTime.value = ph !== 'OFF' ? 0 : v.time + e.phase;
       u.uRepeat.value = v.wrap !== 'CLAMP';
       u.uOpacity.value = v.opacity;
       // WIRE: only the edges. The faces stay in the scene graph (invisible
@@ -649,9 +700,13 @@ export class TimeVolumeManager {
       const vt = this.vols.get(TimeVolumeManager.key(v));
       if (vt?.live) this.recordLive(v, vt);
     }
+    // a volume's PLAY moves its `time` — the same value Time scrubs — so
+    // pausing leaves the playhead exactly where it is and scrubbing takes
+    // over from there
     for (const v of scene.volumes) {
-      const e = this.entries.get(v.id);
-      if (e && v.rate) e.phase = (e.phase + v.rate * dt) % 1;
+      if (!v.rate || v.paused) continue;
+      const t = v.time + v.rate * dt;
+      v.time = v.wrap === 'CLAMP' ? Math.min(1, Math.max(0, t)) : ((t % 1) + 1) % 1;
     }
     for (const [mesh, e] of this.slices) {
       const id = mesh.userData.meshId ?? findMeshId(mesh);

@@ -230,7 +230,10 @@ npm run dev     # open http://localhost:5199
   what moved, as a trail through time. **Filters** — only people (found
   per frame by MediaPipe), a colour key, a brightness range, motion — apply
   to the cube, its slices, the see-through **Volume** display and the
-  splats alike.
+  splats alike. In the Volume display a **playhead** plays, pauses and
+  scrubs through the block — as one crisp slice through a faint ghost, or
+  cutting the block open at the current frame (the car-4d look) — through
+  time, or across the picture as a slit-scan.
 - **Registration with measurements**: a measurement placed on an object
   sticks to it. Type the real length of one and it rescales just that
   object (or the whole scene). Pair two measurements — corners of a

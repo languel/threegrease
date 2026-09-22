@@ -2203,14 +2203,35 @@ export class UI {
         'stop recording and hold the frames the cube has — time 0 is the oldest of them, 1 the newest')] : []),
       tip(selectField('Show', v.display, [['FACES', 'Faces'], ['VOLUME', 'Volume'], ['WIRE', 'Wire']], (x) => { v.display = x; this.refresh(); }),
         'Faces: the cube\'s own faces show the film — the first frame at the front, the last at the back, time streaking down the sides · Volume: see INTO the block — with a filter on, only what passes is left, floating in space-time · Wire: only its edges, so the slices inside are the picture'),
-      ...(v.display === 'VOLUME' ? [tip(slider('Density', v.density ?? 0.5, 0.01, 1, 0.01, (x) => { v.density = x; }, { def: 0.5 }),
-        'how solid each voxel that passes the filter is: low for smoke, high for a surface')] : []),
+      ...(v.display === 'VOLUME' ? [
+        tip(selectField('Playhead', v.playhead ?? 'OFF', [['OFF', 'None'], ['SLICE', 'Crisp slice'], ['CUT', 'Cut the block']],
+          (x) => {
+            v.playhead = x;
+            // sensible looks to start from: a faint ghost round a crisp slice,
+            // and nothing at all in the part a cut has already passed
+            if (x === 'SLICE') v.density = Math.min(v.density ?? 0.5, 0.15);
+            if (x === 'CUT') v.density = 0;
+            this.refresh();
+          }),
+        'None: the whole block at one density · Crisp slice: the block stays a faint ghost and the playhead is one sharp frame through it · Cut the block: the block is carved at the playhead — its face is the current frame and the rest runs on behind it, as in car-4d'),
+        ...(v.playhead && v.playhead !== 'OFF' ? [tip(selectField('Scan', v.scan ?? 'TIME', [['TIME', 'Through time'], ['ACROSS', 'Across'], ['UP', 'Up']],
+          (x) => { v.scan = x; }),
+        'the axis the playhead sweeps: through time plays the film; across or up scans the picture — a slit-scan, every column (or row) at every moment')] : []),
+        tip(slider(v.playhead && v.playhead !== 'OFF' ? 'Ghost' : 'Density', v.density ?? 0.5, 0, 1, 0.01, (x) => { v.density = x; }, { def: 0.5 }),
+          'how solid each voxel that passes the filter is — with a playhead, how visible the rest of the block is around it'),
+      ] : []),
       ...this.volumeFilterRows(v),
       checkbox('Edges', v.outline !== false, (x) => { v.outline = x; }),
-      tip(slider('Time', v.time, 0, 1, 0.005, (x) => { v.time = x; }, { def: 0 }),
-        'scrub along the film (0 to 1 of its length) — for the cube\'s own faces'),
-      tip(slider('Play', v.rate, -2, 2, 0.01, (x) => { v.rate = x; }, { def: 0 }),
-        'films a second: 0 holds, negative plays backwards'),
+      tip(slider(v.playhead && v.playhead !== 'OFF' ? 'Playhead' : 'Time', v.time, 0, 1, 0.005, (x) => { v.time = x; v.paused = true; }, { def: 0 }),
+        'scrub: where the playhead is along its axis (0 to 1) — scrubbing pauses play, and Play carries on from here'),
+      el('div', { class: 'row' },
+        btn(icon(v.rate && !v.paused ? 'pause' : 'play'), () => {
+          if (!v.rate) { v.rate = 0.2; v.paused = false; } else v.paused = !v.paused;
+          this.refresh();
+        }, { title: v.rate && !v.paused ? 'Pause — the playhead holds where it is' : 'Play — the playhead loops along its axis' }),
+        tip(slider('Speed', v.rate, -2, 2, 0.01, (x) => { v.rate = x; }, { def: 0.2 }),
+          'films a second along the playhead\'s axis: negative runs backwards'),
+      ),
       tip(selectField('Ends', v.wrap, [['REPEAT', 'Loop'], ['CLAMP', 'Hold']], (x) => { v.wrap = x; }),
         'Loop: time wraps round the film · Hold: it stops at the first and last frames'),
       slider('Opacity', v.opacity, 0, 1, 0.01, (x) => { v.opacity = x; }, { def: 1 }),

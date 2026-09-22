@@ -3334,3 +3334,18 @@ what it is made of. A camera is never a draw target, so it is never in it.
   costume and the light; Convert to splats: 557,056 unfiltered against
   9,454 people-only, the cloud matching the display; toggling People off and
   on reuses the masked decode.
+
+## Time volume playhead
+
+- `TGVolume.playhead` (OFF / SLICE / CUT), `scan` (TIME / ACROSS / UP),
+  `paused`; Play writes `time` in `tick`; the panel's Playhead slider scrubs
+  (and pauses), the Play/Pause button and Speed run it.
+- Shader: the playhead plane in cube space; SLICE composites an opaque
+  sample at the ray/plane crossing; CUT intersects the ray with the sub-box
+  past the playhead and composites its first hit opaquely.
+- Density became per unit depth, so a faint ghost stays faint.
+- Acceptance (birds.mp4, 256 × 144 × 96): CUT at 0.35 shows the current
+  frame on the playhead face and the sky and water streaking along the top
+  and side, the passed part empty; SLICE at ghost 0.12 shows one sharp frame
+  through a faint block; Play at 0.15 moved the playhead 0.35 → 0.575 in
+  1.5 s; Pause held it exactly.

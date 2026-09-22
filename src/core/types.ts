@@ -581,6 +581,22 @@ export interface TGVolume {
   /** VOLUME display: how much each voxel that passes the filter occludes */
   density?: number;
   /**
+   * The PLAYHEAD in the Volume display, at `time` along `scan`:
+   *  SLICE — the block stays a low-density ghost and the playhead is one
+   *    crisp, opaque slice through it;
+   *  CUT — the car-4d look: the block is CARVED at the playhead, so its face
+   *    there is the current frame, the solid block runs on behind it (time
+   *    streaking down its sides) and what has already passed is empty.
+   * Play moves `time` itself, so the playhead you scrub and the one that
+   * plays are one value.
+   */
+  playhead?: 'OFF' | 'SLICE' | 'CUT';
+  /** which axis the playhead sweeps: TIME plays the film; ACROSS / UP scan
+   *  the picture, which is a slit-scan through time */
+  scan?: 'TIME' | 'ACROSS' | 'UP';
+  /** Play holds its rate while paused */
+  paused?: boolean;
+  /**
    * What of the film COUNTS — applied everywhere it is read: the cube, every
    * slice and Convert to splats. Filtered-out voxels are empty, so with the
    * Volume display you see only what is left, floating in space-time.

@@ -161,6 +161,7 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Time volumes: live camera recorded into a ring (freeze to hold)
 - [x] Time volumes: surface slices (a bent time sheet), convert to splats (stride, brightness, motion)
 - [x] Time volumes: ray-marched Volume display; filters (people via MediaPipe segmentation, colour key, brightness, motion) shared by display, slices and splats; source picker
+- [x] Time volumes: playhead (crisp slice / cut block), scan axis, play / pause / scrub
 - [ ] Time volumes: animated strokes/actors as sources, segmenting live volumes
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
