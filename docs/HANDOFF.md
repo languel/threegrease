@@ -812,6 +812,18 @@ that sweeps through as you scrub), recorded live from a camera into a ring,
 filtered (people via MediaPipe, colour key, brightness, motion), shown as a
 see-through ray-marched block, and convertible to a splat cloud.
 
+Later in the same session: a PLAYHEAD in the Volume display (a crisp slice
+through a ghost of the block, or the block cut open at the current frame —
+the car-4d look) that plays, pauses and scrubs through time or across the
+picture; the ghost kept as a cloud but floored per ray so it reaches the
+box; Escape no longer deselects after a panel edit (its fallback belongs to
+the viewport); the Speed row fixed (a grouped slider took its standalone
+width and hid the play button).
+
+Where to pick up on volumes: animated strokes and actors as sources;
+segmenting LIVE volumes (people only works on files today); carrying panel
+focus across a rebuild, app-wide.
+
 **The lesson: test an effect with material that does not already look like
 the effect.** The first test clip was a render of this very idea, so it
 looked right however the cube was built. A dancer moving in place is the
