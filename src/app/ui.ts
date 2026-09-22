@@ -2195,6 +2195,13 @@ export class UI {
         { label: 'Test camera', icon: 'camera', do: () => { void this.app.setVolumeSourceLive(id, true); } },
       ]);
     }, { title: 'what the cube holds: a video or GIF from the Library or a file, or a camera recorded live' });
+    const playBtn = btn(icon(v.rate && !v.paused ? 'pause' : 'play'), () => {
+      if (!v.rate) { v.rate = 0.2; v.paused = false; } else v.paused = !v.paused;
+      this.refresh();
+    }, { title: v.rate && !v.paused ? 'Pause — the playhead holds where it is' : 'Play — the playhead loops along its axis' });
+    // a field group shares its width equally among its children; the button
+    // keeps its own and the slider takes the rest
+    playBtn.style.cssText = 'flex: none; width: 26px';
     return [
       el('div', { class: 'menu-sep' }),
       fieldRow('Source', srcBtn),
@@ -2220,21 +2227,21 @@ export class UI {
         tip(slider(v.playhead && v.playhead !== 'OFF' ? 'Ghost' : 'Density', v.density ?? 0.5, 0, 1, 0.01, (x) => { v.density = x; }, { def: 0.5 }),
           'how solid each voxel that passes the filter is — with a playhead, how visible the rest of the block is around it'),
       ] : []),
-      ...this.volumeFilterRows(v),
       checkbox('Edges', v.outline !== false, (x) => { v.outline = x; }),
       tip(slider(v.playhead && v.playhead !== 'OFF' ? 'Playhead' : 'Time', v.time, 0, 1, 0.005, (x) => { v.time = x; v.paused = true; }, { def: 0 }),
         'scrub: where the playhead is along its axis (0 to 1) — scrubbing pauses play, and Play carries on from here'),
-      el('div', { class: 'row' },
-        btn(icon(v.rate && !v.paused ? 'pause' : 'play'), () => {
-          if (!v.rate) { v.rate = 0.2; v.paused = false; } else v.paused = !v.paused;
-          this.refresh();
-        }, { title: v.rate && !v.paused ? 'Pause — the playhead holds where it is' : 'Play — the playhead loops along its axis' }),
-        tip(slider('Speed', v.rate, -2, 2, 0.01, (x) => { v.rate = x; }, { def: 0.2 }),
+      // a normal labelled row, the button inside the VALUE column — built
+      // as a bare row it pushed the label out of the column the others share
+      fieldRow('Speed', [
+        playBtn,
+        tip(slider('', v.rate, -2, 2, 0.01, (x) => { v.rate = x; }, { def: 0.2 }),
           'films a second along the playhead\'s axis: negative runs backwards'),
-      ),
+      ]),
       tip(selectField('Ends', v.wrap, [['REPEAT', 'Loop'], ['CLAMP', 'Hold']], (x) => { v.wrap = x; }),
         'Loop: time wraps round the film · Hold: it stops at the first and last frames'),
       slider('Opacity', v.opacity, 0, 1, 0.01, (x) => { v.opacity = x; }, { def: 1 }),
+      ...this.volumeFilterRows(v),
+      el('div', { class: 'menu-sep' }),
       tip(numField('Resolution', v.resolution, (x) => { v.resolution = Math.max(16, Math.min(1024, Math.round(x))); }, 16, { def: 256, min: 16, max: 1024 }),
         'picture width the film is decoded at, in pixels — memory grows with its square'),
       tip(numField('Frames', v.frames, (x) => { v.frames = Math.max(2, Math.min(512, Math.round(x))); }, 8, { def: 128, min: 2, max: 512 }),

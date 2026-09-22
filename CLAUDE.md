@@ -744,6 +744,13 @@ the browser console or automated evals:
   the magnet off: a free drag landed at 2.506 and the same drag with Ctrl at
   exactly 2.500.
 
+- **Escape's "deselect all" fallback belongs to the VIEWPORT**
+  (`App.viewportFocused`, set by the last pointerdown like
+  `outlinerFocused`). A change in a panel rebuilds it, which drops focus to
+  the page, and the Escape that often follows (to leave a field, or from
+  habit) fell through to the fallback and emptied the selection — taking
+  the panel being edited with it. After a click in a panel, Escape leaves
+  the selection alone.
 - **The outliner has keyboard focus when the last pointerdown was in it**
   (`App.outlinerFocused`; rows are divs rebuilt on every refresh, so DOM
   focus cannot say). X, Delete and Cmd+Backspace then delete the SELECTED

@@ -1422,6 +1422,9 @@ class App implements AppHandle {
   /** a pointer went down in the outliner and nowhere else since: keys then
    *  act on its object selection (see onKey) */
   private outlinerFocused = false;
+  /** the last pointerdown was in the viewport — Escape's "deselect all"
+   *  fallback belongs to it, not to a panel you were just editing */
+  private viewportFocused = true;
 
   private deleteSelectedObjects(): void {
     const ctx = this.ctx;
@@ -1777,6 +1780,7 @@ class App implements AppHandle {
     // pointerdown can
     window.addEventListener('pointerdown', (e) => {
       this.outlinerFocused = !!(e.target as HTMLElement)?.closest?.('.sidebar-outliner');
+      this.viewportFocused = !!(e.target as HTMLElement)?.closest?.('#viewport');
     }, true);
 
     // Dropdowns keep keyboard focus after a pick (or after Escape closes
@@ -1819,6 +1823,11 @@ class App implements AppHandle {
       }
       if (document.querySelector('.menu-pop')) { this.ui.closeContextMenu(); return; }
       if (this.ui.settingsOpen || this.objModal.active || this.modal.active || this.nav.flying || this.objectPicking) return;
+      // Escape after editing a PANEL must not deselect what the panel is
+      // for: a change rebuilds the panel, which drops focus to the page, and
+      // the Escape that followed (to leave the field, or from habit) fell
+      // through to here and emptied the selection — the panel with it
+      if (!this.viewportFocused) return;
       if (this.ctx.settings.mode === 'OBJECT') {
         if (listSelected(this.ctx.scene).length) {
           deselectAllObjects(this.ctx.scene);
