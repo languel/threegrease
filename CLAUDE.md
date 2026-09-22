@@ -744,15 +744,30 @@ the browser console or automated evals:
   whichever selection is actually populated (PolyQuilt has no separate
   Vertex/Edge/Face MODE toggle the way standard Edit mode does). It then
   arms a move-grab on the new geometry exactly like meshedit's E, as ONE
-  undo step: `beginMoveElems` gained an optional `beforeOverride` so the
-  drag's own "before" snapshot is the state from BEFORE the extrude, not
-  after it — without that, undo would only unwind the drag and leave the
-  duplicated geometry behind. Verified: extruding a selected quad face
-  gives 6 faces / 12 edges / 8 verts and arms MOVE_ELEMS; dropping the grab
-  keeps that topology; ONE undo (checked against `ctx.scene`, since undo
-  here replaces the scene object wholesale — comparing against a
-  pre-undo `scene` reference silently reads the stale pre-undo copy)
-  reverts everything back to the original single face.
+  undo step — and the first version of that got the ONE STEP right while
+  quietly breaking the DRAG: `MOVE_ELEMS.before` is not just the undo
+  snapshot, `updateMoveElems` ALSO reads it back to find each dragged
+  vertex's OWN pre-drag position to add the delta to. Pointing `before` at
+  the state from BEFORE the extrude meant the newly-extruded vertices had
+  no entry in it at all — their position lookup silently missed, so
+  `if (orig && v)` never ran and they never moved a millimetre. This is
+  exactly what "extruded a face, locked Z, and it snapped back to the
+  ground" turned out to be: not a broken axis lock, a drag whose own
+  reference frame didn't contain the thing being dragged, so every delta
+  computed against nothing and the geometry sat frozen at its extrude-time
+  position. `MOVE_ELEMS` now carries the two roles as two fields:
+  `before` is ALWAYS the fresh POST-mutation snapshot (what the drag
+  interpolates from), `undoBefore` is the earlier PRE-mutation one, used
+  only by `onUp`'s `commit(ctx, pm, st.undoBefore ?? st.before)` — a plain
+  grab has no `undoBefore` and behaves exactly as before. Verified:
+  extruding a selected quad face gives 6 faces / 12 edges / 8 verts and
+  arms MOVE_ELEMS; moving the pointer up and THEN pressing Z now actually
+  raises the extruded face (Z climbed to ~1.0) while the original 4 base
+  vertices stay at Z=0; dropping the grab keeps that topology; ONE undo
+  (checked against `ctx.scene`, since undo here replaces the scene object
+  wholesale — comparing against a pre-undo `scene` reference silently reads
+  the stale pre-undo copy) reverts everything back to the original single
+  face.
   `toolErase`'s keymap entry keeps its action id (the toolbar/palette can
   still reach it) but lost its default `e` combo — the eraser is reached by
   **holding D** (Draw mode's own tool key) **+ right-click-drag**

@@ -79,7 +79,17 @@ type ToolState =
   | { kind: 'BUILD'; meshId: number; vertexIds: number[]; before: string; plane: THREE.Plane }
   | { kind: 'MOVE'; meshId: number; vertexId: number; before: string; moved: boolean }
   | {
-      kind: 'MOVE_ELEMS'; meshId: number; vertexIds: number[]; before: string;
+      // `before` is always the snapshot the DRAG interpolates from — the
+      // per-vertex positions `updateMoveElems` adds its delta to, so it must
+      // include every vertex being dragged, which for an extrude-then-grab
+      // means AFTER the extrude (the pre-extrude snapshot has no id for the
+      // new vertices at all, so their lookup silently misses and they never
+      // move — this is what "extrude then Z-lock did nothing" turned out to
+      // be). `undoBefore`, when set, is the state to restore for the ONE
+      // undo step covering both the mutation that armed this grab and the
+      // grab itself — a separate field on purpose, so the two roles can
+      // never collide again.
+      kind: 'MOVE_ELEMS'; meshId: number; vertexIds: number[]; before: string; undoBefore?: string;
       plane: THREE.Plane; startWorld: THREE.Vector3;
     }
   | {
@@ -453,7 +463,7 @@ export class PolyPenTool implements Tool {
         const st = this.state;
         this.state = { kind: 'IDLE' };
         this.pending = null;
-        this.commit(ctx, pm, st.before);
+        this.commit(ctx, pm, st.undoBefore ?? st.before);
         return;
       }
       case 'EXTRUDE': this.finishExtrude(ctx, pm); return;
@@ -638,7 +648,7 @@ export class PolyPenTool implements Tool {
    *  and the mutation that preceded it commit as ONE undo step — without it,
    *  this captures the CURRENT (already-mutated) state as "before", and
    *  undo would only unwind the drag, leaving the extrude behind. */
-  private beginMoveElems(ctx: AppCtx, pm: TGPolyMesh, vertexIds: number[], beforeOverride?: string): void {
+  private beginMoveElems(ctx: AppCtx, pm: TGPolyMesh, vertexIds: number[], undoBefore?: string): void {
     const verts = vertexIds.map((id) => getVertex(pm, id)).filter((v): v is NonNullable<typeof v> => !!v);
     if (!verts.length) return;
     const centroid: Vec3 = [0, 0, 0];
@@ -647,7 +657,7 @@ export class PolyPenTool implements Tool {
       centroid[0] / verts.length, centroid[1] / verts.length, centroid[2] / verts.length]));
     this.state = {
       kind: 'MOVE_ELEMS', meshId: pm.id, vertexIds: [...vertexIds],
-      before: beforeOverride ?? takeSnapshot(pm),
+      before: takeSnapshot(pm), undoBefore,
       plane: this.camPlaneThrough(ctx, world), startWorld: world,
     };
   }
