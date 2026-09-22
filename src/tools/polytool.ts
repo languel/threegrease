@@ -42,6 +42,7 @@ import {
   removeEdge, removeFace, removeFaceCascade, removeVertex, splitEdge, splitFace, touchPolyMesh,
 } from '../core/polymesh';
 import { createPolyMesh } from '../core/polymesh';
+import { extrudeSelection, type MeshSelectMode } from '../core/polyedit';
 import { deselectAllObjects } from './objects';
 import { bindingFor, pickConstruction, pickPolyEdge, pickPolyFace, pickPolyVertex, type ConstructionHit } from './polypick';
 import { autoQuad, walkQuadLoop, type LoopCutPlan } from './polyops';
@@ -632,7 +633,12 @@ export class PolyPenTool implements Tool {
 
   // ---- edge / face move (rigid, on a camera plane) --------------------------
 
-  private beginMoveElems(ctx: AppCtx, pm: TGPolyMesh, vertexIds: number[]): void {
+  /** `beforeOverride` lets a caller that already mutated `pm` (extrude, say)
+   *  hand in the snapshot from BEFORE that mutation, so the drag this starts
+   *  and the mutation that preceded it commit as ONE undo step — without it,
+   *  this captures the CURRENT (already-mutated) state as "before", and
+   *  undo would only unwind the drag, leaving the extrude behind. */
+  private beginMoveElems(ctx: AppCtx, pm: TGPolyMesh, vertexIds: number[], beforeOverride?: string): void {
     const verts = vertexIds.map((id) => getVertex(pm, id)).filter((v): v is NonNullable<typeof v> => !!v);
     if (!verts.length) return;
     const centroid: Vec3 = [0, 0, 0];
@@ -641,9 +647,35 @@ export class PolyPenTool implements Tool {
       centroid[0] / verts.length, centroid[1] / verts.length, centroid[2] / verts.length]));
     this.state = {
       kind: 'MOVE_ELEMS', meshId: pm.id, vertexIds: [...vertexIds],
-      before: takeSnapshot(pm),
+      before: beforeOverride ?? takeSnapshot(pm),
       plane: this.camPlaneThrough(ctx, world), startWorld: world,
     };
+  }
+
+  /** E: extrude the current selection (whichever of face/edge/vertex is
+   *  populated, in that priority — PolyQuilt has no separate Vertex/Edge/
+   *  Face MODE toggle the way standard Edit mode does, so the kind of
+   *  selection actually present decides) and immediately arm a move-grab on
+   *  the new geometry, exactly like standard Edit mode's E — one undo step,
+   *  drag to place, click or Enter to drop. Reuses `core/polyedit`'s
+   *  `extrudeSelection`, the same function meshedit.ts's E calls, so the
+   *  two editors cannot drift into extruding differently. */
+  private extrudeSelected(ctx: AppCtx): boolean {
+    if (this.state.kind !== 'IDLE') return false;
+    const pm = this.editMesh(ctx);
+    if (!pm) return false;
+    const hasFace = pm.faces.some((f) => f.select);
+    const hasEdge = pm.edges.some((ed) => ed.select);
+    const hasVert = pm.vertices.some((v) => v.select);
+    if (!hasFace && !hasEdge && !hasVert) return false;
+    const mode: MeshSelectMode = hasFace ? 'FACE' : hasEdge ? 'EDGE' : 'VERTEX';
+    const before = takeSnapshot(pm);
+    if (!extrudeSelection(pm, mode)) return false;
+    const vertexIds = pm.vertices.filter((v) => v.select).map((v) => v.id);
+    this.beginMoveElems(ctx, pm, vertexIds, before);
+    touchPolyMesh(pm);
+    ctx.requestRender();
+    return true;
   }
 
   private updateMoveElems(ctx: AppCtx, e: ToolEvent, pm: TGPolyMesh): void {
@@ -1084,6 +1116,9 @@ export class PolyPenTool implements Tool {
     if (key === 'm' || key === 'M') {
       if (this.state.kind !== 'IDLE') return false;
       return e.shiftKey ? this.weldByDistance(ctx) : this.mergeSelected(ctx);
+    }
+    if ((key === 'e' || key === 'E') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      return this.extrudeSelected(ctx);
     }
     if (key === 'Delete' || key === 'Backspace' || key === 'x' || key === 'X') {
       if (this.state.kind !== 'IDLE') return false;

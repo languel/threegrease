@@ -729,6 +729,48 @@ the browser console or automated evals:
   plain two-click cut is no longer weaker than a Knife drag between the same
   two points; Knife remains for the freehand case where you are drawing the
   cut path itself, not clicking two existing points.
+- **E IS EXTRUDE EVERYWHERE, AND ERASE MOVED OFF IT** (`PolyPenTool.extrudeSelected`,
+  `keymap.ts`, `App`'s D+RMB temp-eraser drag in `main.ts`). Standard Edit
+  mode's E (`meshedit.ts`) has always extruded by selection and started a
+  grab; PolyQuilt/Poly Build had no keyboard extrude at all — only
+  hold+drag on a boundary edge or vertex — so E there fell through to the
+  global keymap, which bound it to `toolErase` (switch to the eraser). One
+  key meant two unrelated things depending on which editor happened to have
+  focus, and neither meaning was extrude in the tool where extrude actually
+  needed a key (a selected FACE, say, has no edge to hold-drag).
+  `extrudeSelected` reuses `core/polyedit`'s `extrudeSelection` — the exact
+  function meshedit.ts's E already calls, so the two editors cannot drift
+  into extruding differently — inferring FACE/EDGE/VERTEX mode from
+  whichever selection is actually populated (PolyQuilt has no separate
+  Vertex/Edge/Face MODE toggle the way standard Edit mode does). It then
+  arms a move-grab on the new geometry exactly like meshedit's E, as ONE
+  undo step: `beginMoveElems` gained an optional `beforeOverride` so the
+  drag's own "before" snapshot is the state from BEFORE the extrude, not
+  after it — without that, undo would only unwind the drag and leave the
+  duplicated geometry behind. Verified: extruding a selected quad face
+  gives 6 faces / 12 edges / 8 verts and arms MOVE_ELEMS; dropping the grab
+  keeps that topology; ONE undo (checked against `ctx.scene`, since undo
+  here replaces the scene object wholesale — comparing against a
+  pre-undo `scene` reference silently reads the stale pre-undo copy)
+  reverts everything back to the original single face.
+  `toolErase`'s keymap entry keeps its action id (the toolbar/palette can
+  still reach it) but lost its default `e` combo — the eraser is reached by
+  **holding D** (Draw mode's own tool key) **+ right-click-drag**
+  (`App.eraseModHeld` / `eraseDrag`), driving the `erase` tool's onDown/
+  onMove/onUp directly rather than switching the active tool, so releasing
+  D leaves you exactly on the tool you were on. It needs the same
+  capture-phase `stopImmediatePropagation` trick as Shift+RMB cursor-drag
+  (`projection.ts`'s cousin in `main.ts`): OrbitControls already claimed
+  RIGHT for pan, registered before any of this app's own listeners, so
+  only a capture-phase intercept can steal the gesture back. `eraseModHeld`
+  is cleared on keyup AND on window blur — the same lesson fly mode's
+  `flyKeys` already learned (a blurred window never delivers keyup), so
+  Cmd-tabbing away mid-drag can't leave every later RMB drag erasing.
+  Verified through real dispatched PointerEvents on the canvas (not direct
+  method calls, so the actual capture/bubble listener chain is exercised):
+  a plain RMB drag across a stroke leaves it untouched (still pans), the
+  identical drag with `eraseModHeld` set removes it, and `eraseDrag` is
+  false again afterward either way.
 - **Poly Build drags take G's axis locks** (`PolyPenTool.axisLock`): X / Y /
   Z mid-drag locks a vertex move, a vertex extrude, an edge/face move or a
   boundary extrusion to that WORLD axis, Shift+ to the plane square to it,

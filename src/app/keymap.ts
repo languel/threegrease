@@ -38,7 +38,13 @@ export const ACTIONS: ActionDef[] = [
   { id: 'modePoly', label: 'PolyQuilt tool (topology pen)', combo: '6', category: 'Tools' },
   // Tools
   { id: 'toolDraw', label: 'Draw tool', combo: 'd', category: 'Tools' },
-  { id: 'toolErase', label: 'Erase tool', combo: 'e', category: 'Tools' },
+  // 'e' used to switch to the eraser here, but E is Blender's Extrude
+  // everywhere else in this app (standard Edit mode, PolyQuilt) — one key
+  // meaning two very different things depending on which editor happened to
+  // have focus was the surprising half. The eraser is reached by holding D
+  // (see the temp-eraser drag in main.ts) or from the toolbar/palette; this
+  // action id stays for those, it just has no default keyboard combo now.
+  { id: 'toolErase', label: 'Erase tool', combo: '', category: 'Tools' },
   { id: 'toolFill', label: 'Fill tool', combo: 'f', category: 'Tools' },
   // Edit
   { id: 'move', label: 'Move (grab)', combo: 'g', category: 'Edit' },

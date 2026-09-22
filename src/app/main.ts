@@ -331,6 +331,15 @@ class App implements AppHandle {
   private gizmoDrag: { x: number; y: number; startX: number; startY: number; dragged: boolean } | null = null;
   private rmbDown: { x: number; y: number } | null = null;
   private cursorDrag = false;
+  /** D is held (Draw mode only) — arms the temp-eraser drag on RMB, since
+   *  E is Extrude everywhere now and no longer a free key for the eraser.
+   *  Tracked in `onKey`, which already gates on focus being in the
+   *  viewport (not a text field); cleared on keyup AND on window blur,
+   *  the same lesson fly mode's `flyKeys` already learned — a blurred
+   *  window never delivers keyup, so a stuck D would otherwise turn every
+   *  later right-drag into an eraser until the next reload. */
+  private eraseModHeld = false;
+  private eraseDrag = false;
   private objectPicking: ((ref: ObjRef | null) => void) | null = null;
   /** Blender-style G/R/S modal transform for object mode */
   readonly objModal = new ObjectModalTransform();
@@ -1589,6 +1598,22 @@ class App implements AppHandle {
           return;
         }
       }
+      // D held + RMB drag = temp eraser (Draw mode only). Same capture-phase
+      // + stopImmediatePropagation reasoning as Shift+RMB below: OrbitControls
+      // already claimed RIGHT for pan, so a bubble-phase listener could never
+      // intercept it. Drives the erase tool directly rather than switching
+      // the active tool, so releasing D leaves you exactly on the tool (and
+      // mid-stroke state) you were on before.
+      if (e.button === 2 && this.eraseModHeld && this.ctx.settings.mode === 'DRAW' && !this.nav.flying) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        this.eraseDrag = true;
+        this.pointerPane = this.paneAt(e.clientX, e.clientY);
+        const erase = this.tools.get('erase');
+        this.withPane(this.pointerPane, () => erase?.onDown(this.ctx, this.toolEvent(e)));
+        this.capture(e);
+        return;
+      }
       if (e.button !== 2 || !e.shiftKey || this.nav.flying) return;
       e.stopImmediatePropagation();
       e.preventDefault();
@@ -1659,6 +1684,11 @@ class App implements AppHandle {
         this.withPane(this.pointerPane, () => this.placeCursor(e.clientX, e.clientY));
         return;
       }
+      if (this.eraseDrag) {
+        const erase = this.tools.get('erase');
+        this.withPane(this.pointerPane, () => erase?.onMove(this.ctx, this.toolEvent(e)));
+        return;
+      }
       if (this.gizmoDrag) {
         const dx = te.x - this.gizmoDrag.x, dy = te.y - this.gizmoDrag.y;
         if (Math.hypot(te.x - this.gizmoDrag.startX, te.y - this.gizmoDrag.startY) > 3) {
@@ -1727,6 +1757,12 @@ class App implements AppHandle {
       if (this.lightHandleDrag) { this.lightHandleDrag = null; this.ui.refresh(); return; }
       if (this.keystoneDrag) { this.keystoneDrag = null; this.ui.refresh(); return; }
       if (this.aimDrag) { this.aimDrag = null; this.ui.refresh(); return; }
+      if (this.eraseDrag) {
+        const erase = this.tools.get('erase');
+        this.withPane(this.pointerPane, () => erase?.onUp(this.ctx, this.toolEvent(e)));
+        this.eraseDrag = false;
+        return;
+      }
       if (e.button === 2) {
         if (this.cursorDrag) { this.cursorDrag = false; return; }
         const down = this.rmbDown;
@@ -1754,6 +1790,32 @@ class App implements AppHandle {
     });
 
     window.addEventListener('keyup', (e) => { this.nav.handleFlyKey(e, false); });
+    // EraseTool.onUp ignores its ToolEvent entirely (it only clears its own
+    // `active` flag), so a minimal stand-in at the last known pointer is
+    // fine here — there is no real PointerEvent to build a full one from on
+    // a keyup or a window blur.
+    const endEraseDrag = () => {
+      if (!this.eraseDrag) return;
+      const dummy: ToolEvent = {
+        x: this.tools.lastPointer.x, y: this.tools.lastPointer.y, pressure: 1,
+        shift: false, ctrl: false, alt: false, meta: false, clientX: 0, clientY: 0,
+      };
+      this.tools.get('erase')?.onUp(this.ctx, dummy);
+      this.eraseDrag = false;
+    };
+    window.addEventListener('keyup', (e) => {
+      if (e.key.toLowerCase() !== 'd') return;
+      this.eraseModHeld = false;
+      endEraseDrag();
+    });
+    // A blurred window never delivers keyup (the same trap fly mode's
+    // flyKeys already hit): without this, releasing D outside the window —
+    // Cmd-tabbing away mid-drag, say — would leave eraseModHeld stuck on
+    // and turn every later RMB drag into an eraser until reload.
+    window.addEventListener('blur', () => {
+      this.eraseModHeld = false;
+      endEraseDrag();
+    });
 
     canvas.addEventListener('wheel', (e) => {
       if (this.modal.active && this.ctx.settings.propEdit.enabled) {
@@ -1863,6 +1925,8 @@ class App implements AppHandle {
     const ctx = this.ctx;
     const key = e.key;
     const mod = e.ctrlKey || e.metaKey;
+
+    if (key.toLowerCase() === 'd' && !mod && !e.altKey && ctx.settings.mode === 'DRAW') this.eraseModHeld = true;
 
     if (this.ui.settingsOpen) return; // dialog handles its own keys
     // The OUTLINER has focus: X / Delete / Cmd+Backspace delete the objects
@@ -7577,7 +7641,7 @@ class App implements AppHandle {
     }
     const hints: Record<string, string> = {
       OBJECT: 'LMB select (Shift extends) · widget or G/R/S mode · X delete · Add… for primitives/models · Shift+RMB drag cursor · RMB menu',
-      DRAW: 'LMB draw · MMB orbit · RMB pan · Shift+RMB drag cursor · Tab edit mode',
+      DRAW: 'LMB draw · MMB orbit · RMB pan · hold D+RMB erase · Shift+RMB drag cursor · Tab edit mode',
       EDIT: 'LMB select (drag box, Ctrl lasso) · G/R/S transform (X/Y/Z axis, N normal, Ctrl inverts snap) · X delete · Shift+D dup · A all',
       SCULPT: 'LMB sculpt · Ctrl inverts brush',
       VERTEX: 'LMB paint vertex color',
