@@ -52,6 +52,10 @@ export interface VolumeTex {
   aspect: number;
   /** 0..1 while decoding */
   progress: number;
+  /** the ALPHA channel holds a person mask (people filter), not the film's own */
+  segmented?: boolean;
+  /** what the decode is doing, for the panel */
+  stage?: string;
 }
 
 const MAX_BYTES = 256 * 1024 * 1024;
@@ -127,6 +131,50 @@ async function decodeVideo(url: string, maxW: number, maxFrames: number,
   return { data, w, h, n, aspect };
 }
 
+/**
+ * PEOPLE: MediaPipe's selfie segmenter, frame by frame, its person
+ * confidence written into each layer's ALPHA. Run once, as the film decodes,
+ * not per display frame — the filter is then a threshold in the shader.
+ * The layers are stored bottom-row-first, so each frame is turned the right
+ * way up for the model (it finds people upside down badly) and the mask is
+ * turned back.
+ */
+const SELFIE_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+async function segmentPeople(data: Uint8Array, w: number, h: number, n: number,
+  onProgress: (p: number) => void): Promise<void> {
+  const vision = await import('@mediapipe/tasks-vision');
+  let fileset;
+  try { fileset = await vision.FilesetResolver.forVisionTasks('/node_modules/@mediapipe/tasks-vision/wasm'); }
+  catch { fileset = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm'); }
+  const seg = await vision.ImageSegmenter.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: SELFIE_MODEL, delegate: 'CPU' },
+    runningMode: 'IMAGE', outputConfidenceMasks: true, outputCategoryMask: false,
+  });
+  const row = w * 4;
+  const upright = new Uint8ClampedArray(w * h * 4);
+  for (let z = 0; z < n; z++) {
+    const base = z * w * h * 4;
+    for (let y = 0; y < h; y++) upright.set(data.subarray(base + (h - 1 - y) * row, base + (h - y) * row), y * row);
+    const r = seg.segment(new ImageData(upright, w, h));
+    const masks = r.confidenceMasks ?? [];
+    // one mask = the person; several (multiclass) = the first is BACKGROUND
+    const m = masks.length ? masks[0].getAsFloat32Array() : null;
+    const person = masks.length === 1;
+    if (m) {
+      for (let y = 0; y < h; y++) {
+        const src = y * w, dst = base + (h - 1 - y) * row;
+        for (let x = 0; x < w; x++) {
+          const c = person ? m[src + x] : 1 - m[src + x];
+          data[dst + x * 4 + 3] = Math.round(Math.min(1, Math.max(0, c)) * 255);
+        }
+      }
+    }
+    r.close();
+    onProgress((z + 1) / n);
+  }
+  seg.close();
+}
+
 // ---------------------------------------------------------------- shader
 
 const VERT = /* glsl */`
@@ -173,7 +221,7 @@ const FRAG = /* glsl */`
   uniform float uStart;     // the layer time 0 is in (a live ring's oldest)
   uniform bool uRing;
   uniform mat4 uWorldToVol;
-  uniform int uMode;        // 0 position, 1 map
+  uniform int uMode;        // 0 position, 1 map, 2 VOLUME (ray-march the cube)
   uniform float uTime;      // offset along time, 0..1 of the film
   uniform float uGain;
   uniform bool uRepeat;
@@ -182,13 +230,85 @@ const FRAG = /* glsl */`
   uniform bool uInvertMap;
   uniform float uOpacity;
   uniform bool uReady;
+  uniform float uDensity;
+  // the FILTER: what of the film counts
+  uniform int uPeople;       // 0 off, 1 keep people, 2 remove people
+  uniform float uPeopleTh;
+  uniform bool uKey;
+  uniform vec3 uKeyColor;
+  uniform float uKeyTol;
+  uniform bool uKeyKeep;
+  uniform float uLumaMin, uLumaMax;
+  uniform float uMotion;
   varying vec3 vWorld;
   varying vec2 vUv;
 
   float wrapT(float t) { return uRepeat ? fract(t) : clamp(t, 0.0, 1.0); }
 
+  // TIME is a layer index, blended between the two neighbours by hand (a
+  // texture array does not filter across layers the way a 3D texture does)
+  vec4 sampleAt(vec3 uvt) {
+    float f = uvt.z * (uFrames - 1.0);
+    float f0 = floor(f);
+    float f1 = min(f0 + 1.0, uFrames - 1.0);
+    float l0 = mod(f0 + uStart, uFrames), l1 = mod(f1 + uStart, uFrames);
+    return mix(texture(uVol, vec3(uvt.xy, l0)), texture(uVol, vec3(uvt.xy, l1)), f - f0);
+  }
+
+  // 1 when the voxel passes the filter, 0 when it is filtered out (soft at
+  // the edges, so a mask does not alias). The ALPHA channel carries the
+  // person mask when the volume was decoded with people segmentation.
+  float passes(vec3 uvt, vec4 c) {
+    float k = 1.0;
+    if (uPeople == 1) k *= smoothstep(uPeopleTh - 0.1, uPeopleTh + 0.1, c.a);
+    else if (uPeople == 2) k *= 1.0 - smoothstep(uPeopleTh - 0.1, uPeopleTh + 0.1, c.a);
+    if (uKey) {
+      float d = distance(c.rgb, uKeyColor);
+      float near = 1.0 - smoothstep(uKeyTol * 0.8, uKeyTol * 1.2 + 1e-3, d);
+      k *= uKeyKeep ? near : 1.0 - near;
+    }
+    float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+    k *= step(uLumaMin, l) * step(l, uLumaMax);
+    if (uMotion > 0.0) {
+      vec4 prev = sampleAt(vec3(uvt.xy, max(0.0, uvt.z - 1.0 / max(1.0, uFrames - 1.0))));
+      float dm = (abs(prev.r - c.r) + abs(prev.g - c.g) + abs(prev.b - c.b)) / 3.0;
+      k *= smoothstep(uMotion * 0.7, uMotion * 1.3, dm);
+    }
+    return k;
+  }
+
   void main() {
-    if (!uReady) { gl_FragColor = vec4(0.25, 0.25, 0.28, uOpacity); return; }
+    if (!uReady) { gl_FragColor = vec4(0.25, 0.25, 0.28, uOpacity * 0.5); return; }
+    if (uMode == 2) {
+      // VOLUME: march the ray through the cube (drawn with its BACK faces,
+      // so this runs once per covered pixel whether the eye is outside or
+      // in), compositing front to back what the filter lets through
+      vec3 eye = (uWorldToVol * vec4(cameraPosition, 1.0)).xyz;
+      vec3 end = (uWorldToVol * vec4(vWorld, 1.0)).xyz;
+      vec3 dir = normalize(end - eye);
+      vec3 inv = 1.0 / dir;
+      vec3 t0 = (vec3(-0.5) - eye) * inv, t1 = (vec3(0.5) - eye) * inv;
+      vec3 tn = min(t0, t1), tf = max(t0, t1);
+      float tIn = max(max(max(tn.x, tn.y), tn.z), 0.0);
+      float tOut = min(min(tf.x, tf.y), tf.z);
+      if (tOut <= tIn) discard;
+      const int STEPS = 160;
+      float dt = (tOut - tIn) / float(STEPS);
+      vec4 acc = vec4(0.0);
+      for (int i = 0; i < STEPS; i++) {
+        vec3 p = eye + dir * (tIn + (float(i) + 0.5) * dt) + 0.5;
+        vec3 uvt = vec3(p.x, p.z, wrapT(p.y + uTime));
+        vec4 c = sampleAt(uvt);
+        float a = passes(uvt, c) * clamp(uDensity * dt * 40.0, 0.0, 1.0);
+        acc.rgb += (1.0 - acc.a) * a * c.rgb;
+        acc.a += (1.0 - acc.a) * a;
+        if (acc.a > 0.98) break;
+      }
+      if (acc.a < 0.003) discard;
+      gl_FragColor = vec4(acc.rgb / acc.a, acc.a * uOpacity);
+      #include <colorspace_fragment>
+      return;
+    }
     vec3 uvt;
     if (uMode == 0) {
       // the cube's local space is -0.5..0.5: x across, z up, y TIME
@@ -204,14 +324,10 @@ const FRAG = /* glsl */`
       }
       uvt = vec3(vUv, wrapT(uTime + uGain * m));
     }
-    // TIME is a layer index, blended between the two neighbours by hand (a
-    // texture array does not filter across layers the way a 3D texture does)
-    float f = uvt.z * (uFrames - 1.0);
-    float f0 = floor(f);
-    float f1 = min(f0 + 1.0, uFrames - 1.0);
-    float l0 = mod(f0 + uStart, uFrames), l1 = mod(f1 + uStart, uFrames);
-    vec4 col = mix(texture(uVol, vec3(uvt.xy, l0)), texture(uVol, vec3(uvt.xy, l1)), f - f0);
-    gl_FragColor = vec4(col.rgb, col.a * uOpacity);
+    vec4 col = sampleAt(uvt);
+    float k = passes(uvt, col);
+    if (k < 0.5) discard;
+    gl_FragColor = vec4(col.rgb, uOpacity);
     #include <colorspace_fragment>
   }
 `;
@@ -225,7 +341,9 @@ function sliceMaterial(empty: THREE.DataArrayTexture): THREE.ShaderMaterial {
     vertexShader: VERT, fragmentShader: FRAG, side: THREE.DoubleSide, transparent: true,
     uniforms: {
       uVol: { value: empty }, uWorldToVol: { value: new THREE.Matrix4() },
-      uFrames: { value: 1 }, uStart: { value: 0 }, uRing: { value: false },
+      uFrames: { value: 1 }, uStart: { value: 0 }, uRing: { value: false }, uDensity: { value: 0.5 },
+      uPeople: { value: 0 }, uPeopleTh: { value: 0.5 }, uKey: { value: false }, uKeyColor: { value: new THREE.Color(0, 1, 0) },
+      uKeyTol: { value: 0.25 }, uKeyKeep: { value: false }, uLumaMin: { value: 0 }, uLumaMax: { value: 1 }, uMotion: { value: 0 },
       uField: { value: 0 }, uVolToWorld: { value: new THREE.Matrix4() }, uBase: { value: 0 },
       uAmount: { value: 0 }, uRadius: { value: 0.25 }, uFreq: { value: 1 }, uCenter: { value: new THREE.Vector2(0.5, 0.5) },
       uHasFieldMap: { value: false }, uFieldMap: { value: null },
@@ -266,12 +384,18 @@ export class TimeVolumeManager {
   /** the app's live sources (cameras), for LIVE volumes */
   live: { get(key: string): { canvas: HTMLCanvasElement; frame: number; status: string } | undefined; openTest(): unknown } | null = null;
 
+  /** A volume decoded with the people mask is a different decode. */
   static key(v: TGVolume): string {
-    return `${v.src}|${v.resolution}|${v.frames}`;
+    const seg = v.filter && v.filter.people !== 'OFF' && !v.src.startsWith('live:') ? '|people' : '';
+    return `${v.src}|${v.resolution}|${v.frames}${seg}`;
   }
 
   /** The decoded texture for a volume, starting the decode on first ask. */
+  private noSource: VolumeTex = { tex: null, head: -1, status: 'loading', width: 0, height: 0, frames: 0, aspect: 1, progress: 0, stage: 'no source yet' };
+
   volume(v: TGVolume): VolumeTex {
+    // a volume made from the Add menu has no film until one is picked
+    if (!v.src) return this.noSource;
     const key = TimeVolumeManager.key(v);
     const hit = this.vols.get(key);
     if (hit) return hit;
@@ -328,7 +452,7 @@ export class TimeVolumeManager {
     L.filled = Math.min(vt.frames, L.filled + 1);
   }
 
-  statusOf(v: TGVolume): VolumeTex | undefined { return this.vols.get(TimeVolumeManager.key(v)); }
+  statusOf(v: TGVolume): VolumeTex | undefined { return v.src ? this.vols.get(TimeVolumeManager.key(v)) : this.noSource; }
 
   private async load(v: TGVolume, vt: VolumeTex): Promise<void> {
     try {
@@ -343,6 +467,13 @@ export class TimeVolumeManager {
       const r = isGif
         ? await decodeGif(blob ?? await (await fetch(url)).blob(), maxW, frames, progress)
         : await decodeVideo(url, maxW, frames, progress);
+      if (v.filter && v.filter.people !== 'OFF') {
+        vt.stage = 'finding people';
+        vt.progress = 0;
+        await segmentPeople(r.data, r.w, r.h, r.n, progress);
+        vt.segmented = true;
+      }
+      vt.stage = undefined;
       const tex = new THREE.DataArrayTexture(r.data as Uint8Array<ArrayBuffer>, r.w, r.h, r.n);
       tex.format = THREE.RGBAFormat;
       tex.type = THREE.UnsignedByteType;
@@ -365,6 +496,17 @@ export class TimeVolumeManager {
     u.uVol.value = vt.tex ?? this.emptyTex;
     u.uReady.value = vt.status === 'ok';
     u.uFrames.value = Math.max(1, vt.frames);
+    const f = v.filter;
+    // PEOPLE only means something when the volume was decoded with a mask
+    u.uPeople.value = f && f.people !== 'OFF' && vt.segmented ? (f.people === 'KEEP' ? 1 : 2) : 0;
+    u.uPeopleTh.value = f?.peopleThreshold ?? 0.5;
+    u.uKey.value = !!f?.key;
+    (u.uKeyColor.value as THREE.Color).setRGB(...(f?.keyColor ?? [0, 1, 0]));
+    u.uKeyTol.value = f?.keyTolerance ?? 0.25;
+    u.uKeyKeep.value = !!f?.keyKeep;
+    u.uLumaMin.value = f?.lumaMin ?? 0;
+    u.uLumaMax.value = f?.lumaMax ?? 1;
+    u.uMotion.value = f?.motion ?? 0;
     // a live ring's time 0 is the layer after the newest; a file's is layer 0
     u.uStart.value = vt.live ? (vt.head + 1) % Math.max(1, vt.frames) : 0;
     u.uRing.value = !!vt.live;
@@ -374,6 +516,19 @@ export class TimeVolumeManager {
 
   /** Mirror scene.volumes: one cube per volume, sampling itself. */
   sync(scene: GPScene): void {
+    // a decode nothing names any more (a changed resolution, the people
+    // mask turned on or off) is a texture of up to 256 MB — but the last two
+    // are KEPT: toggling the people filter off and on again must not cost a
+    // second segmentation of every frame. Map order is insertion order, so
+    // the oldest unused go first.
+    if (this.vols.size > scene.volumes.length + 2) {
+      const used = new Set(scene.volumes.map((v) => TimeVolumeManager.key(v)));
+      const unused = [...this.vols].filter(([k, vt]) => !used.has(k) && vt.status !== 'loading');
+      for (const [k, vt] of unused.slice(0, Math.max(0, unused.length - 2))) {
+        vt.tex?.dispose();
+        this.vols.delete(k);
+      }
+    }
     for (const [id, e] of this.entries) {
       if (scene.volumes.some((v) => v.id === id)) continue;
       this.group.remove(e.root);
@@ -403,7 +558,14 @@ export class TimeVolumeManager {
       const mat = e.root.material as THREE.ShaderMaterial;
       const u = mat.uniforms;
       this.fill(u, v, scene);
-      u.uMode.value = 0;
+      // VOLUME ray-marches the cube, drawn from its BACK faces so it works
+      // with the eye inside it too; FACES samples the faces themselves
+      const march = v.display === 'VOLUME';
+      u.uMode.value = march ? 2 : 0;
+      const side = march ? THREE.BackSide : THREE.DoubleSide;
+      if (mat.side !== side) { mat.side = side; mat.needsUpdate = true; }
+      mat.depthWrite = !march;
+      u.uDensity.value = v.density ?? 0.5;
       u.uTime.value = v.time + e.phase;
       u.uRepeat.value = v.wrap !== 'CLAMP';
       u.uOpacity.value = v.opacity;

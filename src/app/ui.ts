@@ -3,7 +3,7 @@ import { snapIncrement, type AppCtx, type EraserMode, type GuideType, type Paint
 import { splatDisplay, type SplatEditOp } from '../splats/edit';
 import type { EditorMode } from '../render/GPSceneRenderer';
 import type { TGLight, TGLens, GPCamera, GPScene, GPLayer, GPMaterial, ModifierType, EffectType, Vec4, BlendMode, LineMode, FillStyle, StrokeShade, VaryMode } from '../core/types';
-import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, Vec3, ViewportShading } from '../core/types';
+import type { MaterialBlend, TGActor, TGMaterial, TextureSlotName, TGMesh, TGVolume, TGVolumeFilter, Vec3, ViewportShading } from '../core/types';
 import { activeCam, activeLayer, activeObject, createLayer, createMaterial, cloneFrame, createFrame, forEachSelectedStroke, frameAt, genId } from '../core/gpdata';
 import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
@@ -97,7 +97,10 @@ export interface AppHandle {
     Promise<{ ok: boolean; count?: number; error?: string }>;
   addVolumeSlice(volumeId: number, mode?: 'POSITION' | 'MAP' | 'FIELD'): number | null;
   /** the decode state of a time volume, for its panel */
-  volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number } | null;
+  volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number; stage?: string; segmented: boolean } | null;
+  setVolumeSource(id: number, src: string, name?: string): void;
+  setVolumeSourceFile(id: number, file: File): Promise<void>;
+  setVolumeSourceLive(id: number, test: boolean): Promise<void>;
   splatSelectInside(meshId: number): void;
   /** [shown, selected, removed, total], or null until the cloud has loaded */
   splatEditCounts(id: number): [number, number, number, number] | null;
@@ -1172,23 +1175,10 @@ export class UI {
    * wear the same glyphs the outliner does, so a light found in this menu
    * looks like the light it becomes.
    */
-  /** Add ▸ Time volume ▸ — every video and GIF in the Library. */
+  /** Add ▸ Time volume: an empty cube — its SOURCE (a video, a GIF, a
+   *  camera) is chosen in its panel, not from a menu listing the Library. */
   private volumeAddItem(at?: [number, number, number]): CtxItem {
-    const media = listAssets().filter((as) => as.kind === 'STREAM'
-      && (JSON.parse(as.payload) as { key?: string }).key?.startsWith('media:'));
-    return {
-      label: 'Time volume', icon: 'timeVolume',
-      items: [
-        // a camera recorded into the cube: the last N frames, always
-        { label: 'Live camera', icon: 'camera', do: () => { void this.app.addLiveVolume(false); } },
-        { label: 'Test camera', icon: 'camera', do: () => { void this.app.addLiveVolume(true); } },
-        ...(media.length ? [{ sep: true as const }] : []),
-        ...media.map((as) => ({
-          label: as.name,
-          do: () => { this.app.addVolume((JSON.parse(as.payload) as { key: string }).key.slice('media:'.length), as.name, at); },
-        })),
-      ],
-    };
+    return { label: 'Time volume', icon: 'timeVolume', do: () => { this.app.addVolume('', undefined, at); } };
   }
 
   addMenuItems(at?: [number, number, number]): CtxItem[] {
@@ -2182,15 +2172,40 @@ export class UI {
     const v = this.app.ctx.scene.volumes.find((x) => x.id === id);
     if (!v) return [];
     const st = this.app.volumeStatus(id);
-    const status = !st ? 'waiting' : st.status === 'loading' ? `decoding… ${Math.round(st.progress * 100)}%`
+    const status = !v.src ? 'no source — pick one' : !st ? 'waiting'
+      : st.status === 'loading' ? `${st.stage ?? 'decoding'}… ${Math.round(st.progress * 100)}%`
       : st.status === 'error' ? `could not decode: ${st.error}` : `${st.width} × ${st.height} × ${st.frames} frames`;
+    const srcName = !v.src ? 'None' : v.src === 'live:test:camera' ? 'Test camera'
+      : v.src.startsWith('live:') ? 'Live camera' : decodeURIComponent(v.src.split('/').pop() ?? v.src);
+    const srcBtn: HTMLElement = btn(srcName, () => {
+      const r = srcBtn.getBoundingClientRect();
+      const media = listAssets().filter((as) => as.kind === 'STREAM'
+        && (JSON.parse(as.payload) as { key?: string }).key?.startsWith('media:'));
+      this.openContextMenu(r.left, r.bottom + 2, [
+        { header: 'Film' },
+        ...media.map((as) => ({
+          label: as.name, icon: 'photo' as IconName,
+          do: () => this.app.setVolumeSource(id, (JSON.parse(as.payload) as { key: string }).key.slice('media:'.length), as.name),
+        })),
+        ...(media.length ? [] : [{ label: 'no videos or GIFs in the Library', disabled: true, do: () => {} }]),
+        { label: 'From a file\u2026', icon: 'arrowDownTray', do: () => this.filePick('video/*,image/gif', (f) => { void this.app.setVolumeSourceFile(id, f); }) },
+        { sep: true },
+        { header: 'Live — recorded into the cube' },
+        { label: 'Camera', icon: 'camera', do: () => { void this.app.setVolumeSourceLive(id, false); } },
+        { label: 'Test camera', icon: 'camera', do: () => { void this.app.setVolumeSourceLive(id, true); } },
+      ]);
+    }, { title: 'what the cube holds: a video or GIF from the Library or a file, or a camera recorded live' });
     return [
       el('div', { class: 'menu-sep' }),
+      fieldRow('Source', srcBtn),
       el('div', { class: 'row dim', text: (v.src.startsWith('live:') ? 'live · ' : '') + status }),
       ...(v.src.startsWith('live:') ? [tip(checkbox('Freeze', !!v.frozen, (x) => { v.frozen = x; }),
         'stop recording and hold the frames the cube has — time 0 is the oldest of them, 1 the newest')] : []),
-      tip(selectField('Show', v.display, [['FACES', 'Faces'], ['WIRE', 'Wire']], (x) => { v.display = x; }),
-        'Faces: the cube\'s own faces show the film — the first frame at the front, the last at the back, time streaking down the sides · Wire: only its edges, so the slices inside are the picture'),
+      tip(selectField('Show', v.display, [['FACES', 'Faces'], ['VOLUME', 'Volume'], ['WIRE', 'Wire']], (x) => { v.display = x; this.refresh(); }),
+        'Faces: the cube\'s own faces show the film — the first frame at the front, the last at the back, time streaking down the sides · Volume: see INTO the block — with a filter on, only what passes is left, floating in space-time · Wire: only its edges, so the slices inside are the picture'),
+      ...(v.display === 'VOLUME' ? [tip(slider('Density', v.density ?? 0.5, 0.01, 1, 0.01, (x) => { v.density = x; }, { def: 0.5 }),
+        'how solid each voxel that passes the filter is: low for smoke, high for a surface')] : []),
+      ...this.volumeFilterRows(v),
       checkbox('Edges', v.outline !== false, (x) => { v.outline = x; }),
       tip(slider('Time', v.time, 0, 1, 0.005, (x) => { v.time = x; }, { def: 0 }),
         'scrub along the film (0 to 1 of its length) — for the cube\'s own faces'),
@@ -2212,6 +2227,38 @@ export class UI {
         tip(btn('Add surface', () => this.app.addVolumeSlice(id, 'FIELD')),
           'a time SURFACE inside the cube, bent by a shape (a bump into the past, a tilt, a wave, a map) — scrub or play its Time and it sweeps through the film'),
       ),
+    ];
+  }
+
+  /** What of the film counts: people, a colour key, brightness, motion. */
+  private volumeFilterRows(v: TGVolume): HTMLElement[] {
+    const f: TGVolumeFilter = v.filter ?? {
+      people: 'OFF', peopleThreshold: 0.5, key: false, keyColor: [0, 1, 0], keyTolerance: 0.3, keyKeep: false,
+      lumaMin: 0, lumaMax: 1, motion: 0,
+    };
+    // written back whole, so a volume with no filter stays one without it
+    const set = (patch: Partial<TGVolumeFilter>) => { v.filter = { ...f, ...patch }; };
+    const live = v.src.startsWith('live:');
+    return [
+      el('div', { class: 'menu-sep' }),
+      el('div', { class: 'row dim', text: 'Filter' }),
+      tip(selectField('People', f.people, [['OFF', 'Off'], ['KEEP', 'Only people'], ['REMOVE', 'Remove people']],
+        (x) => { set({ people: x }); this.refresh(); }),
+      live ? 'people are found as a FILE decodes — a live camera is not segmented'
+        : 'find the people in every frame (MediaPipe) and keep only them, or everything but them — the first time, the film decodes again with the mask'),
+      ...(f.people !== 'OFF' ? [slider('Threshold', f.peopleThreshold, 0.05, 0.95, 0.01, (x) => set({ peopleThreshold: x }), { def: 0.5 })] : []),
+      tip(checkbox('Colour key', f.key, (x) => { set({ key: x }); this.refresh(); }),
+        'keep or remove one colour — a green screen, a costume, a light'),
+      ...(f.key ? [
+        fieldRow('Colour', colorField('', [...f.keyColor, 1], (rgb) => set({ keyColor: rgb }))),
+        slider('Tolerance', f.keyTolerance, 0.02, 1, 0.01, (x) => set({ keyTolerance: x }), { def: 0.3 }),
+        selectField('Key', f.keyKeep ? 'KEEP' : 'REMOVE', [['REMOVE', 'Remove it'], ['KEEP', 'Keep only it']],
+          (x) => set({ keyKeep: x === 'KEEP' })),
+      ] : []),
+      tip(slider('Brightness from', f.lumaMin, 0, 1, 0.01, (x) => set({ lumaMin: x }), { def: 0 }), 'leave out voxels darker than this'),
+      tip(slider('Brightness to', f.lumaMax, 0, 1, 0.01, (x) => set({ lumaMax: x }), { def: 1 }), 'leave out voxels brighter than this'),
+      tip(slider('Motion', f.motion, 0, 0.5, 0.005, (x) => set({ motion: x }), { def: 0 }),
+        'keep only what CHANGED since the frame before — a still background vanishes (0 = off)'),
     ];
   }
 

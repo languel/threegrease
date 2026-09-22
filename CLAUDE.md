@@ -2271,6 +2271,25 @@ the browser console or automated evals:
     then samples exactly where each point lies. Scrub moves the whole sheet
     through the film. Videos and GIFs become volumes from Add ▸ Time volume,
     a Library tile's cube button, or its right-click menu.
+  - A VOLUME HAS A FILTER (`TGVolume.filter`), and it applies EVERYWHERE the
+    film is read — its faces, every slice, the Volume display and Convert to
+    splats — by one shader function (`passes`) and its CPU twin, so what you
+    convert is what you see. PEOPLE is MediaPipe's selfie segmenter, run
+    once per frame AS THE FILE DECODES, its confidence written into the
+    layer's ALPHA (the key gains `|people`, so turning it on decodes again).
+    The layers are stored bottom-row-first, and a segmenter finds people
+    upside down badly — each frame is turned upright for it and the mask
+    turned back. Live volumes are not segmented. COLOUR KEY keeps or removes
+    one colour within a tolerance; BRIGHTNESS a range; MOTION what changed
+    since the previous frame. The two most recent UNUSED decodes are kept,
+    so toggling People off and on does not segment every frame twice.
+  - VOLUME DISPLAY ray-marches the cube (160 steps, front to back,
+    filtered voxels empty), drawn from its BACK faces so it works with the
+    eye inside it and depthWrite off. With a filter on, only what passes is
+    left — people floating in space-time.
+  - A new volume comes from Add ▸ Time volume EMPTY; its SOURCE (a Library
+    video or GIF, a file — which also goes into the Library — or a live /
+    test camera) is picked in its panel, not from a menu listing the Library.
   - CONVERT TO SPLATS (`App.volumeToSplats`): every sampled voxel — one
     pixel of one frame — becomes a gaussian at its place in the cube, sized
     to the sampling spacing, written as a standard 3DGS PLY into the store

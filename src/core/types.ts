@@ -577,7 +577,15 @@ export interface TGVolume {
   /** FACES: the cube's own faces show the film (front = first frame, the
    *  sides the time streaks); WIRE: only its edges — the slices inside it
    *  are the picture */
-  display: 'FACES' | 'WIRE';
+  display: 'FACES' | 'WIRE' | 'VOLUME';
+  /** VOLUME display: how much each voxel that passes the filter occludes */
+  density?: number;
+  /**
+   * What of the film COUNTS — applied everywhere it is read: the cube, every
+   * slice and Convert to splats. Filtered-out voxels are empty, so with the
+   * Volume display you see only what is left, floating in space-time.
+   */
+  filter?: TGVolumeFilter;
   /** draw the cube's edges */
   outline: boolean;
   /** offset along time, 0..1 of the film, for the cube's own faces */
@@ -586,6 +594,26 @@ export interface TGVolume {
   rate: number;
   wrap: 'REPEAT' | 'CLAMP';
   opacity: number;
+}
+
+export interface TGVolumeFilter {
+  /** PEOPLE: a person mask per frame (MediaPipe's selfie segmenter, run as
+   *  the film decodes — files only). KEEP shows only people, REMOVE only
+   *  everything else */
+  people: 'OFF' | 'KEEP' | 'REMOVE';
+  peopleThreshold: number;
+  /** COLOUR KEY: voxels within `tolerance` of `color` are kept (keep) or
+   *  removed (!keep) — a green screen, a costume, a light */
+  key: boolean;
+  keyColor: Vec3;
+  keyTolerance: number;
+  keyKeep: boolean;
+  /** brightness range kept, 0..1 */
+  lumaMin: number;
+  lumaMax: number;
+  /** keep only voxels that changed by more than this since the previous
+   *  frame (0 = off) */
+  motion: number;
 }
 
 /** A mesh that CUTS a time volume: its surface shows what the cube holds

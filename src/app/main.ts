@@ -4854,7 +4854,7 @@ class App implements AppHandle {
     this.ctx.pushUndo();
     const id = genId();
     const v: TGVolume = {
-      id, name: name ?? decodeURIComponent(src.split('/').pop() ?? 'volume'), src,
+      id, name: name ?? (src ? decodeURIComponent(src.split('/').pop() ?? 'volume') : 'Time volume'), src,
       translation: at ?? [...this.ctx.scene.cursor], rotation: [0, 0, 0], scale: [1, 1, 0.5625],
       visible: true, select: false, parent: null, constraints: [],
       resolution: 256, frames: 128, display: 'FACES', outline: true,
@@ -4908,6 +4908,9 @@ class App implements AppHandle {
     const W = vt.width, H = vt.height, N = vt.frames;
     const start = vt.live ? (vt.head + 1) % N : 0;
     const step = Math.max(1, Math.round(o.step)), tStep = Math.max(1, Math.round(o.tStep));
+    const f = v.filter;
+    // the filter's motion threshold counts as well as the conversion's own
+    const motion = Math.max(o.motion, f?.motion ?? 0);
     // the cube's own size is baked into the positions: a splat object has
     // one uniform scale and a volume is rarely a cube
     const world = worldMatrixOf(scene, { kind: 'VOLUME', id });
@@ -4926,12 +4929,25 @@ class App implements AppHandle {
           const i = L + (y * W + x) * 4;
           const r = data[i] / 255, g = data[i + 1] / 255, b = data[i + 2] / 255, a = data[i + 3] / 255;
           const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          if (a < 0.5 || luma < o.minLuma) continue;
-          if (o.motion > 0) {
+          if (luma < o.minLuma) continue;
+          // the VOLUME'S OWN FILTER as well, the same tests the shader makes,
+          // so what you convert is what you see. The alpha is the person mask
+          // when the volume was decoded with one, and the film's own otherwise.
+          if (vt.segmented && f && f.people !== 'OFF') {
+            if (f.people === 'KEEP' ? a < f.peopleThreshold : a >= f.peopleThreshold) continue;
+          } else if (a < 0.5) continue;
+          if (f) {
+            if (luma < f.lumaMin || luma > f.lumaMax) continue;
+            if (f.key) {
+              const d = Math.hypot(r - f.keyColor[0], g - f.keyColor[1], b - f.keyColor[2]);
+              if ((d <= f.keyTolerance) !== f.keyKeep) continue;
+            }
+          }
+          if (motion > 0) {
             if (P < 0) continue;
             const j = P + (y * W + x) * 4;
             const d = (Math.abs(data[j] - data[i]) + Math.abs(data[j + 1] - data[i + 1]) + Math.abs(data[j + 2] - data[i + 2])) / 765;
-            if (d < o.motion) continue;
+            if (d < motion) continue;
           }
           // cube space: x across, y time, z up (v = 0 is the bottom row)
           const u = (x + 0.5) / W, vv = (y + 0.5) / H, t = (k + 0.5) / N;
@@ -4966,10 +4982,42 @@ class App implements AppHandle {
     return { ok: true, count: n };
   }
 
-  volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number } | null {
+  /** Point a volume at a new film (a store ref, or `live:<key>`): it
+   *  decodes afresh and takes the picture's aspect again. */
+  setVolumeSource(id: number, src: string, name?: string): void {
+    const v = this.ctx.scene.volumes.find((x) => x.id === id) as (TGVolume & { fit?: boolean }) | undefined;
+    if (!v) return;
+    this.ctx.pushUndo();
+    const wasDefault = !v.src || v.name === 'Time volume';
+    v.src = src;
+    v.fit = true;
+    if (wasDefault && name) v.name = name;
+    this.ui.refresh();
+  }
+
+  /** A film from disk: into the store AND the Library (so the next volume
+   *  is a click), then onto the volume. */
+  async setVolumeSourceFile(id: number, file: File): Promise<void> {
+    const src = await putFile(file, file.name);
+    saveAsset(file.name, 'STREAM', JSON.stringify({ key: `media:${src}`, label: file.name, deviceId: '', media: true }));
+    this.setVolumeSource(id, src, file.name);
+  }
+
+  async setVolumeSourceLive(id: number, test: boolean): Promise<void> {
+    let key = 'test:camera';
+    if (!test) {
+      try { key = (await liveSources.open()).key; } catch (err) {
+        this.setStatusHint(`no camera: ${err instanceof Error ? err.message : String(err)}`, 4000);
+        return;
+      }
+    }
+    this.setVolumeSource(id, `live:${key}`, test ? 'Test camera volume' : 'Camera volume');
+  }
+
+  volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number; stage?: string; segmented: boolean } | null {
     const v = this.ctx.scene.volumes.find((x) => x.id === id);
     const st = v ? timeVolumes.statusOf(v) : undefined;
-    return st ? { status: st.status, progress: st.progress, error: st.error, width: st.width, height: st.height, frames: st.frames } : null;
+    return st ? { status: st.status, progress: st.progress, error: st.error, width: st.width, height: st.height, frames: st.frames, stage: st.stage, segmented: !!st.segmented } : null;
   }
 
   /** A new volume takes its picture's aspect the moment the decode knows it,

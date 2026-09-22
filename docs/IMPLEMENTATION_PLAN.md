@@ -3315,3 +3315,22 @@ what it is made of. A camera is never a draw target, so it is never in it.
 - Next: a raymarched
   volume display, conversion to splats (density controllable), animated
   strokes and actors as sources.
+
+## Time volume filters, the Volume display and the source picker
+
+- `TGVolumeFilter` (people KEEP / REMOVE + threshold, colour key + tolerance
+  + keep, brightness range, motion); one GLSL `passes()` shared by faces,
+  slices and the ray-march, mirrored on the CPU in `volumeToSplats`.
+- People: `segmentPeople` (MediaPipe ImageSegmenter, selfie model, CPU,
+  IMAGE mode) writes person confidence into each layer's alpha during the
+  decode; frames are flipped upright for the model and back.
+- Volume display: ray-march in the cube's space from its back faces, 160
+  steps, front-to-back, Density control.
+- Add ▸ Time volume makes an empty volume; the panel's Source picks a Library
+  film, a file (also added to the Library), or the live / test camera.
+- Acceptance (giphy-1.gif, 256 × 256 × 34): Volume display shows the dancer
+  at several moments inside the block; Only people removes the stage and
+  background; Remove people leaves only them; an orange key keeps the
+  costume and the light; Convert to splats: 557,056 unfiltered against
+  9,454 people-only, the cloud matching the display; toggling People off and
+  on reuses the masked decode.

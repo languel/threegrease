@@ -801,6 +801,23 @@ the wrong answer. What breaks them is what the person meant: the order they
 clicked, the points left over lying on the shape, and the object having been
 put in roughly the right way up — in that priority.
 
+## Session log (2026-09-21, late): time volumes
+
+Detail in IMPLEMENTATION_PLAN.md under "Time volumes (space-time cubes)" and
+"Time volume filters, the Volume display and the source picker".
+
+A film as a space-time cube (after Cassinelli's Khronos Projector): a VOLUME
+object kind, sliced by any mesh (position, time map, or a bent time surface
+that sweeps through as you scrub), recorded live from a camera into a ring,
+filtered (people via MediaPipe, colour key, brightness, motion), shown as a
+see-through ray-marched block, and convertible to a splat cloud.
+
+**The lesson: test an effect with material that does not already look like
+the effect.** The first test clip was a render of this very idea, so it
+looked right however the cube was built. A dancer moving in place is the
+honest test: an oblique slice has to show two dancers at two moments, and a
+surface bump has to push part of one into the past.
+
 ---
 
 # THE NEXT PHASE: planning a real show in a real room

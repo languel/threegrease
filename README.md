@@ -216,8 +216,8 @@ npm run dev     # open http://localhost:5199
   and hide faint (low-confidence) or oversized splats with filters — then
   **Select / Delete filtered** to make a filter permanent. Export PLY writes
   what is shown.
-- **Time volumes** (Add ▸ Time volume, from any video or GIF in the
-  Library): the film as a space-time cube — across, up, and TIME along its
+- **Time volumes** (Add ▸ Time volume, then pick a video, GIF or camera
+  as its Source): the film as a space-time cube — across, up, and TIME along its
   depth — after Cassinelli's Khronos Projector. Cut it with any surface: a
   slice square to the time axis is one frame and sliding it plays the film,
   a tilted or curved one shows different moments across the picture, and a
@@ -227,7 +227,10 @@ npm run dev     # open http://localhost:5199
   *surface* slice bends a time sheet inside the cube (a bump into the past,
   a tilt, a wave) and sweeps through it as you scrub, and **Convert to
   splats** turns the film into a gaussian cloud — optionally keeping only
-  what moved, as a trail through time.
+  what moved, as a trail through time. **Filters** — only people (found
+  per frame by MediaPipe), a colour key, a brightness range, motion — apply
+  to the cube, its slices, the see-through **Volume** display and the
+  splats alike.
 - **Registration with measurements**: a measurement placed on an object
   sticks to it. Type the real length of one and it rescales just that
   object (or the whole scene). Pair two measurements — corners of a
