@@ -167,7 +167,7 @@ export interface GPEffect {
 
 // ---- Object --------------------------------------------------------------
 
-export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE' | 'CAMERA'; id: number }
+export interface ParentRef { kind: 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE' | 'CAMERA' | 'VOLUME'; id: number }
 
 // ---- object constraints (Blender-style stack, evaluated every frame) ----
 
@@ -548,6 +548,63 @@ export interface TGSplat {
   removed?: string;
 }
 
+/**
+ * A TIME VOLUME: a video or GIF as a SPACE-TIME CUBE — its frames stacked
+ * into one 3D texture. Local x is the picture's across, z its up, y is TIME
+ * (the front face is the first frame). The cube is unit-sized before
+ * `scale`, so scale IS its size. See render/timevolume.ts.
+ */
+export interface TGVolume {
+  id: number;
+  name: string;
+  /** a stored or URL video / GIF */
+  src: string;
+  translation: Vec3;
+  rotation: Vec3;
+  scale: Vec3;
+  visible: boolean;
+  select: boolean;
+  lock?: boolean;
+  parent?: ParentRef | null;
+  constraints?: TGConstraint[];
+  /** picture width the volume is decoded at, px (height follows the aspect) */
+  resolution: number;
+  /** how many frames it is sampled into (the time resolution) */
+  frames: number;
+  /** FACES: the cube's own faces show the film (front = first frame, the
+   *  sides the time streaks); WIRE: only its edges — the slices inside it
+   *  are the picture */
+  display: 'FACES' | 'WIRE';
+  /** draw the cube's edges */
+  outline: boolean;
+  /** offset along time, 0..1 of the film, for the cube's own faces */
+  time: number;
+  /** play: cycles of the film a second (0 = still) */
+  rate: number;
+  wrap: 'REPEAT' | 'CLAMP';
+  opacity: number;
+}
+
+/** A mesh that CUTS a time volume: its surface shows what the cube holds
+ *  where the surface passes through it. */
+export interface TGTimeSlice {
+  volumeId: number;
+  /** POSITION: where the surface is inside the cube decides picture and
+   *  time. MAP: the surface's own UVs are the picture and time comes from a
+   *  map (luminance) — the Khronos Projector */
+  mode: 'POSITION' | 'MAP';
+  /** offset along time, 0..1 of the film */
+  time: number;
+  /** MAP: how much of the film the map's black-to-white spans */
+  gain: number;
+  /** MAP: an image, video or camera (texture src) whose brightness is time */
+  map?: string;
+  invertMap?: boolean;
+  /** cycles a second (0 = still) */
+  rate: number;
+  wrap: 'REPEAT' | 'CLAMP';
+}
+
 export type SplatDisplayMode = 'SPLATS' | 'POINTS';
 
 export interface TGSplatDisplay {
@@ -760,6 +817,8 @@ export interface TGMesh {
   select: boolean;
   lock?: boolean;
   drawTarget: boolean;     // raycast target for Surface placement
+  /** cuts a time volume: the surface shows the space-time cube where it passes through it */
+  timeSlice?: TGTimeSlice;
   /** blocks a possessed character (walls, furniture) and supports it as
    *  ground. Undefined means yes — collision is the default, opt out for
    *  ghost geometry, glass, and reference planes you want to walk through. */
@@ -1520,6 +1579,8 @@ export interface GPScene {
   /** shared material datablocks, referenced by mesh-family objects */
   materials: TGMaterial[];
   splats: TGSplat[];
+  /** time volumes: a video or GIF as a space-time cube (render/timevolume.ts) */
+  volumes: TGVolume[];
   meshes: TGMesh[];
   /** editable generalized meshes (authored topology) */
   polyMeshes: TGPolyMesh[];

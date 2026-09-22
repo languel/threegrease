@@ -23,6 +23,7 @@ export function constraintsOf(scene: GPScene, ref: ObjRef): TGConstraint[] {
     ref.kind === 'GP' ? scene.objects.find((o) => o.id === ref.id) :
     ref.kind === 'MESH' ? scene.meshes.find((m) => m.id === ref.id) :
     ref.kind === 'SPLAT' ? scene.splats.find((s) => s.id === ref.id) :
+    ref.kind === 'VOLUME' ? scene.volumes.find((v) => v.id === ref.id) :
     ref.kind === 'TRIGGER' ? scene.score.triggers.find((t) => t.id === ref.id) :
     ref.kind === 'STREAM' ? scene.mmStreams.find((st) => st.id === ref.id) :
     ref.kind === 'ACTOR' ? scene.actors.find((a) => a.id === ref.id) :

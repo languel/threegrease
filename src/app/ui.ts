@@ -91,6 +91,10 @@ export interface AppHandle {
   splatEditing(): boolean;
   splatEditOp(op: SplatEditOp, id?: number): void;
   splatVolumes(): { id: number; name: string; kind: string }[];
+  addVolume(src: string, name?: string, at?: [number, number, number]): number;
+  addVolumeSlice(volumeId: number, mode?: 'POSITION' | 'MAP'): number | null;
+  /** the decode state of a time volume, for its panel */
+  volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number } | null;
   splatSelectInside(meshId: number): void;
   /** [shown, selected, removed, total], or null until the cloud has loaded */
   splatEditCounts(id: number): [number, number, number, number] | null;
@@ -1165,6 +1169,19 @@ export class UI {
    * wear the same glyphs the outliner does, so a light found in this menu
    * looks like the light it becomes.
    */
+  /** Add ▸ Time volume ▸ — every video and GIF in the Library. */
+  private volumeAddItem(at?: [number, number, number]): CtxItem {
+    const media = listAssets().filter((as) => as.kind === 'STREAM'
+      && (JSON.parse(as.payload) as { key?: string }).key?.startsWith('media:'));
+    return {
+      label: 'Time volume', icon: 'timeVolume', disabled: !media.length,
+      items: media.length ? media.map((as) => ({
+        label: as.name,
+        do: () => { this.app.addVolume((JSON.parse(as.payload) as { key: string }).key.slice('media:'.length), as.name, at); },
+      })) : undefined,
+    };
+  }
+
   addMenuItems(at?: [number, number, number]): CtxItem[] {
     const a = this.app;
     const mesh = (kind: Parameters<AppHandle['addMeshObject']>[0]) => () => a.addMeshObject(kind, undefined, at);
@@ -1200,6 +1217,7 @@ export class UI {
       { label: 'Camera', icon: 'camera', do: () => a.addCamera() },
       { label: 'Empty', icon: 'target', do: mesh('EMPTY') },
       { label: 'Actor', icon: 'actor', do: () => a.addActor(at) },
+      this.volumeAddItem(at),
       { sep: true },
       {
         label: 'From the Library', icon: 'folder', disabled: !assets.length,
@@ -2149,6 +2167,79 @@ export class UI {
 
   /** Right-click while editing a MESH: its own operations, not the stroke
    *  editor's (which acted on grease pencil and did nothing to the mesh). */
+  /** The Volume panel: how the cube shows, where its playhead is, and the
+   *  slices to cut it with. */
+  private volumeRows(id: number): HTMLElement[] {
+    const v = this.app.ctx.scene.volumes.find((x) => x.id === id);
+    if (!v) return [];
+    const st = this.app.volumeStatus(id);
+    const status = !st ? 'waiting' : st.status === 'loading' ? `decoding… ${Math.round(st.progress * 100)}%`
+      : st.status === 'error' ? `could not decode: ${st.error}` : `${st.width} × ${st.height} × ${st.frames} frames`;
+    return [
+      el('div', { class: 'menu-sep' }),
+      el('div', { class: 'row dim', text: status }),
+      tip(selectField('Show', v.display, [['FACES', 'Faces'], ['WIRE', 'Wire']], (x) => { v.display = x; }),
+        'Faces: the cube\'s own faces show the film — the first frame at the front, the last at the back, time streaking down the sides · Wire: only its edges, so the slices inside are the picture'),
+      checkbox('Edges', v.outline !== false, (x) => { v.outline = x; }),
+      tip(slider('Time', v.time, 0, 1, 0.005, (x) => { v.time = x; }, { def: 0 }),
+        'scrub along the film (0 to 1 of its length) — for the cube\'s own faces'),
+      tip(slider('Play', v.rate, -2, 2, 0.01, (x) => { v.rate = x; }, { def: 0 }),
+        'films a second: 0 holds, negative plays backwards'),
+      tip(selectField('Ends', v.wrap, [['REPEAT', 'Loop'], ['CLAMP', 'Hold']], (x) => { v.wrap = x; }),
+        'Loop: time wraps round the film · Hold: it stops at the first and last frames'),
+      slider('Opacity', v.opacity, 0, 1, 0.01, (x) => { v.opacity = x; }, { def: 1 }),
+      tip(numField('Resolution', v.resolution, (x) => { v.resolution = Math.max(16, Math.min(1024, Math.round(x))); }, 16, { def: 256, min: 16, max: 1024 }),
+        'picture width the film is decoded at, in pixels — memory grows with its square'),
+      tip(numField('Frames', v.frames, (x) => { v.frames = Math.max(2, Math.min(512, Math.round(x))); }, 8, { def: 128, min: 2, max: 512 }),
+        'how many frames the film is sampled into: the resolution along TIME'),
+      el('div', { class: 'row' },
+        tip(btn('Add slice', () => this.app.addVolumeSlice(id, 'POSITION')),
+          'a plane that cuts the cube: square to the time axis it is one frame, and moving it along the cube plays the film; tilt it for an oblique cut'),
+        tip(btn('Add time map', () => this.app.addVolumeSlice(id, 'MAP')),
+          'a plane that shows the whole picture with TIME taken from a map — a depth image, a video or a camera — Khronos-style'),
+      ),
+    ];
+  }
+
+  /** On a mesh: cut a time volume with it, or how it does. */
+  private sliceRows(m: TGMesh): HTMLElement[] {
+    const vols = this.app.ctx.scene.volumes;
+    const s = m.timeSlice;
+    if (!s) {
+      if (!vols.length) return [];
+      return [el('div', { class: 'row' }, tip(btn('Slice a time volume', () => {
+        this.app.ctx.pushUndo();
+        m.timeSlice = { volumeId: vols[0].id, mode: 'POSITION', time: 0, gain: 1, rate: 0, wrap: 'REPEAT' };
+        this.refresh();
+      }), 'this surface shows the space-time cube where it passes through it'))];
+    }
+    const mapBtn: HTMLElement = btn(s.map ? 'Change map…' : 'Choose map…', () => this.pickPicture(mapBtn, (src) => {
+      s.map = src; this.refresh();
+    }), { title: 'an image, video or camera whose brightness is TIME' });
+    return [
+      el('div', { class: 'menu-sep' }),
+      el('div', { class: 'row dim', text: 'Time slice' }),
+      selectField('Volume', String(s.volumeId), vols.map((v) => [String(v.id), v.name] as [string, string]),
+        (x) => { s.volumeId = Number(x); }),
+      tip(selectField('Time from', s.mode, [['POSITION', 'Position'], ['MAP', 'Map']], (x) => { s.mode = x; this.refresh(); }),
+        'Position: where the surface is inside the cube decides picture AND time — move, tilt or bend it · Map: the surface shows the whole picture, and each pixel\'s time comes from a map'),
+      tip(slider('Time', s.time, -1, 1, 0.005, (x) => { s.time = x; }, { def: 0 }), 'offset along the film'),
+      tip(slider('Play', s.rate, -2, 2, 0.01, (x) => { s.rate = x; }, { def: 0 }), 'films a second: 0 holds'),
+      ...(s.mode === 'MAP' ? [
+        el('div', { class: 'row' }, mapBtn,
+          ...(s.map ? [btn('×', () => { s.map = undefined; this.refresh(); }, { title: 'no map: one moment everywhere' })] : [])),
+        tip(slider('Depth', s.gain, -1, 1, 0.01, (x) => { s.gain = x; }, { def: 1 }),
+          'how much of the film the map spans from black to white — negative runs it the other way'),
+        checkbox('Invert map', !!s.invertMap, (x) => { s.invertMap = x; }),
+      ] : []),
+      tip(selectField('Ends', s.wrap, [['REPEAT', 'Loop'], ['CLAMP', 'Hold']], (x) => { s.wrap = x; }),
+        'Loop: time wraps round the film · Hold: it stops at the ends'),
+      el('div', { class: 'row' }, btn('Stop slicing', () => {
+        this.app.ctx.pushUndo(); delete m.timeSlice; this.refresh();
+      }, { title: 'show this mesh\'s own material again' })),
+    ];
+  }
+
   /** "Select inside ▸" — every box, sphere, cylinder or plane in the scene
    *  as a selection volume. */
   private splatVolumeItem(): CtxItem & { items?: CtxItem[] } {
@@ -4058,6 +4149,20 @@ export class UI {
       ],
       rename: (v) => { s.name = v; },
     });
+    for (const v of scene.volumes) nodes.push({
+      ref: { kind: 'VOLUME', id: v.id }, icon: icon('timeVolume'), name: v.name, selected: v.select,
+      parent: v.parent,
+      onSelect: (e) => {
+        this.app.setLastPicked({ kind: 'VOLUME', id: v.id });
+        toggleSel((x) => { v.select = x; }, v.select, !!(e?.metaKey || e?.ctrlKey));
+      },
+      extras: viewLockBtns(
+        { kind: 'VOLUME', id: v.id },
+        !v.visible, (x) => { v.visible = !x; },
+        !!v.lock, (x) => { v.lock = x; },
+      ),
+      rename: (x) => { v.name = x; },
+    });
     for (const t of scene.score.triggers) nodes.push({
       ref: { kind: 'TRIGGER', id: t.id }, icon: icon('boltCircle'), name: t.name, selected: !!t.select,
       parent: t.parent,
@@ -4513,6 +4618,7 @@ export class UI {
         + 'Camera (HUD): Loc/Rot/Scale become a view-space offset, so keep z '
         + 'negative for depth'),
         checkbox('Draw target', m.drawTarget, (v) => { m.drawTarget = v; }),
+        ...this.sliceRows(m),
         ...this.physicsRows(m),
         ...this.mediaInstanceRows(m),
         ...(m.kind === 'EMPTY' ? []                 // no surface to display
@@ -4660,6 +4766,8 @@ export class UI {
           }, { title: 'drop every camera key' })] : []),
         ),
       );
+    } else if (ref.kind === 'VOLUME') {
+      rows.push(...this.volumeRows(ref.id));
     } else if (ref.kind === 'SPLAT') {
       const s = ctx.scene.splats.find((x) => x.id === ref.id)!;
       const d = splatDisplay(s.display);
@@ -7018,6 +7126,7 @@ export class UI {
       ref.kind === 'GP' ? ctx.scene.objects.find((o) => o.id === ref.id) :
       ref.kind === 'MESH' ? ctx.scene.meshes.find((m) => m.id === ref.id) :
       ref.kind === 'SPLAT' ? ctx.scene.splats.find((s) => s.id === ref.id) :
+      ref.kind === 'VOLUME' ? ctx.scene.volumes.find((v) => v.id === ref.id) :
       ref.kind === 'TRIGGER' ? ctx.scene.score.triggers.find((t) => t.id === ref.id) :
       ref.kind === 'STREAM' ? ctx.scene.mmStreams.find((st) => st.id === ref.id) :
       ref.kind === 'ACTOR' ? ctx.scene.actors.find((a) => a.id === ref.id) :

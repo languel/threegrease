@@ -216,6 +216,13 @@ npm run dev     # open http://localhost:5199
   and hide faint (low-confidence) or oversized splats with filters — then
   **Select / Delete filtered** to make a filter permanent. Export PLY writes
   what is shown.
+- **Time volumes** (Add ▸ Time volume, from any video or GIF in the
+  Library): the film as a space-time cube — across, up, and TIME along its
+  depth — after Cassinelli's Khronos Projector. Cut it with any surface: a
+  slice square to the time axis is one frame and sliding it plays the film,
+  a tilted or curved one shows different moments across the picture, and a
+  *time map* (an image, video or camera) gives every pixel its own moment.
+  Scrub and play either.
 - **Registration with measurements**: a measurement placed on an object
   sticks to it. Type the real length of one and it rescales just that
   object (or the whole scene). Pair two measurements — corners of a

@@ -175,6 +175,8 @@ const PATHS: Record<string, string> = {
   // the Object properties tab: an object's frame round its (filled) body —
   // the selection brackets, so it cannot be mistaken for the Library's cube
   objectProps: 'M4 8.5V4h4.5M15.5 4H20v4.5M20 15.5V20h-4.5M8.5 20H4v-4.5M9 9h6v6H9Z',
+  // a TIME VOLUME: a cube with frames stacked through its depth
+  timeVolume: 'M4 7.5 12 4l8 3.5v9L12 20l-8-3.5ZM4 7.5l8 3.5 8-3.5M12 11v9M7 9v8.8M9.5 10.1v8.8M14.5 10.1v8.8M17 9v8.8',
   // the Library: books on a shelf, one leaning
   library: 'M4 4.5h3v15H4ZM8.5 4.5h3v15h-3ZM13.2 5.4l2.9-.8 3.9 14.5-2.9.8ZM3 20.25h18',
   selOpExtend: 'M3 3h12v12H3ZM9 9h12v12H9Z',

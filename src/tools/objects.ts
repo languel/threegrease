@@ -13,7 +13,7 @@ import { objectToScreen, pickCanvas } from './projection';
 import type { Tool, ToolEvent } from './toolsys';
 import { drawLasso, pointInPolygon } from './draw';
 
-export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE' | 'CAMERA';
+export type ObjKind = 'GP' | 'CANVAS' | 'SPLAT' | 'MESH' | 'TRIGGER' | 'STREAM' | 'POLY' | 'PCLOUD' | 'LIGHT' | 'ACTOR' | 'MEASURE' | 'CAMERA' | 'VOLUME';
 export interface ObjRef { kind: ObjKind; id: number }
 
 export function gpIndexOf(scene: GPScene, id: number): number {
@@ -25,6 +25,7 @@ export function listSelected(scene: GPScene): ObjRef[] {
   for (const ob of scene.objects) if (ob.select) out.push({ kind: 'GP', id: ob.id });
   for (const c of scene.canvases) if (c.select) out.push({ kind: 'CANVAS', id: c.id });
   for (const s of scene.splats) if (s.select) out.push({ kind: 'SPLAT', id: s.id });
+  for (const v of scene.volumes) if (v.select) out.push({ kind: 'VOLUME', id: v.id });
   for (const m of scene.meshes) if (m.select) out.push({ kind: 'MESH', id: m.id });
   for (const t of scene.score.triggers) if (t.select) out.push({ kind: 'TRIGGER', id: t.id });
   for (const st of scene.mmStreams) if (st.select) out.push({ kind: 'STREAM', id: st.id });
@@ -53,6 +54,7 @@ function entityOf(scene: GPScene, ref: ObjRef):
   if (ref.kind === 'GP') return scene.objects.find((o) => o.id === ref.id);
   if (ref.kind === 'CANVAS') return scene.canvases.find((c) => c.id === ref.id);
   if (ref.kind === 'SPLAT') return scene.splats.find((s) => s.id === ref.id);
+  if (ref.kind === 'VOLUME') return scene.volumes.find((v) => v.id === ref.id);
   if (ref.kind === 'TRIGGER') return scene.score.triggers.find((t) => t.id === ref.id);
   if (ref.kind === 'STREAM') return scene.mmStreams.find((st) => st.id === ref.id);
   if (ref.kind === 'POLY') return scene.polyMeshes.find((p) => p.id === ref.id);
@@ -198,6 +200,7 @@ export function refOfObject3D(object: THREE.Object3D | null): ObjRef | null {
     if (u.polyId !== undefined) return { kind: 'POLY', id: u.polyId };
     if (u.pcloudId !== undefined) return { kind: 'PCLOUD', id: u.pcloudId };
     if (u.splatId !== undefined) return { kind: 'SPLAT', id: u.splatId };
+    if (u.volumeId !== undefined) return { kind: 'VOLUME', id: u.volumeId };
     if (u.actorId !== undefined) return { kind: 'ACTOR', id: u.actorId };
     cur = cur.parent;
   }
@@ -222,6 +225,10 @@ export function getObjectTransform(scene: GPScene, ref: ObjRef): ObjTransform | 
   if (ref.kind === 'SPLAT') {
     const s = scene.splats.find((x) => x.id === ref.id);
     return s ? { translation: [...s.translation], rotation: [...s.rotation], scale: [s.scale, s.scale, s.scale] } : null;
+  }
+  if (ref.kind === 'VOLUME') {
+    const v = scene.volumes.find((x) => x.id === ref.id);
+    return v ? { translation: [...v.translation], rotation: [...v.rotation], scale: [...v.scale] } : null;
   }
   if (ref.kind === 'TRIGGER') {
     const t = scene.score.triggers.find((x) => x.id === ref.id);
@@ -279,6 +286,9 @@ export function setObjectTransform(scene: GPScene, ref: ObjRef, t: ObjTransform)
       s.rotation = [...t.rotation];
       s.scale = Math.max(0.001, (Math.abs(t.scale[0]) + Math.abs(t.scale[1]) + Math.abs(t.scale[2])) / 3);
     }
+  } else if (ref.kind === 'VOLUME') {
+    const v = scene.volumes.find((x) => x.id === ref.id);
+    if (v) { v.translation = [...t.translation]; v.rotation = [...t.rotation]; v.scale = [...t.scale]; }
   } else if (ref.kind === 'TRIGGER') {
     const tr = scene.score.triggers.find((x) => x.id === ref.id);
     if (tr) {
@@ -337,6 +347,10 @@ export function deleteObject(scene: GPScene, ref: ObjRef): void {
     scene.canvases = scene.canvases.filter((c) => c.id !== ref.id);
   } else if (ref.kind === 'SPLAT') {
     scene.splats = scene.splats.filter((s) => s.id !== ref.id);
+  } else if (ref.kind === 'VOLUME') {
+    scene.volumes = scene.volumes.filter((v) => v.id !== ref.id);
+    // a slice of a volume that is gone is just a mesh again
+    for (const m of scene.meshes) if (m.timeSlice?.volumeId === ref.id) delete m.timeSlice;
   } else if (ref.kind === 'TRIGGER') {
     scene.score.triggers = scene.score.triggers.filter((t) => t.id !== ref.id);
   } else if (ref.kind === 'STREAM') {
@@ -371,6 +385,7 @@ export function allRefs(scene: GPScene): ObjRef[] {
     ...scene.objects.map((o) => ({ kind: 'GP' as const, id: o.id })),
     ...scene.canvases.map((c) => ({ kind: 'CANVAS' as const, id: c.id })),
     ...scene.splats.map((s) => ({ kind: 'SPLAT' as const, id: s.id })),
+    ...scene.volumes.map((v) => ({ kind: 'VOLUME' as const, id: v.id })),
     ...scene.meshes.map((m) => ({ kind: 'MESH' as const, id: m.id })),
     ...scene.score.triggers.map((t) => ({ kind: 'TRIGGER' as const, id: t.id })),
     ...scene.mmStreams.map((st) => ({ kind: 'STREAM' as const, id: st.id })),
@@ -711,6 +726,7 @@ export class ObjectSelectTool implements Tool {
         if (cur.userData.canvasId !== undefined) return { kind: 'CANVAS', id: cur.userData.canvasId };
         if (cur.userData.meshId !== undefined) return { kind: 'MESH', id: cur.userData.meshId };
         if (cur.userData.polyId !== undefined) return { kind: 'POLY', id: cur.userData.polyId };
+        if (cur.userData.volumeId !== undefined) return { kind: 'VOLUME', id: cur.userData.volumeId };
         cur = cur.parent;
       }
     }

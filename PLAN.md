@@ -157,6 +157,8 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Splats: select/delete filtered, crop to selection, separate selection into a new baked PLY
 - [x] Measurements: rescale the attached object; align an object by paired measurements (scan pedestal onto a virtual one)
 - [ ] Splats: move/rotate selected splats, live boolean crop/filter volumes
+- [x] Time volumes: video/GIF as a space-time cube; position and time-map slices on any mesh; scrub and play
+- [ ] Time volumes: live camera ring buffer, volume (raymarched) display, conversion to splats with controllable density, animated strokes/actors as sources
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)

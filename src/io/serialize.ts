@@ -211,6 +211,8 @@ export function deserializeScene(json: string): GPScene {
   }
   scene.images = scene.images.filter((i) => !i.src.startsWith('blob:')); // session-only
   scene.splats ??= [];
+  scene.volumes ??= [];
+  for (const v of scene.volumes) { v.select ??= false; v.constraints ??= []; }
   // object-URL sources don't survive reload
   scene.splats = scene.splats.filter((s) => !s.src.startsWith('blob:'));
   for (const s of scene.splats) { s.select ??= false; s.lock ??= false; s.drawTarget ??= false; s.constraints ??= []; }

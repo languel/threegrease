@@ -27,6 +27,7 @@ export function bumpIdCounter(scene: GPScene): void {
   for (const m of scene.meshes ?? []) max = Math.max(max, m.id);
   for (const p of scene.polyMeshes ?? []) max = Math.max(max, p.id);
   for (const s of scene.splats ?? []) max = Math.max(max, s.id);
+  for (const v of scene.volumes ?? []) max = Math.max(max, v.id);
   for (const c of scene.paintClouds ?? []) max = Math.max(max, c.id);
   for (const st of scene.mmStreams ?? []) max = Math.max(max, st.id);
   for (const c of scene.clips ?? []) max = Math.max(max, c.id);
@@ -278,6 +279,7 @@ export function createScene(): GPScene {
     world: createWorld(),
     materials: [],
     splats: [],
+    volumes: [],
     meshes: [],
     polyMeshes: [],
     paintClouds: [],

@@ -1,6 +1,7 @@
 // Mesh scene objects (object mode): primitive solids/planes and imported
 // models, mirroring scene.meshes — reference geometry or Surface-placement
 // draw targets. Same lifecycle pattern as SplatManager.
+import { timeVolumes } from './timevolume';
 import * as THREE from 'three';
 import { liveKeyOf, LIVE_PREFIX } from '../io/livesources';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -415,6 +416,9 @@ export class MeshManager {
       // with the object's material — turning a thin silhouette into a solid
       // block of colour over the whole prop.
       if (!mesh.isMesh || o.userData.emptyHelper || o.userData.hoverShell) return;
+      // a SLICE of a time volume wears the volume's material instead of its
+      // own (and gets its own back when it stops being one)
+      if (timeVolumes.applySlice(mesh, data, scene)) { mesh.castShadow = false; return; }
       const mat = mesh.material as THREE.MeshStandardMaterial;
       if (!mat || Array.isArray(mat)) return;
       // shadows are per-light opt-in; meshes always participate so turning

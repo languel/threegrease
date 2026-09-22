@@ -5,7 +5,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { genId, createScene, activeObject, activeLayer, activeCam, createDefaultCamera, createLight, createObject, createFrame, cloneFrame, frameAt, keyframeIndexAt, baseTextureSrc, setBaseTexture, createImage, ensureMaterial } from '../core/gpdata';
 import { History } from '../core/history';
-import type { GPMaterial, TGPolyMesh, GPObject, GPScene, TGActor, TGActorLayer, TGLight, TGMesh, Vec3, ViewportShading } from '../core/types';
+import type { GPMaterial, TGPolyMesh, GPObject, GPScene, TGActor, TGActorLayer, TGLight, TGMesh, TGVolume, Vec3, ViewportShading } from '../core/types';
 import { GPSceneRenderer, type EditorMode, type RenderState } from '../render/GPSceneRenderer';
 import { EffectsPipeline } from '../fx/effects';
 import { ScenePost, postActive } from '../fx/scenefx';
@@ -244,6 +244,8 @@ import { AgentPanel } from '../agent/panel';
 import { webMcp } from '../agent/webmcp';
 import { WorldManager } from '../render/world';
 import { materialManager } from '../render/materialmgr';
+import { timeVolumes } from '../render/timevolume';
+import { getBlob as storeBlob, resolveSrc as storeUrl } from '../io/blobstore';
 
 /** tools that work on a poly mesh (they target `polyOverlay.editMeshId`) */
 const MESH_TOOLS = new Set(['meshedit', 'polypen', 'polybuild', 'quadpatch']);
@@ -539,6 +541,10 @@ class App implements AppHandle {
       .filter((o): o is THREE.Object3D => !!o));
     this.scene3.add(this.splats.group);
     this.scene3.add(this.meshes.group);
+    this.scene3.add(timeVolumes.group);
+    timeVolumes.resolve = async (src) => ({ url: await storeUrl(src), blob: await storeBlob(src).catch(() => null) });
+    timeVolumes.textureFor = (src) => materialManager.textureForSrc(src);
+    timeVolumes.onChange = () => { this.fitVolumes(); this.ui.refresh(); };
     this.scene3.add(this.polys.group);
     this.scene3.add(this.paints.group);
     this.scene3.add(this.mmPoints.group);
@@ -3201,6 +3207,14 @@ class App implements AppHandle {
         copy.translation[0] += 0.3;
         scene.splats.push(copy);
         clones.push({ kind: 'SPLAT', id: copy.id });
+      } else if (ref.kind === 'VOLUME') {
+        const src = scene.volumes.find((v) => v.id === ref.id);
+        if (!src) continue;
+        const copy = { ...JSON.parse(JSON.stringify(src)), id: newId() };
+        copy.name += ' copy';
+        copy.translation[0] += 0.3;
+        scene.volumes.push(copy);
+        clones.push({ kind: 'VOLUME', id: copy.id });
       } else if (ref.kind === 'POLY') {
         const src = scene.polyMeshes.find((p) => p.id === ref.id);
         if (!src) continue;
@@ -4220,6 +4234,7 @@ class App implements AppHandle {
       case 'GP': return s.objects.find((o) => o.id === ref.id)?.name ?? null;
       case 'MESH': return s.meshes.find((o) => o.id === ref.id)?.name ?? null;
       case 'SPLAT': return s.splats.find((o) => o.id === ref.id)?.name ?? null;
+      case 'VOLUME': return s.volumes.find((o) => o.id === ref.id)?.name ?? null;
       case 'POLY': return s.polyMeshes.find((o) => o.id === ref.id)?.name ?? null;
       case 'ACTOR': return s.actors.find((o) => o.id === ref.id)?.name ?? null;
       default: return null;
@@ -4827,6 +4842,83 @@ class App implements AppHandle {
     a.download = `${name.replace(/\.\w+.*$/, '')}.ply`;
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  /**
+   * Add a TIME VOLUME from a video or GIF (a store ref): the film as a
+   * space-time cube, 1 m across, its depth (time) 1 m, its height set from
+   * the picture's aspect once the decode knows it (`fitVolumes`).
+   */
+  addVolume(src: string, name?: string, at?: [number, number, number]): number {
+    this.ctx.pushUndo();
+    const id = genId();
+    const v: TGVolume = {
+      id, name: name ?? decodeURIComponent(src.split('/').pop() ?? 'volume'), src,
+      translation: at ?? [...this.ctx.scene.cursor], rotation: [0, 0, 0], scale: [1, 1, 0.5625],
+      visible: true, select: false, parent: null, constraints: [],
+      resolution: 256, frames: 128, display: 'FACES', outline: true,
+      time: 0, rate: 0, wrap: 'REPEAT', opacity: 1,
+    };
+    (v as TGVolume & { fit?: boolean }).fit = true;
+    this.ctx.scene.volumes.push(v);
+    // stand the cube on the cursor rather than sunk half into the floor
+    v.translation[2] += v.scale[2] / 2;
+    timeVolumes.sync(this.ctx.scene);
+    this.placeNew({ kind: 'VOLUME', id });
+    return id;
+  }
+
+  volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number } | null {
+    const v = this.ctx.scene.volumes.find((x) => x.id === id);
+    const st = v ? timeVolumes.statusOf(v) : undefined;
+    return st ? { status: st.status, progress: st.progress, error: st.error, width: st.width, height: st.height, frames: st.frames } : null;
+  }
+
+  /** A new volume takes its picture's aspect the moment the decode knows it,
+   *  keeping its base where it stands. Once: resizing it later is yours. */
+  private fitVolumes(): void {
+    for (const v of this.ctx.scene.volumes as (TGVolume & { fit?: boolean })[]) {
+      if (!v.fit) continue;
+      const st = timeVolumes.statusOf(v);
+      if (!st || st.status === 'loading') continue;
+      delete v.fit;
+      if (st.status !== 'ok') continue;
+      const base = v.translation[2] - v.scale[2] / 2;
+      v.scale[2] = v.scale[0] / Math.max(0.05, st.aspect);
+      v.translation[2] = base + v.scale[2] / 2;
+    }
+  }
+
+  /**
+   * Add a SLICE to a volume: a plane parented to it, standing across the
+   * time axis (so it is a frame), sized to the cube's cross-section — in the
+   * cube's own unit space, so its local Y IS the time it shows and dragging
+   * it along Y scrubs the film. MAP slices stand beside the cube, showing
+   * the whole picture, with time coming from their map.
+   */
+  addVolumeSlice(volumeId: number, mode: 'POSITION' | 'MAP' = 'POSITION'): number | null {
+    const scene = this.ctx.scene;
+    const vol = scene.volumes.find((v) => v.id === volumeId);
+    if (!vol) return null;
+    this.ctx.pushUndo();
+    const id = genId();
+    const m = createMeshObject(id, 'PLANE', [0, 0, 0], undefined, this.ctx.settings.upAxis === 'Z');
+    m.name = `${vol.name} ${mode === 'MAP' ? 'time map' : 'slice'}`;
+    // parent-local: the cube spans -0.5..0.5; a PLANE is 2x2 before scale
+    m.parent = { kind: 'VOLUME', id: volumeId };
+    m.translation = mode === 'MAP' ? [1.2, 0, 0] : [0, 0, 0];
+    m.rotation = [Math.PI / 2, 0, 0];
+    m.scale = [0.5, 0.5, 1];
+    m.doubleSided = true;
+    m.timeSlice = { volumeId, mode, time: 0, gain: 1, rate: 0, wrap: 'REPEAT' };
+    scene.meshes.push(m);
+    this.meshes.sync(scene, this.nav.active);
+    deselectAllObjects(scene);
+    setObjectSelected(scene, { kind: 'MESH', id }, true);
+    this.setLastPicked({ kind: 'MESH', id });
+    this.refreshWidget();
+    this.ui.refresh();
+    return id;
   }
 
   addMeshObject(kind: 'PLANE' | 'BOX' | 'SPHERE' | 'CYLINDER' | 'PYRAMID' | 'TETRA' | 'OCTA' | 'DODECA' | 'ICOSA' | 'EMPTY', src?: string, at?: [number, number, number]): void {
@@ -5909,6 +6001,7 @@ class App implements AppHandle {
     return ref.kind === 'GP' ? this.gp.objectGroups[gpIndexOf(scene, ref.id)] ?? null :
       ref.kind === 'MESH' ? this.meshes.rootFor(ref.id) :
       ref.kind === 'SPLAT' ? this.splats.meshFor(ref.id) :
+      ref.kind === 'VOLUME' ? timeVolumes.rootFor(ref.id) :
       ref.kind === 'TRIGGER' ? this.scoreGroup.children.find((c) => c.userData.triggerId === ref.id) ?? null :
       ref.kind === 'STREAM' ? this.mmPoints.objectFor(ref.id) :
       ref.kind === 'POLY' ? this.polys.rootFor(ref.id) :
@@ -5953,6 +6046,7 @@ class App implements AppHandle {
     const scene = this.ctx.scene;
     if (ref.kind === 'GP') return this.gp.objectGroups[gpIndexOf(scene, ref.id)] ?? null;
     if (ref.kind === 'SPLAT') return this.splats.meshFor(ref.id);
+    if (ref.kind === 'VOLUME') return timeVolumes.rootFor(ref.id);
     if (ref.kind === 'ACTOR') return this.actors.rootFor(ref.id);
     // MESHES TOO. They used to wear the inverted hull, which rides the
     // object and is cheap — but it is drawn IN the scene, so against a room
@@ -6724,6 +6818,8 @@ class App implements AppHandle {
     }
     perf.lap('physics');
     this.splats.sync(ctx.scene);
+    timeVolumes.tick(dt, ctx.scene);
+    timeVolumes.sync(ctx.scene);
     this.meshes.sync(ctx.scene, this.nav.active);
     this.settlePlacements();
     this.polys.sync(ctx.scene, this.nav.active);
@@ -6802,6 +6898,7 @@ class App implements AppHandle {
         .map((m) => this.meshes.rootFor(m.id))
         .filter((r): r is THREE.Object3D => !!r && r.visible),
       ...this.polys.pickTargets(ctx.scene),
+      ...timeVolumes.roots(ctx.scene),
     ];
     ctx.surfaces = [
       ...this.canvasSurfaces,

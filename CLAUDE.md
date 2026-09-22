@@ -2243,6 +2243,32 @@ the browser console or automated evals:
     unit space (box ±0.5, sphere r 0.5, cylinder r 0.5 × 1.2 along Y).
   - Not built: moving splats (G/R/S says so) and a LIVE crop volume (a
     filter that follows the box as it moves, rather than a one-off select).
+- **A TIME VOLUME is a film as a SPACE-TIME CUBE** (`render/timevolume.ts`,
+  `scene.volumes` / `TGVolume`, ObjKind `'VOLUME'`) — the Khronos Projector's
+  idea: a video or GIF's frames stacked into one `Data3DTexture`
+  (width × height × time), and what you see is whatever SURFACE passes
+  through it. It is an object kind of its own (outliner, selection,
+  transform, parenting, constraints, duplicate, delete all name it — the
+  "anything else is a mesh" fall-through in objects.ts would otherwise have
+  swallowed it), and it IS the cube: local x = picture across, z = up,
+  y = TIME (front face = first frame), unit-sized so scale is its size. Its
+  own faces sample it (Faces), or only its edges show (Wire).
+  - A SLICE is `TGMesh.timeSlice` on ANY mesh, so every surface the app can
+    make can cut one: POSITION — where the surface is inside the cube decides
+    (u, v, t), so a plane is a frame, a tilted one an oblique cut, a curved
+    one a curved cut, and outside the cube is discarded; MAP — the surface's
+    own UVs are the picture and TIME is a map's luminance × gain + offset
+    (image, video or camera: Khronos proper). `Add slice` parents a plane to
+    the volume in the cube's own unit space, so its local Y IS its time.
+    Both scrub (`time`) and play (`rate`, films a second).
+  - The slice material REPLACES the mesh's own (`applySlice`, hooked first
+    in `MeshManager.apply`) and puts it back when the slice goes.
+  - Decoding is ONCE per (file, resolution, frames): GIFs through
+    ImageDecoder (COMPOSITED frames — a GIF frame is usually only what
+    changed), videos by seeking a hidden <video> to the middle of each slot
+    (never exactly `duration`, which decodes black). Flipped so v = 0 is the
+    bottom, sRGB, inside a 256 MB budget. A new volume takes its picture's
+    aspect when the decode lands (`fitVolumes`, once).
 - **The shared walking body** (`actor/locomotion.ts`) is where collision and
   ground live, so a character does not collide differently depending on who
   is steering it. `walkVolume.gather(scene, frame)` is idempotent per frame.

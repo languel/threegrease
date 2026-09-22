@@ -3291,3 +3291,22 @@ what it is made of. A camera is never a draw target, so it is never in it.
 - Acceptance: a click 11 px off a box's top corner lands on box-local
   (0.5, 0.5, 0.5), bound to the box; hover shows the ring on a vertex and
   the dotted square on a face centre.
+
+## Time volumes (space-time cubes)
+
+- `TGVolume` (`scene.volumes`, ObjKind VOLUME) + `TGMesh.timeSlice`;
+  `render/timevolume.ts` decodes the film to a Data3DTexture and owns the
+  cubes; `applySlice` swaps a slicing mesh's material. The same fragment
+  shader serves both: POSITION maps the world point into the cube's unit
+  space (x across, z up, y time), MAP reads time from a map's luminance.
+- Panel: Show (Faces / Wire), Edges, Time, Play, Ends (loop / hold),
+  Opacity, Resolution, Frames, Add slice / Add time map; on a mesh: Slice a
+  time volume, Volume, Time from, Time, Play, map + Depth + Invert, Stop.
+- Acceptance (car-4d.gif, 256 × 167 × 128): the cube's front shows the first
+  frame and its sides the time streaks; a centred slice shows one frame; a
+  plane turned about the cube's up shows different moments across its width
+  and is clipped to the cube; a MAP plane with a left-to-right gradient runs
+  time across the picture.
+- Next: a live-camera ring buffer (Khronos with a camera), a raymarched
+  volume display, conversion to splats (density controllable), animated
+  strokes and actors as sources.
