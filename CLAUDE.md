@@ -1651,6 +1651,17 @@ the browser console or automated evals:
       carries its OBJECT (`ConstructionHit.ref`) so the point binds.
       Verified: a click 11 px off a box's top corner landed on box-local
       (0.5, 0.5, 0.5) exactly, bound to the box.
+    - WHAT THE MAGNET CATCHES IS A GLYPH AND A CURSOR, not a word
+      (`drawSnapGlyph` / `snapCursor` in snapping.ts, `App.drawSnapHover`):
+      the same shapes as the Snap Target icons — ring = vertex (empty, so
+      the vertex shows through), rails = edge, ring on a diagonal =
+      midpoint, right-angle corner = perpendicular, square with a dot = face
+      centre, square = surface / face, hexagon with a dot = origin, # =
+      grid — drawn round the target with a leash back to the pointer, and
+      worn by the cursor itself (an SVG data-URL cursor, one per kind) for
+      every tool that places points. A label was legible only when nothing
+      else was near it. The hover is re-snapped only when the pointer or
+      the camera moves.
     - A point placed ON A SCAN binds to it: the magnet's Vertex and Surface
       modes fall back to the nearest splat centre and carry the splat as the
       hit's ref (a scan that is not a draw target has no surface to raycast,

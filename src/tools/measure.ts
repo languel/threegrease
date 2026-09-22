@@ -31,7 +31,7 @@ import {
   isObjectSelected, measureResolvers, measureWorldMatrix, worldMatrixOf, worldPointsOf,
   type ObjRef,
 } from './objects';
-import { snapWorldPoint, SNAP_LABEL, type SnapHit, type SnapKind } from './snapping';
+import { drawSnapGlyph, snapWorldPoint, type SnapHit, type SnapKind } from './snapping';
 
 export { formatLength, formatArea, toWorldLength } from '../core/measures';
 export { measureResolvers, worldPointsOf } from './objects';
@@ -372,12 +372,8 @@ export function drawMeasures(
   // name what the pointer is currently catching, so a snap is never a
   // silent surprise
   if (live?.preview && (live.draft.length || tool)) {
-    const label = SNAP_LABEL[live.kind];
-    if (label) {
-      const s = objectToScreen(ctx, [live.preview.x, live.preview.y, live.preview.z]);
-      hud.fillStyle = '#ffc84d';
-      hud.fillText(label, s.x + 12, s.y + 14);
-    }
+    const s = objectToScreen(ctx, [live.preview.x, live.preview.y, live.preview.z]);
+    drawSnapGlyph(hud, live.kind, s.x, s.y);
   }
   hud.restore();
 }

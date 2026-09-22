@@ -170,7 +170,7 @@ import { PolyMeshManager } from '../render/polymesh';
 import { defaultCorners, LightManager } from '../render/lights';
 import { ActorManager } from '../render/actors';
 import { ActorPoseTool } from '../tools/actorpose';
-import { snapToLattice, snapWorldPoint } from '../tools/snapping';
+import { drawSnapGlyph, snapCursor, snapToLattice, snapWorldPoint, type SnapHit } from '../tools/snapping';
 import {
   driveStreamFromActor, driveStreamFromObject, driverOf, isDriven,
   stopDrivingStream, tickSimStreams,
@@ -1710,7 +1710,9 @@ class App implements AppHandle {
       });
     });
 
-    canvas.addEventListener('pointerleave', () => { this.hoverPane = null; });
+    canvas.addEventListener('pointerleave', () => { this.hoverPane = null; this.pointerInViewport = false; });
+    canvas.addEventListener('pointerenter', () => { this.pointerInViewport = true; });
+    canvas.addEventListener('pointermove', () => { this.pointerInViewport = true; });
     canvas.addEventListener('pointerup', (e) => {
       if (this.lightHandleDrag) { this.lightHandleDrag = null; this.ui.refresh(); return; }
       if (this.keystoneDrag) { this.keystoneDrag = null; this.ui.refresh(); return; }
@@ -7106,6 +7108,55 @@ class App implements AppHandle {
 
   /** Draw pointer-relative HUD in the pane the pointer is in: pane camera,
    *  pane-local coordinates, clipped to the pane. Outside quad view, just fn. */
+  /** Tools that PLACE points through the magnet, and so get its feedback. */
+  private static readonly SNAP_FEEDBACK = new Set([
+    'draw', 'line', 'polyline', 'arc', 'curve', 'box', 'circle', 'measure',
+  ]);
+  private snapHoverCache: { key: string; hit: SnapHit | null } = { key: '', hit: null };
+  private pointerInViewport = false;
+
+  /**
+   * THE MAGNET, BEFORE YOU CLICK: for a tool that places points, draw what
+   * the pointer would catch as its glyph round the target (a leash back to
+   * the pointer when the snap pulls away from it) and wear the same glyph as
+   * the CURSOR, so a snap is never a surprise after the fact. Re-snapped only
+   * when the pointer or the camera moved — a vertex search is not free on a
+   * dense scan. The Measure tool draws its own glyph (it already has the
+   * hit) and only borrows the cursor.
+   */
+  private drawSnapHover(g: CanvasRenderingContext2D): void {
+    const s = this.ctx.settings;
+    const tool = s.activeTool;
+    const canvas = this.glRenderer.domElement;
+    const placing = App.SNAP_FEEDBACK.has(tool) || tool.startsWith('draw-');
+    const lattice = s.snap.mode === 'INCREMENT' || s.snap.mode === 'GRID';
+    let kind: SnapHit['kind'] = 'FREE';
+    if (s.snap.enabled && placing && !lattice && this.pointerInViewport && !this.nav.flying
+      && !this.modal.active && !this.objModal.active && !this.presentation) {
+      this.paneHud(g, () => {
+        const { x, y } = this.tools.lastPointer;
+        const e = this.ctx.camera.matrixWorld.elements;
+        const key = `${x},${y},${e[12].toFixed(4)},${e[13].toFixed(4)},${e[14].toFixed(4)},${e[0].toFixed(4)},${e[2].toFixed(4)},${e[9].toFixed(4)}`;
+        if (key !== this.snapHoverCache.key) {
+          const rect = this.ctx.canvas.getBoundingClientRect();
+          this.snapHoverCache = { key, hit: snapWorldPoint(this.ctx, x + rect.left, y + rect.top) };
+        }
+        const hit = this.snapHoverCache.hit;
+        if (!hit || hit.kind === 'FREE') return;
+        kind = hit.kind;
+        if (tool === 'measure') return;
+        // a WORLD point: objectToScreen would apply the active pencil's own
+        // transform to it first
+        const rect = this.ctx.canvas.getBoundingClientRect();
+        const q = hit.point.clone().project(this.ctx.camera);
+        if (q.z > 1) return;
+        drawSnapGlyph(g, hit.kind, (q.x * 0.5 + 0.5) * rect.width, (-q.y * 0.5 + 0.5) * rect.height, undefined, { x, y });
+      });
+    }
+    const want = kind !== 'FREE' ? snapCursor(kind) : (this.tools.active?.cursor ?? 'default');
+    if (canvas.style.cursor !== want) canvas.style.cursor = want;
+  }
+
   private paneHud(g: CanvasRenderingContext2D, fn: () => void): void {
     const pane = this.pointerPane;
     if (!pane || !this.quadView || !this.paneRects) { fn(); return; }
@@ -7166,6 +7217,7 @@ class App implements AppHandle {
       g.fillText(line, w / 2, 23);
       g.textAlign = 'left';
     }
+    this.drawSnapHover(g);
     // Placement preview: show what the pointer will snap to (every mode
     // with a discrete target — ORIGIN/CURSOR have none, so no HUD there)
     if (this.ctx.settings.mode === 'DRAW' && !this.nav.flying) this.paneHud(g, () => {

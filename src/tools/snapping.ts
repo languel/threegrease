@@ -226,6 +226,104 @@ export function magnetPoint(
   return hit && hit.kind !== 'FREE' ? hit.point : null;
 }
 
+/**
+ * WHAT A SNAP CAUGHT, AS A SHAPE drawn round the point — Blender's snap
+ * glyphs: a word beside the point ("vertex") was legible only when nothing
+ * else was near it, and a shape can be read at a glance and in the corner
+ * of your eye. One vocabulary for every tool, the same shapes as the Snap Target icons: ring = vertex,
+ * rails = edge, ring on a diagonal = midpoint, right-angle corner =
+ * perpendicular, square with a dot = face centre, square = surface / face,
+ * hexagon with a dot = object origin, # = grid.
+ */
+function snapPath(g: CanvasRenderingContext2D | Path2DLike, kind: SnapKind, x: number, y: number, r: number): void {
+  // the same shapes as the Snap Target icons in icons.ts, so the glyph at
+  // the pointer and the choice in the menu are one vocabulary
+  const dot = (cx: number, cy: number, rr: number) => { g.moveTo(cx + rr, cy); g.arc(cx, cy, rr, 0, Math.PI * 2); };
+  switch (kind) {
+    // an empty ring round the vertex, so the vertex itself stays visible
+    case 'VERTEX': dot(x, y, r); break;
+    // two rails either side of the edge
+    case 'EDGE': g.moveTo(x - r * 1.3, y - r * 0.6); g.lineTo(x + r * 1.3, y - r * 0.6);
+      g.moveTo(x - r * 1.3, y + r * 0.6); g.lineTo(x + r * 1.3, y + r * 0.6); break;
+    // a ring on a diagonal: the middle of a segment
+    case 'EDGE_CENTER': g.moveTo(x - r * 1.6, y + r * 1.6); g.lineTo(x - r * 0.7, y + r * 0.7);
+      g.moveTo(x + r * 0.7, y - r * 0.7); g.lineTo(x + r * 1.6, y - r * 1.6); dot(x, y, r); break;
+    // a corner with its right-angle mark
+    case 'EDGE_PERP': g.moveTo(x - r, y - r * 1.3); g.lineTo(x - r, y + r); g.lineTo(x + r * 1.3, y + r);
+      g.moveTo(x - r, y + r * 0.1); g.lineTo(x - r * 0.1, y + r * 0.1); g.lineTo(x - r * 0.1, y + r); break;
+    // a face, with its centre
+    case 'FACE_CENTER': g.rect(x - r, y - r, r * 2, r * 2); dot(x, y, r * 0.3); break;
+    case 'FACE_NEAREST': case 'SURFACE': g.rect(x - r, y - r, r * 2, r * 2); break;
+    // the object's hexagon, and its origin
+    case 'OBJECT': {
+      g.moveTo(x, y - r * 1.2);
+      for (let k = 1; k <= 6; k++) { const t = -Math.PI / 2 + (k * Math.PI) / 3; g.lineTo(x + Math.cos(t) * r * 1.2, y + Math.sin(t) * r * 1.2); }
+      dot(x, y, r * 0.3);
+      break;
+    }
+    case 'GRID': g.moveTo(x - r * 1.3, y - r * 0.5); g.lineTo(x + r * 1.3, y - r * 0.5);
+      g.moveTo(x - r * 1.3, y + r * 0.5); g.lineTo(x + r * 1.3, y + r * 0.5);
+      g.moveTo(x - r * 0.5, y - r * 1.3); g.lineTo(x - r * 0.5, y + r * 1.3);
+      g.moveTo(x + r * 0.5, y - r * 1.3); g.lineTo(x + r * 0.5, y + r * 1.3); break;
+    default: break;
+  }
+}
+interface Path2DLike {
+  rect(x: number, y: number, w: number, h: number): void; moveTo(x: number, y: number): void;
+  lineTo(x: number, y: number): void; arc(x: number, y: number, r: number, a: number, b: number): void; closePath(): void;
+}
+
+/** Draw the glyph for `kind` round a screen point, with a dark halo so it
+ *  reads over a bright scan as well as a dark room. `from` draws the faint
+ *  leash back to the pointer when the snap has pulled the point away. */
+export function drawSnapGlyph(
+  g: CanvasRenderingContext2D, kind: SnapKind, x: number, y: number,
+  color = '#ffc84d', from?: { x: number; y: number },
+): void {
+  if (kind === 'FREE') return;
+  g.save();
+  if (from && Math.hypot(from.x - x, from.y - y) > 3) {
+    g.beginPath(); g.moveTo(from.x, from.y); g.lineTo(x, y);
+    g.strokeStyle = 'rgba(255,200,77,0.45)'; g.lineWidth = 1; g.stroke();
+  }
+  g.beginPath();
+  snapPath(g, kind, x, y, 6);
+  g.lineJoin = 'round';
+  g.strokeStyle = 'rgba(0,0,0,0.65)'; g.lineWidth = 3.5; g.stroke();
+  g.strokeStyle = color; g.lineWidth = 1.6; g.stroke();
+  g.restore();
+}
+
+/**
+ * The same glyph as a CSS CURSOR, so the pointer itself says what it would
+ * catch before you click — changing the cursor is the cheapest feedback
+ * there is, and a snap you can only see where it lands is one you notice
+ * after the fact. Built once per kind as an SVG data URL, hotspot at the
+ * centre, with a small crosshair so the exact pixel is still visible.
+ */
+const cursorCache = new Map<SnapKind, string>();
+export function snapCursor(kind: SnapKind): string {
+  const hit = cursorCache.get(kind);
+  if (hit) return hit;
+  const c = 12;
+  const parts: string[] = [];
+  const P = {
+    d: '',
+    rect(x: number, y: number, w: number, h: number) { this.d += `M${x} ${y}h${w}v${h}h${-w}Z`; },
+    moveTo(x: number, y: number) { this.d += `M${x} ${y}`; },
+    lineTo(x: number, y: number) { this.d += `L${x} ${y}`; },
+    arc(x: number, y: number, r: number) { this.d += `M${x - r} ${y}a${r} ${r} 0 1 0 ${r * 2} 0a${r} ${r} 0 1 0 ${-r * 2} 0M${x} ${y}`; },
+    closePath() { this.d += 'Z'; },
+  };
+  snapPath(P, kind, c, c, 7);
+  parts.push(`<path d="${P.d}" fill="none" stroke="black" stroke-opacity=".7" stroke-width="3.5" stroke-linejoin="round"/>`,
+    `<path d="${P.d}" fill="none" stroke="%23ffc84d" stroke-width="1.6" stroke-linejoin="round"/>`,
+    `<path d="M${c} ${c - 2}v4M${c - 2} ${c}h4" stroke="white" stroke-width="1"/>`);
+  const url = `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">${parts.join('')}</svg>') 12 12, crosshair`;
+  cursorCache.set(kind, url);
+  return url;
+}
+
 /** Short label for the HUD, so a snapped point says what it caught. */
 export const SNAP_LABEL: Record<SnapKind, string> = {
   FREE: '', VERTEX: 'vertex', EDGE: 'edge', EDGE_CENTER: 'midpoint',
