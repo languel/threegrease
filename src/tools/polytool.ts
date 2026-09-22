@@ -15,7 +15,10 @@
 //            |  fill                |                 |             |
 //
 //   Shift+click = AutoQuad (infer the fillable patch from nearby open
-//   edges) · Ctrl+click = toggle element selection (Delete/X removes) ·
+//   edges) · Ctrl+click = toggle element selection (Delete/X removes,
+//   M welds the selected vertices into ONE at their centre, Shift+M welds
+//   the selection's close PAIRS independently — the two ways to rejoin
+//   parts a base built from several chains left merely coincident) ·
 //   Ctrl while dragging = disable source snapping · Enter finishes an
 //   open chain · Escape cancels the modal op with exact restoration.
 //
@@ -868,6 +871,100 @@ export class PolyPenTool implements Tool {
     return true;
   }
 
+  /**
+   * MERGE (weld) the Ctrl+click-selected vertices into one, at their
+   * centre — the way to REJOIN parts that only look connected: a base
+   * built as several separate chains (Poly Build has no "click the
+   * existing corner" memory across chains) leaves each corner a distinct,
+   * merely coincident vertex, and nothing before this could rejoin them
+   * short of dragging one exactly onto the other by hand, repeatedly.
+   * `mergeVertices` folds every OTHER selected vertex onto the first
+   * (rewiring their edges and face boundaries, dropping degenerate
+   * results), then the survivor is moved to the group's average position.
+   */
+  mergeSelected(ctx: AppCtx): boolean {
+    const pm = this.editMesh(ctx);
+    if (!pm) return false;
+    const ids = pm.vertices.filter((v) => v.select).map((v) => v.id);
+    if (ids.length < 2) return false;
+    ctx.pushUndo();
+    const center: Vec3 = [0, 0, 0];
+    for (const id of ids) {
+      const v = getVertex(pm, id);
+      if (v) { center[0] += v.co[0]; center[1] += v.co[1]; center[2] += v.co[2]; }
+    }
+    center[0] /= ids.length; center[1] /= ids.length; center[2] /= ids.length;
+    const into = ids[0];
+    for (let i = 1; i < ids.length; i++) mergeVertices(pm, ids[i], into);
+    const survivor = getVertex(pm, into);
+    if (survivor) { survivor.co = center; survivor.select = true; }
+    cleanupDegenerateFaces(pm);
+    touchPolyMesh(pm);
+    ctx.refreshUI();
+    return true;
+  }
+
+  /**
+   * WELD BY DISTANCE (Blender's "Merge — By Distance"): every group of
+   * vertices sitting close together on screen is folded into one, group by
+   * group — unlike `mergeSelected`, which always collapses the WHOLE
+   * selection to a single point. This is the one to reach for after
+   * box-selecting a whole seam between chains built separately: each
+   * corner pair welds independently instead of the seam collapsing into
+   * one vertex. Scoped to the selection when anything is selected (so a
+   * stray near-coincidence elsewhere on the mesh is never touched by
+   * accident), else the whole mesh. Screen-space, like every other pick
+   * here — a fixed WORLD epsilon has no one right value across a scan's
+   * scale, but "close enough to click as the same point" is what the
+   * threshold already means everywhere else in this tool.
+   */
+  weldByDistance(ctx: AppCtx): boolean {
+    const pm = this.editMesh(ctx);
+    if (!pm) return false;
+    const selected = pm.vertices.filter((v) => v.select);
+    const pool = selected.length >= 2 ? selected : pm.vertices;
+    if (pool.length < 2) return false;
+    const pts = pool.map((v) => ({ id: v.id, s: this.screenOf(ctx, this.localToWorld(ctx, pm, v.co)) }))
+      .filter((p): p is { id: number; s: THREE.Vector2 } => !!p.s);
+    // union-find over screen-close pairs
+    const parent = new Map(pts.map((p) => [p.id, p.id]));
+    const find = (id: number): number => { let r = id; while (parent.get(r) !== r) r = parent.get(r)!; return r; };
+    const union = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+    const THRESHOLD_PX = 18;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        if (pts[i].s.distanceTo(pts[j].s) <= THRESHOLD_PX) union(pts[i].id, pts[j].id);
+      }
+    }
+    const groups = new Map<number, number[]>();
+    for (const p of pts) {
+      const r = find(p.id);
+      (groups.get(r) ?? groups.set(r, []).get(r)!).push(p.id);
+    }
+    const multi = [...groups.values()].filter((g) => g.length >= 2);
+    if (!multi.length) return false;
+    ctx.pushUndo();
+    let welded = 0;
+    for (const ids of multi) {
+      const center: Vec3 = [0, 0, 0];
+      for (const id of ids) {
+        const v = getVertex(pm, id);
+        if (v) { center[0] += v.co[0]; center[1] += v.co[1]; center[2] += v.co[2]; }
+      }
+      center[0] /= ids.length; center[1] /= ids.length; center[2] /= ids.length;
+      const into = ids[0];
+      for (let i = 1; i < ids.length; i++) mergeVertices(pm, ids[i], into);
+      const survivor = getVertex(pm, into);
+      if (survivor) { survivor.co = center; survivor.select = true; }
+      welded += ids.length - 1;
+    }
+    cleanupDegenerateFaces(pm);
+    touchPolyMesh(pm);
+    ctx.setStatus(`welded ${welded} ${welded === 1 ? 'vertex' : 'vertices'} into ${multi.length} ${multi.length === 1 ? 'point' : 'points'}`, 2500);
+    ctx.refreshUI();
+    return true;
+  }
+
   // ---- keys ----------------------------------------------------------------
 
   onKey(ctx: AppCtx, key: string, e: KeyboardEvent): boolean {
@@ -900,6 +997,10 @@ export class PolyPenTool implements Tool {
       clearPolyOverlay();
       if (pm) polyOverlay.editMeshId = pm.id;
       return true;
+    }
+    if (key === 'm' || key === 'M') {
+      if (this.state.kind !== 'IDLE') return false;
+      return e.shiftKey ? this.weldByDistance(ctx) : this.mergeSelected(ctx);
     }
     if (key === 'Delete' || key === 'Backspace' || key === 'x' || key === 'X') {
       if (this.state.kind !== 'IDLE') return false;

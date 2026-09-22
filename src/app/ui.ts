@@ -937,8 +937,8 @@ const SELECT_STROKE: ToolGroup = { group: 'select', label: 'Select', tools: [
   ['select-circle', 'circle', 'Circle select ([ ] size)'],
 ] };
 const POLY_TOOLS: ToolGroup = { group: 'poly', label: 'Poly', tools: [
-  ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select'],
-  ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element'],
+  ['polypen', 'wireframe', 'PolyQuilt — context pen: click builds/fills · drag moves (vertex merge on release) · edge center-drag extrudes/loop-cuts · hold deletes/dissolves · hold+drag: vertex=edge extrude, empty=knife · Shift+click=AutoQuad · Ctrl+click=select · M welds selection to one point, Shift+M welds its close pairs'],
+  ['polybuild', 'polylineTool', 'Poly Build — click/Ctrl+click adds geometry · drag a boundary edge extrudes · Shift+click deletes the element · M welds selection to one point, Shift+M welds its close pairs'],
   ['quadpatch', 'swatch', 'Quad Patch — click fills the patch inferred from nearby open edges (U-close, bridge, corner-complete)'],
 ] };
 

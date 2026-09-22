@@ -227,6 +227,14 @@ export class PolyMeshManager {
     verts.raycast = () => {};
     verts.renderOrder = 998;
     verts.count = 0;
+    // frustum culling for an InstancedMesh tests its GEOMETRY's bounding
+    // sphere (the unit octahedron at local origin) against matrixWorld —
+    // it does not expand to where the per-instance matrices actually place
+    // the vertices. The diamonds sat scattered across the whole poly mesh,
+    // so tilting the view moved that small origin-sphere out of the frustum
+    // and the WHOLE batch vanished, even for vertices still plainly on
+    // screen. `previewLine` already carries this fix for the same reason.
+    verts.frustumCulled = false;
     group.add(faceMesh, edgeLines, verts);
     return {
       group, faceMesh, triFaceIds: [], edgeLines, segEdgeIds: [], verts,

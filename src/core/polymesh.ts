@@ -243,9 +243,20 @@ export function dissolveEdge(pm: TGPolyMesh, edgeId: number): boolean {
   let w1 = walkFrom(f1, a, b), w2 = walkFrom(f2, b, a);
   if (!w1 || !w2) { w1 = walkFrom(f1, b, a); w2 = walkFrom(f2, a, b); }
   if (!w1 || !w2) return false;
-  // w1 = b..a (exclusive of nothing at the end: ends with a), w2 = a..b;
-  // drop each walk's final vertex to avoid repeats when concatenating
-  const merged = [...w1.slice(0, -1), ...w2.slice(0, -1)];
+  // walkFrom already excludes ONLY its own `from` — w1 (from a) starts at
+  // b and runs to a's predecessor; w2 (from b) starts at a and runs to
+  // b's predecessor. So `a` appears once, as w2's first vertex, and `b`
+  // once, as w1's — concatenating the two walks AS THEY ARE gives every
+  // vertex of both faces exactly once, correctly ordered round the merged
+  // loop. This used to `.slice(0, -1)` each walk first, on the theory that
+  // doing so dropped a repeat; there is no repeat to drop, and what it
+  // actually dropped was each walk's LAST vertex — a real corner, one per
+  // face, silently missing from every successful dissolve. For two
+  // triangles sharing an edge (the common "remove a diagonal" case) that
+  // trimmed the 2-vertex result below the size-3 floor below, so the
+  // dissolve failed outright every time and fell back to deleting both
+  // triangles instead of merging them into a quad.
+  const merged = [...w1, ...w2];
   if (new Set(merged).size !== merged.length || merged.length < 3) return false;
   pm.faces = pm.faces.filter((f) => f.id !== f1.id && f.id !== f2.id);
   pm.edges = pm.edges.filter((x) => x.id !== edgeId);
@@ -254,19 +265,44 @@ export function dissolveEdge(pm: TGPolyMesh, edgeId: number): boolean {
   return true;
 }
 
-/** Dissolve a 2-edge pass-through vertex (not used by any face): its two
- *  edges fuse into one spanning edge. Returns false otherwise. */
+/** Dissolve a 2-edge PASS-THROUGH vertex: its two edges fuse into one
+ *  spanning edge, and it is dropped from every face boundary it sits on —
+ *  the exact inverse of `splitEdge`. A vertex qualifies whether it belongs
+ *  to no face (a dangling T on open edges), one (the free side of a
+ *  boundary edge someone split) or two (an INTERIOR edge someone split,
+ *  which is the common case building a base by adding points on shared
+ *  edges): every face that uses it must use it as a straight pass-through
+ *  strictly BETWEEN its two neighbours, in either winding — a vertex that
+ *  is a real corner of an n-gon, or that some but not all of its faces
+ *  disagree about, is not a clean collapse and returns false so the caller
+ *  falls back to full removal (which is right there: nothing here can
+ *  undo it without deciding which face loses its shape). This used to
+ *  refuse ANY vertex used by a face at all, so shift-clicking a point
+ *  added mid-edge on a real (non-boundary) edge — which `splitEdge` always
+ *  threads into that edge's adjacent face boundaries — fell through to
+ *  removeVertex and took the whole adjacent face with it. */
 export function dissolveVertex(pm: TGPolyMesh, vertexId: number): boolean {
   if (!getVertex(pm, vertexId)) return false;
-  if (pm.faces.some((f) => f.vertices.includes(vertexId))) return false;
   const edges = pm.edges.filter((e) => e.v[0] === vertexId || e.v[1] === vertexId);
   if (edges.length !== 2) return false;
   const other = (e: TGPolyEdge) => (e.v[0] === vertexId ? e.v[1] : e.v[0]);
   const a = other(edges[0]), b = other(edges[1]);
-  if (a === b || findEdge(pm, a, b)) return false;
+  if (a === b) return false;
+  for (const f of pm.faces) {
+    const n = f.vertices.length;
+    const i = f.vertices.indexOf(vertexId);
+    if (i < 0) continue;
+    if (n <= 3) return false; // would leave fewer than 3 boundary vertices
+    const prev = f.vertices[(i - 1 + n) % n], next = f.vertices[(i + 1) % n];
+    if (!((prev === a && next === b) || (prev === b && next === a))) return false;
+  }
   pm.edges = pm.edges.filter((e) => e.id !== edges[0].id && e.id !== edges[1].id);
+  for (const f of pm.faces) {
+    const i = f.vertices.indexOf(vertexId);
+    if (i >= 0) f.vertices.splice(i, 1);
+  }
   pm.vertices = pm.vertices.filter((v) => v.id !== vertexId);
-  addEdge(pm, a, b);
+  addEdge(pm, a, b); // reuses an existing a-b edge if one is somehow already there
   touchPolyMesh(pm);
   return true;
 }

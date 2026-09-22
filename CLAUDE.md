@@ -587,6 +587,62 @@ the browser console or automated evals:
   (vertex keeps a 2px bias so an exact click on one still wins a close
   tie). Verified: a click 6px off an edge but 9.6px from a corner now picks
   the edge; a click 2.8px from the corner still picks the vertex.
+- **The vertex diamonds (poly Edit mode) are drawn as ONE InstancedMesh
+  per poly mesh** (`PolyManager.buildEntry`, `verts` in render/polymesh.ts),
+  and three's frustum culling for an InstancedMesh tests its GEOMETRY's
+  bounding sphere — the shared unit octahedron at LOCAL ORIGIN — against
+  `matrixWorld`, never expanded to where the per-instance matrices actually
+  scatter the vertices across the mesh. So the diamonds vanished as a
+  WHOLE BATCH whenever that small origin-sphere tipped out of the frustum,
+  even for vertices still plainly on screen — "rotate the view a little and
+  they all disappear". `previewLine` already carried `frustumCulled = false`
+  for exactly this reason; `verts` now does too.
+- **`dissolveVertex` used to refuse ANY vertex a face touches at all**,
+  which is every T-vertex `splitEdge` ever makes on a real (non-boundary)
+  edge — it always threads the new point into that edge's adjacent face
+  boundaries. So dissolving a point you had just added mid-edge (Shift+click
+  in Poly Build, or a long hold) fell straight through to the full
+  `removeVertex` cascade and took the WHOLE ADJACENT FACE with it. It now
+  dissolves a genuine 2-edge pass-through vertex regardless of how many
+  faces use it, as long as every one of them uses it strictly BETWEEN its
+  two neighbours (a real n-gon corner, or a vertex the surrounding faces
+  disagree about, still isn't a clean collapse and falls back as before).
+  Verified: splitting a quad's edge and dissolving the new point returns the
+  quad to its original 4 vertices, 1 face — not a hole.
+- **`dissolveEdge` was silently dropping a real corner off EVERY successful
+  merge**, and always refused to merge two triangles at all. Its two
+  boundary walks (`walkFrom`) already exclude only their OWN `from` vertex
+  — `w1` (from `a`) starts at `b` and runs to `a`'s predecessor, `w2` (from
+  `b`) starts at `a` and runs to `b`'s predecessor — so concatenating them
+  AS THEY ARE gives every vertex of both faces exactly once, correctly
+  ordered. The code additionally `.slice(0, -1)`'d each walk "to avoid
+  repeats when concatenating" — there were none to avoid, and what it
+  actually dropped was each walk's LAST vertex, a real corner, one per
+  face, on every dissolve that ever succeeded. For two TRIANGLES sharing an
+  edge (removing a diagonal — the everyday case) the trim shrank the
+  2-element result below the 3-vertex floor, so the merge always failed and
+  fell back to deleting both triangles outright instead of joining them
+  into a quad. Verified: two quads sharing an edge now dissolve into a
+  proper 6-corner hexagon (all six original corners present, none of the
+  earlier missing pair); two triangles now merge into a quad (all four).
+- **REJOINING PARTS THAT ONLY LOOK CONNECTED** (`PolyPenTool.mergeSelected`
+  / `weldByDistance`): Poly Build has no memory of "this is the same corner
+  I placed two chains ago", so a base reconstructed as several separate
+  chains ends up with each shared corner as DISTINCT, merely coincident
+  vertices — the mesh only looks joined. Nothing short of dragging one
+  exactly onto the other (repeatedly, one pair at a time) could fix that
+  before. M welds the Ctrl+click-selected vertices into ONE, at their
+  centre (Blender's plain Merge). Shift+M is the one for a whole seam at
+  once: it welds every screen-close PAIR in the selection INDEPENDENTLY
+  (union-find over screen distance, ≤18px, like every other pick here — a
+  fixed world epsilon has no one right answer across a scan's scale), so a
+  box-selected seam of many corners welds pair by pair rather than
+  collapsing the whole selection to a single point. Selection-scoped when
+  anything is selected, else the whole mesh. Verified end to end: two
+  quads built as separate chains, corners off by ~1-2 cm, Shift+M welds
+  both corner pairs independently (8 vertices -> 6, 2 faces intact and now
+  genuinely sharing one edge), and dissolving that shared edge afterward
+  gives the correct 6-corner hexagon.
 - **Poly Build drags take G's axis locks** (`PolyPenTool.axisLock`): X / Y /
   Z mid-drag locks a vertex move, a vertex extrude, an edge/face move or a
   boundary extrusion to that WORLD axis, Shift+ to the plane square to it,
