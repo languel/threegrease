@@ -117,7 +117,7 @@ export interface AppHandle {
   measureTarget(measureId: number): ObjRef | null;
   scaleObjectToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string };
   alignByMeasures(sourceId: number, targetId: number, allowScale?: boolean):
-    { ok: boolean; rms?: number; max?: number; scale?: number; error?: string };
+    { ok: boolean; rms?: number; max?: number; scale?: number; method?: string; error?: string };
   addActor(at?: [number, number, number]): void;
   resetActor(id: number): void;
   export3D(format: string, selectedOnly: boolean): void;
@@ -3477,7 +3477,9 @@ export class UI {
       if (scope) tip(scope, 'what typing a real length rescales: the object this measurement is attached to, or every object in the scene');
 
       // ALIGN: pair this ruler's points with another's, by order
-      const partners = target ? scene.measures.filter((o) => o.id !== m.id && o.points.length === m.points.length && m.points.length >= 3) : [];
+      // any other measurement will do: identical corners pair exactly, and
+      // anything else is fitted by shape
+      const partners = target && m.points.length >= 2 ? scene.measures.filter((o) => o.id !== m.id && o.points.length >= 2) : [];
       const alignRow = partners.length ? (() => {
         const pick = el('select') as HTMLSelectElement;
         for (const o of partners) pick.append(el('option', { value: String(o.id), text: o.name }));
@@ -3492,10 +3494,10 @@ export class UI {
           tip(btn(`Align ${targetName} onto`, () => {
             const r = this.app.alignByMeasures(m.id, Number(pick.value), this.alignScale);
             this.alignResult.set(m.id, r.ok
-              ? `fit: ${formatLength(r.rms ?? 0, unit)} rms, worst ${formatLength(r.max ?? 0, unit)}${this.alignScale ? ` · scaled ×${(r.scale ?? 1).toFixed(4)}` : ''}`
+              ? `${r.method === 'shape' ? 'shape fit' : r.method === 'reordered' ? 'paired (order found)' : 'paired'}: ${formatLength(r.rms ?? 0, unit)} rms, worst ${formatLength(r.max ?? 0, unit)}${this.alignScale ? ` · scaled ×${(r.scale ?? 1).toFixed(4)}` : ''}`
               : r.error ?? 'failed');
             this.refresh();
-          }), `move, turn${this.alignScale ? ' and scale' : ''} ${targetName} so this measurement's points land on the other's, pair by pair in the order they were clicked (least squares)`),
+          }), `move, turn${this.alignScale ? ' and scale' : ''} ${targetName} so this measurement lands on the other: corners are paired in whatever order fits best, and measurements that do not match point for point are fitted by shape`),
           pick,
           tip(el('label', { class: 'inline' }, scaleBox, 'scale'), 'allow uniform scale — off for a scan already in true units'),
           ...(result ? [el('div', { class: 'hint', text: result })] : []),

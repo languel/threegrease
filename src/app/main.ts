@@ -228,7 +228,7 @@ import {
   type ObjRef, type ObjTransform,
   refOfObject3D, objectName,
 } from '../tools/objects';
-import { alignPoints } from '../core/align';
+import { alignShapes } from '../core/align';
 import { UI, type AppHandle } from './ui';
 import { SilhouetteOutline, type OutlineGroup } from '../render/outline';
 import type { Tool } from '../tools/toolsys';
@@ -4958,21 +4958,21 @@ class App implements AppHandle {
    * a little roughly average out; the residual says how well they agreed.
    */
   alignByMeasures(sourceId: number, targetId: number, allowScale = true):
-    { ok: boolean; rms?: number; max?: number; scale?: number; error?: string } {
+    { ok: boolean; rms?: number; max?: number; scale?: number; method?: string; error?: string } {
     const scene = this.ctx.scene;
     const src = scene.measures.find((x) => x.id === sourceId);
     const dst = scene.measures.find((x) => x.id === targetId);
     const ref = this.measureTarget(sourceId);
     if (!src || !dst) return { ok: false, error: 'measurement not found' };
     if (!ref) return { ok: false, error: `"${src.name}" is not attached to one object — place its points on the thing to move` };
-    if (src.points.length !== dst.points.length) {
-      return { ok: false, error: `"${src.name}" has ${src.points.length} points and "${dst.name}" has ${dst.points.length} — they pair by order` };
-    }
-    const fit = alignPoints(worldPointsOf(scene, src), worldPointsOf(scene, dst), allowScale);
-    if (!fit) return { ok: false, error: 'need at least 3 pairs, not all on one line' };
+    // any two measurements: an exact pairing when the corners match in some
+    // order, a shape fit when they do not (core/align.ts)
+    const fit = alignShapes(worldPointsOf(scene, src), worldPointsOf(scene, dst),
+      { allowScale, sourceClosed: !!src.closed, targetClosed: !!dst.closed });
+    if (!fit) return { ok: false, error: 'each measurement needs at least 2 points' };
     this.ctx.pushUndo();
     this.applyWorldTransform(ref, fit.matrix);
-    return { ok: true, rms: fit.rms, max: fit.max, scale: fit.scale };
+    return { ok: true, rms: fit.rms, max: fit.max, scale: fit.scale, method: fit.method };
   }
 
   scaleSceneToMeasure(measureId: number, realLength: number): { ok: boolean; factor?: number; error?: string } {

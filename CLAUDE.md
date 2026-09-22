@@ -1640,6 +1640,34 @@ the browser console or automated evals:
       1.6x-oversized copy; eight corners picked ±2 cm fit to 9 mm RMS with
       scale 0.623. Because the source points are bound, they ride the
       object and visibly land on the targets.
+    - ANY TWO MEASUREMENTS ALIGN, not just identical ones (`alignShapes`
+      in core/align.ts), in stages:
+      1. same count: every ORDER (all permutations up to 8, every start and
+         direction beyond), and the order AS CLICKED wins whenever it is as
+         good as the best — a box has 24 equally exact orders, and only
+         yours keeps the scan's contents the way round you meant;
+      2. different counts: HYPOTHESISE AND VERIFY — the widest triangle of
+         the smaller set against every ordered triple of the larger, each
+         transform verified by every smaller point landing on a DISTINCT
+         larger one. Needs FOUR points: with three, the seed triangle is all
+         there is to verify with and any similar triangle passes (along a
+         traced edge there are plenty, at the wrong scale). Ties are broken
+         by COVERAGE — the unpaired points must lie on the other shape, or
+         four corners fit a traced outline's midpoint square exactly, 45
+         degrees round and √2 small — and then by the least turn;
+      3. otherwise a SHAPE FIT: principal axes for a first guess (all 24
+         relabellings), then ICP with correspondences taken BOTH ways and
+         onto the other measurement's LEGS, not its samples — one-way ICP
+         with free scale shrinks the source into a corner, and snapping to
+         samples read a traced L 6% small.
+      AMONG EQUALLY GOOD FITS THE LEAST TURN WINS (`leastTurn`): a flat
+      measurement cannot say which side the object is on, and a shape fit is
+      as happy with the pedestal hanging upside down from its own top.
+      Verified against a known answer (a scan 1.6x oversize, turned 63
+      degrees): 8 corners shuffled, 6 of 8, a top outline from another start,
+      4 corners against an outline traced with midpoints — all exact; 5 of 8
+      picked ±1.5 cm off — within 9 mm; a 9-point traced L against its 3
+      corners — scale 0.6249 of 0.625.
     - THE MAGNET'S VERTEX / EDGE MODES ARE THE ELEMENT PICKER
       (`pickElement` in polypick.ts, exported for it): they used to offer
       stroke points only, so over a mesh the magnet did nothing and a
