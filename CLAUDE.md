@@ -682,35 +682,53 @@ the browser console or automated evals:
   vertex they share, which is the point — real topology has no gaps to
   leave a line in); a real click through the tool on a face's interior,
   finalized with Enter, gives the same 4-triangle result end to end.
-- **A TWO-CLICK LINE BETWEEN TWO POINTS ON THE SAME FACE IS A CUT, NOT A NEW
-  CHORD** (`PolyPenTool.clickAction`'s BUILD branch, first segment only).
-  `pokeFace` fixed a click INTO a face's interior; it did nothing for a
-  plain line drawn between two points that already sit on a mesh — the
-  chain-continuation path still fell straight to `addEdge`, which makes an
-  edge with no face on either side of it. On an untouched face that reads
-  as a stray diagonal; on one already split by an earlier poke or cut, the
-  new edge crosses the real boundary without joining it — exactly the
-  "overlapping triangles" a quad-then-notch-then-cut sequence produces.
-  Now, before falling back to `addEdge`, the first segment checks whether
-  BOTH endpoints already sit on one common face and, if so, calls
-  `splitFace` on it instead — the diagonal becomes a real shared edge of
-  two proper faces rather than a chord drawn across them. Scoped to the
-  chain's FIRST segment only (past that you are deliberately building new
-  geometry, not cutting existing geometry) and skipped when the click was
-  itself a fresh poke (`src.kind === 'POLY_FACE'`), since poke already did
-  the better-scoped integration. Verified: a plain quad, clicked corner to
-  opposite corner, gives exactly 2 triangles sharing that diagonal as a
-  real edge (5 edges total, no stray vertices, chain auto-finalizes to
-  IDLE) — matching "step 1" of the reported sequence. THE SCOPE LIMIT: two
-  PRE-EXISTING triangles (a quad already split by its own diagonal), poke
-  one, then draw to a corner belonging ONLY to the OTHER, untouched
-  triangle — the two endpoints share no common face, so this check finds
-  nothing and the line still falls through to a bare `addEdge` (verified:
-  no crash, no wrong split, just the same disconnected chord as before).
-  That is deliberately Knife's job (hold+drag), which already walks and
-  splits every face and edge a line actually crosses; a single-face check
-  here would have to become a general polygon-crossing solver to close
-  that gap, which is a different tool wearing this one's name.
+- **A TWO-CLICK LINE BETWEEN TWO POINTS ON THE MESH IS A CUT, NOT A NEW
+  CHORD** (`PolyPenTool.cutAcrossMesh`, called from `clickAction`'s BUILD
+  branch on the chain's first segment, and by `finishKnife`). `pokeFace`
+  fixed a click INTO a face's interior; it did nothing for a plain line
+  drawn between two points that already sit on a mesh — the
+  chain-continuation path fell straight to `addEdge`, which makes an edge
+  with no face on either side of it. On an untouched face that reads as a
+  stray diagonal; on one already split by an earlier poke or cut, the new
+  edge crosses the real boundary without joining it — the "overlapping
+  triangles" a quad-then-notch-then-cut sequence produces.
+  A first attempt only split a face when BOTH endpoints already sat on ONE
+  shared face — correct for a plain quad's diagonal, but useless the moment
+  an interior point (a poke, a fan) sits between them: two points on
+  OPPOSITE sides of it share no face at all, so the check found nothing and
+  fell back to the same bad chord. The real fix is the general solver Knife
+  already had for its own hold+drag cuts (`cutAcrossMesh`, factored out of
+  what was `finishKnife`): split every EDGE the a-b line crosses, then split
+  every FACE left with exactly two of the resulting cut points on its
+  boundary. `clickAction` now calls this with the two clicked VERTICES
+  seeded into the cut-point set (`seedIds`), so a face that already has one
+  of them as a real corner still gets split against a freshly-cut point on
+  another of its edges — without the seed, neither endpoint counts as a
+  "new" cut point and a face touching only one of them is skipped, leaving
+  that corner's half of the cut dangling.
+  ONE MORE CASE the edge-crossing scan alone misses: a cut whose straight
+  line runs exactly (or near-exactly) THROUGH an existing vertex rather than
+  across an edge's interior — unremarkable-looking geometry (a fan of
+  triangles around a shared centre, cut symmetrically) makes this the COMMON
+  case, not a rare one, since a line between two points symmetric about a
+  centre passes precisely through it. Nothing there needs splitting, but the
+  vertex still has to join the cut-point set or the faces on either side of
+  it are each left with only one cut point and never split. Before scanning
+  edges, `cutAcrossMesh` now also walks every vertex and folds in any that
+  land within `VERTEX_PX` of the a-b segment (strictly between the
+  endpoints), the same threshold every other pick in this tool uses.
+  Verified: a plain quad, corner to opposite corner, still gives 2 triangles
+  sharing a real diagonal (unchanged). A fan of 4 triangles around a shared
+  centre, cut between the midpoints of its top and bottom edges — a line
+  that runs exactly through the centre vertex — now correctly produces 6
+  faces (was: a single crossing chord, chain left open). And the case
+  earlier scoped out as "Knife's job" — two pre-existing triangles sharing a
+  diagonal, poke one, cut to a corner belonging only to the OTHER — now
+  works too: the cut crosses the pre-existing diagonal edge, which the
+  general solver splits and rejoins exactly as Knife's own drag would. A
+  plain two-click cut is no longer weaker than a Knife drag between the same
+  two points; Knife remains for the freehand case where you are drawing the
+  cut path itself, not clicking two existing points.
 - **Poly Build drags take G's axis locks** (`PolyPenTool.axisLock`): X / Y /
   Z mid-drag locks a vertex move, a vertex extrude, an edge/face move or a
   boundary extrusion to that WORLD axis, Shift+ to the plane square to it,

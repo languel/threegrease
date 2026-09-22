@@ -565,20 +565,24 @@ export class PolyPenTool implements Tool {
         polyOverlay.editMeshId = pm.id;
         return;
       }
-      // A STRAIGHT 2-CLICK LINE between two points ALREADY on the SAME
-      // face's boundary is a CUT, not a new dangling chord: split that
-      // face along it right here, so the diagonal becomes a real shared
-      // edge of both halves instead of a line that crosses the existing
-      // topology without joining it (the "overlapping triangles" a raw
-      // `addEdge` produces the moment either end sits on a face someone
-      // already subdivided). Only for the chain's FIRST segment — past
-      // that you are plainly building new, separate geometry — and only
-      // when this click landed on existing topology (a vertex, or a point
-      // `vertexFromHit` just spliced into an edge); a fresh POKE already
-      // did its own, better-scoped integration and needs no second cut.
+      // A STRAIGHT 2-CLICK LINE between two points ALREADY on the mesh is a
+      // CUT, not a new dangling chord: run the SAME crossing solver Knife's
+      // drag uses (`cutAcrossMesh`), seeded with these two REAL vertices as
+      // cut endpoints, so it works whether they share one face (a plain
+      // diagonal) or the line has to cross several already-subdivided faces
+      // to get from one to the other (an interior point sitting between
+      // them, say) — a raw `addEdge` in either case makes an edge with no
+      // face on either side of it, which is the "overlapping triangles" a
+      // quad-then-notch-then-cut sequence produces. Only for the chain's
+      // FIRST segment — past that you are plainly building new, separate
+      // geometry — and only when this click landed on existing topology (a
+      // vertex, or a point `vertexFromHit` just spliced into an edge); a
+      // fresh POKE already did its own, better-scoped integration.
       if (chain.length === 1 && src.kind !== 'POLY_FACE') {
-        const shared = pm.faces.find((f) => f.vertices.includes(chain[0]) && f.vertices.includes(id));
-        if (shared && splitFace(pm, shared.id, chain[0], id)) {
+        const va = getVertex(pm, chain[0]), vb = getVertex(pm, id);
+        const sa = va ? this.screenOf(ctx, this.localToWorld(ctx, pm, va.co)) : null;
+        const sb = vb ? this.screenOf(ctx, this.localToWorld(ctx, pm, vb.co)) : null;
+        if (sa && sb && this.cutAcrossMesh(ctx, pm, sa, sb, [chain[0], id])) {
           this.state = { kind: 'IDLE' };
           this.commit(ctx, pm, st.before);
           clearPolyOverlay();
@@ -835,36 +839,78 @@ export class PolyPenTool implements Tool {
 
   // ---- knife (hold+drag in empty space) -------------------------------------
 
+  /**
+   * The general "cut a line through whatever it crosses" solver: split every
+   * mesh EDGE whose screen segment crosses a-b, then split every FACE that
+   * ends up with exactly two of the resulting cut points on its boundary —
+   * Knife's own algorithm (hold+drag), factored out so a plain two-click
+   * BUILD line can share it instead of re-deriving a narrower version.
+   * `seedIds` lets a caller whose endpoints are themselves REAL vertices
+   * (not points knife is inventing mid-edge) fold them into the same
+   * face-splitting pass: without that, a face that already has one of the
+   * cut's own endpoints as a corner plus one freshly-split crossing point
+   * would show only ONE new id on its boundary and never get split, leaving
+   * that corner's half of the cut dangling. Knife's own drag endpoints are
+   * free points in space, so it calls this with no seeds, unchanged.
+   */
+  private cutAcrossMesh(ctx: AppCtx, pm: TGPolyMesh, a: THREE.Vector2, b: THREE.Vector2, seedIds: number[] = []): boolean {
+    if (a.distanceTo(b) < 1) return false;
+    const newIds: number[] = [...seedIds];
+    // A vertex the cut line runs exactly (or near-exactly) THROUGH is not an
+    // edge crossing — nothing to split there, it is already a real point —
+    // but it still has to join the cut chain, or the faces on either side of
+    // it are left with only ONE of the cut's points on their boundary and
+    // never get split at all. A fan built around a shared centre is exactly
+    // this: a straight line between two points symmetric about that centre
+    // passes precisely through it.
+    const ab = b.clone().sub(a);
+    const len2 = ab.lengthSq();
+    if (len2 > 1e-6) {
+      for (const v of pm.vertices) {
+        if (newIds.includes(v.id)) continue;
+        const s = this.screenOf(ctx, this.localToWorld(ctx, pm, v.co));
+        if (!s) continue;
+        const t = s.clone().sub(a).dot(ab) / len2;
+        if (t <= 0.02 || t >= 0.98) continue;
+        const proj = a.clone().addScaledVector(ab, t);
+        if (proj.distanceTo(s) < VERTEX_PX) newIds.push(v.id);
+      }
+    }
+    const cuts: { edgeId: number; t: number }[] = [];
+    for (const e of pm.edges) {
+      const va = getVertex(pm, e.v[0]), vb = getVertex(pm, e.v[1]);
+      if (!va || !vb) continue;
+      if (newIds.includes(va.id) || newIds.includes(vb.id)) continue;
+      const sa = this.screenOf(ctx, this.localToWorld(ctx, pm, va.co));
+      const sb = this.screenOf(ctx, this.localToWorld(ctx, pm, vb.co));
+      if (!sa || !sb) continue;
+      const t = segmentIntersectParam(sa, sb, a, b);
+      if (t !== null && t > 0.02 && t < 0.98) cuts.push({ edgeId: e.id, t });
+    }
+    for (const cut of cuts) {
+      const v = splitEdge(pm, cut.edgeId, cut.t);
+      if (v) newIds.push(v.id);
+    }
+    if (newIds.length < 2) return false;
+    // connect the cut through faces: any face now containing exactly two of
+    // the cut points (freshly split, or a seeded real endpoint) gets split
+    // between them
+    let didSplit = false;
+    for (const f of [...pm.faces]) {
+      const inFace = f.vertices.filter((id) => newIds.includes(id));
+      if (inFace.length === 2 && splitFace(pm, f.id, inFace[0], inFace[1])) didSplit = true;
+    }
+    return didSplit;
+  }
+
   private finishKnife(ctx: AppCtx, pm: TGPolyMesh): void {
     if (this.state.kind !== 'KNIFE') return;
     const st = this.state;
     this.state = { kind: 'IDLE' };
     this.pending = null;
-    if (st.a.distanceTo(st.b) < DRAG_PX * 2) { clearPolyOverlay(); polyOverlay.editMeshId = pm.id; return; }
-    // split every edge whose screen segment crosses the knife line
-    const cuts: { edgeId: number; t: number }[] = [];
-    for (const e of pm.edges) {
-      const va = getVertex(pm, e.v[0]), vb = getVertex(pm, e.v[1]);
-      if (!va || !vb) continue;
-      const sa = this.screenOf(ctx, this.localToWorld(ctx, pm, va.co));
-      const sb = this.screenOf(ctx, this.localToWorld(ctx, pm, vb.co));
-      if (!sa || !sb) continue;
-      const t = segmentIntersectParam(sa, sb, st.a, st.b);
-      if (t !== null && t > 0.02 && t < 0.98) cuts.push({ edgeId: e.id, t });
+    if (st.a.distanceTo(st.b) >= DRAG_PX * 2 && this.cutAcrossMesh(ctx, pm, st.a, st.b)) {
+      this.commit(ctx, pm, st.before);
     }
-    if (!cuts.length) { clearPolyOverlay(); polyOverlay.editMeshId = pm.id; return; }
-    const newIds: number[] = [];
-    for (const cut of cuts) {
-      const v = splitEdge(pm, cut.edgeId, cut.t);
-      if (v) newIds.push(v.id);
-    }
-    // connect the cut through faces: any face now containing exactly two of
-    // the new vertices gets split between them
-    for (const f of [...pm.faces]) {
-      const inFace = f.vertices.filter((id) => newIds.includes(id));
-      if (inFace.length === 2) splitFace(pm, f.id, inFace[0], inFace[1]);
-    }
-    this.commit(ctx, pm, st.before);
     clearPolyOverlay();
     polyOverlay.editMeshId = pm.id;
   }
