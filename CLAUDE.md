@@ -2295,9 +2295,14 @@ the browser console or automated evals:
     and what has passed is ghost (0 by default). `scan` picks the axis: TIME
     plays the film, ACROSS / UP are slit-scans. PLAY MOVES `time` ITSELF
     (`tick`), so the playhead you scrub and the one that plays are one value:
-    scrubbing pauses, Play resumes from there. DENSITY IS OPACITY PER UNIT OF
-    DEPTH (`1 - (1-d)^(depth*4)`), not per march step — per step, even 0.1
-    compounded over 160 steps to near solid and buried the slice.
+    scrubbing pauses, Play resumes from there. DENSITY is never per march
+    step — per step, even 0.1 compounded over 160 steps to near solid and
+    buried the slice. Without a playhead it is opacity per unit of DEPTH (a
+    cloud: thinner where a ray only clips the cube, right for smoke); WITH
+    one it is the GHOST of the block and is normalised per RAY, so every ray
+    gathers the same total. Per depth, the ghost SHRANK — rays through the
+    corners and edges cross a sliver of the cube and gathered nothing, so the
+    block read as a cloud smaller than its own box.
   - A new volume comes from Add ▸ Time volume EMPTY; its SOURCE (a Library
     video or GIF, a file — which also goes into the Library — or a live /
     test camera) is picked in its panel, not from a menu listing the Library.

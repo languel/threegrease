@@ -332,10 +332,17 @@ const FRAG = /* glsl */`
         vec3 p = eye + dir * t + 0.5;
         vec3 uvt = vec3(p.x, p.z, wrapT(p.y + uTime));
         vec4 c = sampleAt(uvt);
-        // DENSITY is opacity per unit of depth, not per step: at 0.1 a ray
-        // right through the cube keeps about half its light (a ghost you see
-        // the playhead through), at 1 the first voxel is a surface
-        float a = passes(uvt, c) * (1.0 - pow(1.0 - clamp(uDensity, 0.0, 0.999), dt * 4.0));
+        // DENSITY. Without a playhead it is opacity per unit of DEPTH — a
+        // cloud, thinner where a ray only clips the cube, which is right for
+        // smoke. With one it is the GHOST of the block, and per depth made it
+        // SHRINK: a ray through a corner or near an edge crosses a sliver of
+        // the cube and gathers almost nothing, so the block read as a cloud
+        // smaller than its own box. There it is normalised per RAY instead —
+        // every ray through the cube gathers the same total (the Ghost
+        // value), so the block reads as a uniform translucent box to its
+        // very edges.
+        float span = uPlayhead > 0 ? dt / max(tOut - tIn, 1e-3) : dt * 4.0;
+        float a = passes(uvt, c) * (1.0 - pow(1.0 - clamp(uDensity, 0.0, 0.999), span));
         acc.rgb += (1.0 - acc.a) * a * c.rgb;
         acc.a += (1.0 - acc.a) * a;
         if (acc.a > 0.98) break;
