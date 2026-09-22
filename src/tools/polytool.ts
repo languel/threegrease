@@ -565,6 +565,27 @@ export class PolyPenTool implements Tool {
         polyOverlay.editMeshId = pm.id;
         return;
       }
+      // A STRAIGHT 2-CLICK LINE between two points ALREADY on the SAME
+      // face's boundary is a CUT, not a new dangling chord: split that
+      // face along it right here, so the diagonal becomes a real shared
+      // edge of both halves instead of a line that crosses the existing
+      // topology without joining it (the "overlapping triangles" a raw
+      // `addEdge` produces the moment either end sits on a face someone
+      // already subdivided). Only for the chain's FIRST segment — past
+      // that you are plainly building new, separate geometry — and only
+      // when this click landed on existing topology (a vertex, or a point
+      // `vertexFromHit` just spliced into an edge); a fresh POKE already
+      // did its own, better-scoped integration and needs no second cut.
+      if (chain.length === 1 && src.kind !== 'POLY_FACE') {
+        const shared = pm.faces.find((f) => f.vertices.includes(chain[0]) && f.vertices.includes(id));
+        if (shared && splitFace(pm, shared.id, chain[0], id)) {
+          this.state = { kind: 'IDLE' };
+          this.commit(ctx, pm, st.before);
+          clearPolyOverlay();
+          polyOverlay.editMeshId = pm.id;
+          return;
+        }
+      }
       addEdge(pm, chain[chain.length - 1], id);
       chain.push(id);
       polyOverlay.activeVertexIds = [...chain];
