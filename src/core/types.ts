@@ -595,7 +595,21 @@ export interface TGTimeSlice {
   /** POSITION: where the surface is inside the cube decides picture and
    *  time. MAP: the surface's own UVs are the picture and time comes from a
    *  map (luminance) — the Khronos Projector */
-  mode: 'POSITION' | 'MAP';
+  mode: 'POSITION' | 'MAP' | 'FIELD';
+  /** FIELD: the SHAPE of a time surface drawn inside the cube — the Khronos
+   *  "push": each point of the picture at its own depth in time. `time` is
+   *  the surface's base, so scrubbing moves the whole sheet through the
+   *  film; `amount` is how far (0..1 of the film) the shape reaches */
+  field?: {
+    shape: 'FLAT' | 'BUMP' | 'TILT' | 'WAVE' | 'RIPPLE' | 'MAP';
+    amount: number;
+    /** BUMP / RIPPLE: size, 0..1 of the picture */
+    radius: number;
+    /** BUMP / RIPPLE: centre, 0..1 */
+    cx: number; cy: number;
+    /** WAVE / RIPPLE: cycles across the picture */
+    freq: number;
+  };
   /** offset along time, 0..1 of the film */
   time: number;
   /** MAP: how much of the film the map's black-to-white spans */

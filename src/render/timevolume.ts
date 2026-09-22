@@ -130,11 +130,36 @@ async function decodeVideo(url: string, maxW: number, maxFrames: number,
 // ---------------------------------------------------------------- shader
 
 const VERT = /* glsl */`
+  uniform int uField;       // 0 = the mesh as it is; >0 = a time surface
+  uniform mat4 uVolToWorld;
+  uniform float uBase, uAmount, uRadius, uFreq;
+  uniform vec2 uCenter;
+  uniform bool uHasFieldMap;
+  uniform sampler2D uFieldMap;
   varying vec3 vWorld;
   varying vec2 vUv;
+  const float TAU = 6.28318530718;
   void main() {
     vUv = uv;
-    vec4 w = modelMatrix * vec4(position, 1.0);
+    vec4 w;
+    if (uField > 0) {
+      // A TIME SURFACE: the grid's uv is the picture, and its depth in the
+      // cube is the moment that point shows. It is laid out in the CUBE's
+      // space (x across, y time, z up), not its own — the mesh is only the
+      // grid it is drawn with.
+      float d = distance(uv, uCenter);
+      float f = 0.0;
+      if (uField == 2) f = exp(-d * d / (2.0 * uRadius * uRadius));            // bump
+      else if (uField == 3) f = uv.x - 0.5;                                     // tilt
+      else if (uField == 4) f = 0.5 * sin(TAU * uFreq * uv.x);                  // wave
+      else if (uField == 5) f = 0.5 * cos(TAU * uFreq * d / max(uRadius, 1e-3)) * exp(-d / max(uRadius * 2.0, 1e-3)); // ripple
+      else if (uField == 6 && uHasFieldMap) f = dot(texture2D(uFieldMap, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
+      // the sheet stays inside the film: past either end it lies on the face
+      float t = clamp(uBase + uAmount * f, 0.0, 1.0);
+      w = uVolToWorld * vec4(uv.x - 0.5, t - 0.5, uv.y - 0.5, 1.0);
+    } else {
+      w = modelMatrix * vec4(position, 1.0);
+    }
     vWorld = w.xyz;
     gl_Position = projectionMatrix * viewMatrix * w;
   }
@@ -201,6 +226,9 @@ function sliceMaterial(empty: THREE.DataArrayTexture): THREE.ShaderMaterial {
     uniforms: {
       uVol: { value: empty }, uWorldToVol: { value: new THREE.Matrix4() },
       uFrames: { value: 1 }, uStart: { value: 0 }, uRing: { value: false },
+      uField: { value: 0 }, uVolToWorld: { value: new THREE.Matrix4() }, uBase: { value: 0 },
+      uAmount: { value: 0 }, uRadius: { value: 0.25 }, uFreq: { value: 1 }, uCenter: { value: new THREE.Vector2(0.5, 0.5) },
+      uHasFieldMap: { value: false }, uFieldMap: { value: null },
       uMode: { value: 0 }, uTime: { value: 0 }, uGain: { value: 1 }, uRepeat: { value: true },
       uHasMap: { value: false }, uMap: { value: null }, uInvertMap: { value: false },
       uOpacity: { value: 1 }, uReady: { value: false },
@@ -211,7 +239,12 @@ function sliceMaterial(empty: THREE.DataArrayTexture): THREE.ShaderMaterial {
 /** A volume as it stands in the scene: its cube and its playhead. */
 type VolumeEntry = { root: THREE.Mesh; outline: THREE.LineSegments; phase: number };
 /** A mesh wearing a slice: the material it had, put back when it stops. */
-type SliceEntry = { mat: THREE.ShaderMaterial; orig: THREE.Material | THREE.Material[]; phase: number };
+type SliceEntry = {
+  mat: THREE.ShaderMaterial; orig: THREE.Material | THREE.Material[]; phase: number;
+  /** FIELD: the dense grid drawn in place of the mesh's own geometry */
+  grid?: THREE.BufferGeometry; origGeo?: THREE.BufferGeometry;
+};
+const FIELD_SHAPES = { FLAT: 1, BUMP: 2, TILT: 3, WAVE: 4, RIPPLE: 5, MAP: 6 } as const;
 
 export class TimeVolumeManager {
   /** the cubes; parented into the scene by the App */
@@ -391,7 +424,11 @@ export class TimeVolumeManager {
     const v = s ? scene.volumes.find((x) => x.id === s.volumeId) : undefined;
     let e = this.slices.get(mesh);
     if (!s || !v) {
-      if (e) { mesh.material = e.orig; e.mat.dispose(); this.slices.delete(mesh); }
+      if (e) {
+        mesh.material = e.orig; e.mat.dispose();
+        if (e.origGeo) { mesh.geometry = e.origGeo; e.grid?.dispose(); mesh.frustumCulled = true; }
+        this.slices.delete(mesh);
+      }
       return false;
     }
     if (!e) {
@@ -403,6 +440,36 @@ export class TimeVolumeManager {
     this.fill(u, v, scene);
     u.uMode.value = s.mode === 'MAP' ? 1 : 0;
     u.uTime.value = s.time + e.phase;
+    // FIELD: the mesh is swapped for a dense grid (the shape needs vertices
+    // to bend) and the vertex shader lays it out in the cube's space
+    const field = s.mode === 'FIELD' ? (s.field ?? { shape: 'BUMP', amount: -0.5, radius: 0.25, cx: 0.5, cy: 0.5, freq: 2 }) : null;
+    if (field && !e.grid) {
+      e.origGeo = mesh.geometry;
+      e.grid = new THREE.PlaneGeometry(2, 2, 96, 96);
+      mesh.geometry = e.grid;
+      // it is drawn where the SHAPE puts it, not where the mesh stands
+      mesh.frustumCulled = false;
+    } else if (!field && e.grid) {
+      mesh.geometry = e.origGeo!; e.grid.dispose(); e.grid = undefined; e.origGeo = undefined;
+      mesh.frustumCulled = true;
+    }
+    u.uField.value = field ? FIELD_SHAPES[field.shape] : 0;
+    if (field) {
+      u.uMode.value = 0;
+      // the base is the sheet's time: scrub moves the whole surface through
+      // the film; the fragment then reads exactly where it lies
+      u.uBase.value = s.wrap === 'CLAMP' ? Math.min(1, Math.max(0, s.time + e.phase))
+        : (((s.time + e.phase) % 1) + 1) % 1;
+      u.uTime.value = 0;
+      u.uAmount.value = field.amount;
+      u.uRadius.value = field.radius;
+      u.uFreq.value = field.freq;
+      (u.uCenter.value as THREE.Vector2).set(field.cx, field.cy);
+      (u.uVolToWorld.value as THREE.Matrix4).copy(worldMatrixOf(scene, { kind: 'VOLUME', id: v.id }));
+      const fm = field.shape === 'MAP' && s.map ? this.textureFor?.(s.map) ?? null : null;
+      u.uHasFieldMap.value = !!fm;
+      u.uFieldMap.value = fm;
+    }
     u.uGain.value = s.gain;
     u.uRepeat.value = s.wrap !== 'CLAMP';
     u.uInvertMap.value = !!s.invertMap;

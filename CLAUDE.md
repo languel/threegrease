@@ -2263,6 +2263,14 @@ the browser console or automated evals:
     Both scrub (`time`) and play (`rate`, films a second).
   - The slice material REPLACES the mesh's own (`applySlice`, hooked first
     in `MeshManager.apply`) and puts it back when the slice goes.
+  - A SURFACE slice (`mode: 'FIELD'`) is the car demo: a time surface drawn
+    INSIDE the cube, each picture point at its own depth in time by a shape
+    (flat, bump, tilt, wave, ripple, map). The mesh's own geometry is swapped
+    for a 96×96 grid and the vertex shader lays it out in the CUBE's space
+    (its own transform is ignored, so `frustumCulled` is off); the fragment
+    then samples exactly where each point lies. Scrub moves the whole sheet
+    through the film. Videos and GIFs become volumes from Add ▸ Time volume,
+    a Library tile's cube button, or its right-click menu.
   - THE VOLUME IS A TEXTURE ARRAY, NOT A 3D TEXTURE: one layer per frame,
     and the shader blends the two neighbouring layers itself (an array does
     not filter across layers). A 3D texture filters time for free but can

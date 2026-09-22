@@ -93,7 +93,7 @@ export interface AppHandle {
   splatVolumes(): { id: number; name: string; kind: string }[];
   addVolume(src: string, name?: string, at?: [number, number, number]): number;
   addLiveVolume(test: boolean): Promise<void>;
-  addVolumeSlice(volumeId: number, mode?: 'POSITION' | 'MAP'): number | null;
+  addVolumeSlice(volumeId: number, mode?: 'POSITION' | 'MAP' | 'FIELD'): number | null;
   /** the decode state of a time volume, for its panel */
   volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number } | null;
   splatSelectInside(meshId: number): void;
@@ -2206,7 +2206,27 @@ export class UI {
           'a plane that cuts the cube: square to the time axis it is one frame, and moving it along the cube plays the film; tilt it for an oblique cut'),
         tip(btn('Add time map', () => this.app.addVolumeSlice(id, 'MAP')),
           'a plane that shows the whole picture with TIME taken from a map — a depth image, a video or a camera — Khronos-style'),
+        tip(btn('Add surface', () => this.app.addVolumeSlice(id, 'FIELD')),
+          'a time SURFACE inside the cube, bent by a shape (a bump into the past, a tilt, a wave, a map) — scrub or play its Time and it sweeps through the film'),
       ),
+    ];
+  }
+
+  /** A time surface's shape. */
+  private fieldRows(s: NonNullable<TGMesh['timeSlice']>): HTMLElement[] {
+    const f = s.field!;
+    return [
+      tip(selectField('Shape', f.shape, [['FLAT', 'Flat'], ['BUMP', 'Bump'], ['TILT', 'Tilt'], ['WAVE', 'Wave'], ['RIPPLE', 'Ripple'], ['MAP', 'Map']],
+        (x) => { f.shape = x; this.refresh(); }),
+      'the shape of the surface in time: Flat is one frame; Bump pushes a region into the past (or future); Tilt runs time across the picture; Wave and Ripple fold it; Map bends it by an image, video or camera'),
+      tip(slider('Reach', f.amount, -1, 1, 0.01, (x) => { f.amount = x; }, { def: -0.5 }),
+        'how far the shape reaches in time, as a fraction of the film — negative pushes into the past'),
+      ...(f.shape === 'BUMP' || f.shape === 'RIPPLE' ? [
+        slider('Radius', f.radius, 0.02, 1, 0.01, (x) => { f.radius = x; }, { def: 0.25 }),
+        slider('Centre x', f.cx, 0, 1, 0.01, (x) => { f.cx = x; }, { def: 0.5 }),
+        slider('Centre y', f.cy, 0, 1, 0.01, (x) => { f.cy = x; }, { def: 0.5 }),
+      ] : []),
+      ...(f.shape === 'WAVE' || f.shape === 'RIPPLE' ? [slider('Frequency', f.freq, 0.25, 8, 0.25, (x) => { f.freq = x; }, { def: 2 })] : []),
     ];
   }
 
@@ -2230,16 +2250,23 @@ export class UI {
       el('div', { class: 'row dim', text: 'Time slice' }),
       selectField('Volume', String(s.volumeId), vols.map((v) => [String(v.id), v.name] as [string, string]),
         (x) => { s.volumeId = Number(x); }),
-      tip(selectField('Time from', s.mode, [['POSITION', 'Position'], ['MAP', 'Map']], (x) => { s.mode = x; this.refresh(); }),
-        'Position: where the surface is inside the cube decides picture AND time — move, tilt or bend it · Map: the surface shows the whole picture, and each pixel\'s time comes from a map'),
+      tip(selectField('Time from', s.mode, [['POSITION', 'Position'], ['MAP', 'Map'], ['FIELD', 'Surface']], (x) => {
+        s.mode = x;
+        if (x === 'FIELD') s.field ??= { shape: 'BUMP', amount: -0.5, radius: 0.25, cx: 0.5, cy: 0.5, freq: 2 };
+        this.refresh();
+      }),
+        'Position: where the surface is inside the cube decides picture AND time — move, tilt or bend it · Map: the surface shows the whole picture, and each pixel\'s time comes from a map · Surface: a time SURFACE drawn inside the cube, bent by a shape — scrub Time and it sweeps through the film'),
+      ...(s.mode === 'FIELD' && s.field ? this.fieldRows(s) : []),
       tip(slider('Time', s.time, -1, 1, 0.005, (x) => { s.time = x; }, { def: 0 }), 'offset along the film'),
       tip(slider('Play', s.rate, -2, 2, 0.01, (x) => { s.rate = x; }, { def: 0 }), 'films a second: 0 holds'),
-      ...(s.mode === 'MAP' ? [
+      ...(s.mode === 'MAP' || s.field?.shape === 'MAP' && s.mode === 'FIELD' ? [
         el('div', { class: 'row' }, mapBtn,
           ...(s.map ? [btn('×', () => { s.map = undefined; this.refresh(); }, { title: 'no map: one moment everywhere' })] : [])),
-        tip(slider('Depth', s.gain, -1, 1, 0.01, (x) => { s.gain = x; }, { def: 1 }),
-          'how much of the film the map spans from black to white — negative runs it the other way'),
-        checkbox('Invert map', !!s.invertMap, (x) => { s.invertMap = x; }),
+        ...(s.mode === 'MAP' ? [
+          tip(slider('Depth', s.gain, -1, 1, 0.01, (x) => { s.gain = x; }, { def: 1 }),
+            'how much of the film the map spans from black to white — negative runs it the other way'),
+          checkbox('Invert map', !!s.invertMap, (x) => { s.invertMap = x; }),
+        ] : []),
       ] : []),
       tip(selectField('Ends', s.wrap, [['REPEAT', 'Loop'], ['CLAMP', 'Hold']], (x) => { s.wrap = x; }),
         'Loop: time wraps round the film · Hold: it stops at the ends'),
@@ -6513,12 +6540,26 @@ export class UI {
           else this.app.liveAction(stream.key, playing ? 'pause' : 'resume');
         }, { cls: 'icon-btn', title: playing ? 'Pause — everything showing it holds the current frame' : 'Play' }),
       ] : []),
+      // a video or GIF can become a SPACE-TIME CUBE (render/timevolume.ts)
+      ...(isMedia ? [btn(icon('timeVolume', 12), () => {
+        this.app.addVolume(stream!.key.slice('media:'.length), a.name);
+      }, { cls: 'icon-btn', title: 'Make a time volume — the film as a space-time cube you can slice' })] : []),
       ...(!stream ? [btn(icon('camera', 12), () => this.app.refreshAssetThumb(a.id),
         { cls: 'icon-btn', title: 'Re-take this picture from the selected object' })] : []),
       btn(icon('xMark', 12), () => this.removeAssets(this.libTargets(a)),
         { cls: 'icon-btn', title: 'Remove from the Library (the selected tiles, when this one is among them) — ⋯ ▸ Restore brings it back' }),
     );
     for (const b of tools.querySelectorAll('button')) b.addEventListener('click', (e) => e.stopPropagation());
+    tile.oncontextmenu = (e) => {
+      e.preventDefault();
+      this.openContextMenu(e.clientX, e.clientY, [
+        { label: 'Place at the 3D cursor', do: () => this.app.addAssetToScene(a) },
+        ...(isMedia ? [{ label: 'Make time volume', icon: 'timeVolume' as IconName,
+          do: () => { this.app.addVolume(stream!.key.slice('media:'.length), a.name); } }] : []),
+        { sep: true },
+        { label: 'Remove from the Library', do: () => this.removeAssets(this.libTargets(a)) },
+      ]);
+    };
     tile.append(pic, name, tools);
     return tile;
   }

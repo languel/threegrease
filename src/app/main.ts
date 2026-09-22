@@ -4916,21 +4916,23 @@ class App implements AppHandle {
    * it along Y scrubs the film. MAP slices stand beside the cube, showing
    * the whole picture, with time coming from their map.
    */
-  addVolumeSlice(volumeId: number, mode: 'POSITION' | 'MAP' = 'POSITION'): number | null {
+  addVolumeSlice(volumeId: number, mode: 'POSITION' | 'MAP' | 'FIELD' = 'POSITION'): number | null {
     const scene = this.ctx.scene;
     const vol = scene.volumes.find((v) => v.id === volumeId);
     if (!vol) return null;
     this.ctx.pushUndo();
     const id = genId();
     const m = createMeshObject(id, 'PLANE', [0, 0, 0], undefined, this.ctx.settings.upAxis === 'Z');
-    m.name = `${vol.name} ${mode === 'MAP' ? 'time map' : 'slice'}`;
+    m.name = `${vol.name} ${mode === 'MAP' ? 'time map' : mode === 'FIELD' ? 'surface' : 'slice'}`;
     // parent-local: the cube spans -0.5..0.5; a PLANE is 2x2 before scale
     m.parent = { kind: 'VOLUME', id: volumeId };
     m.translation = mode === 'MAP' ? [1.2, 0, 0] : [0, 0, 0];
     m.rotation = [Math.PI / 2, 0, 0];
     m.scale = [0.5, 0.5, 1];
     m.doubleSided = true;
-    m.timeSlice = { volumeId, mode, time: 0, gain: 1, rate: 0, wrap: 'REPEAT' };
+    m.timeSlice = { volumeId, mode, time: mode === 'FIELD' ? 0.75 : 0, gain: 1, rate: 0, wrap: mode === 'FIELD' ? 'CLAMP' : 'REPEAT' };
+    // a surface starts as the Khronos push: a bump into the past
+    if (mode === 'FIELD') m.timeSlice.field = { shape: 'BUMP', amount: -0.5, radius: 0.25, cx: 0.5, cy: 0.5, freq: 2 };
     scene.meshes.push(m);
     this.meshes.sync(scene, this.nav.active);
     deselectAllObjects(scene);
