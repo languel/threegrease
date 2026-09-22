@@ -159,7 +159,8 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [ ] Splats: move/rotate selected splats, live boolean crop/filter volumes
 - [x] Time volumes: video/GIF as a space-time cube; position and time-map slices on any mesh; scrub and play
 - [x] Time volumes: live camera recorded into a ring (freeze to hold)
-- [ ] Time volumes: volume (raymarched) display, conversion to splats with controllable density, animated strokes/actors as sources
+- [x] Time volumes: surface slices (a bent time sheet), convert to splats (stride, brightness, motion)
+- [ ] Time volumes: volume (raymarched) display, animated strokes/actors as sources
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)

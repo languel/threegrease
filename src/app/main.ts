@@ -4888,6 +4888,84 @@ class App implements AppHandle {
     this.addVolume(`live:${key}`, test ? 'Test camera volume' : 'Camera volume');
   }
 
+  /**
+   * A TIME VOLUME AS SPLATS: every sampled voxel — one pixel of one frame —
+   * becomes a gaussian at its place in the cube, so the film becomes a cloud
+   * you can walk round, and every splat tool (edit, crop, filters, point
+   * view) works on it. Density is the choice: a pixel and a frame STRIDE,
+   * a brightness floor (a black background is nothing), and MOTION — keep a
+   * voxel only where it differs from the frame before, so a still background
+   * vanishes and what moved is left as a trail through time. Written as a
+   * standard 3DGS PLY into the store, like Separate.
+   */
+  async volumeToSplats(id: number, o: { step: number; tStep: number; minLuma: number; motion: number; size: number; opacity: number }):
+    Promise<{ ok: boolean; count?: number; error?: string }> {
+    const scene = this.ctx.scene;
+    const v = scene.volumes.find((x) => x.id === id);
+    const vt = v ? timeVolumes.statusOf(v) : undefined;
+    if (!v || !vt?.tex || vt.status !== 'ok') return { ok: false, error: 'the volume has not decoded yet' };
+    const data = vt.tex.image.data as Uint8Array;
+    const W = vt.width, H = vt.height, N = vt.frames;
+    const start = vt.live ? (vt.head + 1) % N : 0;
+    const step = Math.max(1, Math.round(o.step)), tStep = Math.max(1, Math.round(o.tStep));
+    // the cube's own size is baked into the positions: a splat object has
+    // one uniform scale and a volume is rarely a cube
+    const world = worldMatrixOf(scene, { kind: 'VOLUME', id });
+    const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
+    world.decompose(pos, quat, scl);
+    const dx = (scl.x * step) / W, dy = (scl.y * tStep) / N, dz = (scl.z * step) / H;
+    const rows: number[] = [];
+    const SH_C0 = 0.28209479177387814;
+    const logit = (x: number) => { const c = Math.min(1 - 1e-4, Math.max(1e-4, x)); return Math.log(c / (1 - c)); };
+    const sz = [dx, dy, dz].map((d) => Math.log(Math.max(1e-5, d * 0.6 * o.size)));
+    const layer = (k: number) => ((start + k) % N) * W * H * 4;
+    for (let k = 0; k < N; k += tStep) {
+      const L = layer(k), P = k >= tStep ? layer(k - tStep) : -1;
+      for (let y = 0; y < H; y += step) {
+        for (let x = 0; x < W; x += step) {
+          const i = L + (y * W + x) * 4;
+          const r = data[i] / 255, g = data[i + 1] / 255, b = data[i + 2] / 255, a = data[i + 3] / 255;
+          const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          if (a < 0.5 || luma < o.minLuma) continue;
+          if (o.motion > 0) {
+            if (P < 0) continue;
+            const j = P + (y * W + x) * 4;
+            const d = (Math.abs(data[j] - data[i]) + Math.abs(data[j + 1] - data[i + 1]) + Math.abs(data[j + 2] - data[i + 2])) / 765;
+            if (d < o.motion) continue;
+          }
+          // cube space: x across, y time, z up (v = 0 is the bottom row)
+          const u = (x + 0.5) / W, vv = (y + 0.5) / H, t = (k + 0.5) / N;
+          rows.push((u - 0.5) * scl.x, (t - 0.5) * scl.y, (vv - 0.5) * scl.z,
+            (r - 0.5) / SH_C0, (g - 0.5) / SH_C0, (b - 0.5) / SH_C0, logit(o.opacity),
+            sz[0], sz[1], sz[2], 1, 0, 0, 0);
+        }
+      }
+      if (rows.length > 14 * 3_000_000) break;
+    }
+    const n = rows.length / 14;
+    if (!n) return { ok: false, error: 'nothing passed the density settings — lower Min brightness or Motion' };
+    const props = ['x', 'y', 'z', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'scale_0', 'scale_1', 'scale_2', 'rot_0', 'rot_1', 'rot_2', 'rot_3'];
+    const header = new TextEncoder().encode(`ply\nformat binary_little_endian 1.0\nelement vertex ${n}\n`
+      + props.map((p) => `property float ${p}`).join('\n') + '\nend_header\n');
+    const buf = new ArrayBuffer(header.length + rows.length * 4);
+    new Uint8Array(buf).set(header);
+    // the body starts wherever the text header ends — rarely on a 4-byte
+    // boundary, which a Float32Array view needs — so copy it in as bytes
+    new Uint8Array(buf, header.length).set(new Uint8Array(new Float32Array(rows).buffer));
+    const base = v.name.replace(/\.\w+$/, '');
+    const src = await putFile(new Blob([buf], { type: 'application/octet-stream' }), `${base}-splats.ply`);
+    this.ctx.pushUndo();
+    const sid = genId();
+    const e = new THREE.Euler().setFromQuaternion(quat);
+    scene.splats.push({
+      id: sid, name: `${base} splats`, src, translation: [pos.x, pos.y, pos.z], rotation: [e.x, e.y, e.z],
+      scale: 1, visible: true, select: false, parent: null, drawTarget: false, constraints: [],
+    });
+    this.setStatusHint(`${n.toLocaleString()} splats from ${v.name}`, 3000);
+    this.ui.refresh();
+    return { ok: true, count: n };
+  }
+
   volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number } | null {
     const v = this.ctx.scene.volumes.find((x) => x.id === id);
     const st = v ? timeVolumes.statusOf(v) : undefined;

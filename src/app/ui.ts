@@ -93,6 +93,8 @@ export interface AppHandle {
   splatVolumes(): { id: number; name: string; kind: string }[];
   addVolume(src: string, name?: string, at?: [number, number, number]): number;
   addLiveVolume(test: boolean): Promise<void>;
+  volumeToSplats(id: number, o: { step: number; tStep: number; minLuma: number; motion: number; size: number; opacity: number }):
+    Promise<{ ok: boolean; count?: number; error?: string }>;
   addVolumeSlice(volumeId: number, mode?: 'POSITION' | 'MAP' | 'FIELD'): number | null;
   /** the decode state of a time volume, for its panel */
   volumeStatus(id: number): { status: string; progress: number; error?: string; width: number; height: number; frames: number } | null;
@@ -2201,6 +2203,7 @@ export class UI {
         'picture width the film is decoded at, in pixels — memory grows with its square'),
       tip(numField('Frames', v.frames, (x) => { v.frames = Math.max(2, Math.min(512, Math.round(x))); }, 8, { def: 128, min: 2, max: 512 }),
         'how many frames the film is sampled into: the resolution along TIME'),
+      ...this.volumeSplatRows(id),
       el('div', { class: 'row' },
         tip(btn('Add slice', () => this.app.addVolumeSlice(id, 'POSITION')),
           'a plane that cuts the cube: square to the time axis it is one frame, and moving it along the cube plays the film; tilt it for an oblique cut'),
@@ -2208,6 +2211,42 @@ export class UI {
           'a plane that shows the whole picture with TIME taken from a map — a depth image, a video or a camera — Khronos-style'),
         tip(btn('Add surface', () => this.app.addVolumeSlice(id, 'FIELD')),
           'a time SURFACE inside the cube, bent by a shape (a bump into the past, a tilt, a wave, a map) — scrub or play its Time and it sweeps through the film'),
+      ),
+    ];
+  }
+
+  /** per-volume "convert to splats" settings (UI state, not scene data) */
+  private splatOpts = new Map<number, { step: number; tStep: number; minLuma: number; motion: number; size: number; opacity: number; msg?: string }>();
+
+  /** The volume as a cloud: density settings and the button. */
+  private volumeSplatRows(id: number): HTMLElement[] {
+    let o = this.splatOpts.get(id);
+    if (!o) { o = { step: 4, tStep: 2, minLuma: 0.06, motion: 0, size: 1, opacity: 0.8 }; this.splatOpts.set(id, o); }
+    const st = this.app.volumeStatus(id);
+    const w = st?.width ?? 0, h = st?.height ?? 0, n = st?.frames ?? 0;
+    const most = Math.ceil(w / o.step) * Math.ceil(h / o.step) * Math.ceil(n / o.tStep);
+    return [
+      el('div', { class: 'menu-sep' }),
+      el('div', { class: 'row dim', text: 'As splats' }),
+      tip(numField('Step', o.step, (x) => { o!.step = Math.max(1, Math.round(x)); this.refresh(); }, 1, { def: 4, min: 1, max: 32 }),
+        'keep every Nth pixel across and up — density in the picture'),
+      tip(numField('Time step', o.tStep, (x) => { o!.tStep = Math.max(1, Math.round(x)); this.refresh(); }, 1, { def: 2, min: 1, max: 32 }),
+        'keep every Nth frame — density along time'),
+      tip(slider('Min brightness', o.minLuma, 0, 1, 0.01, (x) => { o!.minLuma = x; }, { def: 0.06 }),
+        'leave out voxels darker than this — a black background becomes nothing'),
+      tip(slider('Motion', o.motion, 0, 0.5, 0.005, (x) => { o!.motion = x; }, { def: 0 }),
+        'keep only voxels that CHANGED since the frame before: a still background vanishes and what moved is left as a trail through time (0 keeps everything)'),
+      slider('Splat size', o.size, 0.1, 4, 0.05, (x) => { o!.size = x; }, { def: 1 }),
+      slider('Splat opacity', o.opacity, 0.01, 1, 0.01, (x) => { o!.opacity = x; }, { def: 0.8 }),
+      el('div', { class: 'row' },
+        tip(btn('Convert to splats', () => {
+          o!.msg = 'converting…'; this.refresh();
+          void this.app.volumeToSplats(id, o!).then((r) => {
+            o!.msg = r.ok ? `${r.count!.toLocaleString()} splats` : r.error;
+            this.refresh();
+          });
+        }), 'write the volume out as a gaussian-splat cloud (a new object; the volume stays)'),
+        el('span', { class: 'dim', text: o.msg ?? (most ? `at most ${most.toLocaleString()}` : '') }),
       ),
     ];
   }

@@ -223,7 +223,11 @@ npm run dev     # open http://localhost:5199
   a tilted or curved one shows different moments across the picture, and a
   *time map* (an image, video or camera) gives every pixel its own moment.
   Scrub and play either. A *live* volume records a camera into the cube —
-  always the last N frames — which is the Khronos Projector as built.
+  always the last N frames — which is the Khronos Projector as built. A
+  *surface* slice bends a time sheet inside the cube (a bump into the past,
+  a tilt, a wave) and sweeps through it as you scrub, and **Convert to
+  splats** turns the film into a gaussian cloud — optionally keeping only
+  what moved, as a trail through time.
 - **Registration with measurements**: a measurement placed on an object
   sticks to it. Type the real length of one and it rescales just that
   object (or the whole scene). Pair two measurements — corners of a

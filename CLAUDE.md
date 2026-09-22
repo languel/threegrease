@@ -2271,6 +2271,18 @@ the browser console or automated evals:
     then samples exactly where each point lies. Scrub moves the whole sheet
     through the film. Videos and GIFs become volumes from Add ▸ Time volume,
     a Library tile's cube button, or its right-click menu.
+  - CONVERT TO SPLATS (`App.volumeToSplats`): every sampled voxel — one
+    pixel of one frame — becomes a gaussian at its place in the cube, sized
+    to the sampling spacing, written as a standard 3DGS PLY into the store
+    and added as a new splat object (the volume stays), so every splat tool
+    applies. Density: pixel stride, frame stride, a brightness floor, and
+    MOTION (keep a voxel only where it differs from the previous sampled
+    frame: the still background vanishes, what moved is a trail through
+    time). The cube's non-uniform size is BAKED into the positions — a splat
+    object has one uniform scale. Trap: the PLY body starts wherever the text
+    header ends, rarely 4-byte aligned, so it is copied in as bytes (a
+    Float32Array view on it throws). Measured on a giphy dance (256×256×34):
+    step 2 gave 241k splats, motion 0.08 gave 29k.
   - THE VOLUME IS A TEXTURE ARRAY, NOT A 3D TEXTURE: one layer per frame,
     and the shader blends the two neighbouring layers itself (an array does
     not filter across layers). A 3D texture filters time for free but can
