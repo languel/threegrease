@@ -19,6 +19,7 @@ import {
 } from './projection';
 import { allRefs, refOfObject3D, worldMatrixOf, type ObjRef } from './objects';
 import { pickSplatPoint } from './splatpick';
+import { pickElement } from './polypick';
 
 /** What the returned point actually landed on — for HUD feedback, so the
  *  user can tell a real vertex hit from a fallback onto the drawing plane. */
@@ -70,15 +71,21 @@ export function snapWorldPoint(
 
   if (snap.enabled) {
     if (snap.mode === 'POINT') {
-      const hit = nearestStrokePointAll(ctx, x, y, PICK_PX, scope);
-      // no stroke nearby: fall through to plane placement rather than
-      // refusing to place anything
-      if (hit) return { point: new THREE.Vector3(hit.x, hit.y, hit.z), kind: 'VERTEX' };
-      // a scan's vertices are its splat centres — and the hit carries the
-      // splat, so a measurement point placed there BINDS to the scan and
-      // rides it through an alignment
-      const sp = pickSplatPoint(ctx, x, y, 14);
-      if (sp) return { point: new THREE.Vector3(...sp.world), kind: 'VERTEX', ref: { kind: 'SPLAT', id: sp.objectId } };
+      // EVERY vertex the app knows, nearest on screen wins: poly vertices,
+      // stroke points, splat centres, a primitive's corners, and on a mesh
+      // too big to walk (a room scan) the corners of the triangle under the
+      // pointer. This used to offer stroke points alone (then splat centres),
+      // so on a mesh the magnet did nothing and the point simply slid over
+      // the surface — useless for picking the corners an alignment pairs.
+      // The hit carries the object, so a measurement point BINDS to it.
+      const el = pickElement(ctx, x, y, 'VERTEX', rect, {});
+      if (el) return { point: new THREE.Vector3(...el.world), kind: 'VERTEX', ref: el.ref ?? undefined };
+      if (scope !== 'ANY') {
+        const hit = nearestStrokePointAll(ctx, x, y, PICK_PX, scope);
+        if (hit) return { point: new THREE.Vector3(hit.x, hit.y, hit.z), kind: 'VERTEX' };
+      }
+      // nothing nearby: fall through to plane placement rather than refusing
+      // to place anything
     }
 
     if (snap.mode === 'EDGE' || snap.mode === 'EDGE_CENTER' || snap.mode === 'EDGE_PERP') {
@@ -94,6 +101,11 @@ export function snapWorldPoint(
         const kind: SnapKind = snap.mode === 'EDGE_CENTER' ? 'EDGE_CENTER'
           : snap.mode === 'EDGE_PERP' && reference ? 'EDGE_PERP' : 'EDGE';
         return { point, kind };
+      }
+      // and a mesh's edges, for Edge: the same element picker
+      if (snap.mode === 'EDGE') {
+        const el = pickElement(ctx, x, y, 'EDGE', rect, {});
+        if (el) return { point: new THREE.Vector3(...el.world), kind: 'EDGE', ref: el.ref ?? undefined };
       }
     }
 

@@ -7,7 +7,7 @@
 // rewriting interactions.
 import * as THREE from 'three';
 import type { AppCtx } from './context';
-import { refOfObject3D } from './objects';
+import { refOfObject3D, type ObjRef } from './objects';
 import type { PathRef, TGVertexBinding, Vec3 } from '../core/types';
 import { frameAt } from '../core/gpdata';
 import { drawingPlane, nearestStrokePointAll, nearestStrokeSegmentAll, raycastFaceTriangle, ignoredBySnap, raycastSurfaceHit } from './projection';
@@ -34,6 +34,9 @@ export interface ConstructionHit {
   normal?: Vec3;
   source: ConstructionSource;
   distancePx?: number;
+  /** the OBJECT the element belongs to, when one does — what a measurement
+   *  point binds to, so it rides that object through an alignment */
+  ref?: ObjRef | null;
 }
 
 export interface ConstructionOpts {
@@ -242,9 +245,9 @@ const VERT_BUDGET = 3000;
 
 function meshElements(
   ctx: AppCtx, x: number, y: number, px: number, want: 'VERTEX' | 'EDGE',
-): { world: THREE.Vector3; d: number } | null {
+): { world: THREE.Vector3; d: number; object: THREE.Object3D } | null {
   const rect = ctx.canvas.getBoundingClientRect();
-  let best: { world: THREE.Vector3; d: number } | null = null;
+  let best: { world: THREE.Vector3; d: number; object: THREE.Object3D } | null = null;
   const v = new THREE.Vector3();
   const project = (p: THREE.Vector3): { x: number; y: number; ok: boolean } => {
     const q = p.clone().project(ctx.camera);
@@ -271,7 +274,7 @@ function meshElements(
         for (let i = 0; i < screen.length; i++) {
           if (!screen[i].ok) continue;
           const d = Math.hypot(screen[i].x - x, screen[i].y - y);
-          if (d < px && (!best || d < best.d)) best = { world: world[i], d };
+          if (d < px && (!best || d < best.d)) best = { world: world[i], d, object: mesh };
         }
         return;
       }
@@ -285,7 +288,7 @@ function meshElements(
           if (!screen[i]?.ok || !screen[j]?.ok) continue;
           const d = segmentDistPx(screen[i], screen[j], x, y);
           if (d.px < px && (!best || d.px < best.d)) {
-            best = { world: world[i].clone().lerp(world[j], d.t), d: d.px };
+            best = { world: world[i].clone().lerp(world[j], d.t), d: d.px, object: mesh };
           }
         }
       }
@@ -304,7 +307,7 @@ function segmentDistPx(
   return { px: Math.hypot(a.x + dx * t - x, a.y + dy * t - y), t };
 }
 
-function pickElement(
+export function pickElement(
   ctx: AppCtx, x: number, y: number, only: 'VERTEX' | 'EDGE' | 'FACE' | 'DRAW', rect: DOMRect, opts: ConstructionOpts,
 ): ConstructionHit | null {
   if (only === 'DRAW') {
@@ -320,7 +323,7 @@ function pickElement(
       source: ref?.kind === 'MESH' ? { kind: 'MESH', objectId: ref.id } : { kind: 'ELEMENT' },
     };
   }
-  const cands: { world: THREE.Vector3; d: number; source: ConstructionSource }[] = [];
+  const cands: { world: THREE.Vector3; d: number; source: ConstructionSource; ref?: ObjRef | null }[] = [];
   const dist = (w: THREE.Vector3) => {
     const s = screenOf(ctx, w, rect);
     return s ? Math.hypot(s.x - x, s.y - y) : Infinity;
@@ -328,33 +331,33 @@ function pickElement(
   const tri = only === 'FACE' ? null : raycastFaceTriangle(ctx, x + rect.left, y + rect.top);
   if (only === 'VERTEX') {
     const v = pickPolyVertex(ctx, x, y, ELEMENT_PX, opts.editMeshId, opts.excludeVertexIds);
-    if (v) cands.push({ world: v.world, d: v.d, source: { kind: 'POLY_VERTEX', meshId: v.meshId, vertexId: v.vertexId } });
+    if (v) cands.push({ world: v.world, d: v.d, source: { kind: 'POLY_VERTEX', meshId: v.meshId, vertexId: v.vertexId }, ref: { kind: 'POLY', id: v.meshId } });
     const sp = nearestStrokePointAll(ctx, x, y, ELEMENT_PX);
     if (sp) cands.push({ world: sp, d: dist(sp), source: { kind: 'ELEMENT' } });
     const pc = pickPaintCloudPoint(ctx, x, y, ELEMENT_PX);
     if (pc) cands.push({ world: new THREE.Vector3(...pc.world), d: pc.d, source: { kind: 'PCLOUD', cloudId: pc.cloudId, pointIndex: pc.pointIndex } });
     const sk = pickSplatPoint(ctx, x, y, ELEMENT_PX);
-    if (sk) cands.push({ world: new THREE.Vector3(...sk.world), d: sk.d, source: { kind: 'SPLAT', objectId: sk.objectId, pointIndex: sk.pointIndex } });
+    if (sk) cands.push({ world: new THREE.Vector3(...sk.world), d: sk.d, source: { kind: 'SPLAT', objectId: sk.objectId, pointIndex: sk.pointIndex }, ref: { kind: 'SPLAT', id: sk.objectId } });
     // a box's corner, a cylinder's rim: the geometry a blockout is made of
     const mv = meshElements(ctx, x, y, ELEMENT_PX, 'VERTEX');
-    if (mv) cands.push({ world: mv.world, d: mv.d, source: { kind: 'ELEMENT' } });
+    if (mv) cands.push({ world: mv.world, d: mv.d, source: { kind: 'ELEMENT' }, ref: refOfObject3D(mv.object) });
     if (tri) {
       // the corner of the face you are on — offered however far it is,
       // since being ON the face is what makes it the nearest vertex
       const corners = [tri.tri.a, tri.tri.b, tri.tri.c];
       const best = corners.reduce((m, c) => (dist(c) < dist(m) ? c : m));
-      cands.push({ world: best.clone(), d: Math.max(dist(best), ELEMENT_PX - 0.01), source: { kind: 'ELEMENT' } });
+      cands.push({ world: best.clone(), d: Math.max(dist(best), ELEMENT_PX - 0.01), source: { kind: 'ELEMENT' }, ref: refOfObject3D(tri.object) });
     }
   } else if (only === 'EDGE') {
     const e = pickPolyEdge(ctx, x, y, ELEMENT_PX, opts.editMeshId);
-    if (e) cands.push({ world: e.world, d: e.d, source: { kind: 'POLY_EDGE', meshId: e.meshId, edgeId: e.edgeId, t: e.t } });
+    if (e) cands.push({ world: e.world, d: e.d, source: { kind: 'POLY_EDGE', meshId: e.meshId, edgeId: e.edgeId, t: e.t }, ref: { kind: 'POLY', id: e.meshId } });
     const seg = nearestStrokeSegmentAll(ctx, x, y, ELEMENT_PX);
     if (seg) {
       const w = seg.a.clone().lerp(seg.b, seg.t);
       cands.push({ world: w, d: dist(w), source: { kind: 'ELEMENT' } });
     }
     const me = meshElements(ctx, x, y, ELEMENT_PX, 'EDGE');
-    if (me) cands.push({ world: me.world, d: me.d, source: { kind: 'ELEMENT' } });
+    if (me) cands.push({ world: me.world, d: me.d, source: { kind: 'ELEMENT' }, ref: refOfObject3D(me.object) });
     if (tri) {
       const sides = [[tri.tri.a, tri.tri.b], [tri.tri.b, tri.tri.c], [tri.tri.c, tri.tri.a]];
       let best: THREE.Vector3 | null = null;
@@ -362,7 +365,7 @@ function pickElement(
         const p = new THREE.Line3(a, b).closestPointToPoint(tri.point, true, new THREE.Vector3());
         if (!best || p.distanceTo(tri.point) < best.distanceTo(tri.point)) best = p;
       }
-      if (best) cands.push({ world: best, d: Math.max(dist(best), ELEMENT_PX - 0.01), source: { kind: 'ELEMENT' } });
+      if (best) cands.push({ world: best, d: Math.max(dist(best), ELEMENT_PX - 0.01), source: { kind: 'ELEMENT' }, ref: refOfObject3D(tri.object) });
     }
   } else {
     const f = pickPolyFace(ctx, x, y);
@@ -378,7 +381,7 @@ function pickElement(
   }
   if (!cands.length) return null;
   const win = cands.reduce((m, c) => (c.d < m.d ? c : m));
-  return { world: [win.world.x, win.world.y, win.world.z], source: win.source, distancePx: win.d };
+  return { world: [win.world.x, win.world.y, win.world.z], source: win.source, distancePx: win.d, ref: win.ref ?? null };
 }
 
 // ---- unified query ---------------------------------------------------------

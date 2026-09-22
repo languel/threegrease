@@ -1640,6 +1640,17 @@ the browser console or automated evals:
       1.6x-oversized copy; eight corners picked ±2 cm fit to 9 mm RMS with
       scale 0.623. Because the source points are bound, they ride the
       object and visibly land on the targets.
+    - THE MAGNET'S VERTEX / EDGE MODES ARE THE ELEMENT PICKER
+      (`pickElement` in polypick.ts, exported for it): they used to offer
+      stroke points only, so over a mesh the magnet did nothing and a
+      measurement point slid over the surface under Placement: Surface —
+      no way to put one exactly on a pedestal's corner. Now every vertex the
+      app knows competes by screen distance (poly vertices, stroke points,
+      splat centres, primitive corners within VERT_BUDGET, and on a big
+      scan the corners of the triangle under the pointer), and the hit
+      carries its OBJECT (`ConstructionHit.ref`) so the point binds.
+      Verified: a click 11 px off a box's top corner landed on box-local
+      (0.5, 0.5, 0.5) exactly, bound to the box.
     - A point placed ON A SCAN binds to it: the magnet's Vertex and Surface
       modes fall back to the nearest splat centre and carry the splat as the
       hit's ref (a scan that is not a draw target has no surface to raycast,
