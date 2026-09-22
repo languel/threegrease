@@ -9,7 +9,7 @@ import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
 import { PROVIDER_LIST, getProvider } from '../agent/providers';
 import { webMcp } from '../agent/webmcp';
-import { MEASURE_COLOR, formatArea, formatLength, measureArea, measureLength, toWorldLength, worldPointsOf } from '../tools/measure';
+import { MEASURE_COLOR, closeMeasure, formatArea, formatLength, measureArea, measureLength, toWorldLength, worldPointsOf } from '../tools/measure';
 import { localPoint } from '../core/measures';
 import { DETECT_MODELS, semanticDetector } from '../mm/detect';
 import type { DetectConfig, DetectHit, MMStream } from '../core/types';
@@ -3635,7 +3635,9 @@ export class UI {
         title: bound.length ? 'a bound point follows that object; a free one stays where it is' : undefined,
       }),
       checkbox('Closed', !!m.closed, (v) => {
-        ctx.pushUndo(); m.closed = v; this.refresh();
+        ctx.pushUndo();
+        if (v) closeMeasure(scene, m); else m.closed = false;
+        this.refresh();
       }, 'join the last point back to the first: a perimeter and an enclosed AREA instead of a running length'),
       checkbox('Corner angles', m.angles !== false, (v) => { m.angles = v; }),
       checkbox('Edge lengths', m.edgeLengths !== false, (v) => { m.edgeLengths = v; },

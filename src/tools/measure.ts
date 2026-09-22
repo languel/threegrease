@@ -54,6 +54,27 @@ const DRAFT_HOST: TGMeasure = {
 export const MEASURE_COLOR: Vec3 = [0.30, 0.82, 0.78];
 
 /** Total length, with the closing leg when the ring is closed. */
+/**
+ * CLOSE a measurement, without adding a zero-length leg when the last point
+ * already sits back on the first. Tracing a room's outline and clicking back
+ * onto its own starting corner is the obvious way to close a shape by hand
+ * — and then also ticking Closed (or pressing C) rang a SECOND edge from
+ * that already-coincident point back to point 0, a real zero-length leg
+ * that drew as "0.00 m" sitting right on top of the corner. Only trims when
+ * the ring would still have at least 3 points left afterwards — a genuine
+ * 3-point measurement whose last click happened to land on the first is
+ * rare enough, and ambiguous enough (was that meant to close it, or just a
+ * very short leg?), that leaving it alone is the safer read.
+ */
+export function closeMeasure(scene: GPScene, m: TGMeasure): void {
+  if (m.points.length > 3) {
+    const pts = worldPointsOf(scene, m);
+    const last = pts[pts.length - 1], first = pts[0];
+    if (last && first && last.distanceToSquared(first) < 1e-8) m.points.pop();
+  }
+  m.closed = true;
+}
+
 export function measureLength(scene: GPScene, m: TGMeasure): number {
   return pathLength(worldPointsOf(scene, m), m.closed);
 }
@@ -281,7 +302,7 @@ export class MeasureTool implements Tool {
       const sel = ctx.scene.measures.find((m) => isObjectSelected(ctx.scene, { kind: 'MEASURE', id: m.id }));
       if (sel && sel.points.length > 2) {
         ctx.pushUndo();
-        sel.closed = !sel.closed;
+        if (sel.closed) sel.closed = false; else closeMeasure(ctx.scene, sel);
         ctx.refreshUI();
         return true;
       }
@@ -308,7 +329,7 @@ export class MeasureTool implements Tool {
     if (this.draft.length >= 2) {
       ctx.pushUndo();
       const m = createMeasure(ctx.scene.measures, this.draft);
-      if (close && this.draft.length >= 3) m.closed = true;
+      if (close && this.draft.length >= 3) closeMeasure(ctx.scene, m);
       recentre(m);
       for (const other of ctx.scene.measures) other.select = false;
       m.select = true;

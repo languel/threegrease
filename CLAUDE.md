@@ -1960,6 +1960,25 @@ the browser console or automated evals:
     a real corner always gives. Projecting onto a coordinate plane instead
     reports a wall's area as zero the moment it stands up (verified: a 2x3
     ring reads 6 m2 flat on the floor and 6 m2 stood on end).
+  - **CLOSING A RING THAT IS ALREADY VISUALLY CLOSED MUST NOT ADD A
+    ZERO-LENGTH LEG** (`closeMeasure` in `tools/measure.ts`, the one door
+    `commit`'s Cmd-close, the `c` key and the Closed checkbox all go
+    through). Tracing a room's outline and clicking back onto its own
+    starting corner is the obvious way to close a shape by hand — and
+    setting `closed = true` on top of that rang a SECOND edge from that
+    already-coincident last point back to point 0, a real zero-length leg
+    that drew as a "0.00 m" label sitting right on the corner. `closeMeasure`
+    checks the last and first WORLD points (not raw `pos` — a bound point's
+    coincidence is a world-space fact) and drops the redundant last point
+    before setting the flag, but only when the ring would still have 3+
+    points afterwards: a bare 3-point measurement whose last click happened
+    to land on the first is rare and ambiguous enough (a real short leg, or
+    a close?) that trimming it down to 2 would be the wrong guess. Verified:
+    a 4-point outline closed back onto its start collapses to the expected
+    3, drawing identically to the same triangle built without the
+    duplicate; a normal 3-point close (nothing coincident) is untouched; a
+    3-point ring WITH a coincident last point is left alone rather than
+    trimmed to a degenerate 2.
   - Measure is a tool in OBJECT, DRAW and EDIT mode — every mode that places
     points — and the placement cluster (Placement, Plane, Guide and their
     options) shows for it in all three, because a ruler resolves its points
