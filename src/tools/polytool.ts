@@ -15,7 +15,7 @@
 //            |  fill                |                 |             |
 //
 //   Shift+click = AutoQuad (infer the fillable patch from nearby open
-//   edges) · Ctrl+click = toggle element selection (Delete/X removes,
+//   edges) · Cmd+click = toggle element selection (Delete/X removes,
 //   M welds the selected vertices into ONE at their centre, Shift+M welds
 //   the selection's close PAIRS independently — the two ways to rejoin
 //   parts a base built from several chains left merely coincident) ·
@@ -101,6 +101,9 @@ interface Pending {
   shift: boolean;
   ctrl: boolean;
   alt: boolean;
+  /** Cmd, alone — select-toggle's own modifier, distinct from `ctrl` (Ctrl
+   *  OR Cmd), which already means "disable snapping" for this tool. */
+  meta: boolean;
 }
 
 /** A drag's axis lock, G-style: along one world axis, or (Shift) in the
@@ -274,7 +277,7 @@ export class PolyPenTool implements Tool {
     const hit = this.pick(ctx, e);
     this.pending = {
       x: e.x, y: e.y, downAt: performance.now(), hit,
-      dragged: false, shift: e.shift, ctrl: e.ctrl, alt: e.alt,
+      dragged: false, shift: e.shift, ctrl: e.ctrl, alt: e.alt, meta: e.meta,
     };
   }
 
@@ -477,12 +480,16 @@ export class PolyPenTool implements Tool {
           if (pending.shift) { this.holdAction(ctx, pm, pending); return; }
         } else if (this.variant === 'PATCH') {
           // Quad Patch: clicking fills the inferred patch
-          if (pending.ctrl) { this.toggleSelect(ctx, pm, pending); return; }
+          if (pending.meta) { this.toggleSelect(ctx, pm, pending); return; }
           fill();
           return;
         } else {
           if (pending.shift) { fill(); return; }          // AutoQuad
-          if (pending.ctrl) { this.toggleSelect(ctx, pm, pending); return; }
+          // Cmd, not Ctrl: Ctrl already means "disable snapping" for a
+          // click here (`noSnap: e.ctrl` in `pick()`), and aliasing it to
+          // select too meant every Ctrl+click to pick an existing vertex
+          // also suppressed the very snap that would have found it.
+          if (pending.meta) { this.toggleSelect(ctx, pm, pending); return; }
         }
       }
       this.clickAction(ctx, pm, pending);
@@ -872,7 +879,7 @@ export class PolyPenTool implements Tool {
   }
 
   /**
-   * MERGE (weld) the Ctrl+click-selected vertices into one, at their
+   * MERGE (weld) the Cmd+click-selected vertices into one, at their
    * centre — the way to REJOIN parts that only look connected: a base
    * built as several separate chains (Poly Build has no "click the
    * existing corner" memory across chains) leaves each corner a distinct,

@@ -3,7 +3,12 @@ import type { AppCtx } from './context';
 export interface ToolEvent {
   x: number; y: number;          // canvas px
   pressure: number;
-  shift: boolean; ctrl: boolean; alt: boolean;
+  /** ctrl is Ctrl OR Cmd — most of the app treats them as one modifier
+   *  (so a trackpad-only Mac user always has a "Ctrl") and most tools mean
+   *  it that way. `meta` is Cmd ALONE, for the few places (PolyPenTool's
+   *  select-toggle) that need a modifier Ctrl's own OTHER meaning there
+   *  (disable snapping) doesn't collide with. */
+  shift: boolean; ctrl: boolean; alt: boolean; meta: boolean;
   clientX: number; clientY: number;
 }
 

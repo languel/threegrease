@@ -643,6 +643,22 @@ the browser console or automated evals:
   both corner pairs independently (8 vertices -> 6, 2 faces intact and now
   genuinely sharing one edge), and dissolving that shared edge afterward
   gives the correct 6-corner hexagon.
+- **`ToolEvent.ctrl` IS CTRL-OR-CMD** (`App.toolEvent`: `ctrl: e.ctrlKey ||
+  e.metaKey`), so a trackpad-only Mac user always has one working "Ctrl".
+  Most tools mean it that way on purpose. PolyPenTool's select-toggle used
+  to read that merged flag too, and Ctrl ALSO means "disable snapping" for
+  a click there (`noSnap: e.ctrl` in `pick()`) — so Ctrl+click to select an
+  existing vertex suppressed the very vertex-snap that would have found
+  it, and (with the grid magnet on) the click fell through to a raw,
+  grid-rounded plane point instead. `ToolEvent` gained a genuine `meta`
+  (Cmd ALONE, not merged) for exactly this: the select-toggle now reads
+  `pending.meta`, so Ctrl+click and Cmd+click are two different actions in
+  this tool instead of two names for one. Verified with a fresh tool
+  instance (the app's own live one accumulates modal state across manual
+  testing, which reads as the SAME bug from the outside — a BUILD chain
+  left open by an earlier click swallows the next one silently, since the
+  select check only runs while `state.kind === 'IDLE'`): Ctrl+click left
+  the vertex unselected, Cmd+click toggled it on, Cmd+click again off.
 - **Poly Build drags take G's axis locks** (`PolyPenTool.axisLock`): X / Y /
   Z mid-drag locks a vertex move, a vertex extrude, an edge/face move or a
   boundary extrusion to that WORLD axis, Shift+ to the plane square to it,

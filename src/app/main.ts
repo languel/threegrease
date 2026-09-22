@@ -1462,7 +1462,7 @@ class App implements AppHandle {
       // strokes looked translucent and piled up visibly where they crossed.
       // Only a pen carries real pressure; everything else means "full".
       pressure: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 1,
-      shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey,
+      shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey, meta: e.metaKey,
       clientX: e.clientX, clientY: e.clientY,
     };
   }
@@ -3621,7 +3621,7 @@ class App implements AppHandle {
       const r = ctx.canvas.getBoundingClientRect();
       return this.objectPick.pick(ctx, {
         x: clientX - r.left, y: clientY - r.top, pressure: 0.5,
-        shift: false, ctrl: false, alt: false, clientX, clientY,
+        shift: false, ctrl: false, alt: false, meta: false, clientX, clientY,
       });
     });
     void rect;
