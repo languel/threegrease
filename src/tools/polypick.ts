@@ -399,14 +399,21 @@ export function pickConstruction(ctx: AppCtx, x: number, y: number, opts: Constr
   }
   if (!opts.noSnap && (!opts.only || opts.only === 'ELEMENT')) {
     const v = pickPolyVertex(ctx, x, y, vertexPx, opts.editMeshId, opts.excludeVertexIds);
-    if (v) {
+    const e = pickPolyEdge(ctx, x, y, edgePx, opts.editMeshId);
+    // A VERTEX WINS ONLY WHEN IT IS ACTUALLY NEARER. This used to be a fixed
+    // priority order — any vertex within threshold, however far, beat any
+    // edge — so clicking the middle of a long edge to split it (inserting a
+    // point to continue the chain from) could be "stolen" by an unrelated
+    // corner elsewhere on the mesh that merely happened to fall within its
+    // own 14px circle. The small bias keeps an exact vertex click reliable
+    // when the two are genuinely close together.
+    if (v && (!e || v.d - 2 <= e.d)) {
       return {
         world: [v.world.x, v.world.y, v.world.z],
         source: { kind: 'POLY_VERTEX', meshId: v.meshId, vertexId: v.vertexId },
         distancePx: v.d,
       };
     }
-    const e = pickPolyEdge(ctx, x, y, edgePx, opts.editMeshId);
     if (e) {
       return {
         world: [e.world.x, e.world.y, e.world.z],

@@ -575,6 +575,18 @@ the browser console or automated evals:
   toolbar and the top bar shows them when it is active. The SCULPT mode
   still exists in the type for old scenes; the mode button and pie slot are
   gone, and the `modeSculpt` action opens Edit with the tool.
+- **A VERTEX PICK MUST ACTUALLY BE NEARER THAN THE EDGE, not just found
+  first** (`pickConstruction` in polypick.ts). The priority chain (vertex,
+  then edge, then face, …) used to return the first kind that had ANY
+  candidate inside its own threshold — a vertex won whenever one sat within
+  14px, however far that was, even past an edge only a few px from the
+  pointer. Clicking the middle of a long edge to split it (continuing a
+  Poly Build chain from the new point) could be "stolen" by an unrelated
+  corner elsewhere on the mesh, snapping the draw start far from the click.
+  Vertex and edge candidates are now compared by actual screen distance
+  (vertex keeps a 2px bias so an exact click on one still wins a close
+  tie). Verified: a click 6px off an edge but 9.6px from a corner now picks
+  the edge; a click 2.8px from the corner still picks the vertex.
 - **Poly Build drags take G's axis locks** (`PolyPenTool.axisLock`): X / Y /
   Z mid-drag locks a vertex move, a vertex extrude, an edge/face move or a
   boundary extrusion to that WORLD axis, Shift+ to the plane square to it,
