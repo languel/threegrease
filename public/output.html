@@ -29,6 +29,18 @@
         ? document.exitFullscreen()
         : document.documentElement.requestFullscreen().catch(() => {});
       document.addEventListener('dblclick', toggle);
+      // the editor's Fullscreen button: fullscreen needs a click IN this
+      // window, and Chrome lets the editor hand its click over with the
+      // message (capability delegation). Where that is unsupported the
+      // request fails, and the editor is told so it can say what to do.
+      const editor = window.opener || (window.parent !== window ? window.parent : null);
+      addEventListener('message', (e) => {
+        if (e.origin !== location.origin || e.data?.type !== 'tg-fullscreen') return;
+        if (document.fullscreenElement) { document.exitFullscreen(); return; }
+        document.documentElement.requestFullscreen().catch(() => {
+          editor?.postMessage({ type: 'tg-fullscreen-failed' }, location.origin);
+        });
+      });
       addEventListener('keydown', (e) => { if (e.key === 'f' || e.key === 'F') toggle(); });
       let t = 0;
       const wake = () => {

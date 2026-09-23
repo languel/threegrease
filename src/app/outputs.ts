@@ -113,7 +113,39 @@ export class OutputManager {
   private live = new Map<number, Live>();
   private screensList: OutputScreen[] = [];
 
-  constructor(private host: OutputHost) {}
+  constructor(private host: OutputHost) {
+    window.addEventListener('message', (e) => {
+      if (e.origin === location.origin && e.data?.type === 'tg-fullscreen-failed') {
+        this.host.status('This browser needs a click in the output window for fullscreen — double-click it, or press F in it');
+      }
+    });
+  }
+
+  isFullscreen(id: number): boolean {
+    return !!this.live.get(id)?.doc?.fullscreenElement;
+  }
+
+  /**
+   * Fullscreen from the panel. The browser only grants fullscreen to a
+   * click IN that window, so the editor's click is handed to it with the
+   * message itself (`delegate: 'fullscreen'`, Chrome's capability
+   * delegation); the page asks for fullscreen when the message arrives.
+   * Leaving fullscreen needs no gesture at all.
+   */
+  toggleFullscreen(id: number): void {
+    const l = this.live.get(id);
+    if (!l?.doc) return;
+    if (l.doc.fullscreenElement) { void l.doc.exitFullscreen(); return; }
+    try {
+      l.win.postMessage({ type: 'tg-fullscreen' },
+        { targetOrigin: location.origin, delegate: 'fullscreen' } as WindowPostMessageOptions);
+    } catch {
+      // no delegation here (no fresh click behind the call, or a browser
+      // without it): send the plain request — the page tries, is refused,
+      // and says so, which puts the double-click hint in the status line
+      l.win.postMessage({ type: 'tg-fullscreen' }, location.origin);
+    }
+  }
 
   isOpen(id: number): boolean {
     const l = this.live.get(id);
@@ -249,6 +281,8 @@ export class OutputManager {
 
     Object.assign(l, { doc, canvas, renderer, world, post: null, size: [0, 0] });
     doc.body.classList.add('attached');
+    // the panel's Fullscreen button says which way it will go
+    doc.addEventListener('fullscreenchange', () => this.host.changed());
     const o = (this.host.ctx.scene.outputs ?? []).find((x) => x.id === id);
     if (o) doc.title = o.name;
     // keep the show running when the editor window is hidden (see top); the

@@ -2824,6 +2824,15 @@ the browser console or automated evals:
     without it, and fullscreen removes all chrome anyway. That page owns
     only what must happen IN the window (fullscreen needs its gesture; the
     pointer hides); everything else is attached by the editor.
+  - **FULLSCREEN FROM THE PANEL IS A HANDED-OVER CLICK.** Fullscreen is
+    granted only to a gesture IN that window, so the editor's click is
+    passed along with the message itself (`postMessage(..., { delegate:
+    'fullscreen' })`, Chrome's capability delegation) and `output.html`
+    requests fullscreen when it arrives. Delegation THROWS without a fresh
+    click behind the call (any scripted test) and is unknown elsewhere, so
+    it falls back to a plain message; the page is refused and says so, and
+    the status line asks for a double-click in the window. Leaving
+    fullscreen needs no gesture.
   - **A WINDOW'S DOCUMENT CAN CHANGE UNDER IT** (it finishes loading, or
     someone presses Cmd+R in it). `maintain()` re-attaches a fresh renderer
     to whatever document the window currently holds, every frame and on a

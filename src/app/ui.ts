@@ -3730,6 +3730,9 @@ export class UI {
       btn(open ? 'Close window' : 'Open window', () => {
         if (open) om.close(o.id); else om.open(o);
       }),
+      ...(open ? [btn(om.isFullscreen(o.id) ? 'Exit fullscreen' : 'Fullscreen', () => om.toggleFullscreen(o.id), {
+        title: 'Fill the screen the output window is on (or double-click the window, or press F in it)',
+      })] : []),
       ...(open ? [btn(icon('record'), () => om.toggleRecord(o), {
         active: om.isRecording(o.id),
         title: om.isRecording(o.id) ? 'Stop and save the recording' : 'Record this output to a video file',
