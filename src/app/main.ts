@@ -722,13 +722,19 @@ class App implements AppHandle {
       mainRenderer: this.glRenderer,
       mainWorld: this.world,
       lights: this.lights,
-      furniture: () => [this.grid, this.axes, this.widget.getHelper()],
+      furniture: () => [this.grid, this.axes, this.scoreGroup],
+      gizmo: () => this.widget.getHelper(),
+      rootOf: (ref) => (ref.kind === 'ACTOR' ? this.actors.rootFor(ref.id) : this.objectRoot(ref)),
       cameraLive: (cam) => this.cameraView && this.lockCamToView && !this.player.playing
         && activeCam(this.ctx.scene) === cam,
       tickIfStale: () => { if (performance.now() - this.lastFrameAt > 50) this.frame(); },
       changed: () => this.ui.refresh(),
       status: (text) => this.setStatusHint(text, 4000),
     });
+    // a hidden editor's frames stop entirely, and a freshly (re)loaded
+    // output has no frames of its own until it is attached — a slow timer
+    // (which a hidden window still gets, about once a second) closes the gap
+    window.setInterval(() => this.outputs.maintain(), 1000);
     requestAnimationFrame(() => this.loop());
   }
 
@@ -7088,6 +7094,11 @@ class App implements AppHandle {
     timeVolumes.sync(ctx.scene);
     this.meshes.sync(ctx.scene, this.nav.active);
     this.settlePlacements();
+    // an output may SHOW what the main view hides, so hidden actors and
+    // editable meshes keep updating while any output window is open
+    const outputsOpen = this.outputs.anyOpen();
+    this.polys.keepHiddenLive = outputsOpen;
+    this.actors.keepHiddenLive = outputsOpen;
     this.polys.sync(ctx.scene, this.nav.active);
     perf.lap('sync objects');
     this.lights.helpersVisible = !this.presentation && !this.infoOverlayHidden;

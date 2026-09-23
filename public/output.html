@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>3𝜻 output</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+    body.idle, body.idle canvas { cursor: none; }
+    #wait {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #666; font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; text-align: center;
+    }
+    body.attached #wait { display: none; }
+  </style>
+</head>
+<body>
+  <!-- An OUTPUT WINDOW (src/app/outputs.ts). The editor draws into this canvas
+       with a renderer of its own; this page only owns what has to happen IN
+       this window: fullscreen needs a gesture here, and the pointer is not
+       part of the picture. -->
+  <canvas id="out" tabindex="0"></canvas>
+  <div id="wait">Waiting for the editor —<br />open this output from its Output tab.</div>
+  <script>
+    (() => {
+      const toggle = () => document.fullscreenElement
+        ? document.exitFullscreen()
+        : document.documentElement.requestFullscreen().catch(() => {});
+      document.addEventListener('dblclick', toggle);
+      addEventListener('keydown', (e) => { if (e.key === 'f' || e.key === 'F') toggle(); });
+      let t = 0;
+      const wake = () => {
+        document.body.classList.remove('idle');
+        clearTimeout(t);
+        t = setTimeout(() => document.body.classList.add('idle'), 1500);
+      };
+      addEventListener('mousemove', wake);
+      wake();
+    })();
+  </script>
+</body>
+</html>

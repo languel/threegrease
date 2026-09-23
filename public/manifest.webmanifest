@@ -1,0 +1,13 @@
+{
+  "name": "3𝜻 · threegrease",
+  "short_name": "3𝜻",
+  "description": "Drawing, staging and projection for interactive installations",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1b1b1d",
+  "theme_color": "#1b1b1d",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

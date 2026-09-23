@@ -904,6 +904,15 @@ second context; a kiosk path that reopens outputs without a click; per
 output edge blend and warp (the projector keystone work, but on the whole
 frame).
 
+Then: every object got an OUTPUT visibility beside its eye (a guide you
+see while working never reaches the wall; something can exist only in the
+projection), each output chooses whether to follow those toggles or the
+main view's eyes, and can draw the editor's overlays — a debug window. The
+popup is a real page now, and the app installable, because a browser tab's
+popup always has an address bar and an installed app's does not. Lamps can
+be clicked in front of walls, and an outliner eye no longer takes two
+Ctrl+Z to undo.
+
 **The lesson: a second view on shared state is a promise to put everything
 back.** The test that matters is not "does the output look right" but "is
 the MAIN view byte-identical before and after the output drew".

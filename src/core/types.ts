@@ -1518,6 +1518,11 @@ export interface TGOutput {
   fit: 'CONTAIN' | 'COVER' | 'STRETCH';
   /** screen to open on (index into the Window Management API's list) */
   screen?: number;
+  /** which objects it shows: RENDER follows each object's output toggle
+   *  (`hideRender`), VIEWPORT mirrors the main view's eyes (a debug window) */
+  view?: 'RENDER' | 'VIEWPORT';
+  /** draw the editor's furniture — grid, glyphs, helpers — in this window */
+  overlays?: boolean;
 }
 
 /** Where the world's environment image comes from.

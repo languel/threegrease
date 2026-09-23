@@ -151,6 +151,9 @@ interface Entry {
 const VERT_CAP = 4096; // instanced-handle capacity per mesh (sketch scale)
 
 export class PolyMeshManager {
+  /** an output window is open: a mesh hidden from the main view may still
+   *  be shown in an output, so it keeps being updated while hidden */
+  keepHiddenLive = false;
   readonly group = new THREE.Group();
   private entries = new Map<number, Entry>();
   // transient preview objects (rebuilt from polyOverlay every frame)
@@ -307,7 +310,7 @@ export class PolyMeshManager {
     entry.group.matrixAutoUpdate = false;
     entry.group.matrix.copy(world);
     entry.group.visible = pm.visible;
-    if (!pm.visible) return;
+    if (!pm.visible && !this.keepHiddenLive) return;
 
     const isEdit = polyOverlay.editMeshId === pm.id;
     const hover = polyOverlay.hover?.meshId === pm.id ? polyOverlay.hover : null;

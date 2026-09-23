@@ -200,6 +200,12 @@ Key invariants:
   column — so one row in three read backwards against the rest with no shared
   edge to scan down. `checkbox()` builds a normal `fieldRow` now and wires the
   name to toggle by hand (it is a span, not a `<label for>`).
+- **A button inside an outliner row must not also click the row.** The row's
+  own onclick selects the object and pushes an undo step, and a button's
+  click bubbled into it: toggling an eye SELECTED the object and pushed a
+  second undo step after the button's own, so the first Ctrl+Z undid only
+  the selection and seemed to do nothing. The row handler now ignores
+  clicks that land on a button.
 - **`el.hidden` does nothing when a class sets a `display`.** The UA rule
   `[hidden] { display: none }` loses to any class rule with its own display,
   so `.actor-log { display: flex }` kept the monologue on screen while the
@@ -968,7 +974,11 @@ the browser console or automated evals:
   going the selection colour (`syncCameraHelpers`); and it has nothing to
   raycast, so `ObjectSelectTool.pick` tests screen distance to where it
   stands, the way the score glyphs are picked. Lights were in exactly the
-  same position and are picked the same way now. Adding one leaves it
+  same position and are picked the same way now. **The NEAREST thing under
+  the pointer wins** (`glyphAt` against the first mesh hit, by distance from
+  the eye): picking used to raycast meshes FIRST and return, so a lamp in
+  front of a wall — every projector — could never be clicked; now it beats
+  the wall behind it, and a wall IN FRONT of a lamp still wins. Adding one leaves it
   SELECTED with the widget on it, because a camera added "at the current
   view" is otherwise invisible — it is exactly where your eye is.
   Neither a camera nor a lamp wears the selection BOX: a box round a helper
@@ -2794,6 +2804,31 @@ the browser console or automated evals:
     (`getScreenDetails`, a permission prompt) only places the window on a
     screen. The window's name is stable per output, so after an editor
     reload Open takes over the SAME physical window where it was put.
+  - **AN OBJECT HAS TWO VISIBILITIES**, like Blender's eye and render
+    toggle: `visible` (the main view) and `hideRender` (the outputs; set
+    through `setRenderHidden`, cascading to children and the selection like
+    the eye). The outliner's monitor toggle only appears once the scene HAS
+    an output. An output's `view` picks which one it follows — RENDER (the
+    monitor toggles: a guide seen while working never reaches the wall, and
+    something can exist only in the projection) or VIEWPORT (the eyes, a
+    window to debug in) — and `overlays` draws the editor's furniture in it.
+    The gizmo is never drawn in an output: it is sized for the main camera.
+    Showing what the main view hides only works because hidden objects stay
+    BUILT (`root.visible = false`); actors and editable meshes also stopped
+    UPDATING while hidden, so `keepHiddenLive` keeps them posed/synced while
+    any output is open (and only then — the saving stands otherwise).
+  - **THE ADDRESS BAR CANNOT BE HIDDEN BY A PAGE.** A browser tab's popup
+    always carries one, whatever the feature string says. The output opens
+    `public/output.html` (a real page, not about:blank) and the app ships a
+    manifest: an INSTALLED app opens its own in-scope pages as app windows
+    without it, and fullscreen removes all chrome anyway. That page owns
+    only what must happen IN the window (fullscreen needs its gesture; the
+    pointer hides); everything else is attached by the editor.
+  - **A WINDOW'S DOCUMENT CAN CHANGE UNDER IT** (it finishes loading, or
+    someone presses Cmd+R in it). `maintain()` re-attaches a fresh renderer
+    to whatever document the window currently holds, every frame and on a
+    1 s timer — a hidden editor gets no frames at all, and a reloaded output
+    has none of its own until it is attached.
   - Not yet in outputs: per-object FX (like quad view), and Spark splats
     are unverified in a second context (SparkRenderer may be bound to the
     main renderer).

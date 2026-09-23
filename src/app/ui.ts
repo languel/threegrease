@@ -48,6 +48,7 @@ import {
   deselectAllObjects, descendantRefs, getObjectTransform,
   listSelected as listSelectedObjects, objectName, selectionPivot,
   setObjectHidden, setObjectLockedFlag, setObjectSelected, setObjectTransform,
+  isRenderHidden, setRenderHidden,
   setParentKeepWorld, type ObjRef,
 } from '../tools/objects';
 import {
@@ -3709,6 +3710,13 @@ export class UI {
       'This output\u2019s own shading, whatever the main view is set to'),
       checkbox('Scene look', o.look, (v) => { o.look = v; },
         'bloom, grade, ink and grain from the scene\u2019s Look'),
+      tip(fieldRow('Visibility', selectField('', o.view ?? 'RENDER', [
+        ['RENDER', 'Output toggles'], ['VIEWPORT', 'Same as viewport'],
+      ], (v) => { ctx.pushUndo(); o.view = v as 'RENDER' | 'VIEWPORT'; })),
+      'Output toggles: each object\u2019s monitor icon in the outliner decides, whatever the viewport shows. '
+        + 'Same as viewport: this window shows what the main view shows (a second window to debug in)'),
+      checkbox('Editor overlays', !!o.overlays, (v) => { o.overlays = v; },
+        'draw the grid, light and camera glyphs, helpers and edit overlays in this window'),
     );
     if (screens.length) {
       rows.push(tip(fieldRow('Screen', selectField('', o.screen == null ? '' : String(o.screen), [
@@ -4236,6 +4244,9 @@ export class UI {
       return out;
     };
 
+    // The OUTPUT toggle only appears once the scene has an output: until
+    // then it is a column of switches that do nothing anyone can see.
+    const hasOutputs = !!scene.outputs?.length;
     const viewLockBtns = (
       ref: ObjRef,
       hidden: boolean, onHide: (v: boolean) => void,
@@ -4249,6 +4260,21 @@ export class UI {
         ctx.requestRender();
         this.refresh();
       }, { cls: 'icon-btn', title: hidden ? 'Hidden (click to show)' : 'Visible (click to hide — applies to children and to the whole selection)' }),
+      // apart from the eye, like Blender's render toggle: a guide can be seen
+      // while working and never reach the wall, and something can be shown
+      // ONLY in the output windows
+      ...(hasOutputs ? [(() => {
+        const off = isRenderHidden(scene, ref);
+        return btn(off ? icon('monitorOff') : icon('monitor'), () => {
+          ctx.pushUndo();
+          for (const r of spread(ref)) setRenderHidden(scene, r, !off);
+          this.refresh();
+        }, {
+          cls: 'icon-btn',
+          title: off ? 'Not in outputs (click to show in output windows)'
+            : 'In outputs (click to leave out of output windows — applies to children and to the whole selection)',
+        });
+      })()] : []),
       btn(locked ? icon('lockClosed') : icon('lockOpen'), () => {
         ctx.pushUndo();
         onLock(!locked);
@@ -4553,6 +4579,12 @@ export class UI {
       item.style.paddingLeft = `${6 + depth * 14}px`;
       visible.push(n.ref);
       item.onclick = (e) => {
+        // a click on one of the row's own buttons (eye, output, lock, ...)
+        // is THAT button's, not a click on the row: letting it bubble here
+        // selected the object as a side effect of hiding it, and pushed a
+        // second undo step after the button's own — so the first Ctrl+Z
+        // undid only the selection and seemed to do nothing
+        if ((e.target as HTMLElement).closest('button')) return;
         const me = e as MouseEvent;
         const anchor = this.outlinerAnchor;
         if (me.shiftKey && anchor) {

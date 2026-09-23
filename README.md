@@ -208,6 +208,11 @@ npm run dev     # open http://localhost:5199
   onto a chosen display. Record any output to a video file. Outputs keep
   running while the editor window is hidden or minimised. For OBS or
   another app, capture the window (its title is the output's name).
+  Each object has an output toggle beside its eye in the outliner, so a
+  guide can stay in your view but out of the projection, or the other way
+  round; an output can instead mirror the main view with the editor's
+  overlays, as a debug window. Install the app (Chrome ▸ Install) and its
+  output windows open without an address bar.
 - **Library** (Library tab): an asset container, not an inbox — drop files
   to keep them (with rendered thumbnails), drag a tile into the viewport
   to place it or double-click to place at the 3D cursor, folders with drag

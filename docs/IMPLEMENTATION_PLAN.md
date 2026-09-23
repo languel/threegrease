@@ -3534,3 +3534,28 @@ what it is made of. A camera is never a draw target, so it is never in it.
   render without error; a stalled main loop is driven from the output; an
   output costs ~0.25 ms CPU a frame, the same as the main view's own draw
   of the scene (125 draw calls), with the swap bookkeeping inside the noise.
+
+## Output visibility, the output page, lamp picking
+
+- `hideRender` on any object (`setRenderHidden` / `isRenderHidden`,
+  tools/objects.ts); the outliner's monitor toggle beside the eye, shown
+  once the scene has an output, cascading like the eye. `TGOutput.view`
+  (RENDER follows the toggles, VIEWPORT the eyes) and `overlays` (editor
+  furniture in that window; never the gizmo). Actors and editable meshes
+  keep updating while hidden when any output is open (`keepHiddenLive`).
+- Outputs open `public/output.html`; `public/manifest.webmanifest` and
+  `icon.svg` make the app installable, so an installed app's output windows
+  open without an address bar. The editor re-attaches to whatever document
+  a window holds (`OutputManager.maintain`, every frame and each second).
+- `ObjectSelectTool.pick`: the nearest of a camera/lamp glyph (within
+  30 px) and the first mesh hit wins.
+- Outliner row buttons no longer bubble into the row's select handler.
+- Acceptance (demo gallery): Ball left out of outputs stays in the main
+  view and is gone from the output's draw; Ball 2 hidden with the eye is
+  shown in the output; a hidden Walker is posed while an output is open
+  and frozen when none is; VIEWPORT + overlays shows the eyes' set, the
+  grid and 97 glyphs, RENDER shows none; Cmd+R in the output window
+  re-attaches a new renderer at 60 fps; the Room toggle hides its 6
+  children in ONE undo step without changing the selection; a lamp with
+  the floor behind it is picked as the LIGHT, 80 px beside it is the floor,
+  and the lamp moved under the floor loses to it.

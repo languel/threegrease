@@ -36,7 +36,7 @@ import type { GPCamera, GPScene, TGOutput } from '../core/types';
 import type { AppCtx } from '../tools/context';
 import { activeCam } from '../core/gpdata';
 import { evalCamera } from '../anim/camera';
-import { worldMatrixOf } from '../tools/objects';
+import { allRefs, isRenderHidden, worldMatrixOf, type ObjRef } from '../tools/objects';
 import { WorldManager } from '../render/world';
 import type { LightManager } from '../render/lights';
 import { ScenePost, postActive } from '../fx/scenefx';
@@ -48,8 +48,13 @@ export interface OutputHost {
   mainRenderer: THREE.WebGLRenderer;
   mainWorld: WorldManager;
   lights: LightManager;
-  /** furniture that is not tagged `overlay` (the grid, the gizmo) */
+  /** furniture that is not tagged `overlay` (the grid, the score glyphs) */
   furniture(): THREE.Object3D[];
+  /** the transform gizmo — sized for the MAIN camera, so never drawn in an
+   *  output, not even a debug one */
+  gizmo(): THREE.Object3D;
+  /** an object's render root, for per-output visibility */
+  rootOf(ref: ObjRef): THREE.Object3D | null;
   /** true while the main view is WRITING into this camera (looking through
    *  it with lock-to-view): its stored transform is then the live one, and
    *  its keys must not override what the operator is doing */
@@ -71,19 +76,26 @@ export interface OutputScreen {
 
 interface Live {
   win: Window;
-  canvas: HTMLCanvasElement;
-  renderer: THREE.WebGLRenderer;
-  world: WorldManager;
+  /** the document the renderer is attached to. A window that reloads (or
+   *  first finishes loading) holds a NEW one, and everything below is
+   *  rebuilt on it — see `maintain` */
+  doc: Document | null;
+  canvas: HTMLCanvasElement | null;
+  renderer: THREE.WebGLRenderer | null;
+  world: WorldManager | null;
   post: ScenePost | null;
   lens: LensCamera;
   cam: THREE.PerspectiveCamera;
   size: [number, number];
   recorder: MediaRecorder | null;
   chunks: Blob[];
-  raf: number;
-  /** frame time of the last render, for the panel's fps readout */
+  /** frame times over the last second, for the panel's fps readout */
   frames: number[];
 }
+
+/** Kinds whose visibility an output decides for itself. Cameras, triggers,
+ *  streams and measurements are glyphs or HUD — furniture, not the picture. */
+const RENDERABLE = new Set<ObjRef['kind']>(['GP', 'MESH', 'SPLAT', 'POLY', 'ACTOR', 'LIGHT', 'VOLUME']);
 
 /** Resolutions worth one click. 0 x 0 follows the window. */
 export const OUTPUT_PRESETS: [string, number, number][] = [
@@ -96,13 +108,6 @@ export const OUTPUT_PRESETS: [string, number, number][] = [
   ['1080 × 1920 (portrait)', 1080, 1920],
   ['1024 × 768 (XGA)', 1024, 768],
 ];
-
-const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title></title>
-<style>
-html,body{margin:0;height:100%;background:#000;overflow:hidden}
-canvas{display:block;width:100vw;height:100vh;outline:none}
-body.idle,body.idle canvas{cursor:none}
-</style></head><body><canvas tabindex="0"></canvas></body></html>`;
 
 export class OutputManager {
   private live = new Map<number, Live>();
@@ -157,13 +162,21 @@ export class OutputManager {
     return this.screensList;
   }
 
+  /** any output window open — hidden actors and meshes then stay live */
+  anyOpen(): boolean {
+    for (const l of this.live.values()) if (!l.win.closed) return true;
+    return false;
+  }
+
   /**
    * Open (or bring back) an output's window. Must run inside a click: a
    * browser blocks a popup that no gesture asked for.
    *
-   * The name is stable per output, so after the editor is reloaded, Open
-   * finds the SAME physical window — still on the projector where it was
-   * put — and takes it over rather than opening a second one.
+   * It opens `output.html`, a real page of this app rather than about:blank:
+   * an INSTALLED app opens its own in-scope pages as app windows with no
+   * address bar, which a browser tab's popup always has. The name is stable
+   * per output, so after the editor is reloaded Open finds the SAME physical
+   * window — still on the projector where it was put — and takes it over.
    */
   open(o: TGOutput): boolean {
     if (this.isOpen(o.id)) { this.live.get(o.id)!.win.focus(); return true; }
@@ -181,17 +194,46 @@ export class OutputManager {
       const k = Math.min(1, 960 / rw, 640 / rh);
       features = `popup=yes,width=${Math.round(rw * k)},height=${Math.round(rh * k)}`;
     }
-    const win = window.open('', `threegrease-output-${o.id}`, features);
+    const url = new URL('output.html', document.baseURI).href;
+    const win = window.open(url, `threegrease-output-${o.id}`, features);
     if (!win) {
       this.host.status('The browser blocked the output window — allow popups for this page');
       return false;
     }
-    const doc = win.document;
-    doc.open();
-    doc.write(PAGE);
-    doc.close();
-    doc.title = o.name;
-    const canvas = doc.querySelector('canvas') as HTMLCanvasElement;
+    this.live.set(o.id, {
+      win, doc: null, canvas: null, renderer: null, world: null, post: null,
+      lens: new LensCamera(), cam: new THREE.PerspectiveCamera(50, rw / rh, 0.01, 500),
+      size: [0, 0], recorder: null, chunks: [], frames: [],
+    });
+    this.maintain();
+    this.host.changed();
+    return true;
+  }
+
+  /**
+   * Keep every window attached to the document it is actually showing: drop
+   * the ones that were closed, and build a renderer on a page that has just
+   * finished loading (the first time, or after Cmd+R in the output window).
+   * Runs every frame, and on a slow timer too — a hidden editor's frames
+   * stop entirely, and a reloaded output has no frames of its own until it
+   * is attached, so without the timer it would stay black.
+   */
+  maintain(): void {
+    for (const [id, l] of [...this.live]) {
+      if (l.win.closed) { this.close(id); continue; }
+      let doc: Document;
+      try { doc = l.win.document; } catch { continue; }
+      if (doc !== l.doc) this.attach(id, l, doc);
+    }
+  }
+
+  private attach(id: number, l: Live, doc: Document): void {
+    // the initial about:blank, or a page still loading: try again later
+    if (doc.readyState !== 'complete') return;
+    const canvas = doc.getElementById('out') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    // whatever was attached died with its document
+    this.detach(l);
 
     const main = this.host.mainRenderer;
     // stencil: grease-pencil masks and holdouts are drawn through it
@@ -202,54 +244,38 @@ export class OutputManager {
     renderer.toneMappingExposure = main.toneMappingExposure;
     renderer.shadowMap.enabled = main.shadowMap.enabled;
     renderer.shadowMap.type = main.shadowMap.type;
-
     const world = new WorldManager(renderer);
     world.liveSource = this.host.mainWorld.liveSource;
 
-    const live: Live = {
-      win, canvas, renderer, world, post: null, lens: new LensCamera(),
-      cam: new THREE.PerspectiveCamera(50, rw / rh, 0.01, 500),
-      size: [0, 0], recorder: null, chunks: [], raf: 0, frames: [],
-    };
-    this.live.set(o.id, live);
-
-    // fullscreen needs a gesture IN this window: double-click or F
-    const toggleFull = () => {
-      if (doc.fullscreenElement) void doc.exitFullscreen();
-      else void doc.documentElement.requestFullscreen().catch(() => {});
-    };
-    canvas.addEventListener('dblclick', toggleFull);
-    win.addEventListener('keydown', (e) => { if (e.key === 'f' || e.key === 'F') toggleFull(); });
-    // the pointer is not part of the picture: it hides once it stops moving
-    let idle = 0;
-    const wake = () => {
-      doc.body.classList.remove('idle');
-      win.clearTimeout(idle);
-      idle = win.setTimeout(() => doc.body.classList.add('idle'), 1500);
-    };
-    win.addEventListener('mousemove', wake);
-    wake();
-    // closing the window is closing the output
-    win.addEventListener('pagehide', () => this.close(o.id));
-    // keep the show running when the editor window is hidden (see top)
+    Object.assign(l, { doc, canvas, renderer, world, post: null, size: [0, 0] });
+    doc.body.classList.add('attached');
+    const o = (this.host.ctx.scene.outputs ?? []).find((x) => x.id === id);
+    if (o) doc.title = o.name;
+    // keep the show running when the editor window is hidden (see top); the
+    // chain ends by itself when this document is replaced
     const tick = () => {
-      live.raf = win.requestAnimationFrame(tick);
+      if (l.doc !== doc) return;
+      l.win.requestAnimationFrame(tick);
       this.host.tickIfStale();
     };
-    live.raf = win.requestAnimationFrame(tick);
-
+    l.win.requestAnimationFrame(tick);
     this.host.changed();
-    return true;
+  }
+
+  /** Release the GPU side of a window (it may be about to get a new page). */
+  private detach(l: Live): void {
+    if (l.recorder && l.recorder.state !== 'inactive') l.recorder.stop();
+    l.post?.dispose();
+    l.world?.dispose();
+    l.renderer?.dispose();
+    Object.assign(l, { doc: null, canvas: null, renderer: null, world: null, post: null });
   }
 
   close(id: number): void {
     const l = this.live.get(id);
     if (!l) return;
     this.live.delete(id);
-    if (l.recorder && l.recorder.state !== 'inactive') l.recorder.stop();
-    try { l.win.cancelAnimationFrame(l.raf); } catch { /* window already gone */ }
-    l.post?.dispose();
-    l.renderer.dispose();
+    this.detach(l);
     if (!l.win.closed) l.win.close();
     this.host.changed();
   }
@@ -263,7 +289,7 @@ export class OutputManager {
    */
   toggleRecord(o: TGOutput): void {
     const l = this.live.get(o.id);
-    if (!l) return;
+    if (!l?.canvas) return;
     if (l.recorder) { l.recorder.stop(); return; }
     const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4']
       .find((t) => MediaRecorder.isTypeSupported(t));
@@ -294,17 +320,19 @@ export class OutputManager {
    *  each render swaps shared scene state and must put it back. */
   render(now: number): void {
     if (!this.live.size) return;
+    this.maintain();
     const outs = this.host.ctx.scene.outputs ?? [];
     for (const [id, l] of [...this.live]) {
       const o = outs.find((x) => x.id === id);
-      if (!o || l.win.closed) { this.close(id); continue; }
-      this.renderOne(o, l, now);
+      if (!o) { this.close(id); continue; }
+      if (l.renderer) this.renderOne(o, l, now);
     }
   }
 
   private renderOne(o: TGOutput, l: Live, now: number): void {
     const { ctx, scene3 } = this.host;
     const scene = ctx.scene;
+    const renderer = l.renderer!, world = l.world!, canvas = l.canvas!;
 
     // SIZE: a fixed resolution is drawn at exactly that many pixels, and the
     // window only decides how it is shown (object-fit); following the window
@@ -314,13 +342,13 @@ export class OutputManager {
     const w = fixed ? o.width : Math.max(1, Math.round(l.win.innerWidth * dpr));
     const h = fixed ? o.height : Math.max(1, Math.round(l.win.innerHeight * dpr));
     if (l.size[0] !== w || l.size[1] !== h) {
-      l.renderer.setSize(w, h, false);
+      renderer.setSize(w, h, false);
       l.post?.setSize(w, h);
       l.size = [w, h];
     }
-    l.canvas.style.objectFit = !fixed ? 'fill'
+    canvas.style.objectFit = !fixed ? 'fill'
       : o.fit === 'COVER' ? 'cover' : o.fit === 'STRETCH' ? 'fill' : 'contain';
-    if (l.win.document.title !== o.name) l.win.document.title = o.name;
+    if (l.doc!.title !== o.name) l.doc!.title = o.name;
 
     const camData = (o.camera != null ? scene.cameras.find((c) => c.id === o.camera) : undefined)
       ?? activeCam(scene);
@@ -328,12 +356,30 @@ export class OutputManager {
     this.poseCamera(l.cam, camData, scene, w, h);
 
     // ---- swap the shared scene over to this output ----
+    // WHICH OBJECTS: under RENDER each follows its own output toggle, apart
+    // from the viewport's eye — a guide can be seen while working and never
+    // thrown on the wall, and something can exist ONLY in the projection.
+    // VIEWPORT mirrors the main view, for a second window to debug in.
+    const shown: [THREE.Object3D, boolean][] = [];
+    if ((o.view ?? 'RENDER') === 'RENDER') {
+      for (const ref of allRefs(scene)) {
+        if (!RENDERABLE.has(ref.kind)) continue;
+        const root = this.host.rootOf(ref);
+        if (!root) continue;
+        const want = !isRenderHidden(scene, ref);
+        if (root.visible !== want) { shown.push([root, root.visible]); root.visible = want; }
+      }
+    }
     const hidden: THREE.Object3D[] = [];
-    for (const f of this.host.furniture()) if (f.visible) { f.visible = false; hidden.push(f); }
-    scene3.traverse((obj) => {
-      const u = obj.userData;
-      if ((u.overlay || u.hoverShell) && obj.visible) { obj.visible = false; hidden.push(obj); }
-    });
+    const gizmo = this.host.gizmo();
+    if (gizmo.visible) { gizmo.visible = false; hidden.push(gizmo); }
+    if (!o.overlays) {
+      for (const f of this.host.furniture()) if (f.visible) { f.visible = false; hidden.push(f); }
+      scene3.traverse((obj) => {
+        const u = obj.userData;
+        if ((u.overlay || u.hoverShell) && obj.visible) { obj.visible = false; hidden.push(obj); }
+      });
+    }
     const mainWire = ctx.settings.shading === 'WIREFRAME';
     const outWire = o.shading === 'WIREFRAME';
     const undoWire = mainWire !== outWire ? overrideWire(scene3, outWire) : null;
@@ -349,29 +395,29 @@ export class OutputManager {
     const mainSky = this.host.mainWorld.setSkyVisible(false);
 
     try {
-      l.world.update(scene3, scene, o.shading, ctx.settings.upAxis === 'Z');
+      world.update(scene3, scene, o.shading, ctx.settings.upAxis === 'Z');
       const look = scene.post;
       const styled = o.look && postActive(look);
       if (styled && !l.post) l.post = new ScenePost(w, h);
       const target = styled ? l.post!.target : null;
-      l.renderer.setRenderTarget(target);
-      if (styled) l.renderer.clear();
+      renderer.setRenderTarget(target);
+      if (styled) renderer.clear();
       if (isCurved(camData.lens)) {
         l.cam.updateMatrixWorld(true);
-        l.lens.render(l.renderer, scene3, l.cam, camData.lens!, target);
+        l.lens.render(renderer, scene3, l.cam, camData.lens!, target);
       } else {
-        l.renderer.render(scene3, l.cam);
+        renderer.render(scene3, l.cam);
       }
       if (styled) {
-        l.post!.present(l.renderer, scene3, l.cam, look, now / 1000);
-        l.renderer.setRenderTarget(null);
+        l.post!.present(renderer, scene3, l.cam, look, now / 1000);
+        renderer.setRenderTarget(null);
       }
       l.frames.push(now);
     } catch (err) {
       console.error(`output "${o.name}":`, err);
     } finally {
       // ---- and back to the main view's ----
-      l.world.setSkyVisible(false);
+      world.setSkyVisible(false);
       this.host.mainWorld.setSkyVisible(mainSky);
       scene3.environment = saved.env;
       scene3.environmentIntensity = saved.envI;
@@ -385,6 +431,7 @@ export class OutputManager {
       undoLights();
       undoWire?.();
       for (const obj of hidden) obj.visible = true;
+      for (const [root, was] of shown) root.visible = was;
     }
   }
 

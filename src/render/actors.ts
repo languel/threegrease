@@ -183,6 +183,9 @@ export class ActorManager {
   selectionColor: THREE.Color | null = null;
   /** joint handles are hidden in presentation mode along with other gizmos */
   handlesVisible = true;
+  /** an output window is open: a body hidden from the main view may still
+   *  be SHOWN in an output, so it keeps being posed while hidden */
+  keepHiddenLive = false;
 
   sync(scene: GPScene): void {
     for (const [id, entry] of this.entries) {
@@ -254,7 +257,7 @@ export class ActorManager {
     root.matrixAutoUpdate = false;
     root.matrix.copy(worldMatrixOf(scene, { kind: 'ACTOR', id: actor.id }));
     root.matrixWorldNeedsUpdate = true;
-    if (!actor.visible) return;
+    if (!actor.visible && !this.keepHiddenLive) return;
 
     const spec = lookSpec(actor.look);
     // Geometry only changes when the LOOK changes, not per frame — a look

@@ -99,6 +99,24 @@ export function isObjectHidden(scene: GPScene, ref: ObjRef): boolean {
   return e ? e.visible === false : false;
 }
 
+/**
+ * OUTPUT visibility, apart from the viewport's (Blender's "disable in
+ * renders"): an object can be a guide you see while working but never
+ * throw on the wall, or the other way round — something only the projector
+ * shows. Stored as `hideRender` on the entity itself, so it travels with a
+ * duplicate and survives save/load like `visible` does; absent means shown.
+ */
+export function setRenderHidden(scene: GPScene, ref: ObjRef, hidden: boolean): void {
+  const e = entityOf(scene, ref) as { hideRender?: boolean } | undefined;
+  if (!e) return;
+  if (hidden) e.hideRender = true; else delete e.hideRender;
+}
+
+export function isRenderHidden(scene: GPScene, ref: ObjRef): boolean {
+  const e = entityOf(scene, ref) as { hideRender?: boolean } | undefined;
+  return !!e?.hideRender;
+}
+
 export function setObjectLockedFlag(scene: GPScene, ref: ObjRef, locked: boolean): void {
   const e = entityOf(scene, ref) as { lock?: boolean } | undefined;
   if (e) e.lock = locked;
@@ -713,6 +731,28 @@ export class ObjectSelectTool implements Tool {
     ctx.requestRender();
   }
 
+  /** The camera or lamp glyph nearest the pointer (within 30 px), and how
+   *  far it is from the eye — cameras first, since a projector often sits
+   *  at one. */
+  private glyphAt(ctx: AppCtx, e: ToolEvent, eye: THREE.Vector3): { ref: ObjRef; depth: number } | null {
+    const at = (ref: ObjRef) => {
+      const m = worldMatrixOf(ctx.scene, ref);
+      const p = this.projectWorld(ctx, m);
+      return p && Math.hypot(p.x - e.x, p.y - e.y) < 30
+        ? { ref, depth: new THREE.Vector3().setFromMatrixPosition(m).distanceTo(eye) } : null;
+    };
+    for (const cam of ctx.scene.cameras) {
+      const hit = at({ kind: 'CAMERA', id: cam.id });
+      if (hit) return hit;
+    }
+    for (const l of ctx.scene.lights) {
+      if (l.visible === false) continue;
+      const hit = at({ kind: 'LIGHT', id: l.id });
+      if (hit) return hit;
+    }
+    return null;
+  }
+
   pick(ctx: AppCtx, e: ToolEvent): ObjRef | null {
     const rect = ctx.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2((e.x / rect.width) * 2 - 1, -(e.y / rect.height) * 2 + 1);
@@ -720,6 +760,13 @@ export class ObjectSelectTool implements Tool {
     ray.setFromCamera(ndc, ctx.camera);
     const targets = [...ctx.canvasMeshes, ...ctx.pickableMeshes];
     const hits = ray.intersectObjects(targets, true);
+    // A CAMERA or LAMP has nothing to raycast — it is a wire glyph, picked by
+    // screen distance — so testing meshes first meant a lamp in front of a
+    // wall could never be clicked: the wall behind always answered. The
+    // nearest thing to the eye under the pointer wins instead, so the lamp
+    // beats the wall behind it, and a wall IN FRONT of a lamp still wins.
+    const glyph = this.glyphAt(ctx, e, ray.ray.origin);
+    if (glyph && (!hits.length || glyph.depth < hits[0].distance)) return glyph.ref;
     for (const h of hits) {
       let cur: THREE.Object3D | null = h.object;
       while (cur) {
