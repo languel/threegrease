@@ -123,6 +123,9 @@ const PATHS: Record<string, string> = {
   // an AREA light: the emitting rectangle, seen at an angle, with its
   // direction coming off the front
   lightArea: 'M4 7.5 13 5v11.5L4 19ZM13 5l7 1.8v9L13 16.5M8.5 12.2 5.5 15M16 10.5v6',
+  // a screen on a stand: an output window, a projector's picture
+  monitor: 'M3.75 4.5h16.5v11.25H3.75ZM9 19.5h6M12 15.75v3.75',
+  record: 'M12 12m-6.75 0a6.75 6.75 0 1 0 13.5 0a6.75 6.75 0 1 0 -13.5 0M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0',
   cameraActive: 'M4 8.5h3.2l1.6-2h6.4l1.6 2H20v9H4ZM9.6 13a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0',
   // TRANSFORM ORIENTATION (Blender's header): each says what "X, Y, Z"
   // currently means — a world tripod, an object's own, a surface normal,

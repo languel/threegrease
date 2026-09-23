@@ -879,6 +879,35 @@ break the thing next to it.**
   first cut test used a quad whose two endpoints happened to share a face,
   which the narrow fix handled and the real case did not.
 
+## Session log (2026-09-22, later): output windows
+
+Detail in IMPLEMENTATION_PLAN.md under "Output windows".
+
+The first thing a show needs that the editor never had: a clean picture to
+send somewhere. An output is a window rendering one camera at its own
+resolution and its own shading — the projector can be Rendered with the
+scene look on while you model in Wireframe — with nothing of the editor in
+it. Record it, fullscreen it onto a detected projector, or let OBS capture
+it. It keeps running while the editor is hidden.
+
+The design constraint was to stay on the GPU: each window has its own
+renderer drawing the one shared scene into a canvas in its own document,
+and nothing crosses between windows. What that costs is a list of things in
+the scene graph that are not simply "the scene" — the world's environment
+map (black in a second context), the lamps, the baked-in wireframe, and a
+dozen untagged editor glyphs — each swapped for the output's draw and put
+back. An output costs about what the main view's draw does (~0.25 ms CPU
+on the demo gallery).
+
+Where to pick up: per-object FX in outputs; confirm splats render in a
+second context; a kiosk path that reopens outputs without a click; per
+output edge blend and warp (the projector keystone work, but on the whole
+frame).
+
+**The lesson: a second view on shared state is a promise to put everything
+back.** The test that matters is not "does the output look right" but "is
+the MAIN view byte-identical before and after the output drew".
+
 ---
 
 # THE NEXT PHASE: planning a real show in a real room

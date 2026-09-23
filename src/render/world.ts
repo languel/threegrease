@@ -111,6 +111,19 @@ export class WorldManager {
     this.pmrem.compileEquirectangularShader();
   }
 
+  /**
+   * Show or hide this manager's own sky sphere (a moving world). Two
+   * WorldManagers drawing into ONE scene — the main view's and an output
+   * window's — each add a sphere, so whichever is drawing hides the other's.
+   * Returns what it was, to put back.
+   */
+  setSkyVisible(v: boolean): boolean {
+    if (!this.skyMesh) return false;
+    const was = this.skyMesh.visible;
+    this.skyMesh.visible = v;
+    return was;
+  }
+
   /** Apply the world + shading mode to the three.js scene. Cheap to call
    *  every frame: the source is only rebuilt when its inputs change. */
   update(scene3: THREE.Scene, scene: GPScene, shading: ViewportShading, upAxisZ: boolean): void {

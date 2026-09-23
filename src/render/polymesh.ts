@@ -172,6 +172,8 @@ export class PolyMeshManager {
     this.previewPoint.renderOrder = 1000;
     this.previewPoint.visible = false;
     this.group.add(this.previewLine, this.previewPoint);
+    this.previewLine.userData.overlay = true;
+    this.previewPoint.userData.overlay = true;
   }
 
   /** Mirror scene.polyMeshes; rebuild geometry on rev change, restyle
@@ -235,6 +237,8 @@ export class PolyMeshManager {
     // and the WHOLE batch vanished, even for vertices still plainly on
     // screen. `previewLine` already carries this fix for the same reason.
     verts.frustumCulled = false;
+    // the vertex diamonds only ever exist to be edited
+    verts.userData.overlay = true;
     group.add(faceMesh, edgeLines, verts);
     return {
       group, faceMesh, triFaceIds: [], edgeLines, segEdgeIds: [], verts,
@@ -313,6 +317,9 @@ export class PolyMeshManager {
     // or edited — unless the mesh has loose edges, which are its drawing.
     entry.edgeLines.visible = entry.segEdgeIds.length > 0
       && (isEdit || pm.select || !!entry.looseEdges);
+    // ...and so they are furniture exactly when they are the edit overlay:
+    // a wire's edges are the thing itself and belong in an output window
+    entry.edgeLines.userData.overlay = !entry.looseEdges;
 
     // face material — the shared datablock when assigned, else this mesh's
     // own legacy flattened fields (see render/materialmgr.ts)

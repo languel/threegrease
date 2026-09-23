@@ -9,6 +9,7 @@ import type { MaterialTarget } from '../core/gpdata';
 import type { UnwrapMode } from '../core/uvunwrap';
 import { PROVIDER_LIST, getProvider } from '../agent/providers';
 import { webMcp } from '../agent/webmcp';
+import { OUTPUT_PRESETS, type OutputManager } from './outputs';
 import { MEASURE_COLOR, closeMeasure, formatArea, formatLength, measureArea, measureLength, toWorldLength, worldPointsOf } from '../tools/measure';
 import { localPoint } from '../core/measures';
 import { DETECT_MODELS, semanticDetector } from '../mm/detect';
@@ -86,6 +87,8 @@ import type { ActorLayerSource } from '../core/types';
 
 export interface AppHandle {
   ctx: AppCtx;
+  /** output windows: a camera each, own resolution and shading */
+  readonly outputs: OutputManager;
   /** Edit mode is open on a mesh (vertex / edge / face editor) */
   meshEditing(): boolean;
   splatEditing(): boolean;
@@ -3010,6 +3013,10 @@ export class UI {
         build: () => [this.worldPanel(), this.cameraLensPanel(), this.measurePanel(), this.scenePanel()],
       },
       {
+        id: 'output', icon: 'monitor', title: 'Output — windows that each render a camera: projectors, screens, capture, recording',
+        build: () => [this.outputsPanel()],
+      },
+      {
         id: 'object', icon: 'objectProps', title: 'Object — transform · material',
         build: () => [this.objectPropsPanel(), this.bakePanel()],
       },
@@ -3599,6 +3606,136 @@ export class UI {
    * one click, because a point pinned to the wrong wall is worse than a
    * point pinned to nothing.
    */
+  /** refreshes the live size / fps readouts of open outputs in place */
+  private outputInfoTimer = 0;
+
+  /**
+   * OUTPUTS: windows that each render one camera at their own resolution and
+   * shading (app/outputs.ts). Every property of a window lives here — the
+   * window itself is nothing but the picture.
+   */
+  private outputsPanel(): HTMLElement {
+    const { ctx } = this.app;
+    const scene = ctx.scene;
+    const om = this.app.outputs;
+    const outs = scene.outputs ??= [];
+    const rows: (Node | string | PanelHint)[] = [
+      panelHint('Each output is a window rendering one camera at its own resolution and shading — '
+        + 'a projector, one screen of an installation, a clean window for OBS to capture, a recording. '
+        + 'In the window: double-click or F for fullscreen.'),
+    ];
+    if (!outs.length) rows.push(el('div', { class: 'row dim', text: 'No outputs yet' }));
+    for (const o of outs) rows.push(...this.outputRows(o));
+    rows.push(el('div', { class: 'row' },
+      btn('Add output', () => {
+        ctx.pushUndo();
+        const id = Math.max(0, ...outs.map((x) => x.id)) + 1;
+        outs.push({
+          id, name: `Output ${id}`, camera: null, width: 1920, height: 1080,
+          shading: 'RENDERED', look: true, fit: 'CONTAIN',
+        });
+        this.refresh();
+      }),
+      btn(om.screens().length ? 'Re-detect screens' : 'Detect screens…', () => { void om.detectScreens(); },
+        { title: 'List this machine\u2019s displays, so an output can open straight onto a projector (the browser asks first)' }),
+    ));
+
+    // the readouts change every frame; rewrite them in place rather than
+    // rebuilding the panel, which would fight anything being edited in it
+    window.clearInterval(this.outputInfoTimer);
+    if (outs.some((o) => om.isOpen(o.id))) {
+      this.outputInfoTimer = window.setInterval(() => {
+        const nodes = document.querySelectorAll<HTMLElement>('[data-output-info]');
+        if (!nodes.length) { window.clearInterval(this.outputInfoTimer); return; }
+        for (const n of nodes) n.textContent = this.outputStatus(Number(n.dataset.outputInfo));
+      }, 500);
+    }
+    return panel('Outputs', ...rows);
+  }
+
+  private outputStatus(id: number): string {
+    const om = this.app.outputs;
+    const info = om.info(id);
+    if (!info) return 'Closed';
+    return `Open · ${info.width} × ${info.height} · ${info.fps} fps${om.isRecording(id) ? ' · ● recording' : ''}`;
+  }
+
+  private outputRows(o: import('../core/types').TGOutput): Node[] {
+    const { ctx } = this.app;
+    const scene = ctx.scene;
+    const om = this.app.outputs;
+    const open = om.isOpen(o.id);
+    const fixed = o.width > 0 && o.height > 0;
+    const preset = OUTPUT_PRESETS.findIndex(([, w, h]) => w === o.width && h === o.height);
+    const screens = om.screens();
+
+    const name = el('input', { type: 'text', value: o.name, class: 'grow' }) as HTMLInputElement;
+    name.onchange = () => { ctx.pushUndo(); o.name = name.value.trim() || o.name; this.refresh(); };
+
+    const rows: Node[] = [
+      el('div', { class: 'menu-sep' }),
+      fieldRow('Name', name),
+      el('div', { class: 'row dim', text: this.outputStatus(o.id), 'data-output-info': o.id }),
+      fieldRow('Camera', selectField('', o.camera == null ? '' : String(o.camera), [
+        ['', 'Active camera'],
+        ...scene.cameras.map((c) => [String(c.id), c.name] as [string, string]),
+      ], (v) => { ctx.pushUndo(); o.camera = v === '' ? null : Number(v); })),
+      tip(fieldRow('Resolution', selectField('', preset >= 0 ? String(preset) : 'CUSTOM', [
+        ...OUTPUT_PRESETS.map(([label], i) => [String(i), label] as [string, string]),
+        ['CUSTOM', 'Custom'],
+      ], (v) => {
+        if (v === 'CUSTOM') return;
+        const [, w, h] = OUTPUT_PRESETS[Number(v)];
+        ctx.pushUndo(); o.width = w; o.height = h; this.refresh();
+      })), 'The picture is drawn at exactly this many pixels, whatever size the window is. '
+        + 'Follow window draws at the window\u2019s own size instead.'),
+    ];
+    if (fixed) {
+      rows.push(
+        fieldRow('Size', [
+          numField('W', o.width, (v) => { o.width = Math.max(16, Math.round(v)); }, 1, { min: 16, max: 8192 }),
+          numField('H', o.height, (v) => { o.height = Math.max(16, Math.round(v)); }, 1, { min: 16, max: 8192 }),
+        ]),
+        tip(fieldRow('Fit', selectField('', o.fit, [
+          ['CONTAIN', 'Contain'], ['COVER', 'Cover'], ['STRETCH', 'Stretch'],
+        ], (v) => { o.fit = v as typeof o.fit; })), 'How the picture sits in a window of another shape: '
+          + 'Contain letterboxes, Cover crops, Stretch distorts'),
+      );
+    }
+    rows.push(
+      tip(fieldRow('Shading', selectField('', o.shading, [
+        ['WIREFRAME', 'Wireframe'], ['SOLID', 'Solid'], ['MATERIAL', 'Material'], ['RENDERED', 'Rendered'],
+      ], (v) => { ctx.pushUndo(); o.shading = v as typeof o.shading; })),
+      'This output\u2019s own shading, whatever the main view is set to'),
+      checkbox('Scene look', o.look, (v) => { o.look = v; },
+        'bloom, grade, ink and grain from the scene\u2019s Look'),
+    );
+    if (screens.length) {
+      rows.push(tip(fieldRow('Screen', selectField('', o.screen == null ? '' : String(o.screen), [
+        ['', 'Anywhere'],
+        ...screens.map((sc, i) => [String(i),
+          `${sc.label} (${sc.width} × ${sc.height})${sc.isPrimary ? ' · primary' : ''}`] as [string, string]),
+      ], (v) => { ctx.pushUndo(); o.screen = v === '' ? undefined : Number(v); })),
+      'Where the window opens next time — it fills that screen; double-click it for fullscreen'));
+    }
+    rows.push(el('div', { class: 'row' },
+      btn(open ? 'Close window' : 'Open window', () => {
+        if (open) om.close(o.id); else om.open(o);
+      }),
+      ...(open ? [btn(icon('record'), () => om.toggleRecord(o), {
+        active: om.isRecording(o.id),
+        title: om.isRecording(o.id) ? 'Stop and save the recording' : 'Record this output to a video file',
+      })] : []),
+      btn(icon('trash'), () => {
+        om.close(o.id);
+        ctx.pushUndo();
+        scene.outputs = (scene.outputs ?? []).filter((x) => x.id !== o.id);
+        this.refresh();
+      }, { title: 'Remove this output' }),
+    ));
+    return rows;
+  }
+
   private measureObjectRows(id: number): Node[] {
     const { ctx } = this.app;
     const scene = ctx.scene;
@@ -3632,7 +3769,7 @@ export class UI {
       }),
       el('div', {
         class: 'row dim', text: attachedText,
-        title: bound.length ? 'a bound point follows that object; a free one stays where it is' : undefined,
+        ...(bound.length ? { title: 'a bound point follows that object; a free one stays where it is' } : {}),
       }),
       checkbox('Closed', !!m.closed, (v) => {
         ctx.pushUndo();

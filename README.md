@@ -199,6 +199,15 @@ npm run dev     # open http://localhost:5199
   and Paul Bourke's measured polynomial form), equirectangular,
   cylindrical and mirror ball — a 360 camera and a dome projector out of
   one model read in two directions.
+- **Output windows** (Output tab): each output is a window that renders
+  one camera at its own resolution (exactly 1920 × 1080, say, whatever the
+  window's size — or following the window) and its OWN shading, so the
+  projector can show Rendered while you model in Wireframe. The window is
+  nothing but the picture — no grid, gizmo or light glyphs; double-click it
+  or press F for fullscreen, and after **Detect screens** it opens straight
+  onto a chosen display. Record any output to a video file. Outputs keep
+  running while the editor window is hidden or minimised. For OBS or
+  another app, capture the window (its title is the output's name).
 - **Library** (Library tab): an asset container, not an inbox — drop files
   to keep them (with rendered thumbnails), drag a tile into the viewport
   to place it or double-click to place at the 3D cursor, folders with drag

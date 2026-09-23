@@ -173,6 +173,9 @@ Data is plain-JSON-serializable; rendering is a pure sync from evaluated data
 - [x] Time volumes: ray-marched Volume display; filters (people via MediaPipe segmentation, colour key, brightness, motion) shared by display, slices and splats; source picker
 - [x] Time volumes: playhead (crisp slice / cut block), scan axis, play / pause / scrub
 - [ ] Time volumes: animated strokes/actors as sources, segmenting live volumes
+- [x] Output windows: a camera per window, fixed resolution or follow-window, fit (contain/cover/stretch), independent shading, scene look, curved lenses, lens shift
+- [x] Outputs: editor furniture never drawn; fullscreen by double-click/F; open onto a detected screen; record to video; keep running while the editor is hidden
+- [ ] Outputs: per-object FX in outputs; splats verified in a second context; autostart/reopen without a click (kiosk); edge-blend/warp per output
 - [x] Persistent file store (IndexedDB) and an asset Library with thumbnails, drag-to-place
 - [x] Placement / Plane / Guide as a global top-bar cluster (Object, Draw, Edit)
 - [x] Restyle selected strokes (Stroke Style panel)

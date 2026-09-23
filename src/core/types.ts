@@ -1492,6 +1492,34 @@ export interface TGRoute {
  *  Blender's four viewport shading buttons. */
 export type ViewportShading = 'WIREFRAME' | 'SOLID' | 'MATERIAL' | 'RENDERED';
 
+/**
+ * An OUTPUT: a chosen camera rendered into its own window, at its own
+ * resolution and under its own shading — a projector, one screen of a
+ * multi-view installation, a clean window for OBS to capture, a recording.
+ *
+ * The CONFIG is scene data (a show file should remember which camera goes to
+ * which projector at what resolution); the WINDOW is not — a browser will not
+ * reopen a popup without a click, so reopening is one button in the Output
+ * panel. See app/outputs.ts.
+ */
+export interface TGOutput {
+  id: number;
+  name: string;
+  /** a camera id; null follows the scene's ACTIVE camera */
+  camera: number | null;
+  /** render resolution in pixels; 0 x 0 follows the window's own size */
+  width: number;
+  height: number;
+  /** this output's shading, independent of the main viewport's */
+  shading: ViewportShading;
+  /** run the scene look (bloom, grade, ink, grain) on this output */
+  look: boolean;
+  /** how a fixed resolution sits in a window of another shape */
+  fit: 'CONTAIN' | 'COVER' | 'STRETCH';
+  /** screen to open on (index into the Window Management API's list) */
+  screen?: number;
+}
+
 /** Where the world's environment image comes from.
  *  EQUIRECT/VIDEO both expect an EQUIRECTANGULAR (2:1 lat-long) projection —
  *  the format 360 cameras and drones export. */
@@ -1667,4 +1695,6 @@ export interface GPScene {
   actors: TGActor[];
   /** persisted rulers / annotations for real-world blockout */
   measures: TGMeasure[];
+  /** output windows (app/outputs.ts); absent in scenes saved before them */
+  outputs?: TGOutput[];
 }

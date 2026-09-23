@@ -2745,6 +2745,59 @@ the browser console or automated evals:
   rails, clay on a script, a MINIMAL stick figure on a shorter round that
   crosses the others' paths on purpose).
 
+- **AN OUTPUT WINDOW IS A SECOND RENDERER ON THE SAME SCENE**
+  (`app/outputs.ts`, the Output tab, `scene.outputs`). Each window gets its
+  own `WebGLRenderer` whose canvas lives in the POPUP's document and draws
+  the one shared `THREE.Scene` — three keeps GPU buffers, textures and
+  programs per renderer, so nothing is ever read back or copied between
+  windows. Keep it that way: every alternative (readPixels into a 2D
+  canvas, resizing the main canvas per output) is a CPU round trip per
+  frame. The costs are paid instead in these traps:
+  - **A RENDER-TARGET TEXTURE ONLY EXISTS IN THE CONTEXT THAT DREW IT.** The
+    world's PMREM environment (and the studio env Solid uses) handed to a
+    second renderer is an EMPTY texture — every lit surface comes out black
+    and nothing throws. Each output owns a `WorldManager` built on its own
+    renderer; anything new that bakes a render target into the scene graph
+    (`scene.environment`, a material's map) needs the same per-renderer
+    answer.
+  - **Shading is SHARED SCENE STATE, so an output swaps it and puts it
+    back** around its own draw: furniture hidden (`userData.overlay`,
+    `hoverShell`, grid, axes, gizmo), lamps (`LightManager.overrideEnabled`
+    — flat projectors stay dark), the world (the output's WorldManager
+    writes `scene3.environment/background/fog`; a background Color is
+    mutated IN PLACE, so its value is saved and copied back, not just the
+    reference), and wireframe (`overrideWire`). The managers bake the VIEW's
+    wireframe into their materials, so `userData.ownWire` records what the
+    object ITSELF asked for — without it the output cannot tell the demo's
+    authored-wireframe walls from the main view's Wireframe mode. The
+    outputs render AFTER the main view in `frame()`, and the proof that the
+    swap is airtight is the main view's state being identical before and
+    after (checked: same environment uuid, all 188 materials, lamps).
+  - **Two WorldManagers each add a sky sphere** (moving worlds) to the one
+    scene; whichever is drawing hides the other's (`setSkyVisible`).
+  - **FURNITURE MUST BE TAGGED AT ITS SOURCE**, and an untagged glyph is a
+    glyph thrown on a gallery wall. Light glyphs and rings, the poly vertex
+    diamonds, actor sticks, EMPTY axes and the capture landmark dots were
+    all untagged until this. A poly mesh's edge lines are furniture EXCEPT
+    on a loose wire, where they are the drawing (`polymesh.ts` sets the tag
+    with the same decision that sets their visibility); an EMPTY's invisible
+    pick sphere stays untagged, or picking would lose it.
+  - **A browser throttles a hidden window's rAF**, and an installation's
+    editor is usually hidden behind its projectors. `App.loop` is now
+    `loop` + `frame`, and each popup's own rAF calls `tickIfStale`, which
+    runs a whole frame when the main loop has been quiet for 50 ms.
+  - **A popup needs a click, and so does fullscreen.** `open` must run in a
+    gesture (a scripted call is blocked — and the app's own preview pane
+    refuses popups outright, so verify with an iframe standing in for the
+    window: `window.open = () => iframe.contentWindow`). Fullscreen needs a
+    gesture INSIDE the popup (double-click or F); the Window Management API
+    (`getScreenDetails`, a permission prompt) only places the window on a
+    screen. The window's name is stable per output, so after an editor
+    reload Open takes over the SAME physical window where it was put.
+  - Not yet in outputs: per-object FX (like quad view), and Spark splats
+    are unverified in a second context (SparkRenderer may be bound to the
+    main renderer).
+
 ## Where to pick up (roadmap, rough priority)
 
 NPR brush engine, canvas retirement, object mode, and the N1–N8 Blender-

@@ -84,8 +84,13 @@ ground is not recoverable from one RGB camera.
    via ONNX. So the work is depth model → unproject → write a paint cloud.
    No new rendering, no new data model.
 4. **Surviving a gallery.** CDN model loading fails on hostile wifi. No
-   kiosk mode, no autostart, no watchdog, no heartbeat for a piece running
-   unattended.
+   autostart, no watchdog, no heartbeat for a piece running unattended.
+   Partly answered by OUTPUT WINDOWS (Output tab, `app/outputs.ts`): a
+   camera per window at an exact resolution and its own shading, nothing
+   of the editor in the picture, fullscreen onto a chosen projector, and
+   the show keeps ticking while the editor window is hidden. Still missing:
+   a browser will not reopen a popup without a click, so after a restart
+   someone has to press Open.
 
 ### Sequence
 

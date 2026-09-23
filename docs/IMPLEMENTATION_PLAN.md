@@ -3489,3 +3489,48 @@ what it is made of. A camera is never a draw target, so it is never in it.
   draw on should not cost a mode switch.
 - Acceptance: Measure appears in Draw's toolbar, Placement/Plane/Guide show
   for it, and a two-point ruler commits with Enter without leaving DRAW.
+
+## Output windows
+
+- `scene.outputs: TGOutput[]` (id, name, camera or null = active, width x
+  height or 0 x 0 = follow the window, fit, shading, look, screen) — the
+  CONFIG is scene data; the window is runtime, since a browser will not
+  reopen a popup without a click. Output tab, `UI.outputsPanel`.
+- `app/outputs.ts`, `OutputManager`: each window gets its own
+  `WebGLRenderer` whose canvas lives INSIDE the popup's document and draws
+  the SAME `THREE.Scene` — no readback, no CPU copy, no transfer between
+  windows. The popup is a bare document: black, a canvas, the pointer hidden
+  once it stops; double-click or F toggles fullscreen (the gesture has to
+  happen in that window); the window name is stable per output, so after a
+  reload Open takes over the same physical window on the projector.
+- Swapped around each output's draw and restored: furniture (grid, axes,
+  gizmo, anything `userData.overlay` / `hoverShell`); lamps
+  (`LightManager.overrideEnabled`, respecting flat projectors); the world
+  (an output-owned `WorldManager` on its own renderer, because a PMREM
+  environment made in the main context is an EMPTY texture in another one);
+  wireframe on manager-owned materials (`overrideWire`, from
+  `userData.ownWire`, an import's map returned for a textured output).
+- Newly tagged furniture: light glyphs, cone/blend/aim rings, poly vertex
+  diamonds and preview, poly edge lines unless the mesh is a loose wire,
+  actor sticks, EMPTY axes glyphs (not their pick sphere), capture landmark
+  dots.
+- Per output: its own `ScenePost` (look) and `LensCamera` (curved lens);
+  pinhole lens shift as an off-axis frustum (`setViewOffset`).
+- `App.loop` became `loop` + `frame`; each popup's rAF calls
+  `tickIfStale`, which runs a whole frame when the main loop has been quiet
+  for 50 ms (a hidden or minimised editor is throttled by the browser).
+- Screens via the Window Management API (`getScreenDetails`, asks
+  permission); recording via `canvas.captureStream` + `MediaRecorder`
+  (vp9/vp8 webm).
+- Acceptance (demo gallery scene, an iframe standing in for the popup since
+  the preview pane refuses popups): output at exactly 1280 x 720, 60 fps;
+  main in Wireframe while the output renders lit and shaded; at the output's
+  draw call grid/gizmo/every overlay hidden, both lamps lit, its own
+  environment texture, aspect 1.778; after it, the main view's state
+  byte-identical (same environment, all 188 materials still wireframe, lamps
+  still off); only the four walls authored as wireframe stay wireframe in
+  the output; every output shading with the main in Rendered leaks nothing
+  back; the Turrell look, a fisheye lens and follow-window (1272 x 712) all
+  render without error; a stalled main loop is driven from the output; an
+  output costs ~0.25 ms CPU a frame, the same as the main view's own draw
+  of the scene (125 draw calls), with the swap bookkeeping inside the noise.

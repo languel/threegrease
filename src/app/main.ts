@@ -243,6 +243,7 @@ import { AgentRpc } from '../agent/rpc';
 import { AgentPanel } from '../agent/panel';
 import { webMcp } from '../agent/webmcp';
 import { WorldManager } from '../render/world';
+import { OutputManager } from './outputs';
 import { materialManager } from '../render/materialmgr';
 import { timeVolumes } from '../render/timevolume';
 import { getBlob as storeBlob, resolveSrc as storeUrl } from '../io/blobstore';
@@ -715,8 +716,24 @@ class App implements AppHandle {
     perf.attach(this.glRenderer);
     perf.enabled = !!this.ctx.settings.showPerf;
     this.perfOverlay = new PerfOverlay(document.getElementById('viewport')!);
+    this.outputs = new OutputManager({
+      ctx: this.ctx,
+      scene3: this.scene3,
+      mainRenderer: this.glRenderer,
+      mainWorld: this.world,
+      lights: this.lights,
+      furniture: () => [this.grid, this.axes, this.widget.getHelper()],
+      cameraLive: (cam) => this.cameraView && this.lockCamToView && !this.player.playing
+        && activeCam(this.ctx.scene) === cam,
+      tickIfStale: () => { if (performance.now() - this.lastFrameAt > 50) this.frame(); },
+      changed: () => this.ui.refresh(),
+      status: (text) => this.setStatusHint(text, 4000),
+    });
     requestAnimationFrame(() => this.loop());
   }
+
+  /** output windows (app/outputs.ts) — the panel reaches them through here */
+  outputs!: OutputManager;
 
   /** Drag #sidebar-resize to resize the properties sidebar; width persists. */
   private bindSidebarResize(): void {
@@ -6953,8 +6970,23 @@ class App implements AppHandle {
 
   private loop(): void {
     requestAnimationFrame(() => this.loop());
+    this.frame();
+  }
+
+  /** When the last frame ran — an output window drives the app itself once
+   *  this goes stale (see OutputHost.tickIfStale). */
+  private lastFrameAt = 0;
+
+  /**
+   * One app frame. Driven by this window's animation frame — and by an
+   * output window's whenever this one has gone quiet, because a browser
+   * throttles a hidden or minimised window, and an installation's editor is
+   * usually exactly that while its projectors are the thing on show.
+   */
+  private frame(): void {
     const ctx = this.ctx;
     const now = performance.now();
+    this.lastFrameAt = now;
     perf.frameStart(now);
     const dt = Math.min(0.1, (now - this.lastTime) / 1000);
     this.lastTime = now;
@@ -7308,6 +7340,10 @@ class App implements AppHandle {
       perf.lap('outline');
     }
 
+    // AFTER the main view: each output swaps shared scene state (furniture,
+    // lamps, world, wireframe) for its own draw and puts it back
+    this.outputs.render(now);
+    perf.lap('outputs');
     this.drawHud();
     perf.lap('hud');
     this.updateStatus();

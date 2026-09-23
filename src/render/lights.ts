@@ -30,6 +30,9 @@ interface Entry {
   helper: THREE.Object3D;
   kind: TGLight['kind'];
   shadowMapSize: number;
+  /** the lamp is dark ON PURPOSE (a flat or curved-lens projector draws its
+   *  picture in the materials instead), whatever the shading says */
+  flat?: boolean;
   /** SPOT only: the draggable aim target out along the beam, and the cone
    *  and blend rings at the distance it reaches */
   aim?: THREE.Object3D;
@@ -237,6 +240,22 @@ export class LightManager {
    * and only the light itself stands down.
    */
   lightsEnabled = true;
+
+  /**
+   * Light the scene as `lightsEnabled = on` would, WITHOUT a sync — for a
+   * second view (an output window) drawing these same lamps under its own
+   * shading. Returns the undo. Only the lamps change: their glyphs are
+   * furniture, which the caller hides anyway.
+   */
+  overrideEnabled(on: boolean): () => void {
+    if (on === this.lightsEnabled) return () => {};
+    const saved: [THREE.Object3D, boolean][] = [];
+    for (const e of this.entries.values()) {
+      saved.push([e.light, e.light.visible]);
+      e.light.visible = on && !e.flat;
+    }
+    return () => { for (const [l, v] of saved) l.visible = v; };
+  }
   /** Selection tint for the wire glyph, set by the App from
    *  settings.uiHighlight. A light has no surface for the usual Box3
    *  outline to hug, so the glyph itself turns highlight-coloured — same
@@ -273,6 +292,9 @@ export class LightManager {
         const helper = makeHelper(data.kind, new THREE.Color(...data.color));
         const root = new THREE.Group();
         root.add(light, helper);
+        // the glyph is editor furniture: an output window, a render to the
+        // Library and the scene look's edge prepass all leave it out
+        helper.traverse((o) => { o.userData.overlay = true; });
         // SpotLight/DirectionalLight aim at their .target; parenting the
         // target to the light's own root makes "points down -Z" true, so
         // the object's rotation drives the beam like every other object
@@ -376,13 +398,18 @@ export class LightManager {
 
     light.color.setRGB(...data.color);
     light.intensity = data.intensity;
+    entry.flat = false;
     light.visible = this.lightsEnabled;
     helper.visible = this.helpersVisible;
     if (data.kind === 'POINT') {
       // a point light's REACH: the distance past which it contributes
       // nothing. Drawn as a ring you can pull rather than left as a number,
       // for the same reason as the spot's cone — it is a size in the room.
-      if (!entry.cone) { entry.cone = this.makeRing([1, 0]); entry.root.add(entry.cone); }
+      if (!entry.cone) {
+        entry.cone = this.makeRing([1, 0]);
+        entry.cone.traverse((o) => { o.userData.overlay = true; });
+        entry.root.add(entry.cone);
+      }
       const reach = data.distance ?? 0;
       entry.cone.visible = this.helpersVisible && !!data.select && reach > 1e-3;
       entry.cone.position.set(0, 0, 0);
@@ -405,6 +432,7 @@ export class LightManager {
         entry.cone = this.makeRing([1, 0]);        // 3 o'clock
         entry.blend = this.makeRing([0, 1]);       // 12 o'clock
         entry.root.add(entry.cone, entry.blend);
+        for (const r of [entry.cone, entry.blend]) r.traverse((o) => { o.userData.overlay = true; });
       }
       const d = this.aimDistance.get(data.id) ?? 4;
       const rim = Math.tan(data.angle ?? Math.PI / 6) * d;
@@ -450,7 +478,11 @@ export class LightManager {
     // same reason. Only ambient and point have nothing to aim.
     const aimable = data.kind === 'SPOT' || data.kind === 'SUN' || data.kind === 'AREA';
     if (aimable) {
-      if (!entry.aim) { entry.aim = this.makeAimHandle(); entry.root.add(entry.aim); }
+      if (!entry.aim) {
+        entry.aim = this.makeAimHandle();
+        entry.aim.traverse((o) => { o.userData.overlay = true; });
+        entry.root.add(entry.aim);
+      }
       const ad = this.aimDistance.get(data.id) ?? 4;
       entry.aim.visible = this.helpersVisible && !!data.select;
       entry.aim.position.set(0, 0, -ad);
@@ -608,6 +640,7 @@ export class LightManager {
     // material pass is drawing, which is the "a light's spot appears" bug.
     const flat = curved || !!proj!.flat;
     light.map = flat ? null : p.texture;
+    entry.flat = flat;
     light.visible = this.lightsEnabled && !flat;
     this.shapeBeam(entry, data, curved ? 0 : proj!.aspect ?? 0);
   }

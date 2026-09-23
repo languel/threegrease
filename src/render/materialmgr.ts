@@ -204,6 +204,9 @@ export class MaterialManager {
     // Viewport shading is a VIEW override, applied last so it wins over the
     // material's own wireframe flag without mutating the datablock — leaving
     // the mode restores exactly what the material asked for.
+    // what the MATERIAL asked for, kept apart from the view's override so a
+    // second view under other shading (an output window) can put it back
+    target.userData.ownWire = target.wireframe;
     if (this.shading === 'WIREFRAME') target.wireframe = true;
   }
 

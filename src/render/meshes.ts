@@ -301,6 +301,9 @@ export class MeshManager {
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       const axes = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xbbbbc4 }));
       axes.userData.emptyHelper = true;
+      // an empty is nothing but this glyph: editor furniture (the invisible
+      // pick sphere below stays untagged — picking must still reach it)
+      axes.userData.overlay = true;
       const pick = new THREE.Mesh(
         new THREE.SphereGeometry(r * 0.5, 8, 6),
         new THREE.MeshBasicMaterial({ visible: false }),
@@ -476,7 +479,9 @@ export class MeshManager {
         // surface completely: it looks exactly like the solid view it was
         // supposed to replace.
         const wire = data.wireframe || materialManager.shading === 'WIREFRAME';
-        const um = mat.userData as { baseMap?: THREE.Texture | null; wired?: boolean };
+        const um = mat.userData as { baseMap?: THREE.Texture | null; wired?: boolean; ownWire?: boolean };
+        // the object's own flag, apart from the view's (see materialmgr)
+        um.ownWire = !!data.wireframe;
         if (um.wired !== wire) {
           um.wired = wire;
           if (wire) { um.baseMap = mat.map; mat.map = null; }

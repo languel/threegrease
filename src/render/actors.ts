@@ -239,6 +239,7 @@ export class ActorManager {
     // the stick overlay is an annotation, not a surface: raycasting it would
     // let a drawn stroke land on a debug line rather than on the body
     sticks.raycast = () => {};
+    sticks.userData.overlay = true;
     root.add(sticks);
     return {
       root, limbs, joints, sticks,

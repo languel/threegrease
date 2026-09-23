@@ -51,6 +51,12 @@ export class StreamPointsManager {
   readonly group = new THREE.Group();
   private entries = new Map<number, Entry>();
 
+  constructor() {
+    // landmark dots visualise the tracking data; they are editor feedback,
+    // not part of the picture an output window throws on a wall
+    this.group.userData.overlay = true;
+  }
+
   /** Call once per frame; viewportH = renderer drawing-buffer height. */
   sync(scene: GPScene, viewportH: number): void {
     for (const [id, e] of this.entries) {
